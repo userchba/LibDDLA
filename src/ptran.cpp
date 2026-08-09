@@ -35,7 +35,7 @@ struct device_scalar<std::complex<double>> {
 // thrust::conj<T> for real T (thrust::conj has no real-scalar overloads), so
 // dispatch by overload on the scalar type instead.
 template <typename T>
-__device__ __forceinline__ T conj_if(const thrust::complex<T>& val, bool do_conj) {
+__device__ __forceinline__ thrust::complex<T> conj_if(const thrust::complex<T>& val, bool do_conj) {
     return do_conj ? thrust::conj(val) : val;
 }
 

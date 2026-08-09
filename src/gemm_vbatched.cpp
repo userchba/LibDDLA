@@ -190,9 +190,9 @@ void launch_core_complex_float(
     ddla::deblasOperation_t transA, ddla::deblasOperation_t transB,
     const MaxDimensions& maximum,
     int* d_m, int* d_n, int* d_k,
-    complex_float alpha, const complex_float* const* d_A_array, int* d_lda,
-    const complex_float* const* d_B_array, int* d_ldb,
-    complex_float beta, complex_float** d_C_array, int* d_ldc,
+    std::complex<float> alpha, const std::complex<float>* const* d_A_array, int* d_lda,
+    const std::complex<float>* const* d_B_array, int* d_ldb,
+    std::complex<float> beta, std::complex<float>** d_C_array, int* d_ldc,
     int batch_count, ddla::runtimeStream_t stream)
 {
     const DdlaFloatComplex alpha_internal =
@@ -214,9 +214,9 @@ void launch_core_complex_double(
     ddla::deblasOperation_t transA, ddla::deblasOperation_t transB,
     const MaxDimensions& maximum,
     int* d_m, int* d_n, int* d_k,
-    complex_double alpha, const complex_double* const* d_A_array, int* d_lda,
-    const complex_double* const* d_B_array, int* d_ldb,
-    complex_double beta, complex_double** d_C_array, int* d_ldc,
+    std::complex<double> alpha, const std::complex<float>* const* d_A_array, int* d_lda,
+    const std::complex<float>* const* d_B_array, int* d_ldb,
+    std::complex<double> beta, std::complex<double>** d_C_array, int* d_ldc,
     int batch_count, ddla::runtimeStream_t stream)
 {
     const DdlaDoubleComplex alpha_internal =
@@ -297,15 +297,15 @@ void launch_core_2s_complex_float(
     ddla::deblasOperation_t transA_0, ddla::deblasOperation_t transB_0,
     const MaxDimensions& maximum_0,
     int* d_m_0, int* d_n_0, int* d_k_0,
-    complex_float alpha_0, const complex_float* const* d_A_array_0, int* d_lda_0,
-    const complex_float* const* d_B_array_0, int* d_ldb_0,
-    complex_float beta_0, complex_float** d_C_array_0, int* d_ldc_0,
+    std::complex<float> alpha_0, const std::complex<float>* const* d_A_array_0, int* d_lda_0,
+    const std::complex<float>* const* d_B_array_0, int* d_ldb_0,
+    std::complex<float> beta_0, std::complex<float>** d_C_array_0, int* d_ldc_0,
     ddla::deblasOperation_t transA_1, ddla::deblasOperation_t transB_1,
     const MaxDimensions& maximum_1,
     int* d_m_1, int* d_n_1, int* d_k_1,
-    complex_float alpha_1, const complex_float* const* d_AB_array_1,
+    std::complex<float> alpha_1, const std::complex<float>* const* d_AB_array_1,
     int* d_lda_1, int* d_ldb_1,
-    complex_float beta_1, complex_float** d_C_array_1, int* d_ldc_1,
+    std::complex<float> beta_1, std::complex<float>** d_C_array_1, int* d_ldc_1,
     bool C0_left, int batch_count, const int* segment_sizes,
     ddla::runtimeStream_t stream)
 {
@@ -334,15 +334,15 @@ void launch_core_2s_complex_double(
     ddla::deblasOperation_t transA_0, ddla::deblasOperation_t transB_0,
     const MaxDimensions& maximum_0,
     int* d_m_0, int* d_n_0, int* d_k_0,
-    complex_double alpha_0, const complex_double* const* d_A_array_0, int* d_lda_0,
-    const complex_double* const* d_B_array_0, int* d_ldb_0,
-    complex_double beta_0, complex_double** d_C_array_0, int* d_ldc_0,
+    std::complex<double> alpha_0, const std::complex<float>* const* d_A_array_0, int* d_lda_0,
+    const std::complex<float>* const* d_B_array_0, int* d_ldb_0,
+    std::complex<double> beta_0, std::complex<double>** d_C_array_0, int* d_ldc_0,
     ddla::deblasOperation_t transA_1, ddla::deblasOperation_t transB_1,
     const MaxDimensions& maximum_1,
     int* d_m_1, int* d_n_1, int* d_k_1,
-    complex_double alpha_1, const complex_double* const* d_AB_array_1,
+    std::complex<double> alpha_1, const std::complex<float>* const* d_AB_array_1,
     int* d_lda_1, int* d_ldb_1,
-    complex_double beta_1, complex_double** d_C_array_1, int* d_ldc_1,
+    std::complex<double> beta_1, std::complex<double>** d_C_array_1, int* d_ldc_1,
     bool C0_left, int batch_count, const int* segment_sizes,
     ddla::runtimeStream_t stream)
 {
