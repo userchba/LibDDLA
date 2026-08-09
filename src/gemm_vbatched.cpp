@@ -13,18 +13,18 @@
 // while equal element sizes keep each matrix element aligned when the storage
 // is viewed as the private thrust complex type.
 static_assert(sizeof(std::complex<float>) == sizeof(DdlaFloatComplex));
-static_assert(std::is_trivially_copyable_v<std::complex<float>>);
-static_assert(std::is_trivially_copyable_v<DdlaFloatComplex>);
-static_assert(std::is_standard_layout_v<std::complex<float>>);
-static_assert(std::is_standard_layout_v<DdlaFloatComplex>);
+static_assert(std::is_trivially_copyable<std::complex<float>>::value);
+static_assert(std::is_trivially_copyable<DdlaFloatComplex>::value);
+static_assert(std::is_standard_layout<std::complex<float>>::value);
+static_assert(std::is_standard_layout<DdlaFloatComplex>::value);
 static_assert(alignof(DdlaFloatComplex) >= alignof(std::complex<float>));
 static_assert(
     sizeof(std::complex<float>) % alignof(DdlaFloatComplex) == 0);
 static_assert(sizeof(std::complex<double>) == sizeof(DdlaDoubleComplex));
-static_assert(std::is_trivially_copyable_v<std::complex<double>>);
-static_assert(std::is_trivially_copyable_v<DdlaDoubleComplex>);
-static_assert(std::is_standard_layout_v<std::complex<double>>);
-static_assert(std::is_standard_layout_v<DdlaDoubleComplex>);
+static_assert(std::is_trivially_copyable<std::complex<double>>::value);
+static_assert(std::is_trivially_copyable<DdlaDoubleComplex>::value);
+static_assert(std::is_standard_layout<std::complex<double>>::value);
+static_assert(std::is_standard_layout<DdlaDoubleComplex>::value);
 static_assert(alignof(DdlaDoubleComplex) >= alignof(std::complex<double>));
 static_assert(
     sizeof(std::complex<double>) % alignof(DdlaDoubleComplex) == 0);

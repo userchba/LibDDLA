@@ -30,15 +30,19 @@ struct device_scalar<std::complex<double>> {
     using type = thrust::complex<double>;
 };
 
-// Conjugate helper: no-op for real types, thrust::conj for complex.
+// Conjugate helper: no-op for real types, thrust::conj for complex. C++11 has
+// no `if constexpr`, and a plain runtime `if` would instantiate
+// thrust::conj<T> for real T (thrust::conj has no real-scalar overloads), so
+// dispatch by overload on the scalar type instead.
+template <typename T>
+__device__ __forceinline__ T conj_if(const thrust::complex<T>& val, bool do_conj) {
+    return do_conj ? thrust::conj(val) : val;
+}
+
 template <typename T>
 __device__ __forceinline__ T conj_if(const T& val, bool do_conj) {
-    if (std::is_same<T, thrust::complex<float>>::value ||
-                  std::is_same<T, thrust::complex<double>>::value) {
-        return do_conj ? thrust::conj(val) : val;
-    } else {
-        return val;
-    }
+    (void)do_conj;
+    return val;
 }
 
 } // namespace detail
