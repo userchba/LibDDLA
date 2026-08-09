@@ -32,49 +32,6 @@ __device__ __forceinline__ bool is_zero_nopiv(thrust::complex<T> val) {
 }
 
 // --------------------------------------------------------------------------
-// Kernel-launch dispatch for getf2_nopiv's diagonal block. C++11 has no
-// `if constexpr`, and a plain runtime `if` would instantiate every branch:
-// std::complex cannot be used in device code below C++17 (its constructors
-// are not constexpr there), so the generic T* overload must never be
-// instantiated for complex T. Overload resolution on the scalar pointer type
-// picks the thrust::complex kernel launch for complex scalars and the plain
-// T launch for real scalars.
-// --------------------------------------------------------------------------
-inline void launch_getf2_nopiv_kernel(int jb, int threads, int shmem,
-                                      runtimeStream_t stream,
-                                      std::complex<float>* d_A, int lda,
-                                      int* d_info, int j)
-{
-    getf2_nopiv_kernel<thrust::complex<float>>
-        <<<1, threads, shmem, stream>>>(
-            jb, jb,
-            reinterpret_cast<thrust::complex<float>*>(d_A + j * lda + j),
-            lda, d_info, j);
-}
-
-inline void launch_getf2_nopiv_kernel(int jb, int threads, int shmem,
-                                      runtimeStream_t stream,
-                                      std::complex<double>* d_A, int lda,
-                                      int* d_info, int j)
-{
-    getf2_nopiv_kernel<thrust::complex<double>>
-        <<<1, threads, shmem, stream>>>(
-            jb, jb,
-            reinterpret_cast<thrust::complex<double>*>(d_A + j * lda + j),
-            lda, d_info, j);
-}
-
-template <typename T>
-void launch_getf2_nopiv_kernel(int jb, int threads, int shmem,
-                               runtimeStream_t stream,
-                               T* d_A, int lda, int* d_info, int j)
-{
-    getf2_nopiv_kernel<T>
-        <<<1, threads, shmem, stream>>>(
-            jb, jb, d_A + j * lda + j, lda, d_info, j);
-}
-
-// --------------------------------------------------------------------------
 // Device helper: unblocked LU factorization without pivoting
 //
 // Follows MAGMA's zgetf2_nopiv_device pattern:
@@ -186,6 +143,49 @@ getf2_nopiv_kernel(int m, int n, T* dA, int ldda, int* info, int gbstep)
     const int tx = threadIdx.x;
 
     getf2_nopiv_device<T, GETF2_MAX_N>(m, n, dA, ldda, info, tx, sx, gbstep);
+}
+
+// --------------------------------------------------------------------------
+// Kernel-launch dispatch for getf2_nopiv's diagonal block. C++11 has no
+// `if constexpr`, and a plain runtime `if` would instantiate every branch:
+// std::complex cannot be used in device code below C++17 (its constructors
+// are not constexpr there), so the generic T* overload must never be
+// instantiated for complex T. Overload resolution on the scalar pointer type
+// picks the thrust::complex kernel launch for complex scalars and the plain
+// T launch for real scalars.
+// --------------------------------------------------------------------------
+inline void launch_getf2_nopiv_kernel(int jb, int threads, int shmem,
+                                      runtimeStream_t stream,
+                                      std::complex<float>* d_A, int lda,
+                                      int* d_info, int j)
+{
+    getf2_nopiv_kernel<thrust::complex<float>>
+        <<<1, threads, shmem, stream>>>(
+            jb, jb,
+            reinterpret_cast<thrust::complex<float>*>(d_A + j * lda + j),
+            lda, d_info, j);
+}
+
+inline void launch_getf2_nopiv_kernel(int jb, int threads, int shmem,
+                                      runtimeStream_t stream,
+                                      std::complex<double>* d_A, int lda,
+                                      int* d_info, int j)
+{
+    getf2_nopiv_kernel<thrust::complex<double>>
+        <<<1, threads, shmem, stream>>>(
+            jb, jb,
+            reinterpret_cast<thrust::complex<double>*>(d_A + j * lda + j),
+            lda, d_info, j);
+}
+
+template <typename T>
+void launch_getf2_nopiv_kernel(int jb, int threads, int shmem,
+                               runtimeStream_t stream,
+                               T* d_A, int lda, int* d_info, int j)
+{
+    getf2_nopiv_kernel<T>
+        <<<1, threads, shmem, stream>>>(
+            jb, jb, d_A + j * lda + j, lda, d_info, j);
 }
 
 // --------------------------------------------------------------------------

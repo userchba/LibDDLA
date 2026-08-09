@@ -188,7 +188,9 @@ T to_host_scalar(const DeviceScalarT<T>& value)
         std::is_same<T, std::complex<float>>::value
         || std::is_same<T, std::complex<double>>::value,
         std::true_type, std::false_type>::type tag;
-    return to_host_scalar_impl(value, tag());
+    // DeviceScalarT<T> is a non-deduced context (nested type of a class
+    // template), so pass T explicitly to the impl overload.
+    return to_host_scalar_impl<T>(value, tag());
 }
 
 } // namespace
