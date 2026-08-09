@@ -27,6 +27,31 @@ inline const char* pgemm_backend_name(DdlaBackend backend)
 }
 
 
+namespace {
+
+// C++11 has no `if constexpr`, and in a dual build both DDLA_HAS_CPU and
+// DDLA_HAS_GPU are defined in every TU, so a plain runtime `if` would
+// instantiate the GPU sync branch for CPU-backend templates too --
+// runtimeStreamSynchronize<CPU> takes RuntimeTraits<CPU>::stream_t (int)
+// while this TU's h->stream is a device stream. Dispatch on the backend tag
+// so only the matching branch is instantiated.
+inline void sync_streams_if_gpu(const DdlaHandle_t& h,
+                                std::integral_constant<DdlaBackend, DdlaBackend::GPU>)
+{
+    RUNTIME_CHECK(runtimeStreamSynchronize(h->stream));
+    RUNTIME_CHECK(runtimeStreamSynchronize(h->stream_data));
+}
+
+inline void sync_streams_if_gpu(const DdlaHandle_t&,
+                                std::integral_constant<DdlaBackend, DdlaBackend::CPU>)
+{
+    // No-op: CPU BLAS calls are synchronous and every MPI call in
+    // transport_block<DdlaBackend::CPU> is blocking, so there is no
+    // in-flight work left to wait on here.
+}
+
+} // anonymous namespace
+
 template <DdlaBackend Backend, typename T>
 void pgemm(
     const char& transa, const char& transb,
@@ -212,14 +237,7 @@ void pgemm(
     get_data(k_s);
     bool first_gemm = true;
     for (k_s = 0; k_s < k; k_s += nb) {
-        if (Backend == DdlaBackend::CPU) {
-            // No-op: CPU BLAS calls are synchronous and every MPI call in
-            // transport_block<DdlaBackend::CPU> is blocking, so there is no
-            // in-flight work left to wait on here.
-        } else {
-            RUNTIME_CHECK<Backend>(runtimeStreamSynchronize<Backend>(h->stream));
-            RUNTIME_CHECK<Backend>(runtimeStreamSynchronize<Backend>(h->stream_data));
-        }
+        sync_streams_if_gpu(h, std::integral_constant<DdlaBackend, Backend>());
         if (m_loc_C > 0 && n_loc_C > 0) {
             const T gemm_beta = first_gemm ? beta : static_cast<T>(1.0);
             ddla::gemm<Backend>(
@@ -235,14 +253,7 @@ void pgemm(
         temp_buffer = (temp_buffer + 1) % buffer_max;
         get_data(k_s + nb);
     }
-    if (Backend == DdlaBackend::CPU) {
-        // No-op: CPU BLAS calls are synchronous and every MPI call in
-        // transport_block<DdlaBackend::CPU> is blocking, so there is no
-        // in-flight work left to wait on here.
-    } else {
-        RUNTIME_CHECK<Backend>(runtimeStreamSynchronize<Backend>(h->stream));
-        RUNTIME_CHECK<Backend>(runtimeStreamSynchronize<Backend>(h->stream_data));
-    }
+    sync_streams_if_gpu(h, std::integral_constant<DdlaBackend, Backend>());
     for (int i = 0; i < buffer_max; i++) {
         RUNTIME_CHECK<Backend>(runtimeFree<Backend>(d_A_temp[i]));
         RUNTIME_CHECK<Backend>(runtimeFree<Backend>(d_B_temp[i]));

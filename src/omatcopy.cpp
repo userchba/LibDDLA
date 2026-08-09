@@ -128,27 +128,48 @@ void omatcopy(const DdlaHandle_t& handle, char trans, int rows, int cols,
     }
 }
 
+// C++11 has no `if constexpr`, and in a dual build both DDLA_HAS_CPU and
+// DDLA_HAS_GPU are defined in every TU, so a plain runtime `if` would
+// instantiate the GPU branch for CPU-backend templates too -- and
+// runtimeMemcpy2DAsync<CPU> takes RuntimeTraits<CPU>::stream_t (int) while
+// this TU's h->stream is a device stream. Dispatch on the backend tag so
+// only the matching branch is instantiated.
+namespace {
+template <typename T>
+void copy2D_impl(const DdlaHandle_t& handle, T* dst, int dst_ld,
+                 const T* src, int src_ld, int rows, int cols,
+                 std::integral_constant<DdlaBackend, DdlaBackend::CPU>)
+{
+#if DDLA_HAS_CPU
+    cpu_omatcopy('N', rows, cols, (T)1.0, src, src_ld, dst, dst_ld);
+#endif
+}
+
+template <typename T>
+void copy2D_impl(const DdlaHandle_t& handle, T* dst, int dst_ld,
+                 const T* src, int src_ld, int rows, int cols,
+                 std::integral_constant<DdlaBackend, DdlaBackend::GPU>)
+{
+#if DDLA_HAS_GPU
+    RUNTIME_CHECK(runtimeMemcpy2DAsync(
+        dst, static_cast<std::size_t>(dst_ld) * sizeof(T),
+        src, static_cast<std::size_t>(src_ld) * sizeof(T),
+        static_cast<std::size_t>(rows) * sizeof(T),
+        static_cast<std::size_t>(cols),
+        runtimeMemcpyDeviceToDevice,
+        handle->stream));
+#endif
+}
+} // anonymous namespace
+
 template <DdlaBackend Backend, typename T>
 void copy2D(const DdlaHandle_t& handle, T* dst, int dst_ld,
             const T* src, int src_ld, int rows, int cols)
 {
     if (rows <= 0 || cols <= 0) return;
 
-    if (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
-        cpu_omatcopy('N', rows, cols, (T)1.0, src, src_ld, dst, dst_ld);
-#endif
-    } else {
-#if DDLA_HAS_GPU
-        RUNTIME_CHECK(runtimeMemcpy2DAsync<Backend>(
-            dst, static_cast<std::size_t>(dst_ld) * sizeof(T),
-            src, static_cast<std::size_t>(src_ld) * sizeof(T),
-            static_cast<std::size_t>(rows) * sizeof(T),
-            static_cast<std::size_t>(cols),
-            detail::RuntimeTraits<Backend>::device_to_device,
-            handle->stream));
-#endif
-    }
+    copy2D_impl(handle, dst, dst_ld, src, src_ld, rows, cols,
+                std::integral_constant<DdlaBackend, Backend>());
 }
 
 #define INSTANTIATE_COPY2D(BACKEND, TYPE)                                    \
