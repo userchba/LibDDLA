@@ -155,7 +155,7 @@ __global__ void scale_update_kernel(int length_row, int length_col,
 // partial ordering picking the more specialized overload) selects at compile
 // time.
 template <typename T>
-DeviceScalarT<T> to_device_scalar(const std::complex<T>& value)
+DeviceComplex<T> to_device_scalar(const std::complex<T>& value)
 {
     return {value.real(), value.imag()};
 }
@@ -166,16 +166,29 @@ T to_device_scalar(const T& value)
     return value;
 }
 
+// to_host_scalar keeps the original single-template shape (callers pass the
+// scalar type explicitly, e.g. to_host_scalar<T>), so the complex-vs-real
+// split goes through a tag-dispatch helper instead of overloads.
 template <typename T>
-T to_host_scalar(const DeviceComplex<T>& value)
+T to_host_scalar_impl(const DeviceScalarT<T>& value, std::true_type /* complex */)
 {
     return T(value.real, value.imag);
 }
 
 template <typename T>
-T to_host_scalar(const T& value)
+T to_host_scalar_impl(const DeviceScalarT<T>& value, std::false_type /* real */)
 {
     return value;
+}
+
+template <typename T>
+T to_host_scalar(const DeviceScalarT<T>& value)
+{
+    typedef typename std::conditional<
+        std::is_same<T, std::complex<float>>::value
+        || std::is_same<T, std::complex<double>>::value,
+        std::true_type, std::false_type>::type tag;
+    return to_host_scalar_impl(value, tag());
 }
 
 } // namespace
