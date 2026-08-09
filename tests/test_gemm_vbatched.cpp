@@ -134,8 +134,9 @@ class DeviceArray
     DeviceArray& operator=(const DeviceArray&) = delete;
 
     DeviceArray(DeviceArray&& other) noexcept
-        : pointer_(std::exchange(other.pointer_, nullptr))
+        : pointer_(other.pointer_)
     {
+        other.pointer_ = nullptr;
     }
 
     DeviceArray& operator=(DeviceArray&& other) noexcept
@@ -143,7 +144,8 @@ class DeviceArray
         if (this != &other)
         {
             ddla::RUNTIME_CHECK(ddla::runtimeFree(pointer_));
-            pointer_ = std::exchange(other.pointer_, nullptr);
+            pointer_ = other.pointer_;
+            other.pointer_ = nullptr;
         }
         return *this;
     }
