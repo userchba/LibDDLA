@@ -154,7 +154,7 @@ MaxDimensions validate_dimensions(
 // no `if constexpr`, so the former is_same_v<> chains become plain
 // overloads on the scalar type: overload resolution picks the right
 // precision core at compile time.
-void launch_core_float(
+void launch_core(
     ddla::deblasOperation_t transA, ddla::deblasOperation_t transB,
     const MaxDimensions& maximum,
     int* d_m, int* d_n, int* d_k,
@@ -170,7 +170,7 @@ void launch_core_float(
         batch_count, stream);
 }
 
-void launch_core_double(
+void launch_core(
     ddla::deblasOperation_t transA, ddla::deblasOperation_t transB,
     const MaxDimensions& maximum,
     int* d_m, int* d_n, int* d_k,
@@ -186,7 +186,7 @@ void launch_core_double(
         batch_count, stream);
 }
 
-void launch_core_complex_float(
+void launch_core(
     ddla::deblasOperation_t transA, ddla::deblasOperation_t transB,
     const MaxDimensions& maximum,
     int* d_m, int* d_n, int* d_k,
@@ -210,7 +210,7 @@ void launch_core_complex_float(
         0, 0, d_ldc, batch_count, stream);
 }
 
-void launch_core_complex_double(
+void launch_core(
     ddla::deblasOperation_t transA, ddla::deblasOperation_t transB,
     const MaxDimensions& maximum,
     int* d_m, int* d_n, int* d_k,
@@ -237,7 +237,7 @@ void launch_core_complex_double(
 
 // Two-stage (gemmVbatched2s) scalar-type overload dispatch, same
 // rationale as launch_core above.
-void launch_core_2s_float(
+void launch_core_2s(
     ddla::deblasOperation_t transA_0, ddla::deblasOperation_t transB_0,
     const MaxDimensions& maximum_0,
     int* d_m_0, int* d_n_0, int* d_k_0,
@@ -265,7 +265,7 @@ void launch_core_2s_float(
         batch_count, segment_sizes, stream);
 }
 
-void launch_core_2s_double(
+void launch_core_2s(
     ddla::deblasOperation_t transA_0, ddla::deblasOperation_t transB_0,
     const MaxDimensions& maximum_0,
     int* d_m_0, int* d_n_0, int* d_k_0,
@@ -293,7 +293,7 @@ void launch_core_2s_double(
         batch_count, segment_sizes, stream);
 }
 
-void launch_core_2s_complex_float(
+void launch_core_2s(
     ddla::deblasOperation_t transA_0, ddla::deblasOperation_t transB_0,
     const MaxDimensions& maximum_0,
     int* d_m_0, int* d_n_0, int* d_k_0,
@@ -330,7 +330,7 @@ void launch_core_2s_complex_float(
         0, 0, d_ldc_1, C0_left, batch_count, segment_sizes, stream);
 }
 
-void launch_core_2s_complex_double(
+void launch_core_2s(
     ddla::deblasOperation_t transA_0, ddla::deblasOperation_t transB_0,
     const MaxDimensions& maximum_0,
     int* d_m_0, int* d_n_0, int* d_k_0,
