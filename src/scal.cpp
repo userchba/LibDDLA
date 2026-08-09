@@ -66,7 +66,7 @@ void scal(const DdlaHandle_t& handle, int n, const T& alpha, T* x, int incx)
     }
     if (n <= 0) return;
 
-    if constexpr (Backend == DdlaBackend::CPU) {
+    if (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         cpu_scal(n, alpha, x, incx);
 #endif

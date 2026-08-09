@@ -24,6 +24,44 @@ namespace {
 constexpr int kBlockSize = 128;
 
 template <typename T>
+void update_leading_impl(
+    deblasHandle_t blas_handle, deblasFillMode_t fill_mode, bool upper,
+    int leading_n, int block_n,
+    const T* d_panel, int lda,
+    T* d_leading,
+    std::true_type /* real scalar */)
+{
+    const deblasOperation_t op = upper ? DEBLAS_OP_N : DEBLAS_OP_T;
+    const T minus_one = T(-1);
+    const T one = T(1);
+    BLAS_CHECK(deblasSyrk(
+        blas_handle, fill_mode, op,
+        leading_n, block_n,
+        minus_one, d_panel, lda,
+        one, d_leading, lda));
+}
+
+template <typename T>
+void update_leading_impl(
+    deblasHandle_t blas_handle, deblasFillMode_t fill_mode, bool upper,
+    int leading_n, int block_n,
+    const T* d_panel, int lda,
+    T* d_leading,
+    std::false_type /* complex scalar */)
+{
+    const deblasOperation_t op = upper ? DEBLAS_OP_N : DEBLAS_OP_C;
+    using Real = typename std::conditional<
+        std::is_same<T, std::complex<float>>::value, float, double>::type;
+    const Real minus_one = Real(-1);
+    const Real one = Real(1);
+    BLAS_CHECK(deblasHerk(
+        blas_handle, fill_mode, op,
+        leading_n, block_n,
+        minus_one, d_panel, lda,
+        one, d_leading, lda));
+}
+
+template <typename T>
 void update_leading(
     deblasHandle_t blas_handle,
     const char uplo,
@@ -35,27 +73,11 @@ void update_leading(
     const deblasFillMode_t fill_mode = upper
         ? DEBLAS_FILL_MODE_UPPER
         : DEBLAS_FILL_MODE_LOWER;
-    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>){
-        const T minus_one = T(-1);
-        const T one = T(1);
-        BLAS_CHECK(deblasSyrk(
-            blas_handle, fill_mode,
-            upper ? DEBLAS_OP_N : DEBLAS_OP_T,
-            leading_n, block_n,
-            minus_one, d_panel, lda,
-            one, d_leading, lda));
-    }else{
-        using Real = std::conditional_t<
-            std::is_same_v<T, std::complex<float>>, float, double>;
-        const Real minus_one = Real(-1);
-        const Real one = Real(1);
-        BLAS_CHECK(deblasHerk(
-            blas_handle, fill_mode,
-            upper ? DEBLAS_OP_N : DEBLAS_OP_C,
-            leading_n, block_n,
-            minus_one, d_panel, lda,
-            one, d_leading, lda));
-    }
+    // C++11 has no `if constexpr`: real scalars use syrk, complex use herk,
+    // selected by tag dispatch on the scalar type.
+    update_leading_impl(blas_handle, fill_mode, upper,
+                        leading_n, block_n, d_panel, lda, d_leading,
+                        std::is_floating_point<T>());
 }
 
 } // namespace
@@ -193,7 +215,7 @@ void potrf_bottom_right(
                 d_panel, lda));
         }else{
             const deblasOperation_t trans =
-                std::is_same_v<T, float> || std::is_same_v<T, double>
+                std::is_same<T, float>::value || std::is_same<T, double>::value
                 ? DEBLAS_OP_T
                 : DEBLAS_OP_C;
             BLAS_CHECK(deblasTrsm(

@@ -150,154 +150,223 @@ MaxDimensions validate_dimensions(
     return {summary[0], summary[1], summary[2]};
 }
 
-template <typename T>
-void launch_core(
+// Scalar-type overload dispatch for the vbatched core launch. C++11 has
+// no `if constexpr`, so the former is_same_v<> chains become plain
+// overloads on the scalar type: overload resolution picks the right
+// precision core at compile time.
+void launch_core_float(
     ddla::deblasOperation_t transA, ddla::deblasOperation_t transB,
     const MaxDimensions& maximum,
     int* d_m, int* d_n, int* d_k,
-    T alpha, const T* const* d_A_array, int* d_lda,
-    const T* const* d_B_array, int* d_ldb,
-    T beta, T** d_C_array, int* d_ldc,
+    float alpha, const float* const* d_A_array, int* d_lda,
+    const float* const* d_B_array, int* d_ldb,
+    float beta, float** d_C_array, int* d_ldc,
     int batch_count, ddla::runtimeStream_t stream)
 {
-    if constexpr (std::is_same_v<T, float>)
-    {
-        ddla_internal_sgemm_vbatched_core(
-            transA, transB, maximum.m, maximum.n, maximum.k,
-            d_m, d_n, d_k, alpha, d_A_array, 0, 0, d_lda,
-            d_B_array, 0, 0, d_ldb, beta, d_C_array, 0, 0, d_ldc,
-            batch_count, stream);
-    }
-    else if constexpr (std::is_same_v<T, double>)
-    {
-        ddla_internal_dgemm_vbatched_core(
-            transA, transB, maximum.m, maximum.n, maximum.k,
-            d_m, d_n, d_k, alpha, d_A_array, 0, 0, d_lda,
-            d_B_array, 0, 0, d_ldb, beta, d_C_array, 0, 0, d_ldc,
-            batch_count, stream);
-    }
-    else if constexpr (std::is_same_v<T, std::complex<float>>)
-    {
-        const DdlaFloatComplex alpha_internal =
-            DDLA_C_MAKE(alpha.real(), alpha.imag());
-        const DdlaFloatComplex beta_internal =
-            DDLA_C_MAKE(beta.real(), beta.imag());
-        ddla_internal_cgemm_vbatched_core(
-            transA, transB, maximum.m, maximum.n, maximum.k,
-            d_m, d_n, d_k, alpha_internal,
-            reinterpret_cast<const DdlaFloatComplex* const*>(d_A_array),
-            0, 0, d_lda,
-            reinterpret_cast<const DdlaFloatComplex* const*>(d_B_array),
-            0, 0, d_ldb, beta_internal,
-            reinterpret_cast<DdlaFloatComplex**>(d_C_array),
-            0, 0, d_ldc, batch_count, stream);
-    }
-    else if constexpr (std::is_same_v<T, std::complex<double>>)
-    {
-        const DdlaDoubleComplex alpha_internal =
-            DDLA_Z_MAKE(alpha.real(), alpha.imag());
-        const DdlaDoubleComplex beta_internal =
-            DDLA_Z_MAKE(beta.real(), beta.imag());
-        ddla_internal_zgemm_vbatched_core(
-            transA, transB, maximum.m, maximum.n, maximum.k,
-            d_m, d_n, d_k, alpha_internal,
-            reinterpret_cast<const DdlaDoubleComplex* const*>(d_A_array),
-            0, 0, d_lda,
-            reinterpret_cast<const DdlaDoubleComplex* const*>(d_B_array),
-            0, 0, d_ldb, beta_internal,
-            reinterpret_cast<DdlaDoubleComplex**>(d_C_array),
-            0, 0, d_ldc, batch_count, stream);
-    }
+    ddla_internal_sgemm_vbatched_core(
+        transA, transB, maximum.m, maximum.n, maximum.k,
+        d_m, d_n, d_k, alpha, d_A_array, 0, 0, d_lda,
+        d_B_array, 0, 0, d_ldb, beta, d_C_array, 0, 0, d_ldc,
+        batch_count, stream);
 }
 
-template <typename T>
-void launch_core_2s(
+void launch_core_double(
+    ddla::deblasOperation_t transA, ddla::deblasOperation_t transB,
+    const MaxDimensions& maximum,
+    int* d_m, int* d_n, int* d_k,
+    double alpha, const double* const* d_A_array, int* d_lda,
+    const double* const* d_B_array, int* d_ldb,
+    double beta, double** d_C_array, int* d_ldc,
+    int batch_count, ddla::runtimeStream_t stream)
+{
+    ddla_internal_dgemm_vbatched_core(
+        transA, transB, maximum.m, maximum.n, maximum.k,
+        d_m, d_n, d_k, alpha, d_A_array, 0, 0, d_lda,
+        d_B_array, 0, 0, d_ldb, beta, d_C_array, 0, 0, d_ldc,
+        batch_count, stream);
+}
+
+void launch_core_complex_float(
+    ddla::deblasOperation_t transA, ddla::deblasOperation_t transB,
+    const MaxDimensions& maximum,
+    int* d_m, int* d_n, int* d_k,
+    complex_float alpha, const complex_float* const* d_A_array, int* d_lda,
+    const complex_float* const* d_B_array, int* d_ldb,
+    complex_float beta, complex_float** d_C_array, int* d_ldc,
+    int batch_count, ddla::runtimeStream_t stream)
+{
+    const DdlaFloatComplex alpha_internal =
+        DDLA_C_MAKE(alpha.real(), alpha.imag());
+    const DdlaFloatComplex beta_internal =
+        DDLA_C_MAKE(beta.real(), beta.imag());
+    ddla_internal_cgemm_vbatched_core(
+        transA, transB, maximum.m, maximum.n, maximum.k,
+        d_m, d_n, d_k, alpha_internal,
+        reinterpret_cast<const DdlaFloatComplex* const*>(d_A_array),
+        0, 0, d_lda,
+        reinterpret_cast<const DdlaFloatComplex* const*>(d_B_array),
+        0, 0, d_ldb, beta_internal,
+        reinterpret_cast<DdlaFloatComplex**>(d_C_array),
+        0, 0, d_ldc, batch_count, stream);
+}
+
+void launch_core_complex_double(
+    ddla::deblasOperation_t transA, ddla::deblasOperation_t transB,
+    const MaxDimensions& maximum,
+    int* d_m, int* d_n, int* d_k,
+    complex_double alpha, const complex_double* const* d_A_array, int* d_lda,
+    const complex_double* const* d_B_array, int* d_ldb,
+    complex_double beta, complex_double** d_C_array, int* d_ldc,
+    int batch_count, ddla::runtimeStream_t stream)
+{
+    const DdlaDoubleComplex alpha_internal =
+        DDLA_Z_MAKE(alpha.real(), alpha.imag());
+    const DdlaDoubleComplex beta_internal =
+        DDLA_Z_MAKE(beta.real(), beta.imag());
+    ddla_internal_zgemm_vbatched_core(
+        transA, transB, maximum.m, maximum.n, maximum.k,
+        d_m, d_n, d_k, alpha_internal,
+        reinterpret_cast<const DdlaDoubleComplex* const*>(d_A_array),
+        0, 0, d_lda,
+        reinterpret_cast<const DdlaDoubleComplex* const*>(d_B_array),
+        0, 0, d_ldb, beta_internal,
+        reinterpret_cast<DdlaDoubleComplex**>(d_C_array),
+        0, 0, d_ldc, batch_count, stream);
+}
+
+
+// Two-stage (gemmVbatched2s) scalar-type overload dispatch, same
+// rationale as launch_core above.
+void launch_core_2s_float(
     ddla::deblasOperation_t transA_0, ddla::deblasOperation_t transB_0,
     const MaxDimensions& maximum_0,
     int* d_m_0, int* d_n_0, int* d_k_0,
-    T alpha_0, const T* const* d_A_array_0, int* d_lda_0,
-    const T* const* d_B_array_0, int* d_ldb_0,
-    T beta_0, T** d_C_array_0, int* d_ldc_0,
+    float alpha_0, const float* const* d_A_array_0, int* d_lda_0,
+    const float* const* d_B_array_0, int* d_ldb_0,
+    float beta_0, float** d_C_array_0, int* d_ldc_0,
     ddla::deblasOperation_t transA_1, ddla::deblasOperation_t transB_1,
     const MaxDimensions& maximum_1,
     int* d_m_1, int* d_n_1, int* d_k_1,
-    T alpha_1, const T* const* d_AB_array_1,
+    float alpha_1, const float* const* d_AB_array_1,
     int* d_lda_1, int* d_ldb_1,
-    T beta_1, T** d_C_array_1, int* d_ldc_1,
+    float beta_1, float** d_C_array_1, int* d_ldc_1,
     bool C0_left, int batch_count, const int* segment_sizes,
     ddla::runtimeStream_t stream)
 {
-    if constexpr (std::is_same_v<T, float>)
-    {
-        ddla_internal_sgemm_vbatched_core_2s(
-            transA_0, transB_0, maximum_0.m, maximum_0.n, maximum_0.k,
-            d_m_0, d_n_0, d_k_0, alpha_0,
-            d_A_array_0, 0, 0, d_lda_0, d_B_array_0, 0, 0, d_ldb_0,
-            beta_0, d_C_array_0, 0, 0, d_ldc_0,
-            transA_1, transB_1, maximum_1.m, maximum_1.n, maximum_1.k,
-            d_m_1, d_n_1, d_k_1, alpha_1,
-            d_AB_array_1, 0, 0, d_lda_1, 0, 0, d_ldb_1,
-            beta_1, d_C_array_1, 0, 0, d_ldc_1, C0_left,
-            batch_count, segment_sizes, stream);
-    }
-    else if constexpr (std::is_same_v<T, double>)
-    {
-        ddla_internal_dgemm_vbatched_core_2s(
-            transA_0, transB_0, maximum_0.m, maximum_0.n, maximum_0.k,
-            d_m_0, d_n_0, d_k_0, alpha_0,
-            d_A_array_0, 0, 0, d_lda_0, d_B_array_0, 0, 0, d_ldb_0,
-            beta_0, d_C_array_0, 0, 0, d_ldc_0,
-            transA_1, transB_1, maximum_1.m, maximum_1.n, maximum_1.k,
-            d_m_1, d_n_1, d_k_1, alpha_1,
-            d_AB_array_1, 0, 0, d_lda_1, 0, 0, d_ldb_1,
-            beta_1, d_C_array_1, 0, 0, d_ldc_1, C0_left,
-            batch_count, segment_sizes, stream);
-    }
-    else if constexpr (std::is_same_v<T, std::complex<float>>)
-    {
-        ddla_internal_cgemm_vbatched_core_2s(
-            transA_0, transB_0, maximum_0.m, maximum_0.n, maximum_0.k,
-            d_m_0, d_n_0, d_k_0,
-            DDLA_C_MAKE(alpha_0.real(), alpha_0.imag()),
-            reinterpret_cast<const DdlaFloatComplex* const*>(d_A_array_0),
-            0, 0, d_lda_0,
-            reinterpret_cast<const DdlaFloatComplex* const*>(d_B_array_0),
-            0, 0, d_ldb_0,
-            DDLA_C_MAKE(beta_0.real(), beta_0.imag()),
-            reinterpret_cast<DdlaFloatComplex**>(d_C_array_0),
-            0, 0, d_ldc_0,
-            transA_1, transB_1, maximum_1.m, maximum_1.n, maximum_1.k,
-            d_m_1, d_n_1, d_k_1,
-            DDLA_C_MAKE(alpha_1.real(), alpha_1.imag()),
-            reinterpret_cast<const DdlaFloatComplex* const*>(d_AB_array_1),
-            0, 0, d_lda_1, 0, 0, d_ldb_1,
-            DDLA_C_MAKE(beta_1.real(), beta_1.imag()),
-            reinterpret_cast<DdlaFloatComplex**>(d_C_array_1),
-            0, 0, d_ldc_1, C0_left, batch_count, segment_sizes, stream);
-    }
-    else if constexpr (std::is_same_v<T, std::complex<double>>)
-    {
-        ddla_internal_zgemm_vbatched_core_2s(
-            transA_0, transB_0, maximum_0.m, maximum_0.n, maximum_0.k,
-            d_m_0, d_n_0, d_k_0,
-            DDLA_Z_MAKE(alpha_0.real(), alpha_0.imag()),
-            reinterpret_cast<const DdlaDoubleComplex* const*>(d_A_array_0),
-            0, 0, d_lda_0,
-            reinterpret_cast<const DdlaDoubleComplex* const*>(d_B_array_0),
-            0, 0, d_ldb_0,
-            DDLA_Z_MAKE(beta_0.real(), beta_0.imag()),
-            reinterpret_cast<DdlaDoubleComplex**>(d_C_array_0),
-            0, 0, d_ldc_0,
-            transA_1, transB_1, maximum_1.m, maximum_1.n, maximum_1.k,
-            d_m_1, d_n_1, d_k_1,
-            DDLA_Z_MAKE(alpha_1.real(), alpha_1.imag()),
-            reinterpret_cast<const DdlaDoubleComplex* const*>(d_AB_array_1),
-            0, 0, d_lda_1, 0, 0, d_ldb_1,
-            DDLA_Z_MAKE(beta_1.real(), beta_1.imag()),
-            reinterpret_cast<DdlaDoubleComplex**>(d_C_array_1),
-            0, 0, d_ldc_1, C0_left, batch_count, segment_sizes, stream);
-    }
+    ddla_internal_sgemm_vbatched_core_2s(
+        transA_0, transB_0, maximum_0.m, maximum_0.n, maximum_0.k,
+        d_m_0, d_n_0, d_k_0, alpha_0,
+        d_A_array_0, 0, 0, d_lda_0, d_B_array_0, 0, 0, d_ldb_0,
+        beta_0, d_C_array_0, 0, 0, d_ldc_0,
+        transA_1, transB_1, maximum_1.m, maximum_1.n, maximum_1.k,
+        d_m_1, d_n_1, d_k_1, alpha_1,
+        d_AB_array_1, 0, 0, d_lda_1, 0, 0, d_ldb_1,
+        beta_1, d_C_array_1, 0, 0, d_ldc_1, C0_left,
+        batch_count, segment_sizes, stream);
 }
+
+void launch_core_2s_double(
+    ddla::deblasOperation_t transA_0, ddla::deblasOperation_t transB_0,
+    const MaxDimensions& maximum_0,
+    int* d_m_0, int* d_n_0, int* d_k_0,
+    double alpha_0, const double* const* d_A_array_0, int* d_lda_0,
+    const double* const* d_B_array_0, int* d_ldb_0,
+    double beta_0, double** d_C_array_0, int* d_ldc_0,
+    ddla::deblasOperation_t transA_1, ddla::deblasOperation_t transB_1,
+    const MaxDimensions& maximum_1,
+    int* d_m_1, int* d_n_1, int* d_k_1,
+    double alpha_1, const double* const* d_AB_array_1,
+    int* d_lda_1, int* d_ldb_1,
+    double beta_1, double** d_C_array_1, int* d_ldc_1,
+    bool C0_left, int batch_count, const int* segment_sizes,
+    ddla::runtimeStream_t stream)
+{
+    ddla_internal_dgemm_vbatched_core_2s(
+        transA_0, transB_0, maximum_0.m, maximum_0.n, maximum_0.k,
+        d_m_0, d_n_0, d_k_0, alpha_0,
+        d_A_array_0, 0, 0, d_lda_0, d_B_array_0, 0, 0, d_ldb_0,
+        beta_0, d_C_array_0, 0, 0, d_ldc_0,
+        transA_1, transB_1, maximum_1.m, maximum_1.n, maximum_1.k,
+        d_m_1, d_n_1, d_k_1, alpha_1,
+        d_AB_array_1, 0, 0, d_lda_1, 0, 0, d_ldb_1,
+        beta_1, d_C_array_1, 0, 0, d_ldc_1, C0_left,
+        batch_count, segment_sizes, stream);
+}
+
+void launch_core_2s_complex_float(
+    ddla::deblasOperation_t transA_0, ddla::deblasOperation_t transB_0,
+    const MaxDimensions& maximum_0,
+    int* d_m_0, int* d_n_0, int* d_k_0,
+    complex_float alpha_0, const complex_float* const* d_A_array_0, int* d_lda_0,
+    const complex_float* const* d_B_array_0, int* d_ldb_0,
+    complex_float beta_0, complex_float** d_C_array_0, int* d_ldc_0,
+    ddla::deblasOperation_t transA_1, ddla::deblasOperation_t transB_1,
+    const MaxDimensions& maximum_1,
+    int* d_m_1, int* d_n_1, int* d_k_1,
+    complex_float alpha_1, const complex_float* const* d_AB_array_1,
+    int* d_lda_1, int* d_ldb_1,
+    complex_float beta_1, complex_float** d_C_array_1, int* d_ldc_1,
+    bool C0_left, int batch_count, const int* segment_sizes,
+    ddla::runtimeStream_t stream)
+{
+    ddla_internal_cgemm_vbatched_core_2s(
+        transA_0, transB_0, maximum_0.m, maximum_0.n, maximum_0.k,
+        d_m_0, d_n_0, d_k_0,
+        DDLA_C_MAKE(alpha_0.real(), alpha_0.imag()),
+        reinterpret_cast<const DdlaFloatComplex* const*>(d_A_array_0),
+        0, 0, d_lda_0,
+        reinterpret_cast<const DdlaFloatComplex* const*>(d_B_array_0),
+        0, 0, d_ldb_0,
+        DDLA_C_MAKE(beta_0.real(), beta_0.imag()),
+        reinterpret_cast<DdlaFloatComplex**>(d_C_array_0),
+        0, 0, d_ldc_0,
+        transA_1, transB_1, maximum_1.m, maximum_1.n, maximum_1.k,
+        d_m_1, d_n_1, d_k_1,
+        DDLA_C_MAKE(alpha_1.real(), alpha_1.imag()),
+        reinterpret_cast<const DdlaFloatComplex* const*>(d_AB_array_1),
+        0, 0, d_lda_1, 0, 0, d_ldb_1,
+        DDLA_C_MAKE(beta_1.real(), beta_1.imag()),
+        reinterpret_cast<DdlaFloatComplex**>(d_C_array_1),
+        0, 0, d_ldc_1, C0_left, batch_count, segment_sizes, stream);
+}
+
+void launch_core_2s_complex_double(
+    ddla::deblasOperation_t transA_0, ddla::deblasOperation_t transB_0,
+    const MaxDimensions& maximum_0,
+    int* d_m_0, int* d_n_0, int* d_k_0,
+    complex_double alpha_0, const complex_double* const* d_A_array_0, int* d_lda_0,
+    const complex_double* const* d_B_array_0, int* d_ldb_0,
+    complex_double beta_0, complex_double** d_C_array_0, int* d_ldc_0,
+    ddla::deblasOperation_t transA_1, ddla::deblasOperation_t transB_1,
+    const MaxDimensions& maximum_1,
+    int* d_m_1, int* d_n_1, int* d_k_1,
+    complex_double alpha_1, const complex_double* const* d_AB_array_1,
+    int* d_lda_1, int* d_ldb_1,
+    complex_double beta_1, complex_double** d_C_array_1, int* d_ldc_1,
+    bool C0_left, int batch_count, const int* segment_sizes,
+    ddla::runtimeStream_t stream)
+{
+    ddla_internal_zgemm_vbatched_core_2s(
+        transA_0, transB_0, maximum_0.m, maximum_0.n, maximum_0.k,
+        d_m_0, d_n_0, d_k_0,
+        DDLA_Z_MAKE(alpha_0.real(), alpha_0.imag()),
+        reinterpret_cast<const DdlaDoubleComplex* const*>(d_A_array_0),
+        0, 0, d_lda_0,
+        reinterpret_cast<const DdlaDoubleComplex* const*>(d_B_array_0),
+        0, 0, d_ldb_0,
+        DDLA_Z_MAKE(beta_0.real(), beta_0.imag()),
+        reinterpret_cast<DdlaDoubleComplex**>(d_C_array_0),
+        0, 0, d_ldc_0,
+        transA_1, transB_1, maximum_1.m, maximum_1.n, maximum_1.k,
+        d_m_1, d_n_1, d_k_1,
+        DDLA_Z_MAKE(alpha_1.real(), alpha_1.imag()),
+        reinterpret_cast<const DdlaDoubleComplex* const*>(d_AB_array_1),
+        0, 0, d_lda_1, 0, 0, d_ldb_1,
+        DDLA_Z_MAKE(beta_1.real(), beta_1.imag()),
+        reinterpret_cast<DdlaDoubleComplex**>(d_C_array_1),
+        0, 0, d_ldc_1, C0_left, batch_count, segment_sizes, stream);
+}
+
 
 } // namespace
 
@@ -314,9 +383,9 @@ void gemmVbatched(
     int batch_count, const DdlaHandle_t& handle)
 {
     static_assert(
-        std::is_same_v<T, float> || std::is_same_v<T, double>
-        || std::is_same_v<T, std::complex<float>>
-        || std::is_same_v<T, std::complex<double>>,
+        std::is_same<T, float>::value || std::is_same<T, double>::value
+        || std::is_same<T, std::complex<float>>::value
+        || std::is_same<T, std::complex<double>>::value,
         "gemmVbatched supports float, double, and their complex types");
 
     if (batch_count < 0)

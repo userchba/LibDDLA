@@ -10,7 +10,7 @@ void check_pgetf2_panel(const ddla::DdlaHandle_t& handle, const Shape& base)
     descA.init(n, n, nb, nb, 0, 0);
 
     {
-        auto h_A = make_local<Complex>(descA, [](int i, int j){
+        auto h_A = make_local<Complex>(descA, [](int i, int j) -> Complex {
             if(j == 0) return Complex(0.0, 0.0);
             return i == j ? Complex(1.0, 0.0) : Complex(0.0, 0.0);
         });

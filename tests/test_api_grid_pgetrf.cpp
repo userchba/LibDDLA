@@ -13,7 +13,7 @@ void check_pgetrf(const ddla::DdlaHandle_t& handle, const Shape& base)
 
     {
         const int singular_index = std::min(nb + 1, n - 1);
-        auto h_singular = make_local<Complex>(descA, [=](int i, int j){
+        auto h_singular = make_local<Complex>(descA, [=](int i, int j) -> Complex {
             if(i != j) return Complex(0.0, 0.0);
             return Complex(i == singular_index ? 0.0 : 1.0, 0.0);
         });

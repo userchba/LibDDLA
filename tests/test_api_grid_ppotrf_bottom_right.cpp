@@ -16,8 +16,9 @@ using namespace api_grid_test;
 namespace {
 
 template <typename T>
-constexpr bool is_complex_v = std::is_same_v<T, std::complex<float>>
-                           || std::is_same_v<T, std::complex<double>>;
+struct is_complex : std::false_type {};
+template <typename U>
+struct is_complex<std::complex<U>> : std::true_type {};
 
 template <typename T>
 struct real_type {
@@ -32,26 +33,45 @@ struct real_type<std::complex<Real>> {
 template <typename T>
 using real_type_t = typename real_type<T>::type;
 
+// C++11 has no `if constexpr`: scalar construction and conjugation dispatch
+// on an is_complex<> tag so the complex-only expressions (two-argument
+// constructor, std::conj) are only instantiated for complex T.
+template <typename T>
+T scalar_impl(double real, double imag, std::true_type)
+{
+    using Real = typename T::value_type;
+    return T(static_cast<Real>(real), static_cast<Real>(imag));
+}
+
+template <typename T>
+T scalar_impl(double real, double imag, std::false_type)
+{
+    (void)imag;
+    return static_cast<T>(real);
+}
+
 template <typename T>
 T scalar(double real, double imag = 0.0)
 {
-    if constexpr (is_complex_v<T>){
-        using Real = typename T::value_type;
-        return T(static_cast<Real>(real), static_cast<Real>(imag));
-    }else{
-        (void)imag;
-        return static_cast<T>(real);
-    }
+    return scalar_impl<T>(real, imag, is_complex<T>());
+}
+
+template <typename T>
+T conjugate_impl(const T& value, std::true_type)
+{
+    return std::conj(value);
+}
+
+template <typename T>
+T conjugate_impl(const T& value, std::false_type)
+{
+    return value;
 }
 
 template <typename T>
 T conjugate(const T& value)
 {
-    if constexpr (is_complex_v<T>){
-        return std::conj(value);
-    }else{
-        return value;
-    }
+    return conjugate_impl(value, is_complex<T>());
 }
 
 template <typename T>
@@ -185,7 +205,7 @@ void check_success_case(const ddla::DdlaHandle_t& handle, char uplo, int n, int 
     ddla::DdlaDesc desc(handle);
     desc.init(n, n, nb, nb, irsrc, icsrc);
 
-    auto input = make_local_with_padding<T>(desc, [=](int i, int j){
+    auto input = make_local_with_padding<T>(desc, [=](int i, int j) -> T {
         if(uplo == 'U'){
             return i <= j ? upper_product_value<T>(i, j, n)
                           : opposite_triangle_sentinel<T>(i, j, n);
@@ -247,7 +267,7 @@ void check_failure_case(const ddla::DdlaHandle_t& handle, char uplo, int n, int 
     ddla::DdlaDesc desc(handle);
     desc.init(n, n, nb, nb, irsrc, icsrc);
 
-    auto input = make_local_with_padding<T>(desc, [=](int i, int j){
+    auto input = make_local_with_padding<T>(desc, [=](int i, int j) -> T {
         const bool opposite_triangle = uplo == 'U' ? i > j : i < j;
         if(opposite_triangle) return opposite_triangle_sentinel<T>(i, j, n);
         if(i != j) return T{};

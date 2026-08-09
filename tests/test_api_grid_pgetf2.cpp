@@ -7,21 +7,32 @@ using namespace api_grid_test;
 namespace {
 
 template <typename T>
-T scalar(double real, double imag = 0.0)
+struct is_complex : std::false_type {};
+template <typename U>
+struct is_complex<std::complex<U>> : std::true_type {};
+
+// C++11 has no `if constexpr`: scalar construction dispatches on an
+// is_complex<> tag so the two-argument constructor is only instantiated
+// for complex T.
+template <typename T>
+T scalar_impl(double real, double imag, std::true_type)
 {
-    if constexpr (std::is_same_v<T, std::complex<float>>
-                  || std::is_same_v<T, std::complex<double>>){
-        using Real = typename T::value_type;
-        return T(static_cast<Real>(real), static_cast<Real>(imag));
-    }else{
-        (void)imag;
-        return static_cast<T>(real);
-    }
+    using Real = typename T::value_type;
+    return T(static_cast<Real>(real), static_cast<Real>(imag));
 }
 
 template <typename T>
-constexpr bool is_complex_v = std::is_same_v<T, std::complex<float>>
-                           || std::is_same_v<T, std::complex<double>>;
+T scalar_impl(double real, double imag, std::false_type)
+{
+    (void)imag;
+    return static_cast<T>(real);
+}
+
+template <typename T>
+T scalar(double real, double imag = 0.0)
+{
+    return scalar_impl<T>(real, imag, is_complex<T>());
+}
 
 template <typename T>
 const char* scalar_name();
@@ -71,7 +82,7 @@ void check_scalar_type(const ddla::DdlaHandle_t& handle,
     int nprows = 0, npcols_unused = 0;
     ddla_get_grid_dims(handle, nprows, npcols_unused);
 
-    run_case<T>(handle, desc, "normal", std::min(nb, n), [=](int i, int j){
+    run_case<T>(handle, desc, "normal", std::min(nb, n), [=](int i, int j) -> T {
         if(i == j){
             return scalar<T>(4.0 + 0.1 * i);
         }
@@ -80,7 +91,7 @@ void check_scalar_type(const ddla::DdlaHandle_t& handle,
     }, 0);
 
     const int remote_row = nprows > 1 ? nb : 1;
-    run_case<T>(handle, desc, "cross-row", 1, [=](int i, int j){
+    run_case<T>(handle, desc, "cross-row", 1, [=](int i, int j) -> T {
         if(j == 0){
             return scalar<T>(i == remote_row ? 9.0 : 1.0 / (i + 1));
         }
@@ -88,10 +99,10 @@ void check_scalar_type(const ddla::DdlaHandle_t& handle,
     }, 0, remote_row + 1);
 
     const int competing_row = nprows > 1 ? nb : 3;
-    run_case<T>(handle, desc, "tie", 1, [=](int i, int j){
+    run_case<T>(handle, desc, "tie", 1, [=](int i, int j) -> T {
         if(j == 0){
             if(i == 0){
-                return is_complex_v<T> ? scalar<T>(4.0, 4.0) : scalar<T>(8.0);
+                return is_complex<T>::value ? scalar<T>(4.0, 4.0) : scalar<T>(8.0);
             }
             if(i == competing_row){
                 return scalar<T>(8.0);
@@ -101,8 +112,8 @@ void check_scalar_type(const ddla::DdlaHandle_t& handle,
         return i == j ? scalar<T>(2.0) : scalar<T>(0.0);
     }, 0, 1);
 
-    if constexpr (is_complex_v<T>){
-        run_case<T>(handle, desc, "complex-metric", 1, [=](int i, int j){
+    if (is_complex<T>::value){
+        run_case<T>(handle, desc, "complex-metric", 1, [=](int i, int j) -> T {
             if(j == 0){
                 if(i == 0) return scalar<T>(4.0, 4.0);
                 if(i == competing_row) return scalar<T>(7.0);
@@ -112,12 +123,12 @@ void check_scalar_type(const ddla::DdlaHandle_t& handle,
         }, 0, 1);
     }
 
-    run_case<T>(handle, desc, "tiny-nonzero", 1, [](int i, int j){
+    run_case<T>(handle, desc, "tiny-nonzero", 1, [](int i, int j) -> T {
         if(i != j) return scalar<T>(0.0);
         return scalar<T>(i == 0 ? 1.0e-12 : 1.0);
     }, 0);
 
-    run_case<T>(handle, desc, "exact-singular", 1, [](int i, int j){
+    run_case<T>(handle, desc, "exact-singular", 1, [](int i, int j) -> T {
         if(j == 0) return scalar<T>(0.0);
         return i == j ? scalar<T>(1.0) : scalar<T>(0.0);
     }, 1);

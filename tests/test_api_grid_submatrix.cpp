@@ -151,12 +151,12 @@ void check_ptrtrs_submatrix(const ddla::DdlaHandle_t& handle, const Shape& base)
                     return (uplo == 'L') ? triangular_l_value(i, j)
                                          : triangular_l_value(j, i);
                 };
-                auto op_triA = [&](int i, int j){
+                auto op_triA = [&](int i, int j) -> Complex {
                     if(trans == 'N') return triA(i, j);
                     const Complex raw = triA(j, i);
                     return (trans == 'T') ? raw : std::conj(raw);
                 };
-                auto rhsB = [&](int i, int j){
+                auto rhsB = [&](int i, int j) -> Complex {
                     Complex sum(0, 0);
                     for(int l = 0; l < n; ++l){
                         if(side == 'L')
@@ -270,7 +270,7 @@ void check_pgetrf_pgetrs_submatrix(const ddla::DdlaHandle_t& handle, const Shape
         descB_p.init(P, P, nb, nb, 0, 0);
 
         auto A = [&](int i, int j){ return dominant_value(i, j, n); };
-        auto B = [&](int i, int j){
+        auto B = [&](int i, int j) -> Complex {
             Complex sum(0, 0);
             for(int l = 0; l < n; ++l){
                 if(side == 'L') sum += dominant_value(i, l, n) * x_value(l, j);

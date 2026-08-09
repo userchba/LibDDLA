@@ -42,7 +42,7 @@ void check_pgemm(const ddla::DdlaHandle_t& handle, const Shape& base)
                           beta, d_C.ptr, descC);
             auto out = download(handle, d_C.ptr, h_C.size());
 
-            const double err = local_max_error<Complex>(descC, out, [&](int i, int j){
+            const double err = local_max_error<Complex>(descC, out, [&](int i, int j) -> Complex {
                 Complex ref = beta * general_value(i, j, 3);
                 for(int l = 0; l < k; ++l){
                     ref += alpha * op_value(transa, a_rows, a_cols, i, l, general_value, 1)
@@ -90,7 +90,7 @@ void check_pgemm_k_zero(const ddla::DdlaHandle_t& handle, const Shape& base)
                   beta, d_C.ptr, descC);
     auto out = download(handle, d_C.ptr, h_C.size());
 
-    const double err = local_max_error<Complex>(descC, out, [&](int i, int j){
+    const double err = local_max_error<Complex>(descC, out, [&](int i, int j) -> Complex {
         return beta * general_value(i, j, 3);
     });
     require_close(handle, "pgemm(k=0)", err, 2e-10);

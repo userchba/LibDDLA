@@ -45,7 +45,7 @@ inline Complex head_value(int i, int j, int n, int head_idx)
 // construction here instead.
 inline std::vector<Complex> build_head_rhs(const ddla::DdlaDesc& descB, int n, int head_idx)
 {
-    return make_local<Complex>(descB, [&](int i, int j){
+    return make_local<Complex>(descB, [&](int i, int j) -> Complex {
         Complex sum(0.0, 0.0);
         for(int l = 0; l < n; ++l){
             sum += head_value(i, l, n, head_idx) * x_value(l, j);

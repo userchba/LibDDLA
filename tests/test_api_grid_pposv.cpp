@@ -66,7 +66,7 @@ inline Complex head_value(int i, int j, int n, int head_idx)
 inline std::vector<Complex> build_head_rhs_side(const ddla::DdlaDesc& descB, int n,
                                                 char side, int head_idx)
 {
-    return make_local<Complex>(descB, [&](int i, int j){
+    return make_local<Complex>(descB, [&](int i, int j) -> Complex {
         Complex sum(0.0, 0.0);
         for(int l = 0; l < n; ++l){
             if(side == 'L')

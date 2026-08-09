@@ -43,8 +43,8 @@ template <typename T>
 bool close(const T& a, const T& b)
 {
     using Real = decltype(std::abs(std::declval<T>()));
-    const Real tol = (std::is_same_v<T, float> ||
-                      std::is_same_v<T, std::complex<float>>) ? 1e-4 : 1e-10;
+    const Real tol = (std::is_same<T, float>::value ||
+                      std::is_same<T, std::complex<float>>::value) ? 1e-4 : 1e-10;
     return std::abs(a - b) <= tol * (Real(1) + std::abs(b));
 }
 

@@ -83,7 +83,7 @@ for FILENAME in "${files[@]}"; do
 
     # 2. 编译阶段 (注意源文件路径加了 ./)
     echo "⏳ Compiling..."
-    mpicxx -gdwarf-4 -g -O2 -lamdhip64 -lgalaxyhip -lddla -fopenmp -lrccl -lhipblas -lhipsolver -lhiprand  ${FILENAME}.cpp -o ../../${FILENAME} -std=c++17 -DDDLA_USE_HIP -D__HIP_PLATFORM_AMD__ -DDDLA_USE_CCL
+    mpicxx -gdwarf-4 -g -O2 -lamdhip64 -lgalaxyhip -lddla -fopenmp -lrccl -lhipblas -lhipsolver -lhiprand  ${FILENAME}.cpp -o ../../${FILENAME} -std=c++11 -DDDLA_USE_HIP -D__HIP_PLATFORM_AMD__ -DDDLA_USE_CCL
     # 检查编译是否成功
     if [ $? -ne 0 ]; then
         echo "❌ ERROR: Failed to compile ${FILENAME}"

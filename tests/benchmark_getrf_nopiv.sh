@@ -76,7 +76,7 @@ for FILENAME in "${files[@]}"; do
 
     # 2. 编译阶段 (注意源文件路径加了 ./)
     echo "⏳ Compiling..."
-    mpicxx -g -O2 -lcudart -lddla -fopenmp -lcublas -lcusolver -lcurand -lcal -lcusolverMp -lmagma ${FILENAME}.cpp -o ../../${FILENAME} -std=c++17 -DDDLA_USE_CUDA -DDDLA_USE_CCL
+    mpicxx -g -O2 -lcudart -lddla -fopenmp -lcublas -lcusolver -lcurand -lcal -lcusolverMp -lmagma ${FILENAME}.cpp -o ../../${FILENAME} -std=c++11 -DDDLA_USE_CUDA -DDDLA_USE_CCL
 
     # 检查编译是否成功
     if [ $? -ne 0 ]; then

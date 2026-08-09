@@ -76,7 +76,7 @@ void axpy(const DdlaHandle_t& handle, int n, const T& alpha,
     }
     if (n <= 0) return;
 
-    if constexpr (Backend == DdlaBackend::CPU) {
+    if (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         cpu_axpy(n, alpha, x, incx, y, incy);
 #endif

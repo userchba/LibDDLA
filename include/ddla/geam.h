@@ -410,7 +410,7 @@ void omatcopy(const DdlaHandle_t& handle, char trans, int rows, int cols,
  * @brief Backend-neutral strided 2D block copy: dst(rows x cols) := src(rows x cols).
  *
  * The non-transposing companion to omatcopy, and the unified replacement for
- * the hand-rolled `if constexpr (CPU) { memcpy loop } else {
+ * the hand-rolled `if (CPU) { memcpy loop } else {
  * runtimeMemcpy2DAsync }` pairs that used to sit in transport_block.cpp.
  *
  * CPU dispatches to cblas_?omatcopy with DEBLAS_OP_N; GPU dispatches to the

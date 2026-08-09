@@ -52,7 +52,7 @@ int main(int argc, char* argv[])
     RUNTIME_CHECK(runtimeMemcpy(h_AT.data(), d_AT, sizeof(std::complex<double>) * loc_size_AT, runtimeMemcpyDeviceToHost));
 
     // Gather global A and AT on host
-    auto gather = [&](const DdlaDesc& desc, const std::vector<std::complex<double>>& local){
+    auto gather = [&](const DdlaDesc& desc, const std::vector<std::complex<double>>& local) -> std::vector<std::complex<double>> {
         std::vector<int> recvcounts(nprocs), displs(nprocs);
         int sz = local.size();
         MPI_Allgather(&sz, 1, MPI_INT, recvcounts.data(), 1, MPI_INT, MPI_COMM_WORLD);

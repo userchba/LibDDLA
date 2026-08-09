@@ -197,7 +197,7 @@ void getrf_nopiv(int m, int n, T* d_A, int lda, int* d_info, const DdlaHandle_t&
         int threads = std::min(jb, 512);
         int shmem   = jb * sizeof(T);
 
-        if constexpr (std::is_same_v<T, std::complex<float>>)
+        if (std::is_same<T, std::complex<float>>::value)
         {
             getf2_nopiv_kernel<thrust::complex<float>>
                 <<<1, threads, shmem, stream>>>(
@@ -205,7 +205,7 @@ void getrf_nopiv(int m, int n, T* d_A, int lda, int* d_info, const DdlaHandle_t&
                     reinterpret_cast<thrust::complex<float>*>(d_A + j * lda + j),
                     lda, d_info, j);
         }
-        else if constexpr (std::is_same_v<T, std::complex<double>>)
+        else if (std::is_same<T, std::complex<double>>::value)
         {
             getf2_nopiv_kernel<thrust::complex<double>>
                 <<<1, threads, shmem, stream>>>(

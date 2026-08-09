@@ -16,7 +16,7 @@
 // not from a backend template argument. In a dual (CPU+GPU) build a single
 // object file is compiled with DDLA_USE_CUDA defined and DDLA_USE_CPU not
 // defined, so deblasOmatcopy unconditionally resolves to cuBLAS geam there --
-// calling it from an `if constexpr (Backend == CPU)` branch would hand host
+// calling it from an `if (Backend == CPU)` branch would hand host
 // pointers to cuBLAS. This file breaks that coupling by binding the CPU path
 // to the raw cblas_?omatcopy symbols directly (gated on the project-wide
 // DDLA_HAS_CPU capability flag, not the per-TU DDLA_USE_CPU vendor flag),
@@ -115,7 +115,7 @@ void omatcopy(const DdlaHandle_t& handle, char trans, int rows, int cols,
     }
     if (rows <= 0 || cols <= 0) return;
 
-    if constexpr (Backend == DdlaBackend::CPU) {
+    if (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         cpu_omatcopy(trans, rows, cols, alpha, A, lda, B, ldb);
 #endif
@@ -134,7 +134,7 @@ void copy2D(const DdlaHandle_t& handle, T* dst, int dst_ld,
 {
     if (rows <= 0 || cols <= 0) return;
 
-    if constexpr (Backend == DdlaBackend::CPU) {
+    if (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         cpu_omatcopy('N', rows, cols, (T)1.0, src, src_ld, dst, dst_ld);
 #endif

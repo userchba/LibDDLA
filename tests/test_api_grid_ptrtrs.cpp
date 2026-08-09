@@ -41,7 +41,7 @@ void check_ptrtrs(const ddla::DdlaHandle_t& handle, const Shape& base)
         descB.init(b_rows, b_cols, nb, nb, 0, 0);
 
         auto h_A = make_local<Complex>(descA, [&](int i, int j){ return stored_tri(uplo, i, j); });
-        auto h_B = make_local<Complex>(descB, [&](int i, int j){
+        auto h_B = make_local<Complex>(descB, [&](int i, int j) -> Complex {
             Complex sum(0.0, 0.0);
             for(int l = 0; l < n; ++l){
                 if(side == 'L'){

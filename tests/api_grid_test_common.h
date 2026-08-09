@@ -460,7 +460,7 @@ inline std::vector<Complex> build_rhs(const ddla::DdlaDesc& descB, int n,
                                       Complex (*matrix)(int, int, int),
                                       int tag)
 {
-    return make_local<Complex>(descB, [&](int i, int j){
+    return make_local<Complex>(descB, [&](int i, int j) -> Complex {
         Complex sum(0.0, 0.0);
         for(int l = 0; l < n; ++l){
             sum += matrix(i, l, tag) * x_value(l, j);
@@ -476,7 +476,7 @@ inline std::vector<Complex> build_rhs_side(const ddla::DdlaDesc& descB, int n,
                                            Complex (*matrix)(int, int, int),
                                            int tag)
 {
-    return make_local<Complex>(descB, [&](int i, int j){
+    return make_local<Complex>(descB, [&](int i, int j) -> Complex {
         Complex sum(0.0, 0.0);
         for(int l = 0; l < n; ++l){
             if(side == 'L')
@@ -535,7 +535,9 @@ int run_grid_test(int argc, char** argv, const std::string& test_name, Body body
     g_test_irsrc = options.irsrc;
     g_test_icsrc = options.icsrc;
 
-    for(auto [nprows, npcols] : options.grids){
+    for (const auto& grid : options.grids){
+        const int nprows = grid.first;
+        const int npcols = grid.second;
         ddla::DdlaHandle_t handle = nullptr;
         ddla::ddla_init(handle);
         ddla::ddla_set(handle, MPI_COMM_WORLD, nprows, npcols);

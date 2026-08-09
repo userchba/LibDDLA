@@ -28,7 +28,7 @@ inline const char* transport_block_backend_name(DdlaBackend backend)
 // branch-for-branch identical control flow (same split on trans=='N' vs
 // transposed, same split on square vs non-square process grid, same index
 // math via num_loc/indxg2p/indxg2l/rc_to_rank) -- only a few leaf operations
-// genuinely differ, and none of them needs an `if constexpr` here any more:
+// genuinely differ, and none of them needs compile-time branch dispatch here:
 // each is a single call into a unified primitive that owns the split itself:
 //   copy_block     -> ddla::copy2D<Backend,T>       (geam.h / omatcopy.cpp)
 //   pack_transpose -> ddla::omatcopy<Backend,T>     (geam.h / omatcopy.cpp)

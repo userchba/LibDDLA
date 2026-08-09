@@ -22,6 +22,34 @@ using namespace ddla;
 // data falls in [0, 1] (the derand uniform range).
 //
 
+// C++11 has no `if constexpr`: real and complex samples are validated by
+// overloads on the scalar type -- the real overload handles float and double,
+// the std::complex overload handles both complex precisions; overload
+// resolution picks the right one at compile time.
+template <typename T>
+bool sample_in_range(const T& value, double lo, double hi,
+                     int myid, const char* type_name, size_t i)
+{
+    const double v = static_cast<double>(value);
+    if (std::isfinite(v) && v >= lo && v <= hi) return true;
+    fprintf(stderr, "[rank %d] %s[%zu] = %g  out of [%g,%g]\n",
+            myid, type_name, i, v, lo, hi);
+    return false;
+}
+
+template <typename R>
+bool sample_in_range(const std::complex<R>& value, double lo, double hi,
+                     int myid, const char* type_name, size_t i)
+{
+    const double r = static_cast<double>(value.real());
+    const double im = static_cast<double>(value.imag());
+    if (std::isfinite(r) && r >= lo && r <= hi &&
+        std::isfinite(im) && im >= lo && im <= hi) return true;
+    fprintf(stderr, "[rank %d] %s[%zu] = (%g,%g)  out of [%g,%g]\n",
+            myid, type_name, i, r, im, lo, hi);
+    return false;
+}
+
 template <typename T>
 bool validate_uniform_range(const std::vector<T>& host_data, size_t count,
                             int myid, const char* type_name)
@@ -30,49 +58,10 @@ bool validate_uniform_range(const std::vector<T>& host_data, size_t count,
     const double lo = 0.0;
     const double hi = 1.0;
 
-    if constexpr (std::is_same_v<T, float>) {
-        for (size_t i = 0; i < count; ++i) {
-            double v = static_cast<double>(host_data[i]);
-            if (!std::isfinite(v) || v < lo || v > hi) {
-                fprintf(stderr, "[rank %d] %s[%zu] = %g  out of [%g,%g]\n",
-                        myid, type_name, i, v, lo, hi);
-                ok = false;
-                break;
-            }
-        }
-    } else if constexpr (std::is_same_v<T, double>) {
-        for (size_t i = 0; i < count; ++i) {
-            double v = host_data[i];
-            if (!std::isfinite(v) || v < lo || v > hi) {
-                fprintf(stderr, "[rank %d] %s[%zu] = %g  out of [%g,%g]\n",
-                        myid, type_name, i, v, lo, hi);
-                ok = false;
-                break;
-            }
-        }
-    } else if constexpr (std::is_same_v<T, std::complex<float>>) {
-        for (size_t i = 0; i < count; ++i) {
-            float r = host_data[i].real();
-            float im = host_data[i].imag();
-            if (!std::isfinite(r) || r < lo || r > hi ||
-                !std::isfinite(im) || im < lo || im > hi) {
-                fprintf(stderr, "[rank %d] %s[%zu] = (%g,%g)  out of [%g,%g]\n",
-                        myid, type_name, i, (double)r, (double)im, lo, hi);
-                ok = false;
-                break;
-            }
-        }
-    } else if constexpr (std::is_same_v<T, std::complex<double>>) {
-        for (size_t i = 0; i < count; ++i) {
-            double r = host_data[i].real();
-            double im = host_data[i].imag();
-            if (!std::isfinite(r) || r < lo || r > hi ||
-                !std::isfinite(im) || im < lo || im > hi) {
-                fprintf(stderr, "[rank %d] %s[%zu] = (%g,%g)  out of [%g,%g]\n",
-                        myid, type_name, i, r, im, lo, hi);
-                ok = false;
-                break;
-            }
+    for (size_t i = 0; i < count; ++i) {
+        if (!sample_in_range(host_data[i], lo, hi, myid, type_name, i)) {
+            ok = false;
+            break;
         }
     }
     return ok;

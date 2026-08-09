@@ -33,8 +33,8 @@ struct device_scalar<std::complex<double>> {
 // Conjugate helper: no-op for real types, thrust::conj for complex.
 template <typename T>
 __device__ __forceinline__ T conj_if(const T& val, bool do_conj) {
-    if constexpr (std::is_same_v<T, thrust::complex<float>> ||
-                  std::is_same_v<T, thrust::complex<double>>) {
+    if (std::is_same<T, thrust::complex<float>>::value ||
+                  std::is_same<T, thrust::complex<double>>::value) {
         return do_conj ? thrust::conj(val) : val;
     } else {
         return val;
@@ -249,12 +249,12 @@ void ptran(const T* d_A, const DdlaDesc& descA,
 
     // Sort by peer rank, then by (g_row, g_col) so that both send and recv
     // sides visit blocks in the same order (required for NCCL group matching).
-    auto cmp_send = [](const BlockInfo& a, const BlockInfo& b){
+    auto cmp_send = [](const BlockInfo& a, const BlockInfo& b) -> bool {
         if(a.dst_rank != b.dst_rank) return a.dst_rank < b.dst_rank;
         if(a.g_row != b.g_row) return a.g_row < b.g_row;
         return a.g_col < b.g_col;
     };
-    auto cmp_recv = [](const BlockInfo& a, const BlockInfo& b){
+    auto cmp_recv = [](const BlockInfo& a, const BlockInfo& b) -> bool {
         if(a.src_rank != b.src_rank) return a.src_rank < b.src_rank;
         if(a.g_row != b.g_row) return a.g_row < b.g_row;
         return a.g_col < b.g_col;

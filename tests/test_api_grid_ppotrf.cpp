@@ -33,7 +33,7 @@ void check_ppotrf(const ddla::DdlaHandle_t& handle, const Shape& base)
     }
 
     {
-        auto h_not_pd = make_local<Complex>(descA, [](int i, int j){
+        auto h_not_pd = make_local<Complex>(descA, [](int i, int j) -> Complex {
             if(i != j) return Complex(0.0, 0.0);
             return Complex(i == 0 ? -1.0 : 2.0, 0.0);
         });

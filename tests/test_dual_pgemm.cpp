@@ -56,6 +56,35 @@ std::complex<double> elem_val<std::complex<double>>(int i, int j, int salt) {
         ((i * 811 + j * 613 + salt * 43 + 11) % 31) - 15.0);
 }
 
+// C++11 has no `if constexpr`: complex-valued alpha/beta are assigned only
+// for complex T; the tag overload keeps the two-argument T(...) constructor
+// from ever being instantiated for real T.
+template <typename T>
+void set_complex_alpha_beta_impl(T& alpha, T& beta,
+                                 double ar, double ai, double br, double bi,
+                                 std::true_type)
+{
+    alpha = T(ar, ai);
+    beta = T(br, bi);
+}
+
+template <typename T>
+void set_complex_alpha_beta_impl(T&, T&, double, double, double, double,
+                                 std::false_type)
+{
+}
+
+template <typename T>
+void set_complex_alpha_beta(T& alpha, T& beta,
+                            double ar, double ai, double br, double bi)
+{
+    set_complex_alpha_beta_impl(
+        alpha, beta, ar, ai, br, bi,
+        std::integral_constant<bool,
+            std::is_same<T, std::complex<float>>::value
+            || std::is_same<T, std::complex<double>>::value>());
+}
+
 template <typename T>
 static int check_one(
     DdlaHandle_t h_cpu, DdlaHandle_t h_gpu,
@@ -110,11 +139,7 @@ static int check_one(
 
     T alpha = T(1.25);
     T beta  = T(-0.5);
-    if constexpr (std::is_same_v<T, std::complex<float>> ||
-                  std::is_same_v<T, std::complex<double>>) {
-        alpha = T(1.25, -0.375);
-        beta = T(-0.5, 0.25);
-    }
+    set_complex_alpha_beta(alpha, beta, 1.25, -0.375, -0.5, 0.25);
 
     // --- GPU device allocation and upload ---
     T *d_A = nullptr, *d_B = nullptr, *d_C = nullptr;
@@ -221,7 +246,7 @@ static int check_one(
         MPI_Allreduce(&max_err, &global_err, 1, MPI_DOUBLE, MPI_MAX, comm);
     }
 
-    constexpr bool is_single = std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>;
+    constexpr bool is_single = std::is_same<T, float>::value || std::is_same<T, std::complex<float>>::value;
     double tol = is_single ? 2e-4 : 2e-10;
     if (myid == 0 && global_err > tol * std::max(1.0, global_ref)) {
         std::cout << "  FAIL [" << transa << "," << transb
@@ -266,11 +291,7 @@ static int check_k_zero(DdlaHandle_t h_cpu, DdlaHandle_t h_gpu)
 
     T alpha = T(2.0);
     T beta = T(-0.75);
-    if constexpr (std::is_same_v<T, std::complex<float>> ||
-                  std::is_same_v<T, std::complex<double>>) {
-        alpha = T(2.0, -1.0);
-        beta = T(-0.75, 0.5);
-    }
+    set_complex_alpha_beta(alpha, beta, 2.0, -1.0, -0.75, 0.5);
 
     pgemm<DdlaBackend::CPU>('N', 'N', M, N, 0, alpha,
                             h_A.data(), descA_cpu, h_B.data(), descB_cpu,
@@ -300,7 +321,7 @@ static int check_k_zero(DdlaHandle_t h_cpu, DdlaHandle_t h_gpu)
     mf |= ddla_free(d_C, h_gpu);
     TEST("k=0 GPU free", mf == 0);
 
-    constexpr bool is_single = std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>;
+    constexpr bool is_single = std::is_same<T, float>::value || std::is_same<T, std::complex<float>>::value;
     const double tol = is_single ? 2e-4 : 2e-10;
     int local_failed = 0;
     double local_max_err = 0.0;

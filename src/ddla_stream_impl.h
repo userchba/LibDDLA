@@ -64,8 +64,8 @@ public:
     // ::operator new guarantees alignment suitable for any fundamental type, so
     // reinterpret_cast<T*> is safe for T in
     // {float, double, std::complex<float>, std::complex<double>}.
-    std::vector<std::byte> tunnel_host_staging_a;
-    std::vector<std::byte> tunnel_host_staging_b;
+    std::vector<unsigned char> tunnel_host_staging_a;
+    std::vector<unsigned char> tunnel_host_staging_b;
 
     // -----------------------------------------------------------------------
     // Device selection (per-handle)

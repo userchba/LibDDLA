@@ -17,13 +17,40 @@ using namespace ddla;
 
 namespace {
 
+// C++11 has no `if constexpr`: complex-valued alpha/beta are assigned only
+// for complex T; the tag overload keeps the two-argument T(...) constructor
+// from ever being instantiated for real T.
+template <typename T>
+void set_complex_alpha_beta_impl(T& alpha, T& beta,
+                                 double ar, double ai, double br, double bi,
+                                 std::true_type)
+{
+    alpha = T(ar, ai);
+    beta = T(br, bi);
+}
+
+template <typename T>
+void set_complex_alpha_beta_impl(T&, T&, double, double, double, double,
+                                 std::false_type)
+{
+}
+
+template <typename T>
+void set_complex_alpha_beta(T& alpha, T& beta,
+                            double ar, double ai, double br, double bi)
+{
+    set_complex_alpha_beta_impl(
+        alpha, beta, ar, ai, br, bi,
+        std::integral_constant<bool,
+            std::is_same<T, std::complex<float>>::value
+            || std::is_same<T, std::complex<double>>::value>());
+}
+
 template <typename T>
 T value(int i, int j, int salt)
 {
     return T(((i * 17 + j * 13 + salt * 7) % 19) - 9);
-}
-
-template <>
+}template <>
 std::complex<float> value(int i, int j, int salt)
 {
     return {static_cast<float>(((i * 17 + j * 13 + salt * 7) % 19) - 9),
@@ -95,11 +122,7 @@ int check_case(const DdlaHandle_t& handle, char transa, char transb, bool use_de
     std::vector<T> reference = h_c;
     T alpha = T(0.75);
     T beta = T(-0.25);
-    if constexpr (std::is_same_v<T, std::complex<float>> ||
-                  std::is_same_v<T, std::complex<double>>) {
-        alpha = T(0.75, -0.125);
-        beta = T(-0.25, 0.375);
-    }
+    set_complex_alpha_beta(alpha, beta, 0.75, -0.125, -0.25, 0.375);
     for (int j = 0; j < n; ++j) {
         for (int i = 0; i < m; ++i) {
             T sum = T(0);
@@ -153,8 +176,8 @@ int check_case(const DdlaHandle_t& handle, char transa, char transb, bool use_de
     double global_scale = 0.0;
     MPI_Allreduce(&local_error, &global_error, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     MPI_Allreduce(&local_scale, &global_scale, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-    const bool single = std::is_same_v<T, float> ||
-                        std::is_same_v<T, std::complex<float>>;
+    const bool single = std::is_same<T, float>::value ||
+                        std::is_same<T, std::complex<float>>::value;
     const double tolerance = single ? 2e-4 : 2e-11;
     return global_error <= tolerance * std::max(1.0, global_scale) ? 0 : 1;
 }
@@ -166,7 +189,7 @@ int run_type(const DdlaHandle_t& handle)
     for (char transa : {'N', 'T', 'C'})
         for (char transb : {'N', 'T', 'C'})
             failures += check_case<Backend, T>(handle, transa, transb, false);
-    if constexpr (Backend == default_backend_v)
+    if (Backend == default_backend_v)
         failures += check_case<Backend, T>(handle, 'N', 'N', true);
     return failures;
 }

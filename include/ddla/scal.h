@@ -74,7 +74,7 @@ inline deblasStatus_t deblasScal(deblasHandle_t handle, int64_t n, const std::co
  * @brief Backend-neutral BLAS Level-1 scale: x := alpha * x.
  *
  * Mirrors ddla::gemm's shape: one function, backend chosen by the template
- * argument, `if constexpr` dispatch inside. CPU specializations consume host
+ * argument, per-backend dispatch inside. CPU specializations consume host
  * pointers and call the linked BLAS (?scal); GPU specializations consume
  * device pointers and call cuBLAS/hipBLAS via deblasScal.
  *

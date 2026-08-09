@@ -19,33 +19,52 @@
 namespace
 {
 
+// C++11 has no `if constexpr`: value construction and conjugation dispatch
+// on an is_complex<> tag so the complex-only expressions (two-argument
+// constructor, std::conj) are only instantiated for complex T.
+template <typename T>
+struct is_complex : std::false_type {};
+template <typename U>
+struct is_complex<std::complex<U>> : std::true_type {};
+
+template <typename T>
+T value_impl(int index, std::true_type)
+{
+    using Real = typename T::value_type;
+    return T(
+        Real((index % 13) - 6) / Real(7),
+        Real((index % 9) - 4) / Real(11));
+}
+
+template <typename T>
+T value_impl(int index, std::false_type)
+{
+    return T((index % 13) - 6) / T(7);
+}
+
 template <typename T>
 T value(int index)
 {
-    if constexpr (
-        std::is_same_v<T, std::complex<float>>
-        || std::is_same_v<T, std::complex<double>>)
-    {
-        using Real = typename T::value_type;
-        return T(
-            Real((index % 13) - 6) / Real(7),
-            Real((index % 9) - 4) / Real(11));
-    }
-    else
-    {
-        return T((index % 13) - 6) / T(7);
-    }
+    return value_impl<T>(index, is_complex<T>());
+}
+
+template <typename T>
+T conjugate_if_needed_impl(T input, bool conjugate, std::true_type)
+{
+    return conjugate ? std::conj(input) : input;
+}
+
+template <typename T>
+T conjugate_if_needed_impl(T input, bool conjugate, std::false_type)
+{
+    (void)conjugate;
+    return input;
 }
 
 template <typename T>
 T conjugate_if_needed(T input, bool conjugate)
 {
-    if constexpr (
-        std::is_same_v<T, std::complex<float>>
-        || std::is_same_v<T, std::complex<double>>)
-        return conjugate ? std::conj(input) : input;
-    else
-        return input;
+    return conjugate_if_needed_impl(input, conjugate, is_complex<T>());
 }
 
 template <typename T>
@@ -421,7 +440,7 @@ double run_two_stage_case(bool temporary_on_left, const ddla::DdlaHandle_t& hand
         ddla::runtimeStreamSynchronize(
             static_cast<ddla::runtimeStream_t>(ddla::ddla_get_stream(handle))));
 
-    if constexpr (std::is_same_v<T, double>)
+    if (std::is_same<T, double>::value)
     {
         for (const auto& invalid : std::vector<std::vector<int>>{{0, 3}, {-1, 4}, {1, 1}})
         {
@@ -483,11 +502,11 @@ double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
             {ddla::DEBLAS_OP_C, ddla::DEBLAS_OP_C}};
 
     const char* type_name = [] {
-        if constexpr (std::is_same_v<T, float>)
+        if (std::is_same<T, float>::value)
             return "float";
-        else if constexpr (std::is_same_v<T, double>)
+        else if (std::is_same<T, double>::value)
             return "double";
-        else if constexpr (std::is_same_v<T, std::complex<float>>)
+        else if (std::is_same<T, std::complex<float>>::value)
             return "complex_float";
         else
             return "complex_double";
@@ -495,8 +514,10 @@ double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
 
     double maximum_error = 0.0;
     int operation_index = 0;
-    for (const auto& [transA, transB] : operations)
+    for (const auto& operation : operations)
     {
+        const ddla::deblasOperation_t transA = operation.first;
+        const ddla::deblasOperation_t transB = operation.second;
         const double error = run_standard_case<T>(transA, transB, handle);
         std::cout << "DDLA_GEMM_VBATCHED_CASE type=" << type_name
                   << " operation_index=" << operation_index++

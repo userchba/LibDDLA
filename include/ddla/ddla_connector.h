@@ -61,9 +61,9 @@ const auto cclSum=MPI_SUM;
 namespace detail {
 
 #if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
-inline constexpr DdlaBackend local_backend_v = DdlaBackend::GPU;
+constexpr DdlaBackend local_backend_v = DdlaBackend::GPU;
 #elif defined(DDLA_USE_CPU)
-inline constexpr DdlaBackend local_backend_v = DdlaBackend::CPU;
+constexpr DdlaBackend local_backend_v = DdlaBackend::CPU;
 #endif
 
 template <DdlaBackend Backend> struct RuntimeTraits;   // primary: intentionally undefined
@@ -252,12 +252,10 @@ constexpr auto runtimeMemcpyDeviceToHost = detail::RuntimeTraits<detail::local_b
 constexpr auto runtimeMemcpyDeviceToDevice = detail::RuntimeTraits<detail::local_backend_v>::device_to_device;
 
 // Unconditionally defined (not guarded by #ifdef DDLA_USE_CPU): its body has
-// no vendor dependency, and it must stay name-lookup-visible in every TU,
-// including GPU-only ones -- runtimeMemcpy2DAsync's `if constexpr` CPU
-// branch below calls it as plain (non-dependent) text, and phase-1 lookup
-// for a genuinely undeclared name is diagnosed even inside a discarded
-// `if constexpr` branch. Only ever *called* from the CPU branch; in a
-// GPU-only TU it stays declared but unused.
+// no vendor dependency, and it must stay name-lookup-visible in every TU --
+// RuntimeImpl<DdlaBackend::CPU>::memcpy2DAsync below calls it by name. Only
+// ever *called* from the CPU implementation; in a GPU-only TU it stays
+// declared but unused.
 static inline runtimeError_t cpuMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t spitch,
     size_t width, size_t height, runtimeMemcpyKind kind, runtimeStream_t stream) {
     (void)kind; (void)stream;
@@ -276,31 +274,284 @@ static inline runtimeError_t cpuMemcpy2DAsync(void* dst, size_t dpitch, const vo
 }
 
 // ---------------------------------------------------------------------------
-// Runtime functions: real DdlaBackend-templated functions (no #define), each
-// defaulted to this TU's local backend so existing bracket-free call sites
-// (e.g. `runtimeMallocAsync(&p, n, stream)`) keep compiling unchanged --
-// Backend is a non-deduced template parameter here, so a call with no
-// explicit <...> always resolves it from the default argument.
+// RuntimeImpl<Backend>: per-backend implementations of the runtime* family
+// below. C++11 has no `if constexpr`, so the CPU/GPU branch bodies move into
+// these specializations -- a plain runtime `if` would require every branch to
+// compile in every TU, which fails because e.g. cudaMalloc is undeclared in a
+// CPU-only TU. RuntimeImpl<DdlaBackend::GPU> is only *defined* in a TU that
+// actually compiled in a GPU vendor, exactly like RuntimeTraits<Backend>: the
+// runtime* wrappers below default Backend to this TU-local constant, so a TU
+// compiled without a GPU vendor never names the undefined GPU specialization.
 // ---------------------------------------------------------------------------
+namespace detail {
 
-template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
-runtimeMalloc(void** ptr, std::size_t bytes)
-{
-    if(bytes == 0 && ptr != nullptr){
-        *ptr = nullptr;
-        return detail::RuntimeTraits<Backend>::success;
-    }
-    if constexpr (Backend == DdlaBackend::CPU) {
+template <DdlaBackend Backend> struct RuntimeImpl;   // primary: intentionally undefined
+
+template <>
+struct RuntimeImpl<DdlaBackend::CPU> {
+    using traits = RuntimeTraits<DdlaBackend::CPU>;
+    using error_t = typename traits::error_t;
+    using stream_t = typename traits::stream_t;
+    using memcpy_kind_t = typename traits::memcpy_kind_t;
+    using event_t = typename traits::event_t;
+
+    static error_t malloc(void** ptr, std::size_t bytes)
+    {
+        if (bytes == 0 && ptr != nullptr) {
+            *ptr = nullptr;
+            return traits::success;
+        }
         *ptr = std::malloc(bytes);
-        return (*ptr != nullptr || bytes == 0) ? detail::RuntimeTraits<Backend>::success : 1;
-    } else {
+        return (*ptr != nullptr || bytes == 0) ? traits::success : 1;
+    }
+    static error_t mallocAsync(void** ptr, std::size_t bytes, stream_t stream)
+    {
+        (void)stream;
+        if (bytes == 0 && ptr != nullptr) {
+            *ptr = nullptr;
+            return traits::success;
+        }
+        *ptr = std::malloc(bytes);
+        return (*ptr != nullptr || bytes == 0) ? traits::success : 1;
+    }
+    static error_t free(void* ptr)
+    {
+        if (ptr == nullptr) return traits::success;
+        std::free(ptr);
+        return traits::success;
+    }
+    static error_t freeAsync(void* ptr, stream_t stream)
+    {
+        (void)stream;
+        if (ptr == nullptr) return traits::success;
+        std::free(ptr);
+        return traits::success;
+    }
+    static error_t streamSynchronize(stream_t stream) { (void)stream; return traits::success; }
+    static error_t deviceSynchronize() { return traits::success; }
+    static error_t getDeviceCount(int* count) { *count = 1; return traits::success; }
+    static const char* getErrorString(error_t status) { (void)status; return ""; }
+    static error_t getLastError() { return traits::success; }
+    static error_t memcpyAsync(void* dst, const void* src, std::size_t count,
+                               memcpy_kind_t kind, stream_t stream)
+    {
+        (void)kind; (void)stream;
+        std::memcpy(dst, src, count);
+        return traits::success;
+    }
+    static error_t memcpy(void* dst, const void* src, std::size_t count, memcpy_kind_t kind)
+    {
+        (void)kind;
+        std::memcpy(dst, src, count);
+        return traits::success;
+    }
+    static error_t memcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t spitch,
+                                 size_t width, size_t height, memcpy_kind_t kind, stream_t stream)
+    {
+        return cpuMemcpy2DAsync(dst, dpitch, src, spitch, width, height, kind, stream);
+    }
+    static error_t memsetAsync(void* ptr, int value, std::size_t count, stream_t stream)
+    {
+        (void)stream;
+        std::memset(ptr, value, count);
+        return traits::success;
+    }
+    static error_t eventCreate(event_t* event) { (void)event; return traits::success; }
+    static error_t eventDestroy(event_t event) { (void)event; return traits::success; }
+    static error_t eventRecord(event_t event, stream_t stream) { (void)event; (void)stream; return traits::success; }
+    static error_t streamWaitEvent(stream_t stream, event_t event, unsigned int flags)
+    {
+        (void)stream; (void)event; (void)flags;
+        return traits::success;
+    }
+    static error_t memGetInfo(std::size_t* free, std::size_t* total) { *free = 0; *total = 0; return traits::success; }
+};
+
+#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+template <>
+struct RuntimeImpl<DdlaBackend::GPU> {
+    using traits = RuntimeTraits<DdlaBackend::GPU>;
+    using error_t = typename traits::error_t;
+    using stream_t = typename traits::stream_t;
+    using memcpy_kind_t = typename traits::memcpy_kind_t;
+    using event_t = typename traits::event_t;
+
+    static error_t malloc(void** ptr, std::size_t bytes)
+    {
+        if (bytes == 0 && ptr != nullptr) {
+            *ptr = nullptr;
+            return traits::success;
+        }
 #if defined(DDLA_USE_CUDA)
         return cudaMalloc(reinterpret_cast<void**>(ptr), bytes);
 #elif defined(DDLA_USE_HIP)
         return hipMalloc(reinterpret_cast<void**>(ptr), bytes);
 #endif
     }
+    static error_t mallocAsync(void** ptr, std::size_t bytes, stream_t stream)
+    {
+        if (bytes == 0 && ptr != nullptr) {
+            *ptr = nullptr;
+            return traits::success;
+        }
+#if defined(DDLA_USE_CUDA)
+        return cudaMallocAsync(reinterpret_cast<void**>(ptr), bytes, stream);
+#elif defined(DDLA_USE_HIP)
+        return hipMallocAsync(reinterpret_cast<void**>(ptr), bytes, stream);
+#endif
+    }
+    static error_t free(void* ptr)
+    {
+        if (ptr == nullptr) return traits::success;
+#if defined(DDLA_USE_CUDA)
+        return cudaFree(ptr);
+#elif defined(DDLA_USE_HIP)
+        return hipFree(ptr);
+#endif
+    }
+    static error_t freeAsync(void* ptr, stream_t stream)
+    {
+        if (ptr == nullptr) return traits::success;
+#if defined(DDLA_USE_CUDA)
+        return cudaFreeAsync(ptr, stream);
+#elif defined(DDLA_USE_HIP)
+        return hipFreeAsync(ptr, stream);
+#endif
+    }
+    static error_t streamSynchronize(stream_t stream)
+    {
+#if defined(DDLA_USE_CUDA)
+        return cudaStreamSynchronize(stream);
+#elif defined(DDLA_USE_HIP)
+        return hipStreamSynchronize(stream);
+#endif
+    }
+    static error_t deviceSynchronize()
+    {
+#if defined(DDLA_USE_CUDA)
+        return cudaDeviceSynchronize();
+#elif defined(DDLA_USE_HIP)
+        return hipDeviceSynchronize();
+#endif
+    }
+    static error_t getDeviceCount(int* count)
+    {
+#if defined(DDLA_USE_CUDA)
+        return cudaGetDeviceCount(count);
+#elif defined(DDLA_USE_HIP)
+        return hipGetDeviceCount(count);
+#endif
+    }
+    static const char* getErrorString(error_t status)
+    {
+#if defined(DDLA_USE_CUDA)
+        return cudaGetErrorString(status);
+#elif defined(DDLA_USE_HIP)
+        return hipGetErrorString(status);
+#endif
+    }
+    static error_t getLastError()
+    {
+#if defined(DDLA_USE_CUDA)
+        return cudaGetLastError();
+#elif defined(DDLA_USE_HIP)
+        return hipGetLastError();
+#endif
+    }
+    static error_t memcpyAsync(void* dst, const void* src, std::size_t count,
+                               memcpy_kind_t kind, stream_t stream)
+    {
+#if defined(DDLA_USE_CUDA)
+        return cudaMemcpyAsync(dst, src, count, kind, stream);
+#elif defined(DDLA_USE_HIP)
+        return hipMemcpyAsync(dst, src, count, kind, stream);
+#endif
+    }
+    static error_t memcpy(void* dst, const void* src, std::size_t count, memcpy_kind_t kind)
+    {
+#if defined(DDLA_USE_CUDA)
+        return cudaMemcpy(dst, src, count, kind);
+#elif defined(DDLA_USE_HIP)
+        return hipMemcpy(dst, src, count, kind);
+#endif
+    }
+    static error_t memcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t spitch,
+                                 size_t width, size_t height, memcpy_kind_t kind, stream_t stream)
+    {
+#if defined(DDLA_USE_CUDA)
+        return cudaMemcpy2DAsync(dst, dpitch, src, spitch, width, height, kind, stream);
+#elif defined(DDLA_USE_HIP)
+        return hipMemcpy2DAsync(dst, dpitch, src, spitch, width, height, kind, stream);
+#endif
+    }
+    static error_t memsetAsync(void* ptr, int value, std::size_t count, stream_t stream)
+    {
+#if defined(DDLA_USE_CUDA)
+        return cudaMemsetAsync(ptr, value, count, stream);
+#elif defined(DDLA_USE_HIP)
+        return hipMemsetAsync(ptr, value, count, stream);
+#endif
+    }
+    static error_t eventCreate(event_t* event)
+    {
+#if defined(DDLA_USE_CUDA)
+        return cudaEventCreate(event);
+#elif defined(DDLA_USE_HIP)
+        return hipEventCreate(event);
+#endif
+    }
+    static error_t eventDestroy(event_t event)
+    {
+#if defined(DDLA_USE_CUDA)
+        return cudaEventDestroy(event);
+#elif defined(DDLA_USE_HIP)
+        return hipEventDestroy(event);
+#endif
+    }
+    static error_t eventRecord(event_t event, stream_t stream)
+    {
+#if defined(DDLA_USE_CUDA)
+        return cudaEventRecord(event, stream);
+#elif defined(DDLA_USE_HIP)
+        return hipEventRecord(event, stream);
+#endif
+    }
+    static error_t streamWaitEvent(stream_t stream, event_t event, unsigned int flags)
+    {
+#if defined(DDLA_USE_CUDA)
+        return cudaStreamWaitEvent(stream, event, flags);
+#elif defined(DDLA_USE_HIP)
+        return hipStreamWaitEvent(stream, event, flags);
+#endif
+    }
+    static error_t memGetInfo(std::size_t* free, std::size_t* total)
+    {
+#if defined(DDLA_USE_CUDA)
+        return cudaMemGetInfo(free, total);
+#elif defined(DDLA_USE_HIP)
+        return hipMemGetInfo(free, total);
+#endif
+    }
+};
+#endif // defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+
+} // namespace detail
+
+// ---------------------------------------------------------------------------
+// Runtime functions: real DdlaBackend-templated functions (no #define), each
+// defaulted to this TU's local backend so existing bracket-free call sites
+// (e.g. `runtimeMallocAsync(&p, n, stream)`) keep compiling unchanged --
+// Backend is a non-deduced template parameter here, so a call with no
+// explicit <...> always resolves it from the default argument. Each function
+// forwards to detail::RuntimeImpl<Backend>, the per-backend implementation
+// selected at compile time.
+// ---------------------------------------------------------------------------
+
+template <DdlaBackend Backend = detail::local_backend_v>
+static inline typename detail::RuntimeTraits<Backend>::error_t
+runtimeMalloc(void** ptr, std::size_t bytes)
+{
+    return detail::RuntimeImpl<Backend>::malloc(ptr, bytes);
 }
 
 // `typename = enable_if<!is_void<T>>` excludes T=void from this overload set:
@@ -311,7 +562,7 @@ runtimeMalloc(void** ptr, std::size_t bytes)
 // making the call ambiguous. Restricting T to non-void keeps the two
 // overloads' argument sets disjoint.
 template <DdlaBackend Backend = detail::local_backend_v, typename T,
-          typename = std::enable_if_t<!std::is_void<T>::value>>
+          typename = typename std::enable_if<!std::is_void<T>::value>::type>
 static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeMalloc(T** ptr, std::size_t bytes)
 {
@@ -319,30 +570,16 @@ runtimeMalloc(T** ptr, std::size_t bytes)
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
+static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeMallocAsync(void** ptr, std::size_t bytes, typename detail::RuntimeTraits<Backend>::stream_t stream)
 {
-    if(bytes == 0 && ptr != nullptr){
-        *ptr = nullptr;
-        return detail::RuntimeTraits<Backend>::success;
-    }
-    if constexpr (Backend == DdlaBackend::CPU) {
-        (void)stream;
-        *ptr = std::malloc(bytes);
-        return (*ptr != nullptr || bytes == 0) ? detail::RuntimeTraits<Backend>::success : 1;
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaMallocAsync(reinterpret_cast<void**>(ptr), bytes, stream);
-#elif defined(DDLA_USE_HIP)
-        return hipMallocAsync(reinterpret_cast<void**>(ptr), bytes, stream);
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::mallocAsync(ptr, bytes, stream);
 }
 
 // Same T=void exclusion as runtimeMalloc's T** overload above, and for the
 // same reason (both overloads here are now function templates).
 template <DdlaBackend Backend = detail::local_backend_v, typename T,
-          typename = std::enable_if_t<!std::is_void<T>::value>>
+          typename = typename std::enable_if<!std::is_void<T>::value>::type>
 static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeMallocAsync(T** ptr, std::size_t bytes, typename detail::RuntimeTraits<Backend>::stream_t stream)
 {
@@ -350,273 +587,122 @@ runtimeMallocAsync(T** ptr, std::size_t bytes, typename detail::RuntimeTraits<Ba
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
+static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeFree(void* ptr)
 {
-    if(ptr == nullptr){
-        return detail::RuntimeTraits<Backend>::success;
-    }
-    if constexpr (Backend == DdlaBackend::CPU) {
-        std::free(ptr);
-        return detail::RuntimeTraits<Backend>::success;
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaFree(ptr);
-#elif defined(DDLA_USE_HIP)
-        return hipFree(ptr);
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::free(ptr);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
+static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeFreeAsync(void* ptr, typename detail::RuntimeTraits<Backend>::stream_t stream)
 {
-    if(ptr == nullptr){
-        return detail::RuntimeTraits<Backend>::success;
-    }
-    if constexpr (Backend == DdlaBackend::CPU) {
-        (void)stream;
-        std::free(ptr);
-        return detail::RuntimeTraits<Backend>::success;
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaFreeAsync(ptr, stream);
-#elif defined(DDLA_USE_HIP)
-        return hipFreeAsync(ptr, stream);
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::freeAsync(ptr, stream);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
+static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeStreamSynchronize(typename detail::RuntimeTraits<Backend>::stream_t stream) {
-    if constexpr (Backend == DdlaBackend::CPU) {
-        (void)stream;
-        return detail::RuntimeTraits<Backend>::success;
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaStreamSynchronize(stream);
-#elif defined(DDLA_USE_HIP)
-        return hipStreamSynchronize(stream);
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::streamSynchronize(stream);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
+static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeDeviceSynchronize(){
-    if constexpr (Backend == DdlaBackend::CPU) {
-        return detail::RuntimeTraits<Backend>::success;
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaDeviceSynchronize();
-#elif defined(DDLA_USE_HIP)
-        return hipDeviceSynchronize();
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::deviceSynchronize();
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
+static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeGetDeviceCount(int* count){
-    if constexpr (Backend == DdlaBackend::CPU) {
-        *count = 1;
-        return detail::RuntimeTraits<Backend>::success;
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaGetDeviceCount(count);
-#elif defined(DDLA_USE_HIP)
-        return hipGetDeviceCount(count);
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::getDeviceCount(count);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline const char*
+static inline const char*
 runtimeGetErrorString(typename detail::RuntimeTraits<Backend>::error_t status)
 {
-    if constexpr (Backend == DdlaBackend::CPU) {
-        (void)status;
-        return "";
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaGetErrorString(status);
-#elif defined(DDLA_USE_HIP)
-        return hipGetErrorString(status);
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::getErrorString(status);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
+static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeGetLastError()
 {
-    if constexpr (Backend == DdlaBackend::CPU) {
-        return detail::RuntimeTraits<Backend>::success;
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaGetLastError();
-#elif defined(DDLA_USE_HIP)
-        return hipGetLastError();
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::getLastError();
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
+static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeMemcpyAsync(void* dst, const void* src, std::size_t count,
                    typename detail::RuntimeTraits<Backend>::memcpy_kind_t kind,
                    typename detail::RuntimeTraits<Backend>::stream_t stream)
 {
-    if constexpr (Backend == DdlaBackend::CPU) {
-        (void)kind; (void)stream;
-        std::memcpy(dst, src, count);
-        return detail::RuntimeTraits<Backend>::success;
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaMemcpyAsync(dst, src, count, kind, stream);
-#elif defined(DDLA_USE_HIP)
-        return hipMemcpyAsync(dst, src, count, kind, stream);
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::memcpyAsync(dst, src, count, kind, stream);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
+static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeMemcpy(void* dst, const void* src, std::size_t count,
               typename detail::RuntimeTraits<Backend>::memcpy_kind_t kind)
 {
-    if constexpr (Backend == DdlaBackend::CPU) {
-        (void)kind;
-        std::memcpy(dst, src, count);
-        return detail::RuntimeTraits<Backend>::success;
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaMemcpy(dst, src, count, kind);
-#elif defined(DDLA_USE_HIP)
-        return hipMemcpy(dst, src, count, kind);
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::memcpy(dst, src, count, kind);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
+static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t spitch,
                       size_t width, size_t height,
                       typename detail::RuntimeTraits<Backend>::memcpy_kind_t kind,
                       typename detail::RuntimeTraits<Backend>::stream_t stream)
 {
-    if constexpr (Backend == DdlaBackend::CPU) {
-        return cpuMemcpy2DAsync(dst, dpitch, src, spitch, width, height, kind, stream);
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaMemcpy2DAsync(dst, dpitch, src, spitch, width, height, kind, stream);
-#elif defined(DDLA_USE_HIP)
-        return hipMemcpy2DAsync(dst, dpitch, src, spitch, width, height, kind, stream);
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::memcpy2DAsync(dst, dpitch, src, spitch, width, height, kind, stream);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
+static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeMemsetAsync(void* ptr, int value, std::size_t count,
                     typename detail::RuntimeTraits<Backend>::stream_t stream)
 {
-    if constexpr (Backend == DdlaBackend::CPU) {
-        (void)stream;
-        std::memset(ptr, value, count);
-        return detail::RuntimeTraits<Backend>::success;
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaMemsetAsync(ptr, value, count, stream);
-#elif defined(DDLA_USE_HIP)
-        return hipMemsetAsync(ptr, value, count, stream);
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::memsetAsync(ptr, value, count, stream);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
+static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeEventCreate(typename detail::RuntimeTraits<Backend>::event_t* event)
 {
-    if constexpr (Backend == DdlaBackend::CPU) {
-        (void)event;
-        return detail::RuntimeTraits<Backend>::success;
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaEventCreate(event);
-#elif defined(DDLA_USE_HIP)
-        return hipEventCreate(event);
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::eventCreate(event);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
+static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeEventDestroy(typename detail::RuntimeTraits<Backend>::event_t event)
 {
-    if constexpr (Backend == DdlaBackend::CPU) {
-        (void)event;
-        return detail::RuntimeTraits<Backend>::success;
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaEventDestroy(event);
-#elif defined(DDLA_USE_HIP)
-        return hipEventDestroy(event);
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::eventDestroy(event);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
+static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeEventRecord(typename detail::RuntimeTraits<Backend>::event_t event,
                     typename detail::RuntimeTraits<Backend>::stream_t stream)
 {
-    if constexpr (Backend == DdlaBackend::CPU) {
-        (void)event; (void)stream;
-        return detail::RuntimeTraits<Backend>::success;
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaEventRecord(event, stream);
-#elif defined(DDLA_USE_HIP)
-        return hipEventRecord(event, stream);
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::eventRecord(event, stream);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
+static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeStreamWaitEvent(typename detail::RuntimeTraits<Backend>::stream_t stream,
                         typename detail::RuntimeTraits<Backend>::event_t event,
                         unsigned int flags)
 {
-    if constexpr (Backend == DdlaBackend::CPU) {
-        (void)stream; (void)event; (void)flags;
-        return detail::RuntimeTraits<Backend>::success;
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaStreamWaitEvent(stream, event, flags);
-#elif defined(DDLA_USE_HIP)
-        return hipStreamWaitEvent(stream, event, flags);
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::streamWaitEvent(stream, event, flags);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-[[maybe_unused]] static inline typename detail::RuntimeTraits<Backend>::error_t
+static inline typename detail::RuntimeTraits<Backend>::error_t
 runtimeMemGetInfo(std::size_t* free, std::size_t* total)
 {
-    if constexpr (Backend == DdlaBackend::CPU) {
-        *free = 0; *total = 0;
-        return detail::RuntimeTraits<Backend>::success;
-    } else {
-#if defined(DDLA_USE_CUDA)
-        return cudaMemGetInfo(free, total);
-#elif defined(DDLA_USE_HIP)
-        return hipMemGetInfo(free, total);
-#endif
-    }
+    return detail::RuntimeImpl<Backend>::memGetInfo(free, total);
 }
 
 

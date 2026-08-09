@@ -56,7 +56,7 @@ cmake -S "${REPO}" -B "${BUILD}" \
     -DCMAKE_CUDA_ARCHITECTURES=70
 cmake --build "${BUILD}" --target ddla_lib --parallel 12
 
-mpicxx -O3 -DNDEBUG -std=c++17 -Wall -Wextra -Wpedantic \
+mpicxx -O3 -DNDEBUG -std=c++11 -Wall -Wextra -Wpedantic \
     -DDDLA_USE_CUDA -DDDLA_USE_CCL \
     -I"${REPO}/include" \
     -I"${REPO}/src" \

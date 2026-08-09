@@ -149,26 +149,33 @@ __global__ void scale_update_kernel(int length_row, int length_col,
     return;
 }
 
+// Scalar-type dispatch for host<->device scalar conversion. C++11 has no
+// `if constexpr`: the std::complex<T> overloads split/join real and imag
+// parts, the plain T overloads pass through; overload resolution (with
+// partial ordering picking the more specialized overload) selects at compile
+// time.
 template <typename T>
-DeviceScalarT<T> to_device_scalar(const T& value)
+DeviceScalarT<T> to_device_scalar(const std::complex<T>& value)
 {
-    if constexpr (std::is_same_v<T, std::complex<float>>
-                  || std::is_same_v<T, std::complex<double>>){
-        return {value.real(), value.imag()};
-    }else{
-        return value;
-    }
+    return {value.real(), value.imag()};
 }
 
 template <typename T>
-T to_host_scalar(const DeviceScalarT<T>& value)
+T to_device_scalar(const T& value)
 {
-    if constexpr (std::is_same_v<T, std::complex<float>>
-                  || std::is_same_v<T, std::complex<double>>){
-        return T(value.real, value.imag);
-    }else{
-        return value;
-    }
+    return value;
+}
+
+template <typename T>
+T to_host_scalar(const DeviceComplex<T>& value)
+{
+    return T(value.real, value.imag);
+}
+
+template <typename T>
+T to_host_scalar(const T& value)
+{
+    return value;
 }
 
 } // namespace

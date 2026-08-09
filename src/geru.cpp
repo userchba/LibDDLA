@@ -86,7 +86,7 @@ void geru(const DdlaHandle_t& handle, int m, int n, const T& alpha,
     }
     if (m <= 0 || n <= 0) return;
 
-    if constexpr (Backend == DdlaBackend::CPU) {
+    if (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         if (incx == 0 || incy == 0) {
             throw std::runtime_error("geru: incx and incy must be nonzero");

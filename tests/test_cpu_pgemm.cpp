@@ -28,6 +28,35 @@ template <typename T> T maybe_conj(T v) { return v; }
 template <> std::complex<float>  maybe_conj(std::complex<float> v)  { return std::conj(v); }
 template <> std::complex<double> maybe_conj(std::complex<double> v) { return std::conj(v); }
 
+// C++11 has no `if constexpr`: complex-valued alpha/beta are assigned only
+// for complex T; the tag overload keeps the two-argument T(...) constructor
+// from ever being instantiated for real T.
+template <typename T>
+void set_complex_alpha_beta_impl(T& alpha, T& beta,
+                                 double ar, double ai, double br, double bi,
+                                 std::true_type)
+{
+    alpha = T(ar, ai);
+    beta = T(br, bi);
+}
+
+template <typename T>
+void set_complex_alpha_beta_impl(T&, T&, double, double, double, double,
+                                 std::false_type)
+{
+}
+
+template <typename T>
+void set_complex_alpha_beta(T& alpha, T& beta,
+                            double ar, double ai, double br, double bi)
+{
+    set_complex_alpha_beta_impl(
+        alpha, beta, ar, ai, br, bi,
+        std::integral_constant<bool,
+            std::is_same<T, std::complex<float>>::value
+            || std::is_same<T, std::complex<double>>::value>());
+}
+
 // ---------------------------------------------------------------------------
 // Sequential reference GEMM: C = alpha * op(A) * op(B) + beta * C
 // A is MxK, B is KxN, C is MxN (all column-major).
@@ -143,11 +172,7 @@ static int check_one(
 
     T alpha = T(1.25);
     T beta  = T(-0.5);
-    if constexpr (std::is_same_v<T, std::complex<float>> ||
-                  std::is_same_v<T, std::complex<double>>) {
-        alpha = T(1.25, -0.375);
-        beta = T(-0.5, 0.25);
-    }
+    set_complex_alpha_beta(alpha, beta, 1.25, -0.375, -0.5, 0.25);
 
     // ---- compute with ddla::pgemm ----
     if (use_default_backend) {
@@ -284,7 +309,7 @@ static int check_one(
 
     // Classify by component precision: float/complex<float> = single,
     // double/complex<double> = double
-    constexpr bool is_single = std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>;
+    constexpr bool is_single = std::is_same<T, float>::value || std::is_same<T, std::complex<float>>::value;
     double rel_tol = is_single ? 1e-4 : 1e-10;
     double threshold = rel_tol * std::max(1.0, max_ref);
     if (has_nonfinite || max_abs_err > threshold) {
@@ -369,11 +394,7 @@ static int run_tests_for_type(const char* type_name,
 
         T alpha = T(2.0);
         T beta = T(-0.75);
-        if constexpr (std::is_same_v<T, std::complex<float>> ||
-                      std::is_same_v<T, std::complex<double>>) {
-            alpha = T(2.0, -1.0);
-            beta = T(-0.75, 0.5);
-        }
+        set_complex_alpha_beta(alpha, beta, 2.0, -1.0, -0.75, 0.5);
 
         pgemm<DdlaBackend::CPU>('N', 'N', M, N, 0, alpha,
                                 h_A.data(), descA,
@@ -382,7 +403,7 @@ static int run_tests_for_type(const char* type_name,
                                 h_C.data(), descC);
 
         bool k_zero_ok = true;
-        constexpr bool is_single = std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>;
+        constexpr bool is_single = std::is_same<T, float>::value || std::is_same<T, std::complex<float>>::value;
         double tol = is_single ? 1e-5 : 1e-12;
         for (size_t idx = 0; idx < h_C.size(); ++idx) {
             T expected = beta * h_C_orig[idx];

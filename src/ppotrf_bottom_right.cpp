@@ -22,6 +22,50 @@ namespace ddla{
 namespace {
 
 template <typename T>
+void update_diagonal_tile_impl(
+    const deblasHandle_t blas_handle,
+    const deblasFillMode_t fill_mode, const bool upper,
+    const int nb, const int panel_width,
+    const T* d_panel, const int ld_panel,
+    T* d_tile, const int ldd,
+    std::true_type /* real scalar */)
+{
+    const deblasOperation_t op = upper ? DEBLAS_OP_N : DEBLAS_OP_T;
+    const T minus_one = T(-1);
+    const T one = T(1);
+    BLAS_CHECK(deblasSyrk(
+        blas_handle,
+        fill_mode, op,
+        nb, panel_width,
+        minus_one, d_panel, ld_panel,
+        one, d_tile, ldd
+    ));
+}
+
+template <typename T>
+void update_diagonal_tile_impl(
+    const deblasHandle_t blas_handle,
+    const deblasFillMode_t fill_mode, const bool upper,
+    const int nb, const int panel_width,
+    const T* d_panel, const int ld_panel,
+    T* d_tile, const int ldd,
+    std::false_type /* complex scalar */)
+{
+    const deblasOperation_t op = upper ? DEBLAS_OP_N : DEBLAS_OP_C;
+    using Real = typename std::conditional<
+        std::is_same<T, std::complex<float>>::value, float, double>::type;
+    const Real minus_one = Real(-1);
+    const Real one = Real(1);
+    BLAS_CHECK(deblasHerk(
+        blas_handle,
+        fill_mode, op,
+        nb, panel_width,
+        minus_one, d_panel, ld_panel,
+        one, d_tile, ldd
+    ));
+}
+
+template <typename T>
 void update_diagonal_tile(
     const deblasHandle_t blas_handle,
     const char uplo,
@@ -34,29 +78,11 @@ void update_diagonal_tile(
     const deblasFillMode_t fill_mode = upper
         ? DEBLAS_FILL_MODE_UPPER
         : DEBLAS_FILL_MODE_LOWER;
-    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>){
-        const T minus_one = T(-1);
-        const T one = T(1);
-        BLAS_CHECK(deblasSyrk(
-            blas_handle,
-            fill_mode, upper ? DEBLAS_OP_N : DEBLAS_OP_T,
-            nb, panel_width,
-            minus_one, d_panel, ld_panel,
-            one, d_tile, ldd
-        ));
-    }else{
-        using Real = std::conditional_t<
-            std::is_same_v<T, std::complex<float>>, float, double>;
-        const Real minus_one = Real(-1);
-        const Real one = Real(1);
-        BLAS_CHECK(deblasHerk(
-            blas_handle,
-            fill_mode, upper ? DEBLAS_OP_N : DEBLAS_OP_C,
-            nb, panel_width,
-            minus_one, d_panel, ld_panel,
-            one, d_tile, ldd
-        ));
-    }
+    // C++11 has no `if constexpr`: real scalars use syrk, complex use herk,
+    // selected by tag dispatch on the scalar type.
+    update_diagonal_tile_impl(blas_handle, fill_mode, upper,
+                              nb, panel_width, d_panel, ld_panel, d_tile, ldd,
+                              std::is_floating_point<T>());
 }
 
 } // namespace
@@ -265,8 +291,8 @@ void ppotrf_bottom_right(
                     const T one = T(1);
                     T* const d_local_panel = d_A + local_row_prefix;
                     const deblasOperation_t trans =
-                        std::is_same_v<T, float>
-                            || std::is_same_v<T, double>
+                        std::is_same<T, float>::value
+                            || std::is_same<T, double>::value
                         ? DEBLAS_OP_T
                         : DEBLAS_OP_C;
                     BLAS_CHECK(deblasTrsm(

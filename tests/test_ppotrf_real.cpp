@@ -35,7 +35,7 @@ void check_ppotrf_real(const ddla::DdlaHandle_t& handle, const Shape& base)
     descB.init(n, nrhs, nb, nb, 0, 0);
 
     auto h_A = make_local<T>(descA, [&](int i, int j){ return spd_value<T>(i, j); });
-    auto h_B = make_local<T>(descB, [&](int i, int j){
+    auto h_B = make_local<T>(descB, [&](int i, int j) -> T {
         T sum(0.0);
         for(int l = 0; l < n; ++l){
             sum += spd_value<T>(i, l) * x_value_real<T>(l, j);
@@ -62,7 +62,7 @@ void check_ppotrf_real(const ddla::DdlaHandle_t& handle, const Shape& base)
     const double sol_err = local_max_error<T>(descB, x, [](int i, int j){
         return x_value_real<T>(i, j);
     });
-    const double tol = std::is_same_v<T, float> ? 3e-3 : 1e-9;
+    const double tol = std::is_same<T, float>::value ? 3e-3 : 1e-9;
     require_close(handle, "ppotrf_real(solution)", sol_err, tol);
 }
 
@@ -80,7 +80,7 @@ void check_pposv_real(const ddla::DdlaHandle_t& handle, const Shape& base)
     descB.init(n, nrhs, nb, nb, 0, 0);
 
     auto h_A = make_local<T>(descA, [&](int i, int j){ return spd_value<T>(i, j); });
-    auto h_B = make_local<T>(descB, [&](int i, int j){
+    auto h_B = make_local<T>(descB, [&](int i, int j) -> T {
         T sum(0.0);
         for(int l = 0; l < n; ++l){
             sum += spd_value<T>(i, l) * x_value_real<T>(l, j);
@@ -105,7 +105,7 @@ void check_pposv_real(const ddla::DdlaHandle_t& handle, const Shape& base)
     const double sol_err = local_max_error<T>(descB, x, [](int i, int j){
         return x_value_real<T>(i, j);
     });
-    const double tol = std::is_same_v<T, float> ? 3e-3 : 1e-9;
+    const double tol = std::is_same<T, float>::value ? 3e-3 : 1e-9;
     require_close(handle, "pposv_real(solution)", sol_err, tol);
 }
 

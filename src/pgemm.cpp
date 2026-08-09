@@ -212,7 +212,7 @@ void pgemm(
     get_data(k_s);
     bool first_gemm = true;
     for (k_s = 0; k_s < k; k_s += nb) {
-        if constexpr (Backend == DdlaBackend::CPU) {
+        if (Backend == DdlaBackend::CPU) {
             // No-op: CPU BLAS calls are synchronous and every MPI call in
             // transport_block<DdlaBackend::CPU> is blocking, so there is no
             // in-flight work left to wait on here.
@@ -235,7 +235,7 @@ void pgemm(
         temp_buffer = (temp_buffer + 1) % buffer_max;
         get_data(k_s + nb);
     }
-    if constexpr (Backend == DdlaBackend::CPU) {
+    if (Backend == DdlaBackend::CPU) {
         // No-op: CPU BLAS calls are synchronous and every MPI call in
         // transport_block<DdlaBackend::CPU> is blocking, so there is no
         // in-flight work left to wait on here.

@@ -17,6 +17,32 @@
 
 namespace ddla{
 
+namespace {
+
+// Scalar-type dispatch for the "negative diagonal entry" fix-up in ppotrf.
+// C++11 has no `if constexpr`: for real T a negative diagonal is flagged and
+// negated, for complex T the sign of the real part decides. Overload
+// resolution on the scalar type selects the right behaviour at compile time.
+template <typename T>
+inline void negate_if_negative(T& value, bool& is_nega)
+{
+    if (value < T(0)) {
+        is_nega = true;
+        value = -value;
+    }
+}
+
+template <typename T>
+inline void negate_if_negative(std::complex<T>& value, bool& is_nega)
+{
+    if (value.real() < T(0)) {
+        is_nega = true;
+        value = -value;
+    }
+}
+
+} // anonymous namespace
+
 template<typename T>
 bool ppotrf(
     const char& uplo, const int& n,
@@ -167,19 +193,7 @@ bool ppotrf(
                 T last_value;
                 RUNTIME_CHECK(runtimeMemcpyAsync(&last_value, A + mm_row_start + nb_real - 1 + (mm_col_start + nb_real - 1) * lldA, sizeof(T), runtimeMemcpyDeviceToHost, stream));
                 is_nega = false;
-                if constexpr (std::is_same_v<T, double> || std::is_same_v<T, float>){
-                    if(last_value < 0){
-                        is_nega = true;
-                        last_value = -last_value;
-                    }
-                }else if constexpr (std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>>){
-                    if(last_value.real() < 0){
-                        is_nega = true;
-                        last_value = -last_value;
-                    }                
-                }else{
-                    throw std::runtime_error("unsupported template type\n");
-                }
+                negate_if_negative(last_value, is_nega);
                 last_value = std::sqrt(last_value);
                 RUNTIME_CHECK(runtimeMemcpyAsync(A + mm_row_start + nb_real - 1 + (mm_col_start + nb_real - 1) * lldA, &last_value, sizeof(T), runtimeMemcpyHostToDevice, stream));
             }else

@@ -70,7 +70,7 @@ void iamax(const DdlaHandle_t& handle, int n, const T* x, int incx, int& result)
         return;
     }
 
-    if constexpr (Backend == DdlaBackend::CPU) {
+    if (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         result = cpu_iamax(n, x, incx);
 #endif

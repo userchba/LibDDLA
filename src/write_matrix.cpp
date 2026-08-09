@@ -10,14 +10,25 @@ namespace ddla {
 
 namespace {
 
-template <typename T>
-struct is_std_complex : std::false_type {};
-template <typename U>
-struct is_std_complex<std::complex<U>> : std::true_type {};
-
 // Flush denormal-ish noise to an exact 0 so successive runs diff cleanly.
 template <typename R>
 inline R flush_tiny(R v) { return (std::abs(v) < static_cast<R>(1e-10)) ? static_cast<R>(0) : v; }
+
+// Scalar-type dispatch for value formatting. C++11 has no `if constexpr`:
+// complex values print as (re,im), real values directly. The std::complex<>
+// overload wins by overload resolution, so the `v.real()` call below is only
+// ever instantiated for complex T.
+template <typename R>
+void write_value(std::ostream& out, const std::complex<R>& v)
+{
+    out << "(" << flush_tiny(v.real()) << "," << flush_tiny(v.imag()) << ") ";
+}
+
+template <typename T>
+void write_value(std::ostream& out, const T& v)
+{
+    out << flush_tiny(v) << " ";
+}
 
 template <typename T>
 void write_host_matrix(const T* A, int m, int n, const char* filename)
@@ -28,11 +39,7 @@ void write_host_matrix(const T* A, int m, int n, const char* filename)
     for (int i = 0; i < m; ++i) {
         for (int j = 0; j < n; ++j) {
             const T v = A[static_cast<std::size_t>(i) + static_cast<std::size_t>(j) * m];
-            if constexpr (is_std_complex<T>::value) {
-                outfile << "(" << flush_tiny(v.real()) << "," << flush_tiny(v.imag()) << ") ";
-            } else {
-                outfile << flush_tiny(v) << " ";
-            }
+            write_value(outfile, v);
         }
         outfile << "\n";
     }
@@ -51,7 +58,7 @@ void write_matrix(const T* A, const int& m, const int& n, const char* filename)
 
     if (A == nullptr || m <= 0 || n <= 0 || filename == nullptr) return;
 
-    if constexpr (Backend == DdlaBackend::CPU) {
+    if (Backend == DdlaBackend::CPU) {
         write_host_matrix(A, m, n, filename);
     } else {
 #if DDLA_HAS_GPU

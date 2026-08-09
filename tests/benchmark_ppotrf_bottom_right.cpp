@@ -115,7 +115,7 @@ bool parse_options(int argc, char** argv, Options& options, std::string& error)
     bool source_set = false;
     bool uplo_set = false;
 
-    auto add_size = [&](const std::string& text) {
+    auto add_size = [&](const std::string& text) -> bool {
         int n = 0;
         if(!parse_integer(text, false, n)){
             error = "invalid matrix size: " + text;
@@ -130,7 +130,7 @@ bool parse_options(int argc, char** argv, Options& options, std::string& error)
     };
 
     auto require_value = [&](int& index, const std::string& option,
-                             std::string& value) {
+                             std::string& value) -> bool {
         if(index + 1 >= argc){
             error = option + " requires a value";
             return false;
