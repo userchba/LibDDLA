@@ -255,9 +255,16 @@ constexpr auto runtimeMemcpyDeviceToDevice = detail::RuntimeTraits<detail::local
 // no vendor dependency, and it must stay name-lookup-visible in every TU --
 // RuntimeImpl<DdlaBackend::CPU>::memcpy2DAsync below calls it by name. Only
 // ever *called* from the CPU implementation; in a GPU-only TU it stays
-// declared but unused.
+// declared but unused. The kind/stream parameters use the CPU traits types
+// explicitly (not the TU-local runtimeMemcpyKind/runtimeStream_t aliases),
+// because RuntimeImpl<DdlaBackend::CPU> is a fully specialized struct whose
+// member bodies are compiled in every TU -- in a GPU-only TU the TU-local
+// aliases would be cudaMemcpyKind/CUstream, mismatching the int the CPU
+// implementation passes.
 static inline runtimeError_t cpuMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t spitch,
-    size_t width, size_t height, runtimeMemcpyKind kind, runtimeStream_t stream) {
+    size_t width, size_t height,
+    typename detail::RuntimeTraits<DdlaBackend::CPU>::memcpy_kind_t kind,
+    typename detail::RuntimeTraits<DdlaBackend::CPU>::stream_t stream) {
     (void)kind; (void)stream;
     if (width == 0 || height == 0) return runtimeSuccess;
     // Contiguous fast path: when the source and destination row pitches equal
