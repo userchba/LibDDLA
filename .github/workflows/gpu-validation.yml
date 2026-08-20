@@ -89,7 +89,7 @@ jobs:
             trusted-control/.ci/slurm/config.ini trusted-control/.ci/slurm/modules.sh \
             trusted-control/.ci/slurm/known_hosts \
             trusted-control/.ci/slurm/build.sbatch.in trusted-control/.ci/slurm/test.sbatch.in \
-            trusted-control/.ci/slurm/mpirun_with_mapping.sh trusted-control/.ci/slurm/report.py \
+            trusted-control/.ci/slurm/mpirun_with_mapping.sh trusted-control/.ci/slurm/rank_in_container.sh trusted-control/.ci/slurm/report.py trusted-control/.ci/slurm/case_plan.py trusted-control/.ci/slurm/run_case.py \
             trusted-control/.ci/slurm/create-rootfs.sh trusted-control/.ci/slurm/submit.sh \
             "gpu-ci:$run_root/control/"
           ssh -F "$REMOTE_SSH_CONFIG" gpu-ci \
@@ -100,8 +100,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/libddla-gpu-results"
-          scp -r -F "$REMOTE_SSH_CONFIG" \
-            "gpu-ci:$REMOTE_RUN_ROOT/results" "$RUNNER_TEMP/libddla-gpu-results/" || true
+          if ! ssh -F "$REMOTE_SSH_CONFIG" gpu-ci \
+            "tar -C '$REMOTE_RUN_ROOT' -czf - results" \
+            | tar -xzf - -C "$RUNNER_TEMP/libddla-gpu-results" \
+                --no-same-owner --no-same-permissions; then
+            echo "warning: remote result download failed" >&2
+          fi
           if [[ ! -s "$RUNNER_TEMP/libddla-gpu-results/results/summary.md" ]]; then
             cat > "$RUNNER_TEMP/libddla-gpu-results/results/summary.md" <<'EOF'
           # LibDDLA GPU validation

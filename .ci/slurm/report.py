@@ -12,9 +12,9 @@ from pathlib import Path
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--junit", type=Path, required=True)
+    parser.add_argument("--junit-dir", type=Path, required=True)
     parser.add_argument("--results", type=Path, required=True)
-    parser.add_argument("--job-id", required=True)
+    parser.add_argument("--job-map", type=Path, required=True)
     return parser.parse_args()
 
 
@@ -33,23 +33,27 @@ def manifest_tests(path: Path) -> list[dict[str, str]]:
     return rows
 
 
-def junit_tests(path: Path) -> dict[str, dict[str, str]]:
-    root = ET.parse(path).getroot()
+def junit_tests(directory: Path) -> dict[str, dict[str, str]]:
     result = {}
-    for case in root.iter("testcase"):
-        name = case.attrib.get("name", "")
-        failure = case.find("failure")
-        error = case.find("error")
-        skipped = case.find("skipped")
-        state = "PASS"
-        if failure is not None or error is not None:
-            state = "FAIL"
-        elif skipped is not None:
-            state = "INFRA"
-        result[name] = {
-            "state": state,
-            "duration": case.attrib.get("time", "0"),
-        }
+    for path in sorted(directory.glob("*.xml")):
+        try:
+            root = ET.parse(path).getroot()
+        except (ET.ParseError, OSError):
+            continue
+        for case in root.iter("testcase"):
+            name = case.attrib.get("name", "")
+            failure = case.find("failure")
+            error = case.find("error")
+            skipped = case.find("skipped")
+            state = "PASS"
+            if failure is not None or error is not None:
+                state = "FAIL"
+            elif skipped is not None:
+                state = "INFRA"
+            result[name] = {
+                "state": state,
+                "duration": case.attrib.get("time", "0"),
+            }
     return result
 
 
@@ -63,17 +67,21 @@ def duration(value: str) -> str:
 def main() -> int:
     args = parse_args()
     expected = manifest_tests(args.manifest)
-    actual = junit_tests(args.junit)
+    actual = junit_tests(args.junit_dir)
+    job_map = json.loads(args.job_map.read_text(encoding="utf-8"))
     rows = []
     for index, test in enumerate(expected, 1):
         result = actual.get(test["name"], {"state": "INFRA", "duration": "0"})
+        allocation = job_map.get(test["name"], {})
+        if isinstance(allocation, str):
+            allocation = {"job_id": allocation, "ranks": test["processors"]}
         rows.append({
             "index": index,
             "name": test["name"],
-            "processors": test["processors"],
+            "processors": allocation.get("ranks", test["processors"]),
             "state": result["state"],
             "duration": result["duration"],
-            "job_id": args.job_id,
+            "job_id": allocation.get("job_id", "-"),
         })
 
     passed = sum(row["state"] == "PASS" for row in rows)

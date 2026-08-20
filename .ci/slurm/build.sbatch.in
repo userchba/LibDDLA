@@ -18,8 +18,10 @@ export TMPDIR=@BUILD@/tmp
 mkdir -p "$TMPDIR"
 source @CONTROL@/modules.sh
 export CI_CONTAINER_IMAGE=@CONTAINER_IMAGE@
-export CI_MPI_ROOT=@MPI_ROOT@
-container=(apptainer exec --nv --containall --cleanenv --bind /opt:/opt:ro --bind /usr:/usr:ro --bind /lib:/lib:ro --bind /lib64:/lib64:ro --bind @MPI_ROOT@:@MPI_ROOT@:ro --bind @SOURCE@:@SOURCE@:ro --bind @BUILD@:@BUILD@ --bind @RESULTS@:@RESULTS@ --bind @CONTROL@:@CONTROL@:ro --env "PATH=$PATH" --env "TMPDIR=$TMPDIR" --env "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}" --env "CPATH=${CPATH:-}" --env "LIBRARY_PATH=${LIBRARY_PATH:-}" --env "CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH:-}" "$CI_CONTAINER_IMAGE")
+CI_SYSTEM_MPIRUN=$(readlink -f "$(command -v mpirun)")
+CI_MPI_ROOT=$(dirname "$(dirname "$CI_SYSTEM_MPIRUN")")
+export CI_MPI_ROOT
+container=(apptainer exec --nv --containall --cleanenv --bind /opt:/opt:ro --bind /usr:/usr:ro --bind /lib:/lib:ro --bind /lib64:/lib64:ro --bind "$CI_MPI_ROOT:$CI_MPI_ROOT:ro" --bind @SOURCE@:@SOURCE@:ro --bind @BUILD@:@BUILD@ --bind @RESULTS@:@RESULTS@ --bind @CONTROL@:@CONTROL@:ro --env "PATH=$PATH" --env "TMPDIR=$TMPDIR" --env "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}" --env "CPATH=${CPATH:-}" --env "LIBRARY_PATH=${LIBRARY_PATH:-}" --env "CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH:-}" "$CI_CONTAINER_IMAGE")
 module -t list 2>&1 | tee @RESULTS@/modules-build.txt
 command -v apptainer | tee @RESULTS@/tools-build.txt
 "${container[@]}" bash -lc 'command -v cmake make mpicxx nvcc' | tee -a @RESULTS@/tools-build.txt
@@ -34,6 +36,7 @@ command -v apptainer | tee @RESULTS@/tools-build.txt
     -DBUILD_TESTS=ON \
     -DDDLA_TEST_NP=4 \
     -DMPIEXEC_EXECUTABLE=@CONTROL@/mpirun_with_mapping.sh \
+    -DMPIEXEC_PREFLAGS=@CONTROL@/rank_in_container.sh \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
     2>&1 | tee @RESULTS@/configure.log
 "${container[@]}" cmake --build @BUILD@ --parallel 32 2>&1 | tee @RESULTS@/build.log
