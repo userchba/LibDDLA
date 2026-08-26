@@ -25,6 +25,7 @@ jobs:
           cmake -S . -B build -DDDLA_USE_CPU=ON -DBUILD_TESTS=ON
           -DDDLA_CPU_BLAS_LIBRARY=/usr/lib/x86_64-linux-gnu/libopenblas.so
           -DCMAKE_BUILD_TYPE=Release
+          -DMPIEXEC_PREFLAGS=--oversubscribe
 
       - name: Build
         run: cmake --build build -j2
@@ -36,7 +37,7 @@ jobs:
     name: CUDA build (compile check, no GPU runner)
     runs-on: ubuntu-22.04
     container:
-      image: nvidia/cuda:11.8.0-devel-ubuntu22.04
+      image: nvcr.io/nvidia/nvhpc:25.1-devel-cuda12.6-ubuntu22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -49,6 +50,7 @@ jobs:
         run: >
           cmake -S . -B build-cuda -DDDLA_USE_CUDA=ON -DBUILD_TESTS=ON
           -DCMAKE_CUDA_ARCHITECTURES=70 -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_FLAGS=-I/opt/nvidia/hpc_sdk/Linux_x86_64/25.1/cuda/12.6/include
 
       - name: Build (CUDA)
         run: cmake --build build-cuda -j2
@@ -58,13 +60,15 @@ jobs:
     runs-on: ubuntu-22.04
     container:
       image: rocm/dev-ubuntu-22.04:5.7
+    env:
+      ROCM_PATH: /opt/rocm
     steps:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
           apt-get update
-          apt-get install -y libopenmpi-dev openmpi-bin cmake
+          apt-get install -y libopenmpi-dev openmpi-bin cmake hipblas-dev hipsolver-dev rocrand-dev rccl
 
       - name: Configure (HIP)
         run: >

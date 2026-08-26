@@ -98,12 +98,30 @@ message(STATUS "CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}")
 
 if(DDLA_USE_HIP)
     enable_language(HIP)
-    set(HIP_LIBRARIES "-lhipblas -lrccl -lhipsolver -lamdhip64 -lhiprand -lgalaxyhip -lomp")
-    # -lamdhip64 -lhsa-runtime64
-    # find_package(HIP REQUIRED)
-    list(APPEND math_libs
-        ${HIP_LIBRARIES}
-    )
+    if(NOT DEFINED ROCM_PATH)
+        if(DEFINED ENV{ROCM_PATH} AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
+            set(ROCM_PATH "$ENV{ROCM_PATH}")
+        else()
+            set(ROCM_PATH "/opt/rocm")
+        endif()
+    endif()
+    message(STATUS "ROCM_PATH: ${ROCM_PATH}")
+    set(HIP_LIBRARIES "")
+    foreach(_hip_lib IN ITEMS hipblas rccl hipsolver amdhip64 hiprand omp)
+        if(EXISTS "${ROCM_PATH}/lib/lib${_hip_lib}.so" OR EXISTS "${ROCM_PATH}/lib64/lib${_hip_lib}.so")
+            list(APPEND HIP_LIBRARIES "-l${_hip_lib}")
+        endif()
+    endforeach()
+    # Hygon/GALAXY DCU-specific HIP runtime: link only on DCU platforms.
+    if(EXISTS "${ROCM_PATH}/dcc/lib/libgalaxyhip.so" OR
+       EXISTS "${ROCM_PATH}/lib/libgalaxyhip.so" OR
+       EXISTS "${ROCM_PATH}/lib64/libgalaxyhip.so")
+        list(APPEND HIP_LIBRARIES "-lgalaxyhip")
+    endif()
+    if(HIP_LIBRARIES)
+        message(STATUS "HIP_LIBRARIES: ${HIP_LIBRARIES}")
+        list(APPEND math_libs ${HIP_LIBRARIES})
+    endif()
 endif()
 # cpu setting
 if(DDLA_USE_CPU)
