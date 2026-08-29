@@ -25,6 +25,7 @@ jobs:
           cmake -S . -B build -DDDLA_USE_CPU=ON -DBUILD_TESTS=ON
           -DDDLA_CPU_BLAS_LIBRARY=/usr/lib/x86_64-linux-gnu/libopenblas.so
           -DCMAKE_BUILD_TYPE=Release
+          -DDDLA_TEST_NP=2
           -DMPIEXEC_PREFLAGS=--oversubscribe
 
       - name: Build

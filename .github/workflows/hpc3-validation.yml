@@ -1,0 +1,128 @@
+name: HPC3 validation
+
+on:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: "Commit or branch to test (defaults to develop)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: libddla-hpc3-validation-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  hpc3:
+    name: Build and test on HPC3 (CPU + 43 GPU cases)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    env:
+      REMOTE_HOST: hpc3.chinahpc.com
+      REMOTE_PORT: "1014"
+      REMOTE_USER: renxg
+      REMOTE_ROOT: ~/libddla_hpc3_ci
+    steps:
+      - name: Checkout requested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || 'develop' }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout trusted CI control files
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted-control
+          sparse-checkout: .ci/hpc3
+          persist-credentials: false
+
+      - name: Configure SSH
+        env:
+          REMOTE_SSH_PRIVATE_KEY: ${{ secrets.HPC3_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/remote-ssh"
+          mkdir -m 700 "$root"
+          printf '%s\n' "$REMOTE_SSH_PRIVATE_KEY" > "$root/id_ed25519"
+          chmod 600 "$root/id_ed25519"
+          cp trusted-control/.ci/hpc3/known_hosts "$root/known_hosts"
+          chmod 600 "$root/known_hosts"
+          cat > "$root/config" <<EOF
+          Host hpc3-ci
+              HostName $REMOTE_HOST
+              Port $REMOTE_PORT
+              User $REMOTE_USER
+              IdentityFile $root/id_ed25519
+              IdentitiesOnly yes
+              StrictHostKeyChecking yes
+              UserKnownHostsFile $root/known_hosts
+              ForwardAgent no
+              ServerAliveInterval 30
+              ServerAliveCountMax 6
+          EOF
+          chmod 600 "$root/config"
+          ssh-keygen -y -f "$root/id_ed25519" >/dev/null
+          echo "REMOTE_SSH_CONFIG=$root/config" >> "$GITHUB_ENV"
+
+      - name: Submit remote build and test
+        id: remote
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          remote_root=$(ssh -F "$REMOTE_SSH_CONFIG" hpc3-ci 'printf "%s/libddla_hpc3_ci" "$HOME"')
+          run_root="$remote_root/runs/github/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "REMOTE_RUN_ROOT=$run_root" >> "$GITHUB_ENV"
+          ssh -F "$REMOTE_SSH_CONFIG" hpc3-ci "mkdir -p '$run_root/source' '$run_root/control'"
+          tar --exclude=.git -C source -czf - . \
+            | ssh -F "$REMOTE_SSH_CONFIG" hpc3-ci "tar -xzf - -C '$run_root/source'"
+          scp -F "$REMOTE_SSH_CONFIG" \
+            trusted-control/.ci/hpc3/config.ini \
+            trusted-control/.ci/hpc3/setup_cpu.sh trusted-control/.ci/hpc3/setup_gpu.sh \
+            trusted-control/.ci/hpc3/validate_cpu.sbatch.in \
+            trusted-control/.ci/hpc3/validate_gpu.sbatch.in \
+            trusted-control/.ci/hpc3/gpurank_wrapper.sh \
+            trusted-control/.ci/hpc3/report.py trusted-control/.ci/hpc3/submit.sh \
+            "hpc3-ci:$run_root/control/"
+          ssh -F "$REMOTE_SSH_CONFIG" hpc3-ci \
+            "chmod 700 '$run_root/control/'*.sh; '$run_root/control/submit.sh' '$run_root'"
+
+      - name: Download raw results
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/libddla-hpc3-results"
+          scp -r -F "$REMOTE_SSH_CONFIG" \
+            "hpc3-ci:$REMOTE_RUN_ROOT/results" "$RUNNER_TEMP/libddla-hpc3-results/" || true
+
+      - name: Publish CPU table
+        if: always()
+        run: |
+          f="$RUNNER_TEMP/libddla-hpc3-results/results/summary_cpu.md"
+          if [[ -s "$f" ]]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Publish GPU table
+        if: always()
+        run: |
+          f="$RUNNER_TEMP/libddla-hpc3-results/results/summary_gpu.md"
+          if [[ -s "$f" ]]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload raw results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: libddla-hpc3-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/libddla-hpc3-results/results
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Fail when remote validation failed
+        if: steps.remote.outcome == 'failure'
+        run: exit 1

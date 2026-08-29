@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# CPU validation: configure, build, run the 5 CPU-labelled tests.
+#SBATCH --job-name=libddla-hpc3-cpu
+#SBATCH --partition=@CPU_PARTITION@
+#SBATCH --nodes=1
+#SBATCH --ntasks=4
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=@CPU_MEM@
+#SBATCH --time=@CPU_TIME@
+#SBATCH --output=@RESULTS@/cpu-slurm-%j.log
+#SBATCH --export=NIL
+
+set -euo pipefail
+export HOME=@HOME@
+export USER=${SLURM_JOB_USER:?}
+export LOGNAME=$USER
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export TMPDIR=@BUILD_CPU@/tmp
+mkdir -p "$TMPDIR"
+source @CONTROL@/setup_cpu.sh
+export CUDA_VISIBLE_DEVICES=
+export OMPI_MCA_plm=isolated
+
+echo "job $SLURM_JOB_ID on $(hostname)"
+module -t list 2>&1 | tee @RESULTS@/cpu-modules.txt
+command -v cmake mpicxx mpirun | tee @RESULTS@/cpu-tools.txt
+
+cmake -S @SOURCE@ -B @BUILD_CPU@ \
+    -DDDLA_USE_CPU=ON \
+    -DBUILD_TESTS=ON \
+    -DDDLA_CPU_BLAS_LIBRARY=$OPENBLAS \
+    -DCMAKE_BUILD_TYPE=Release \
+    2>&1 | tee @RESULTS@/cpu-configure.log
+cmake --build @BUILD_CPU@ --parallel 8 2>&1 | tee @RESULTS@/cpu-build.log
+
+set +e
+ctest --test-dir @BUILD_CPU@ -L cpu --output-on-failure \
+    --output-junit @RESULTS@/cpu-ctest.xml 2>&1 | tee @RESULTS@/cpu-ctest.log
+rc=${PIPESTATUS[0]}
+set -e
+
+python3 @CONTROL@/report.py --kind cpu --junit @RESULTS@/cpu-ctest.xml \
+    --results @RESULTS@ --job-id "$SLURM_JOB_ID"
+exit "$rc"

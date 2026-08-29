@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# GPU validation: configure, build, run the full CTest suite (43 cases) on 8 V100s.
+#SBATCH --job-name=libddla-hpc3-gpu
+#SBATCH --partition=@GPU_PARTITION@
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=@GPU_CPUS@
+#SBATCH --gres=gpu:@GPU_GPUS@
+#SBATCH --mem=@GPU_MEM@
+#SBATCH --time=@GPU_TIME@
+#SBATCH --output=@RESULTS@/gpu-slurm-%j.log
+#SBATCH --export=NIL
+
+set -euo pipefail
+export HOME=@HOME@
+export USER=${SLURM_JOB_USER:?}
+export LOGNAME=$USER
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export TMPDIR=@BUILD_GPU@/tmp
+mkdir -p "$TMPDIR"
+source @CONTROL@/setup_gpu.sh
+
+echo "job $SLURM_JOB_ID on $(hostname) gpus=$(nvidia-smi -L | wc -l)"
+module -t list 2>&1 | tee @RESULTS@/gpu-modules.txt
+command -v cmake mpicxx mpirun nvcc | tee @RESULTS@/gpu-tools.txt
+nvidia-smi --query-gpu=index,name,memory.total,driver_version --format=csv,noheader \
+    | tee @RESULTS@/gpu-gpus.txt
+
+MPIWRAP=@CONTROL@/gpurank_wrapper.sh
+chmod +x "$MPIWRAP"
+
+cmake -S @SOURCE@ -B @BUILD_GPU@ \
+    -DDDLA_USE_CUDA=ON \
+    -DDDLA_USE_CCL=ON \
+    -DBUILD_TESTS=ON \
+    -DCMAKE_CUDA_ARCHITECTURES=70 \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CXX_COMPILER=g++ \
+    -DMPIEXEC_EXECUTABLE="$MPIWRAP" \
+    -DMPIEXEC_PREFLAGS=--oversubscribe \
+    2>&1 | tee @RESULTS@/gpu-configure.log
+cmake --build @BUILD_GPU@ --parallel 16 2>&1 | tee @RESULTS@/gpu-build.log
+
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+set +e
+ctest --test-dir @BUILD_GPU@ --output-on-failure -j1 \
+    --output-junit @RESULTS@/gpu-ctest.xml 2>&1 | tee @RESULTS@/gpu-ctest.log
+rc=${PIPESTATUS[0]}
+set -e
+
+python3 @CONTROL@/report.py --kind gpu --junit @RESULTS@/gpu-ctest.xml \
+    --results @RESULTS@ --job-id "$SLURM_JOB_ID"
+exit "$rc"
