@@ -53,11 +53,11 @@ T matrix_element(
     const std::vector<T>& matrix, int leading_dimension,
     int row, int column, char operation)
 {
-    if (operation == 'N')
+    if (operation == 'N' || operation == 'n')
         return matrix[row + column * leading_dimension];
     return conjugate_if_needed(
         matrix[column + row * leading_dimension],
-        operation == 'C');
+        operation == 'C' || operation == 'c');
 }
 
 template <typename T>
@@ -218,12 +218,12 @@ class DeviceMatrixBatch
 
 int storage_rows(char operation, int m, int k)
 {
-    return operation == 'N' ? m : k;
+    return (operation == 'N' || operation == 'n') ? m : k;
 }
 
 int storage_columns(char operation, int m, int k)
 {
-    return operation == 'N' ? k : m;
+    return (operation == 'N' || operation == 'n') ? k : m;
 }
 
 template <typename T>
@@ -480,7 +480,8 @@ double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
             {'T', 'T'},
             {'C', 'N'},
             {'N', 'C'},
-            {'C', 'C'}};
+            {'C', 'C'},
+            {'n', 't'}};
 
     const char* type_name = [] {
         if constexpr (std::is_same_v<T, float>)

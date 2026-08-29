@@ -105,9 +105,12 @@ __global__ void validate_and_max_dimensions(
     atomicMax(summary + 2, kb);
 }
 
+// BLAS/LAPACK convention: transpose modes are case-insensitive.
 bool valid_operation(char operation)
 {
-    return operation == 'N' || operation == 'T' || operation == 'C';
+    return operation == 'N' || operation == 'n'
+        || operation == 'T' || operation == 't'
+        || operation == 'C' || operation == 'c';
 }
 
 // Converts the public char transpose mode to the vendor operation enum used
@@ -118,9 +121,9 @@ ddla::deblasOperation_t to_deblas_operation(char operation)
 {
     if (!valid_operation(operation))
         throw std::invalid_argument("gemmVbatched: invalid transpose operation");
-    return operation == 'N' ? ddla::DEBLAS_OP_N
-         : operation == 'T' ? ddla::DEBLAS_OP_T
-                            : ddla::DEBLAS_OP_C;
+    return (operation == 'N' || operation == 'n') ? ddla::DEBLAS_OP_N
+         : (operation == 'T' || operation == 't') ? ddla::DEBLAS_OP_T
+                                                  : ddla::DEBLAS_OP_C;
 }
 
 MaxDimensions validate_dimensions(
