@@ -105,10 +105,22 @@ __global__ void validate_and_max_dimensions(
     atomicMax(summary + 2, kb);
 }
 
-bool valid_operation(ddla::deblasOperation_t operation)
+bool valid_operation(char operation)
 {
-    return operation == ddla::DEBLAS_OP_N || operation == ddla::DEBLAS_OP_T
-        || operation == ddla::DEBLAS_OP_C;
+    return operation == 'N' || operation == 'T' || operation == 'C';
+}
+
+// Converts the public char transpose mode to the vendor operation enum used
+// by the launchers. The message keeps its historical "gemmVbatched:" spelling
+// even when reached through gemmVbatched2s, whose op check has always lived
+// in this shared validation path.
+ddla::deblasOperation_t to_deblas_operation(char operation)
+{
+    if (!valid_operation(operation))
+        throw std::invalid_argument("gemmVbatched: invalid transpose operation");
+    return operation == 'N' ? ddla::DEBLAS_OP_N
+         : operation == 'T' ? ddla::DEBLAS_OP_T
+                            : ddla::DEBLAS_OP_C;
 }
 
 MaxDimensions validate_dimensions(
@@ -117,8 +129,6 @@ MaxDimensions validate_dimensions(
     int* d_lda, int* d_ldb, int* d_ldc,
     int batch_count, ddla::runtimeStream_t stream)
 {
-    if (!valid_operation(transA) || !valid_operation(transB))
-        throw std::invalid_argument("gemmVbatched: invalid transpose operation");
     if (d_m == nullptr || d_n == nullptr || d_k == nullptr
         || d_lda == nullptr || d_ldb == nullptr || d_ldc == nullptr)
         throw std::invalid_argument("gemmVbatched: null dimension array");
@@ -306,7 +316,7 @@ namespace ddla
 
 template <typename T>
 void gemmVbatched(
-    deblasOperation_t transA, deblasOperation_t transB,
+    char transA, char transB,
     int* d_m, int* d_n, int* d_k,
     T alpha, const T* const* d_A_array, int* d_lda,
     const T* const* d_B_array, int* d_ldb,
@@ -328,11 +338,13 @@ void gemmVbatched(
     if (d_A_array == nullptr || d_B_array == nullptr || d_C_array == nullptr)
         throw std::invalid_argument("gemmVbatched: null matrix pointer array");
 
+    const deblasOperation_t op_a = to_deblas_operation(transA);
+    const deblasOperation_t op_b = to_deblas_operation(transB);
     const MaxDimensions maximum = validate_dimensions(
-        transA, transB, d_m, d_n, d_k, d_lda, d_ldb, d_ldc,
+        op_a, op_b, d_m, d_n, d_k, d_lda, d_ldb, d_ldc,
         batch_count, handle->stream);
     launch_core(
-        transA, transB, maximum, d_m, d_n, d_k,
+        op_a, op_b, maximum, d_m, d_n, d_k,
         alpha, d_A_array, d_lda, d_B_array, d_ldb,
         beta, d_C_array, d_ldc, batch_count, handle->stream);
     RUNTIME_CHECK(runtimeGetLastError());
@@ -340,12 +352,12 @@ void gemmVbatched(
 
 template <typename T>
 void gemmVbatched2s(
-    deblasOperation_t transA_0, deblasOperation_t transB_0,
+    char transA_0, char transB_0,
     int* d_m_0, int* d_n_0, int* d_k_0,
     T alpha_0, const T* const* d_A_array_0, int* d_lda_0,
     const T* const* d_B_array_0, int* d_ldb_0,
     T beta_0, T** d_C_array_0, int* d_ldc_0,
-    deblasOperation_t transA_1, deblasOperation_t transB_1,
+    char transA_1, char transB_1,
     int* d_m_1, int* d_n_1, int* d_k_1,
     T alpha_1, const T* const* d_AB_array_1,
     int* d_lda_1, int* d_ldb_1,
@@ -381,19 +393,23 @@ void gemmVbatched2s(
         || d_C_array_1 == nullptr)
         throw std::invalid_argument("gemmVbatched2s: null matrix pointer array");
 
+    const deblasOperation_t op_a_0 = to_deblas_operation(transA_0);
+    const deblasOperation_t op_b_0 = to_deblas_operation(transB_0);
     const MaxDimensions maximum_0 = validate_dimensions(
-        transA_0, transB_0, d_m_0, d_n_0, d_k_0,
+        op_a_0, op_b_0, d_m_0, d_n_0, d_k_0,
         d_lda_0, d_ldb_0, d_ldc_0, batch_count, handle->stream);
+    const deblasOperation_t op_a_1 = to_deblas_operation(transA_1);
+    const deblasOperation_t op_b_1 = to_deblas_operation(transB_1);
     const MaxDimensions maximum_1 = validate_dimensions(
-        transA_1, transB_1, d_m_1, d_n_1, d_k_1,
+        op_a_1, op_b_1, d_m_1, d_n_1, d_k_1,
         d_lda_1, d_ldb_1, d_ldc_1, batch_count, handle->stream);
 
     launch_core_2s(
-        transA_0, transB_0, maximum_0,
+        op_a_0, op_b_0, maximum_0,
         d_m_0, d_n_0, d_k_0, alpha_0,
         d_A_array_0, d_lda_0, d_B_array_0, d_ldb_0,
         beta_0, d_C_array_0, d_ldc_0,
-        transA_1, transB_1, maximum_1,
+        op_a_1, op_b_1, maximum_1,
         d_m_1, d_n_1, d_k_1, alpha_1,
         d_AB_array_1, d_lda_1, d_ldb_1,
         beta_1, d_C_array_1, d_ldc_1,
@@ -403,13 +419,13 @@ void gemmVbatched2s(
 
 #define INSTANTIATE_VBATCHED(type)                                              \
 template void gemmVbatched<type>(                                              \
-    deblasOperation_t, deblasOperation_t, int*, int*, int*, type,              \
+    char, char, int*, int*, int*, type,                                        \
     const type* const*, int*, const type* const*, int*, type, type**, int*,     \
     int, const DdlaHandle_t&);                                                  \
 template void gemmVbatched2s<type>(                                            \
-    deblasOperation_t, deblasOperation_t, int*, int*, int*, type,              \
+    char, char, int*, int*, int*, type,                                        \
     const type* const*, int*, const type* const*, int*, type, type**, int*,     \
-    deblasOperation_t, deblasOperation_t, int*, int*, int*, type,              \
+    char, char, int*, int*, int*, type,                                        \
     const type* const*, int*, int*, type, type**, int*, bool, int,             \
     const int*, int, const DdlaHandle_t&)
 

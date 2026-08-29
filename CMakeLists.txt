@@ -63,17 +63,6 @@ if(DDLA_USE_CUDA OR DDLA_USE_HIP)
 else()
     set(DDLA_HAS_GPU 0)
 endif()
-# Vendor capability macros: consumed by the public headers (ddla.h) so that
-# external consumers of the installed headers never need the private
-# DDLA_USE_* compile definitions to resolve the deblas* aliases.
-# Exactly one is defined, mirroring the backend selection.
-if(DDLA_USE_CUDA)
-    set(DDLA_VENDOR_CUDA 1)
-elseif(DDLA_USE_HIP)
-    set(DDLA_VENDOR_HIP 1)
-elseif(DDLA_USE_CPU)
-    set(DDLA_VENDOR_CPU 1)
-endif()
 configure_file(
     ${PROJECT_SOURCE_DIR}/include/ddla/ddla_config.h.in
     ${CMAKE_CURRENT_BINARY_DIR}/include/ddla/ddla_config.h

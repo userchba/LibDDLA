@@ -8,119 +8,6 @@
 #include <stdexcept>
 #include <string>
 
-// ---------------------------------------------------------------------------
-// Public deblas* type aliases and operation constants.
-//
-// These appear in public template signatures (e.g. gemmVbatched takes
-// deblasOperation_t), so they are part of the public interface. The
-// definition lives here and is shared with the private
-// src/ddla_connector.h via the DDLA_DEBLAS_TYPES_DEFINED guard: whichever
-// header is included first defines the block, the other skips it (the
-// aliases resolve to the same vendor types either way).
-#ifndef DDLA_DEBLAS_TYPES_DEFINED
-#define DDLA_DEBLAS_TYPES_DEFINED
-#if defined(DDLA_USE_CUDA) || defined(DDLA_VENDOR_CUDA)
-#include <cublas_v2.h>
-#include <cusolverDn.h>
-#include <curand.h>
-using deblasStatus_t = cublasStatus_t;
-constexpr auto DEBLAS_STATUS_SUCCESS = deblasStatus_t::CUBLAS_STATUS_SUCCESS;
-using deblasHandle_t = cublasHandle_t;
-using desolverHandle_t = cusolverDnHandle_t;
-using desolverStatus_t = cusolverStatus_t;
-constexpr auto DESOLVER_STATUS_SUCCESS = desolverStatus_t::CUSOLVER_STATUS_SUCCESS;
-#define desolverGetStream cusolverDnGetStream
-using derandGenerator_t = curandGenerator_t;
-using derandStatus_t = curandStatus_t;
-constexpr auto DERAND_STATUS_SUCCESS = derandStatus_t::CURAND_STATUS_SUCCESS;
-#define derandCreateGenerator curandCreateGenerator
-#define derandSetPseudoRandomGeneratorSeed curandSetPseudoRandomGeneratorSeed
-#define derandGenerateUniform curandGenerateUniform
-#define derandGenerateUniformDouble curandGenerateUniformDouble
-#define derandDestroyGenerator curandDestroyGenerator
-using derandRngType = curandRngType;
-constexpr auto DERAND_RNG_PSEUDO_DEFAULT = derandRngType::CURAND_RNG_PSEUDO_DEFAULT;
-using deblasSideMode_t = cublasSideMode_t;
-constexpr auto DEBLAS_SIDE_LEFT = deblasSideMode_t::CUBLAS_SIDE_LEFT;
-constexpr auto DEBLAS_SIDE_RIGHT = deblasSideMode_t::CUBLAS_SIDE_RIGHT;
-using deblasFillMode_t = cublasFillMode_t;
-constexpr auto DEBLAS_FILL_MODE_LOWER = deblasFillMode_t::CUBLAS_FILL_MODE_LOWER;
-constexpr auto DEBLAS_FILL_MODE_UPPER = deblasFillMode_t::CUBLAS_FILL_MODE_UPPER;
-using deblasDiagType_t = cublasDiagType_t;
-constexpr auto DEBLAS_DIAG_UNIT = deblasDiagType_t::CUBLAS_DIAG_UNIT;
-constexpr auto DEBLAS_DIAG_NON_UNIT = deblasDiagType_t::CUBLAS_DIAG_NON_UNIT;
-using deblasOperation_t = cublasOperation_t;
-constexpr auto DEBLAS_OP_N = deblasOperation_t::CUBLAS_OP_N;
-constexpr auto DEBLAS_OP_T = deblasOperation_t::CUBLAS_OP_T;
-constexpr auto DEBLAS_OP_C = deblasOperation_t::CUBLAS_OP_C;
-#elif defined(DDLA_USE_HIP) || defined(DDLA_VENDOR_HIP)
-#include <hipblas/hipblas.h>
-#include <hipsolver/hipsolver.h>
-#include <hiprand/hiprand.h>
-using deblasStatus_t = hipblasStatus_t;
-constexpr auto DEBLAS_STATUS_SUCCESS = deblasStatus_t::HIPBLAS_STATUS_SUCCESS;
-using deblasHandle_t = hipblasHandle_t;
-using desolverHandle_t = hipsolverHandle_t;
-using desolverStatus_t = hipsolverStatus_t;
-constexpr auto DESOLVER_STATUS_SUCCESS = desolverStatus_t::HIPSOLVER_STATUS_SUCCESS;
-#define desolverGetStream hipsolverGetStream
-using derandGenerator_t = hiprandGenerator_t;
-using derandStatus_t = hiprandStatus_t;
-constexpr auto DERAND_STATUS_SUCCESS = derandStatus_t::HIPRAND_STATUS_SUCCESS;
-#define derandCreateGenerator hiprandCreateGenerator
-#define derandSetPseudoRandomGeneratorSeed hiprandSetPseudoRandomGeneratorSeed
-#define derandGenerateUniform hiprandGenerateUniform
-#define derandGenerateUniformDouble hiprandGenerateUniformDouble
-#define derandDestroyGenerator hiprandDestroyGenerator
-using derandRngType = hiprandRngType;
-constexpr auto DERAND_RNG_PSEUDO_DEFAULT = derandRngType::HIPRAND_RNG_PSEUDO_DEFAULT;
-using deblasSideMode_t = hipblasSideMode_t;
-constexpr auto DEBLAS_SIDE_LEFT = deblasSideMode_t::HIPBLAS_SIDE_LEFT;
-constexpr auto DEBLAS_SIDE_RIGHT = deblasSideMode_t::HIPBLAS_SIDE_RIGHT;
-using deblasFillMode_t = hipblasFillMode_t;
-constexpr auto DEBLAS_FILL_MODE_LOWER = deblasFillMode_t::HIPBLAS_FILL_MODE_LOWER;
-constexpr auto DEBLAS_FILL_MODE_UPPER = deblasFillMode_t::HIPBLAS_FILL_MODE_UPPER;
-using deblasDiagType_t = hipblasDiagType_t;
-constexpr auto DEBLAS_DIAG_UNIT = deblasDiagType_t::HIPBLAS_DIAG_UNIT;
-constexpr auto DEBLAS_DIAG_NON_UNIT = hipblasDiagType_t::HIPBLAS_DIAG_NON_UNIT;
-using deblasOperation_t = hipblasOperation_t;
-constexpr auto DEBLAS_OP_N = deblasOperation_t::HIPBLAS_OP_N;
-constexpr auto DEBLAS_OP_T = deblasOperation_t::HIPBLAS_OP_T;
-constexpr auto DEBLAS_OP_C = deblasOperation_t::HIPBLAS_OP_C;
-#elif defined(DDLA_USE_CPU) || defined(DDLA_VENDOR_CPU)
-using deblasStatus_t = int;
-constexpr auto DEBLAS_STATUS_SUCCESS = 0;
-using deblasHandle_t = void*;
-using desolverHandle_t = void*;
-using desolverStatus_t = int;
-constexpr auto DESOLVER_STATUS_SUCCESS = 0;
-#define desolverGetStream(solverH, stream) ((void)0)
-using derandGenerator_t = void*;
-using derandStatus_t = int;
-constexpr auto DERAND_STATUS_SUCCESS = 0;
-#define derandCreateGenerator(gen, rng) ((void)0)
-#define derandSetPseudoRandomGeneratorSeed(gen, seed) ((void)0)
-#define derandGenerateUniform(gen, data, n) ((void)0)
-#define derandGenerateUniformDouble(gen, data, n) ((void)0)
-#define derandDestroyGenerator(gen) ((void)0)
-using derandRngType = int;
-constexpr auto DERAND_RNG_PSEUDO_DEFAULT = 0;
-using deblasSideMode_t = int;
-constexpr auto DEBLAS_SIDE_LEFT = 0;
-constexpr auto DEBLAS_SIDE_RIGHT = 1;
-using deblasFillMode_t = int;
-constexpr auto DEBLAS_FILL_MODE_LOWER = 0;
-constexpr auto DEBLAS_FILL_MODE_UPPER = 1;
-using deblasDiagType_t = int;
-constexpr auto DEBLAS_DIAG_UNIT = 0;
-constexpr auto DEBLAS_DIAG_NON_UNIT = 1;
-using deblasOperation_t = char;
-constexpr auto DEBLAS_OP_N = 'N';
-constexpr auto DEBLAS_OP_T = 'T';
-constexpr auto DEBLAS_OP_C = 'C';
-#endif
-#endif // DDLA_DEBLAS_TYPES_DEFINED
-
 namespace ddla{
 
 /// Check a ddlaStatus_t returned by a public API function.
@@ -376,7 +263,7 @@ void pgetrf_nopiv(const int& m, const int& n, T* d_A, const DdlaDesc& array_desc
  *
  * Uses a right-looking block algorithm with block size nb=32:
  *   1. Panel factorization via custom getf2_nopiv_kernel.
- *   2. Solve for U panel via deblasTrsm.
+ *   2. Solve for U panel via a triangular solve (trsm).
  *   3. Update trailing submatrix via gemm.
  *
  * @tparam T   Scalar type.
@@ -673,8 +560,8 @@ void pdam(const T1& alpha, T2* d_A, const DdlaDesc& array_descA, const int& n = 
 /**
  * @brief Distributed Cholesky factorization.
  *
- * Factors a Hermitian positive-definite distributed matrix using GPU solver
- * libraries (cusolverDn / hipsolver).  Algorithm: factor diagonal block
+ * Factors a Hermitian positive-definite distributed matrix using the GPU
+ * solver libraries.  Algorithm: factor diagonal block
  * (potrf), broadcast factor, solve off-diagonal (trsm), update trailing
  * submatrix via gemm/herk.  With uplo='L', computes A = L * L^H.
  * With uplo='U', computes A = U^H * U.
@@ -863,7 +750,7 @@ void copy2D(const DdlaHandle_t& handle, T* dst, int dst_ld,
 
 template <typename T>
 void gemmVbatched(
-    deblasOperation_t transA, deblasOperation_t transB,
+    char transA, char transB,
     int* d_m, int* d_n, int* d_k,
     T alpha,
     const T* const* d_A_array, int* d_lda,
@@ -875,14 +762,14 @@ void gemmVbatched(
 
 template <typename T>
 void gemmVbatched2s(
-    deblasOperation_t transA_0, deblasOperation_t transB_0,
+    char transA_0, char transB_0,
     int* d_m_0, int* d_n_0, int* d_k_0,
     T alpha_0,
     const T* const* d_A_array_0, int* d_lda_0,
     const T* const* d_B_array_0, int* d_ldb_0,
     T beta_0,
     T** d_C_array_0, int* d_ldc_0,
-    deblasOperation_t transA_1, deblasOperation_t transB_1,
+    char transA_1, char transB_1,
     int* d_m_1, int* d_n_1, int* d_k_1,
     T alpha_1,
     const T* const* d_AB_array_1,
@@ -892,6 +779,7 @@ void gemmVbatched2s(
     bool C0_left,
     int batch_count,
     const int* segment_sizes,
+    int segment_count,
     const DdlaHandle_t& handle);
 
 template <typename T>

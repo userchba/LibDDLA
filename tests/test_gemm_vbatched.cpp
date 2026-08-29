@@ -51,18 +51,18 @@ T conjugate_if_needed(T input, bool conjugate)
 template <typename T>
 T matrix_element(
     const std::vector<T>& matrix, int leading_dimension,
-    int row, int column, ddla::deblasOperation_t operation)
+    int row, int column, char operation)
 {
-    if (operation == ddla::DEBLAS_OP_N)
+    if (operation == 'N')
         return matrix[row + column * leading_dimension];
     return conjugate_if_needed(
         matrix[column + row * leading_dimension],
-        operation == ddla::DEBLAS_OP_C);
+        operation == 'C');
 }
 
 template <typename T>
 void reference_gemm(
-    ddla::deblasOperation_t transA, ddla::deblasOperation_t transB,
+    char transA, char transB,
     int m, int n, int k, T alpha,
     const std::vector<T>& A, int lda,
     const std::vector<T>& B, int ldb,
@@ -216,14 +216,14 @@ class DeviceMatrixBatch
     T** device_pointers_ = nullptr;
 };
 
-int storage_rows(ddla::deblasOperation_t operation, int m, int k)
+int storage_rows(char operation, int m, int k)
 {
-    return operation == ddla::DEBLAS_OP_N ? m : k;
+    return operation == 'N' ? m : k;
 }
 
-int storage_columns(ddla::deblasOperation_t operation, int m, int k)
+int storage_columns(char operation, int m, int k)
 {
-    return operation == ddla::DEBLAS_OP_N ? k : m;
+    return operation == 'N' ? k : m;
 }
 
 template <typename T>
@@ -238,7 +238,7 @@ std::vector<T> make_matrix(int leading_dimension, int columns, int seed)
 
 template <typename T>
 double run_standard_case(
-    ddla::deblasOperation_t transA, ddla::deblasOperation_t transB,
+    char transA, char transB,
     const ddla::DdlaHandle_t& handle)
 {
     const std::vector<int> m{2, 4, 3};
@@ -364,14 +364,14 @@ double run_two_stage_case(bool temporary_on_left, const ddla::DdlaHandle_t& hand
         std::vector<T> temporary(
             static_cast<std::size_t>(ldc0[batch]) * n0[batch], T{});
         reference_gemm(
-            ddla::DEBLAS_OP_N, ddla::DEBLAS_OP_N,
+            'N', 'N',
             m0[batch], n0[batch], k0[batch], alpha0,
             A0[batch], lda0[batch], B0[batch], ldb0[batch],
             T{}, temporary, ldc0[batch]);
         if (temporary_on_left)
         {
             reference_gemm(
-                ddla::DEBLAS_OP_N, ddla::DEBLAS_OP_N,
+                'N', 'N',
                 m1[batch], n1[batch], k1[batch], alpha1,
                 temporary, lda1[batch], AB1[batch], ldb1[batch],
                 beta1, expected[batch], ldc1[batch]);
@@ -379,7 +379,7 @@ double run_two_stage_case(bool temporary_on_left, const ddla::DdlaHandle_t& hand
         else
         {
             reference_gemm(
-                ddla::DEBLAS_OP_N, ddla::DEBLAS_OP_N,
+                'N', 'N',
                 m1[batch], n1[batch], k1[batch], alpha1,
                 AB1[batch], lda1[batch], temporary, ldb1[batch],
                 beta1, expected[batch], ldc1[batch]);
@@ -402,12 +402,12 @@ double run_two_stage_case(bool temporary_on_left, const ddla::DdlaHandle_t& hand
 
     auto invoke = [&](T beta0, const std::vector<int>& test_segments) {
         ddla::gemmVbatched2s(
-            ddla::DEBLAS_OP_N, ddla::DEBLAS_OP_N,
+            'N', 'N',
             d_m0.data(), d_n0.data(), d_k0.data(),
             alpha0, const_cast<const T* const*>(d_A0.data()), d_lda0.data(),
             const_cast<const T* const*>(d_B0.data()), d_ldb0.data(),
             beta0, d_tmp.data(), d_ldc0.data(),
-            ddla::DEBLAS_OP_N, ddla::DEBLAS_OP_N,
+            'N', 'N',
             d_m1.data(), d_n1.data(), d_k1.data(),
             alpha1, const_cast<const T* const*>(d_AB1.data()),
             d_lda1.data(), d_ldb1.data(), beta1,
@@ -472,15 +472,15 @@ double run_two_stage_case(bool temporary_on_left, const ddla::DdlaHandle_t& hand
 template <typename T>
 double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
 {
-    const std::vector<std::pair<ddla::deblasOperation_t, ddla::deblasOperation_t>>
+    const std::vector<std::pair<char, char>>
         operations{
-            {ddla::DEBLAS_OP_N, ddla::DEBLAS_OP_N},
-            {ddla::DEBLAS_OP_N, ddla::DEBLAS_OP_T},
-            {ddla::DEBLAS_OP_T, ddla::DEBLAS_OP_N},
-            {ddla::DEBLAS_OP_T, ddla::DEBLAS_OP_T},
-            {ddla::DEBLAS_OP_C, ddla::DEBLAS_OP_N},
-            {ddla::DEBLAS_OP_N, ddla::DEBLAS_OP_C},
-            {ddla::DEBLAS_OP_C, ddla::DEBLAS_OP_C}};
+            {'N', 'N'},
+            {'N', 'T'},
+            {'T', 'N'},
+            {'T', 'T'},
+            {'C', 'N'},
+            {'N', 'C'},
+            {'C', 'C'}};
 
     const char* type_name = [] {
         if constexpr (std::is_same_v<T, float>)
@@ -516,14 +516,14 @@ double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
     ++case_count;
 
     ddla::gemmVbatched<T>(
-        ddla::DEBLAS_OP_N, ddla::DEBLAS_OP_N,
+        'N', 'N',
         nullptr, nullptr, nullptr, T{}, nullptr, nullptr,
         nullptr, nullptr, T{}, nullptr, nullptr, 0, nullptr);
     ddla::gemmVbatched2s<T>(
-        ddla::DEBLAS_OP_N, ddla::DEBLAS_OP_N,
+        'N', 'N',
         nullptr, nullptr, nullptr, T{}, nullptr, nullptr,
         nullptr, nullptr, T{}, nullptr, nullptr,
-        ddla::DEBLAS_OP_N, ddla::DEBLAS_OP_N,
+        'N', 'N',
         nullptr, nullptr, nullptr, T{}, nullptr, nullptr, nullptr,
         T{}, nullptr, nullptr, false, 0, nullptr, 0, nullptr);
     ++case_count;

@@ -6,9 +6,4 @@
 #define DDLA_HAS_CPU @DDLA_HAS_CPU@
 #define DDLA_HAS_GPU @DDLA_HAS_GPU@
 
-/* Vendor selection for the public headers. Exactly one is defined. */
-#cmakedefine DDLA_VENDOR_CUDA
-#cmakedefine DDLA_VENDOR_HIP
-#cmakedefine DDLA_VENDOR_CPU
-
 #endif // DDLA_CONFIG_H

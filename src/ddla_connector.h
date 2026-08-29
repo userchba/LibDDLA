@@ -128,16 +128,11 @@ struct RuntimeTraits<DdlaBackend::GPU> {
 
 // ---------------------------------------------------------------------------
 // deblas* / desolver* / derand* families: vendor BLAS/solver/RNG handle and
-// status types, unchanged by this refactor (already correctly namespaced,
-// not part of the runtime-abstraction rework).
-//
-// Shared with the public ddla.h via the DDLA_DEBLAS_TYPES_DEFINED guard:
-// whichever header is included first defines the block (identical content),
-// the other skips it.
+// status types. This is the sole definition site: the public <ddla/ddla.h>
+// stays vendor-free, so these names exist only inside namespace ddla and
+// are visible only in TUs that include this header.
 // ---------------------------------------------------------------------------
-#ifndef DDLA_DEBLAS_TYPES_DEFINED
-#define DDLA_DEBLAS_TYPES_DEFINED
-#if defined(DDLA_USE_CUDA) || defined(DDLA_VENDOR_CUDA)
+#if defined(DDLA_USE_CUDA)
 using deblasStatus_t = cublasStatus_t;
 constexpr auto DEBLAS_STATUS_SUCCESS = deblasStatus_t::CUBLAS_STATUS_SUCCESS;
 using deblasHandle_t = cublasHandle_t;
@@ -170,7 +165,7 @@ constexpr auto DEBLAS_OP_T = deblasOperation_t::CUBLAS_OP_T;
 constexpr auto DEBLAS_OP_C = deblasOperation_t::CUBLAS_OP_C;
 
 #endif
-#if defined(DDLA_USE_HIP) || defined(DDLA_VENDOR_HIP)
+#if defined(DDLA_USE_HIP)
 using deblasStatus_t = hipblasStatus_t;
 constexpr auto DEBLAS_STATUS_SUCCESS = deblasStatus_t::HIPBLAS_STATUS_SUCCESS;
 using deblasHandle_t = hipblasHandle_t;
@@ -202,7 +197,7 @@ constexpr auto DEBLAS_OP_N = deblasOperation_t::HIPBLAS_OP_N;
 constexpr auto DEBLAS_OP_T = deblasOperation_t::HIPBLAS_OP_T;
 constexpr auto DEBLAS_OP_C = deblasOperation_t::HIPBLAS_OP_C;
 #endif
-#if defined(DDLA_USE_CPU) || defined(DDLA_VENDOR_CPU)
+#if defined(DDLA_USE_CPU)
 using deblasStatus_t = int;
 constexpr auto DEBLAS_STATUS_SUCCESS = 0;
 using deblasHandle_t = void*;
@@ -234,7 +229,6 @@ constexpr auto DEBLAS_OP_N = 'N';
 constexpr auto DEBLAS_OP_T = 'T';
 constexpr auto DEBLAS_OP_C = 'C';
 #endif
-#endif // DDLA_DEBLAS_TYPES_DEFINED
 
 // ---------------------------------------------------------------------------
 // Bare runtime type/constant names, resolved once per TU via RuntimeTraits
