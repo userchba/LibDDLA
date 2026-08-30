@@ -69,7 +69,7 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
-          apt-get install -y libopenmpi-dev openmpi-bin cmake hipblas-dev hipsolver-dev rocrand-dev rccl
+          apt-get install -y libopenmpi-dev openmpi-bin cmake hipblas-dev hipsolver-dev rocrand-dev rccl rocthrust-dev hipcub-dev
 
       - name: Configure (HIP)
         run: >
