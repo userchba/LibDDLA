@@ -146,6 +146,15 @@ if(DDLA_USE_DEBUG)
 endif()
 
 if(DDLA_USE_HIP)
+    # CXX-language TUs (gemm.cpp, scal.cpp, the tests, ...) include vendor HIP
+    # headers through ddla_connector.h. Only the LANGUAGE HIP sources get ROCm
+    # include paths from hipcc itself, so point every other compile at
+    # ${ROCM_PATH}/include explicitly (the df_dcu module env does this via
+    # CPATH; the GitHub rocm container does not). PUBLIC: test targets also
+    # include ddla_connector.h from their own sources.
+    target_include_directories(ddla_lib PUBLIC
+        "${ROCM_PATH}/include"
+    )
     target_link_directories(ddla_lib PUBLIC
         "${ROCM_PATH}/lib"
         "${ROCM_PATH}/lib64"
