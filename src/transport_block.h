@@ -1,8 +1,10 @@
 #ifndef TRANSPORT_BLOCK_H
 #define TRANSPORT_BLOCK_H
 
-#include <ddla/ddla_desc.h>
-#include <ddla/ddla_handle_t.h>   // DdlaBackend, default_backend_v
+// Public <ddla/ddla.h> first: owns DdlaDesc, DdlaBackend,
+// default_backend_v, and every public default argument -- hipcc/clang
+// rejects redeclarations that introduce defaults later.
+#include <ddla/ddla.h>
 #include <complex>
 
 namespace ddla{

@@ -1,6 +1,10 @@
 #ifndef IAMAX_H
 #define IAMAX_H
 
+// Public <ddla/ddla.h> must be included before any redeclaration: it
+// owns the public default arguments (Backend = default_backend_v), and
+// hipcc/clang rejects redeclarations that introduce defaults later.
+#include <ddla/ddla.h>
 #include "ddla_connector.h"
 #include <ddla/ddla_handle_t.h>
 
