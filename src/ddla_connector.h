@@ -196,6 +196,21 @@ using deblasOperation_t = hipblasOperation_t;
 constexpr auto DEBLAS_OP_N = deblasOperation_t::HIPBLAS_OP_N;
 constexpr auto DEBLAS_OP_T = deblasOperation_t::HIPBLAS_OP_T;
 constexpr auto DEBLAS_OP_C = deblasOperation_t::HIPBLAS_OP_C;
+
+// hipsolverFillMode_t is a distinct enum from hipblasFillMode_t on current
+// ROCm (older hipsolver and DTK simply alias it and expose the
+// HIPSOLVER_FILL_MODE_* names as macros). Mapping through the named
+// constants of each family is correct under both layouts and survives any
+// future enumerator renumbering, so solver wrappers can keep accepting
+// deblasFillMode_t.
+inline hipsolverFillMode_t desolverFillMode(deblasFillMode_t uplo)
+{
+    if (uplo == DEBLAS_FILL_MODE_LOWER)
+        return HIPSOLVER_FILL_MODE_LOWER;
+    if (uplo == DEBLAS_FILL_MODE_UPPER)
+        return HIPSOLVER_FILL_MODE_UPPER;
+    throw std::runtime_error("desolverFillMode: invalid fill mode");
+}
 #endif
 #if defined(DDLA_USE_CPU)
 using deblasStatus_t = int;
