@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# KSSG validation job: configure + build + ctest for the HIP GPU suite
+# (4 ranks / 4 DCUs in one allocation; QOS requires dcu>=1 anyway). CPU
+# validation is owned by the hpc3 workflow (.ci/hpc3/) and is NOT run here.
+# No python3 exists on KSSG, so all logic here is plain bash; result JSON +
+# JUnit XML are consumed on the GitHub runner (see kssg-validation.yml).
+#
+# Rendered by submit.sh from validate.sbatch.in.
+#SBATCH --job-name=libddla-kssg
+#SBATCH --partition=@PARTITION@
+#SBATCH --nodes=1
+#SBATCH --ntasks=4
+#SBATCH --cpus-per-task=@CPUS@
+#SBATCH --gres=dcu:@DCUS@
+# KSSG caps DefMemPerCPU at ~4 GB/CPU: --mem must stay <= 4G × cpus-per-task.
+#SBATCH --mem=@MEM@
+#SBATCH --time=@TIME@
+#SBATCH --output=@RESULTS@/kssg-slurm-%j.log
+#SBATCH --export=NIL
+
+set -euo pipefail
+export HOME=@HOME@
+export USER=${SLURM_JOB_USER:?}
+export LOGNAME=$USER
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export TMPDIR=@BUILD_ROOT@/tmp
+mkdir -p "$TMPDIR"
+
+echo "job $SLURM_JOB_ID on $(hostname) dcus=$(rocm-smi -l 2>/dev/null | grep -c 'DCU\|GPU' || echo '?')"
+source @CONTROL@/setup_gpu.sh
+module -t list 2>&1 | tee @RESULTS@/gpu-modules.txt
+command -v hipcc rocm-smi 2>/dev/null | tee @RESULTS@/gpu-tools.txt || true
+
+BUILD_GPU=@BUILD_GPU@
+# One rank per DCU (rank i -> DCU i), like the hpc3 gpurank_wrapper but via
+# the DTK runtime's device enumeration: 4 ranks on 4 DCUs.
+cmake -S @SOURCE@ -B $BUILD_GPU \
+    -DDDLA_USE_HIP=ON \
+    -DDDLA_USE_CCL=ON \
+    -DBUILD_TESTS=ON \
+    -DCMAKE_CXX_COMPILER=g++ \
+    -DCMAKE_HIP_ARCHITECTURES=gfx906 \
+    -DROCM_PATH=$ROCM_PATH \
+    -Damd_comgr_DIR=$ROCM_PATH/lib64/cmake/amd_comgr \
+    -DCMAKE_CXX_FLAGS="-I$NCCL_INCLUDE_DIR" \
+    -DCMAKE_HIP_FLAGS="-I$NCCL_INCLUDE_DIR" \
+    -DCMAKE_BUILD_TYPE=Release \
+    2>&1 | tee @RESULTS@/gpu-configure.log
+cmake --build $BUILD_GPU --parallel 16 2>&1 | tee @RESULTS@/gpu-build.log
+
+# HIP GPU tests: 4 MPI ranks, one DCU per rank. test_ptran_mpi needs 6 ranks
+# (excluded); test_getrf_nopiv_mpi's n=15000 case is pathologically slow on
+# gfx906 (excluded; single-GPU test_getrf_nopiv stays in).
+set +e
+ctest --test-dir $BUILD_GPU -L gpu \
+    -E "test_ptran_mpi|test_getrf_nopiv_mpi" \
+    --output-on-failure -j1 \
+    --output-junit @RESULTS@/gpu-ctest.xml 2>&1 | tee @RESULTS@/gpu-ctest.log
+gpu_rc=${PIPESTATUS[0]}
+set -e
+echo "gpu stage rc=$gpu_rc"
+
+# Result JSON for the GitHub side (pure bash; JUnit XML is parsed there).
+# grep -c prints one "0" per input FILE when nothing matches (multi-line ->
+# arithmetic error), so count matching lines with awk instead.
+stage=gpu
+junit=@RESULTS@/${stage}-ctest.xml
+if [ -s "$junit" ]; then
+    total=$(awk '/<testcase /{n++} END{print n+0}' "$junit")
+    fails=$(awk '/<failure/{n++} /<error/{n++} END{print n+0}' "$junit")
+else
+    total=0; fails=0
+fi
+passed=$((total - fails))
+printf '{"kind": "%s", "total": %d, "passed": %d, "failed": %d, "infrastructure": 0}\n' \
+    "$stage" "$total" "$passed" "$fails" > @RESULTS@/result_$stage.json
+
+[ "$gpu_rc" -eq 0 ]

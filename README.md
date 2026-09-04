@@ -379,6 +379,7 @@ LibDDLA/
 ├── tests/                Integration tests (MPI executables)
 ├── benchmarks/           Benchmark data and supporting artifacts
 ├── install_scripts/      Backend-specific build/install scripts
+├── .ci/                  Cluster CI control files (hpc3: CUDA, kssg: HIP/DCU)
 ├── cmake/                CMake helper modules
 ├── CMakeLists.txt        Top-level build
 └── LICENSE               LGPL-3.0 license text

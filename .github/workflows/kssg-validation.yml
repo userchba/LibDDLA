@@ -1,0 +1,170 @@
+name: KSSG validation
+
+on:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: "Commit or branch to test (defaults to develop)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: libddla-kssg-validation-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  kssg:
+    name: Build and test on KSSG (40 HIP cases)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    env:
+      REMOTE_HOST: cancon.hpccube.com
+      REMOTE_PORT: "65023"
+      REMOTE_USER: ac5g1n561p
+      REMOTE_ROOT: ~/libddla_kssg_ci
+    steps:
+      - name: Checkout requested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || 'develop' }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout trusted CI control files
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted-control
+          sparse-checkout: .ci/kssg
+          persist-credentials: false
+
+      - name: Configure SSH
+        env:
+          REMOTE_SSH_PRIVATE_KEY: ${{ secrets.KSSG_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/remote-ssh"
+          mkdir -m 700 "$root"
+          printf '%s\n' "$REMOTE_SSH_PRIVATE_KEY" > "$root/id_ed25519"
+          chmod 600 "$root/id_ed25519"
+          cp trusted-control/.ci/kssg/known_hosts "$root/known_hosts"
+          chmod 600 "$root/known_hosts"
+          cat > "$root/config" <<EOF
+          Host kssg-ci
+              HostName $REMOTE_HOST
+              Port $REMOTE_PORT
+              User $REMOTE_USER
+              IdentityFile $root/id_ed25519
+              IdentitiesOnly yes
+              StrictHostKeyChecking yes
+              UserKnownHostsFile $root/known_hosts
+              ForwardAgent no
+              ServerAliveInterval 30
+              ServerAliveCountMax 6
+          EOF
+          chmod 600 "$root/config"
+          ssh-keygen -y -f "$root/id_ed25519" >/dev/null
+          echo "REMOTE_SSH_CONFIG=$root/config" >> "$GITHUB_ENV"
+
+      - name: Submit remote build and test
+        id: remote
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          remote_root=$(ssh -F "$REMOTE_SSH_CONFIG" kssg-ci 'printf "%s/libddla_kssg_ci" "$HOME"')
+          run_root="$remote_root/runs/github/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "REMOTE_RUN_ROOT=$run_root" >> "$GITHUB_ENV"
+          ssh -F "$REMOTE_SSH_CONFIG" kssg-ci "mkdir -p '$run_root/source' '$run_root/control'"
+          tar --exclude=.git -C source -czf - . \
+            | ssh -F "$REMOTE_SSH_CONFIG" kssg-ci "tar -xzf - -C '$run_root/source'"
+          scp -F "$REMOTE_SSH_CONFIG" \
+            trusted-control/.ci/kssg/config.ini \
+            trusted-control/.ci/kssg/setup_gpu.sh \
+            trusted-control/.ci/kssg/validate.sbatch.in \
+            trusted-control/.ci/kssg/submit.sh \
+            "kssg-ci:$run_root/control/"
+          ssh -F "$REMOTE_SSH_CONFIG" kssg-ci \
+            "chmod 700 '$run_root/control/'*.sh; '$run_root/control/submit.sh' '$run_root'"
+
+      - name: Download raw results
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/libddla-kssg-results"
+          scp -r -F "$REMOTE_SSH_CONFIG" \
+            "kssg-ci:$REMOTE_RUN_ROOT/results" "$RUNNER_TEMP/libddla-kssg-results/" || true
+
+      - name: Publish HIP table
+        if: always()
+        run: |
+          python3 - "$RUNNER_TEMP/libddla-kssg-results/results" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          results = Path(sys.argv[1])
+
+          def stage_table(kind, heading):
+              junit = results / f"{kind}-ctest.xml"
+              if not junit.is_file():
+                  return f"## {heading}\n\nNo JUnit result produced (see the Slurm logs in the artifact).\n"
+              rows = []
+              for case in ET.parse(str(junit)).getroot().iter("testcase"):
+                  state = "PASS"
+                  if case.find("failure") is not None or case.find("error") is not None:
+                      state = "FAIL"
+                  elif case.find("skipped") is not None:
+                      state = "INFRA"
+                  rows.append((case.attrib.get("name", ""), state,
+                               "%.2fs" % float(case.attrib.get("time", "0"))))
+              job = ""
+              jobs = results / "jobs.txt"
+              if jobs.is_file():
+                  for line in jobs.read_text().splitlines():
+                      if line.startswith("job="):
+                          job = line.split("=", 1)[1]
+              passed = sum(1 for _, s, _ in rows if s == "PASS")
+              lines = [f"## {heading}", "",
+                       f"**{passed}/{len(rows)} passed**; "
+                       f"{len(rows) - passed} failed/infra. Slurm job `{job}`.", "",
+                       "| # | Test case | State | Duration |",
+                       "|---:|---|---|---:|"]
+              for i, (name, state, dur) in enumerate(rows, 1):
+                  lines.append(f"| {i} | `{name}` | {state} | {dur} |")
+              return "\n".join(lines) + "\n"
+
+          summary = stage_table("gpu", "LibDDLA KSSG HIP (DCU) validation")
+          results.joinpath("summary.md").write_text(summary)
+          print(summary)
+          PY
+          cat "$RUNNER_TEMP/libddla-kssg-results/results/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail when summary is missing (remote unreachable)
+        if: always()
+        run: |
+          f="$RUNNER_TEMP/libddla-kssg-results/results/summary.md"
+          if [[ ! -s "$f" ]]; then
+            echo "# LibDDLA KSSG validation" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Remote build/test did not produce a result report. See the Slurm logs in the uploaded artifact." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Upload raw results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: libddla-kssg-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/libddla-kssg-results/results
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Fail when remote validation failed
+        if: steps.remote.outcome == 'failure'
+        run: exit 1
