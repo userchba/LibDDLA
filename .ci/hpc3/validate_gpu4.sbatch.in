@@ -51,10 +51,10 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3
 set +e
 ctest --test-dir @BUILD_GPU@ --output-on-failure -j1 \
     -E "^test_ptran_mpi$" \
-    --output-junit @RESULTS@/gpu-ctest.xml 2>&1 | tee @RESULTS@/gpu-ctest.log
+    --output-junit @RESULTS@/gpu4-ctest.xml 2>&1 | tee @RESULTS@/gpu4-ctest.log
 rc=${PIPESTATUS[0]}
 set -e
 
-python3 @CONTROL@/report.py --kind gpu --junit @RESULTS@/gpu-ctest.xml \
+python3 @CONTROL@/report.py --kind gpu4 --junit @RESULTS@/gpu4-ctest.xml \
     --results @RESULTS@ --job-id "$SLURM_JOB_ID"
 exit "$rc"

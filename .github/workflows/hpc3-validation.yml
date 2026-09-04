@@ -112,7 +112,7 @@ jobs:
       - name: Publish GPU tables
         if: always()
         run: |
-          f="$RUNNER_TEMP/libddla-hpc3-results/results/summary_gpu.md"
+          f="$RUNNER_TEMP/libddla-hpc3-results/results/summary_gpu4.md"
           if [[ -s "$f" ]]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; fi
           f="$RUNNER_TEMP/libddla-hpc3-results/results/summary_gpu6.md"
           if [[ -s "$f" ]]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; fi

@@ -71,7 +71,7 @@ def main():
         "cases": rows,
     }, indent=2) + "\n", encoding="utf-8")
 
-    label = {"cpu": "CPU", "gpu": "GPU", "gpu6": "GPU (6-rank)"}.get(args.kind, "GPU")
+    label = {"cpu": "CPU", "gpu": "GPU", "gpu4": "GPU (4-rank)", "gpu6": "GPU (6-rank)"}.get(args.kind, "GPU")
     lines = [
         "# LibDDLA HPC3 %s validation" % label,
         "",
