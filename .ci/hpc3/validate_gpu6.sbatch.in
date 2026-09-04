@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# GPU validation (6-rank suite): run test_ptran — the one CTest entry
+# hardcoded to 6 MPI ranks — on 6 V100s, one rank per GPU. The 4-rank
+# remainder of the suite runs in validate_gpu4.sbatch.in. The build is
+# reused from the 4-GPU job's tree when that job finished first; this job
+# configures/builds on its own otherwise (idempotent).
+#SBATCH --job-name=libddla-hpc3-gpu6
+#SBATCH --partition=@GPU6_PARTITION@
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=@GPU6_CPUS@
+#SBATCH --gres=gpu:@GPU6_GPUS@
+#SBATCH --mem=@GPU6_MEM@
+#SBATCH --time=@GPU6_TIME@
+#SBATCH --output=@RESULTS@/gpu6-slurm-%j.log
+#SBATCH --export=NIL
+
+set -euo pipefail
+export HOME=@HOME@
+export USER=${SLURM_JOB_USER:?}
+export LOGNAME=$USER
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export TMPDIR=@BUILD_GPU@/tmp
+mkdir -p "$TMPDIR"
+source @CONTROL@/setup_gpu.sh
+
+echo "job $SLURM_JOB_ID on $(hostname) gpus=$(nvidia-smi -L | wc -l)"
+module -t list 2>&1 | tee @RESULTS@/gpu6-modules.txt
+command -v cmake mpicxx mpirun nvcc | tee @RESULTS@/gpu6-tools.txt
+
+MPIWRAP=@CONTROL@/gpurank_wrapper.sh
+chmod +x "$MPIWRAP"
+
+# Independent build tree (the two GPU jobs run in parallel).
+cmake -S @SOURCE@ -B @BUILD_GPU6@ \
+    -DDDLA_USE_CUDA=ON \
+    -DDDLA_USE_CCL=ON \
+    -DBUILD_TESTS=ON \
+    -DCMAKE_CUDA_ARCHITECTURES=70 \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CXX_COMPILER=g++ \
+    -DMPIEXEC_EXECUTABLE="$MPIWRAP" \
+    -DMPIEXEC_PREFLAGS=--oversubscribe \
+    2>&1 | tee @RESULTS@/gpu6-configure.log
+cmake --build @BUILD_GPU6@ --parallel 16 --target test_ptran 2>&1 | tee @RESULTS@/gpu6-build.log
+
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5
+set +e
+ctest --test-dir @BUILD_GPU6@ --output-on-failure -j1 \
+    -R "^test_ptran_mpi$" \
+    --output-junit @RESULTS@/gpu-ctest-ptran.xml 2>&1 | tee @RESULTS@/gpu6-ctest.log
+rc=${PIPESTATUS[0]}
+set -e
+
+python3 @CONTROL@/report.py --kind gpu6 --junit @RESULTS@/gpu-ctest-ptran.xml \
+    --results @RESULTS@ --job-id "$SLURM_JOB_ID"
+exit "$rc"

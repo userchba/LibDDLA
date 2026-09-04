@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   hpc3:
-    name: Build and test on HPC3 (CPU + 43 GPU cases)
+    name: Build and test on HPC3 (CPU + 43 GPU cases, 2 GPU partitions)
     runs-on: ubuntu-22.04
     timeout-minutes: 360
     env:
@@ -87,7 +87,8 @@ jobs:
             trusted-control/.ci/hpc3/config.ini \
             trusted-control/.ci/hpc3/setup_cpu.sh trusted-control/.ci/hpc3/setup_gpu.sh \
             trusted-control/.ci/hpc3/validate_cpu.sbatch.in \
-            trusted-control/.ci/hpc3/validate_gpu.sbatch.in \
+            trusted-control/.ci/hpc3/validate_gpu4.sbatch.in \
+            trusted-control/.ci/hpc3/validate_gpu6.sbatch.in \
             trusted-control/.ci/hpc3/gpurank_wrapper.sh \
             trusted-control/.ci/hpc3/report.py trusted-control/.ci/hpc3/submit.sh \
             "hpc3-ci:$run_root/control/"
@@ -108,10 +109,12 @@ jobs:
           f="$RUNNER_TEMP/libddla-hpc3-results/results/summary_cpu.md"
           if [[ -s "$f" ]]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; fi
 
-      - name: Publish GPU table
+      - name: Publish GPU tables
         if: always()
         run: |
           f="$RUNNER_TEMP/libddla-hpc3-results/results/summary_gpu.md"
+          if [[ -s "$f" ]]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; fi
+          f="$RUNNER_TEMP/libddla-hpc3-results/results/summary_gpu6.md"
           if [[ -s "$f" ]]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; fi
 
       - name: Upload raw results

@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# GPU validation: configure, build, run the full CTest suite (43 cases) on 8 V100s.
-#SBATCH --job-name=libddla-hpc3-gpu
-#SBATCH --partition=@GPU_PARTITION@
+# GPU validation (4-rank suite): configure, build, and run every CTest
+# entry that registers at DDLA_TEST_NP=4 ranks (plus the two 1-rank
+# potrf_bottom_right cases) on 4 V100s — one rank per GPU. The 6-rank
+# test_ptran runs in a separate 6-GPU job (validate_gpu6.sbatch.in).
+#SBATCH --job-name=libddla-hpc3-gpu4
+#SBATCH --partition=@GPU4_PARTITION@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=@GPU_CPUS@
-#SBATCH --gres=gpu:@GPU_GPUS@
-#SBATCH --mem=@GPU_MEM@
-#SBATCH --time=@GPU_TIME@
-#SBATCH --output=@RESULTS@/gpu-slurm-%j.log
+#SBATCH --cpus-per-task=@GPU4_CPUS@
+#SBATCH --gres=gpu:@GPU4_GPUS@
+#SBATCH --mem=@GPU4_MEM@
+#SBATCH --time=@GPU4_TIME@
+#SBATCH --output=@RESULTS@/gpu4-slurm-%j.log
 #SBATCH --export=NIL
 
 set -euo pipefail
@@ -41,9 +44,13 @@ cmake -S @SOURCE@ -B @BUILD_GPU@ \
     2>&1 | tee @RESULTS@/gpu-configure.log
 cmake --build @BUILD_GPU@ --parallel 16 2>&1 | tee @RESULTS@/gpu-build.log
 
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+# Suite registered at 4 ranks (default DDLA_TEST_NP=4). test_ptran (6
+# ranks) would fail the mpirun slot check here even with oversubscribe, so
+# it is excluded and covered by the 6-GPU job.
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 set +e
 ctest --test-dir @BUILD_GPU@ --output-on-failure -j1 \
+    -E "^test_ptran_mpi$" \
     --output-junit @RESULTS@/gpu-ctest.xml 2>&1 | tee @RESULTS@/gpu-ctest.log
 rc=${PIPESTATUS[0]}
 set -e
