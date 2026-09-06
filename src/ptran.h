@@ -17,16 +17,17 @@ namespace ddla{
  * d_AT = d_A^H (conjugate transpose) when conj == true.  The descriptor
  * descAT must describe the transposed matrix on the same process grid as
  * descA with swapped block sizes and source process indices:
- *   descAT.m()  == descA.n()
- *   descAT.n()  == descA.m()
- *   descAT.mb() == descA.nb()
- *   descAT.nb() == descA.mb()
- *   descAT.irsrc() == descA.icsrc()
- *   descAT.icsrc() == descA.irsrc()
+ *   descAT[DDLA_M_]    == descA[DDLA_N_]
+ *   descAT[DDLA_N_]    == descA[DDLA_M_]
+ *   descAT[DDLA_MB_]   == descA[DDLA_NB_]
+ *   descAT[DDLA_NB_]   == descA[DDLA_MB_]
+ *   descAT[DDLA_RSRC_] == descA[DDLA_CSRC_]
+ *   descAT[DDLA_CSRC_] == descA[DDLA_RSRC_]
  */
 template <typename T>
-void ptran(const T* d_A, const DdlaDesc& descA,
-           T* d_AT, const DdlaDesc& descAT,
+void ptran(const DdlaHandle_t& handle,
+           const T* d_A, const int* descA,
+           T* d_AT, const int* descAT,
            bool conj);
 
 } // namespace ddla

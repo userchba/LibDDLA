@@ -1,4 +1,5 @@
 #include <ddla/ddla.h>
+#include "ddla_desc.h"
 #include <cassert>
 #include <vector>
 #include "ddla_stream_impl.h"
@@ -7,14 +8,16 @@ namespace ddla{
 
 template <typename T>
 void ppotrs(
-    const char& side, const char& uplo, const char& trans,
+    const DdlaHandle_t& handle, const char& side, const char& uplo, const char& trans,
     const int& n, const int& nrhs,
-    T* d_A, const DdlaDesc& array_descA,
-    T* d_B, const DdlaDesc& array_descB,
+    T* d_A, const int* array_descA,
+    T* d_B, const int* array_descB,
     bool is_nega, int location
 )
 {
-    DdlaHandle_t ddla_handle = array_descA.ddla_handle();
+    check_desc(array_descB, handle);
+    check_desc(array_descA, handle);
+    DdlaHandle_t ddla_handle = handle;
     detail::require_gpu_backend(ddla_handle, "ppotrs");
     // A is Hermitian, so op(A) == A for both trans='N' and trans='C'; the
     // solve path is identical.  trans='T' would require conjugating B and is
@@ -24,11 +27,11 @@ void ppotrs(
     assert(uplo == 'L' || uplo == 'U');
     // Leading-block sub-matrix: descriptors may be larger than the logical
     // sub-matrix (anchored at global (0,0)).
-    assert(n <= array_descA.m() && n <= array_descA.n());
+    assert(n <= array_descA[DDLA_M_] && n <= array_descA[DDLA_N_]);
     if(side == 'L')
-        assert(n <= array_descB.m());
+        assert(n <= array_descB[DDLA_M_]);
     else
-        assert(n <= array_descB.n());
+        assert(n <= array_descB[DDLA_N_]);
 
     // Head correction: when ppotrf was called with is_head=true and a
     // location != -1 (and != n), it relocated the head element to the last
@@ -42,10 +45,10 @@ void ppotrs(
     const bool needs_permute = (location != -1 && location != n);
     if(needs_permute){
         if(side == 'L')
-            pswap(nrhs, d_B, location, 1, array_descB, array_descB.m(),
-                        d_B, n,        1, array_descB, array_descB.m());
+            pswap(handle, nrhs, d_B, location, 1, array_descB, array_descB[DDLA_M_],
+                        d_B, n,        1, array_descB, array_descB[DDLA_M_]);
         else
-            pswap(array_descB.m(), d_B, 1, location, array_descB, 1,
+            pswap(handle, array_descB[DDLA_M_], d_B, 1, location, array_descB, 1,
                         d_B, 1, n,        array_descB, 1);
     }
 
@@ -58,23 +61,23 @@ void ppotrs(
     const int b_rows = left ? n : nrhs;
     const int b_cols = left ? nrhs : n;
 
-    ptrtrs(
+    ptrtrs(handle, 
         side, uplo, first_trans, 'N', b_rows, b_cols,
         d_A, array_descA,
         d_B, array_descB
     );
     if(is_nega){
-        int i_loc = array_descA.indx_g2l_r(n - 1);
-        int j_loc = array_descA.indx_g2l_c(n - 1);
+        int i_loc = indx_g2l_r(array_descA, handle, n - 1);
+        int j_loc = indx_g2l_c(array_descA, handle, n - 1);
         if(i_loc >= 0 && j_loc >= 0){
             RUNTIME_CHECK(runtimeStreamSynchronize(ddla_handle->stream));
             T correction;
-            RUNTIME_CHECK(runtimeMemcpy(&correction, d_A + i_loc + j_loc * array_descA.lld(), sizeof(T), runtimeMemcpyDeviceToHost));
+            RUNTIME_CHECK(runtimeMemcpy(&correction, d_A + i_loc + j_loc * array_descA[DDLA_LLD_], sizeof(T), runtimeMemcpyDeviceToHost));
             correction = -correction;
-            RUNTIME_CHECK(runtimeMemcpy(d_A + i_loc + j_loc * array_descA.lld(), &correction, sizeof(T), runtimeMemcpyHostToDevice));
+            RUNTIME_CHECK(runtimeMemcpy(d_A + i_loc + j_loc * array_descA[DDLA_LLD_], &correction, sizeof(T), runtimeMemcpyHostToDevice));
         }
     }
-    ptrtrs(
+    ptrtrs(handle, 
         side, uplo, second_trans, 'N', b_rows, b_cols,
         d_A, array_descA,
         d_B, array_descB
@@ -82,43 +85,43 @@ void ppotrs(
 
     if(needs_permute){
         if(side == 'L')
-            pswap(nrhs, d_B, location, 1, array_descB, array_descB.m(),
-                        d_B, n,        1, array_descB, array_descB.m());
+            pswap(handle, nrhs, d_B, location, 1, array_descB, array_descB[DDLA_M_],
+                        d_B, n,        1, array_descB, array_descB[DDLA_M_]);
         else
-            pswap(array_descB.m(), d_B, 1, location, array_descB, 1,
+            pswap(handle, array_descB[DDLA_M_], d_B, 1, location, array_descB, 1,
                         d_B, 1, n,        array_descB, 1);
     }
 }
 
 template void ppotrs<float>(
-    const char& side, const char& uplo, const char& trans,
+    const DdlaHandle_t&, const char& side, const char& uplo, const char& trans,
     const int& n, const int& nrhs,
-    float* d_A, const DdlaDesc& array_descA,
-    float* d_B, const DdlaDesc& array_descB,
+    float* d_A, const int* array_descA,
+    float* d_B, const int* array_descB,
     bool is_nega, int location
 );
 
 template void ppotrs<double>(
-    const char& side, const char& uplo, const char& trans,
+    const DdlaHandle_t&, const char& side, const char& uplo, const char& trans,
     const int& n, const int& nrhs,
-    double* d_A, const DdlaDesc& array_descA,
-    double* d_B, const DdlaDesc& array_descB,
+    double* d_A, const int* array_descA,
+    double* d_B, const int* array_descB,
     bool is_nega, int location
 );
 
 template void ppotrs<std::complex<double>>(
-    const char& side, const char& uplo, const char& trans,
+    const DdlaHandle_t&, const char& side, const char& uplo, const char& trans,
     const int& n, const int& nrhs,
-    std::complex<double>* d_A, const DdlaDesc& array_descA,
-    std::complex<double>* d_B, const DdlaDesc& array_descB,
+    std::complex<double>* d_A, const int* array_descA,
+    std::complex<double>* d_B, const int* array_descB,
     bool is_nega, int location
 );
 
 template void ppotrs<std::complex<float>>(
-    const char& side, const char& uplo, const char& trans,
+    const DdlaHandle_t&, const char& side, const char& uplo, const char& trans,
     const int& n, const int& nrhs,
-    std::complex<float>* d_A, const DdlaDesc& array_descA,
-    std::complex<float>* d_B, const DdlaDesc& array_descB,
+    std::complex<float>* d_A, const int* array_descA,
+    std::complex<float>* d_B, const int* array_descB,
     bool is_nega, int location
 );
 

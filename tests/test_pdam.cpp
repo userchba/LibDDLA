@@ -3,6 +3,7 @@
 #include <vector>
 #include <complex>
 #include <ddla/ddla.h>
+#include "test_desc_helpers.h"
 #include "ddla_connector.h"
 #include "ddla_stream_impl.h"
 
@@ -11,12 +12,12 @@ using namespace ddla;
 template <typename T1, typename T2>
 void check_pdam(int n, const DdlaHandle_t& handle, const T1& alpha)
 {
-    DdlaDesc desc(handle);
-    desc.init_square_blk(n, n, 0, 0);
+    int desc[DDLA_DLEN_];
+    ddla_test::init_square_blk(desc, n, n, 0, 0, handle);
 
-    const int m_loc = desc.m_loc();
-    const int n_loc = desc.n_loc();
-    const int lld = desc.lld();
+    const int m_loc = ddla_test::m_loc(handle, desc);
+    const int n_loc = ddla_test::n_loc(handle, desc);
+    const int lld = desc[DDLA_LLD_];
     const size_t nelem = static_cast<size_t>(n_loc) * lld;
 
     T2* d_A = nullptr;
@@ -25,7 +26,7 @@ void check_pdam(int n, const DdlaHandle_t& handle, const T1& alpha)
         RUNTIME_CHECK(runtimeMemsetAsync(d_A, 0, nelem * sizeof(T2), handle->stream));
     }
 
-    pdam(alpha, d_A, desc);
+    pdam(handle, alpha, d_A, desc);
     RUNTIME_CHECK(runtimeStreamSynchronize(handle->stream));
 
     std::vector<T2> h_A(nelem);
@@ -38,8 +39,8 @@ void check_pdam(int n, const DdlaHandle_t& handle, const T1& alpha)
 
     int local_ok = 1;
     for (int i = 0; i < n; ++i) {
-        const int ilo = desc.indx_g2l_r(i);
-        const int jlo = desc.indx_g2l_c(i);
+        const int ilo = indx_g2l_r(desc, handle, i);
+        const int jlo = indx_g2l_c(desc, handle, i);
         if (ilo >= 0 && jlo >= 0) {
             if (h_A[ilo + jlo * lld] != expected) {
                 local_ok = 0;
@@ -50,9 +51,9 @@ void check_pdam(int n, const DdlaHandle_t& handle, const T1& alpha)
 
     if (local_ok) {
         for (int iloc = 0; iloc < m_loc; ++iloc) {
-            const int g_row = desc.indx_l2g_r(iloc);
+            const int g_row = indx_l2g_r(desc, handle, iloc);
             for (int jloc = 0; jloc < n_loc; ++jloc) {
-                const int g_col = desc.indx_l2g_c(jloc);
+                const int g_col = indx_l2g_c(desc, handle, jloc);
                 if (g_row == g_col) continue;
                 if (h_A[iloc + jloc * lld] != T2(0)) {
                     local_ok = 0;

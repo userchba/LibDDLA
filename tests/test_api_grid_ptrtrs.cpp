@@ -28,20 +28,20 @@ void check_ptrtrs(const ddla::DdlaHandle_t& handle, const Shape& base)
     const int nb = base.nb;
     const int n = square_size(handle, base);
     const int nrhs = nrhs_size(base, 5);
-    ddla::DdlaDesc descA(handle);
-    descA.init(n, n, nb, nb, 0, 0);
+    int descA[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descA, handle, n, n, nb, nb, 0, 0));
 
     auto run_case = [&](char side, char uplo, char trans, char diag){
-        const std::string name = std::string("ptrtrs(") + side + "," + uplo + "," + trans + "," + diag + ")";
+        const std::string name = std::string("ptrtrs(handle, ") + side + "," + uplo + "," + trans + "," + diag + ")";
         // side='L': B is n x nrhs, solve op(A)*X = B;
         // side='R': B is nrhs x n, solve X*op(A) = B.
         const int b_rows = (side == 'L') ? n : nrhs;
         const int b_cols = (side == 'L') ? nrhs : n;
-        ddla::DdlaDesc descB(handle);
-        descB.init(b_rows, b_cols, nb, nb, 0, 0);
+        int descB[ddla::DDLA_DLEN_];
+        DDLA_CHECK(ddlaDescInit(descB, handle, b_rows, b_cols, nb, nb, 0, 0));
 
-        auto h_A = make_local<Complex>(descA, [&](int i, int j){ return stored_tri(uplo, i, j); });
-        auto h_B = make_local<Complex>(descB, [&](int i, int j){
+        auto h_A = make_local<Complex>(handle, descA, [&](int i, int j){ return stored_tri(uplo, i, j); });
+        auto h_B = make_local<Complex>(handle, descB, [&](int i, int j){
             Complex sum(0.0, 0.0);
             for(int l = 0; l < n; ++l){
                 if(side == 'L'){
@@ -59,7 +59,7 @@ void check_ptrtrs(const ddla::DdlaHandle_t& handle, const Shape& base)
         upload(handle, d_B.ptr, h_B);
         check_ddla_sync(handle);
 
-        ddla::ptrtrs(side, uplo, trans, diag, b_rows, b_cols, d_A.ptr, descA, d_B.ptr, descB);
+        ddla::ptrtrs(handle, side, uplo, trans, diag, b_rows, b_cols, d_A.ptr, descA, d_B.ptr, descB);
         check_solution(handle, descB, d_B.ptr, h_B.size(), name, 2e-10);
     };
 

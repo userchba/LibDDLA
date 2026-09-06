@@ -1,4 +1,5 @@
 #include "api_grid_test_common.h"
+#include "test_desc_helpers.h"
 
 using namespace api_grid_test;
 
@@ -30,12 +31,12 @@ void check_ppotrf_real(const ddla::DdlaHandle_t& handle, const Shape& base)
     const int nb = base.nb;
     const int n = square_size(handle, base);
     const int nrhs = nrhs_size(base);
-    ddla::DdlaDesc descA(handle), descB(handle);
-    descA.init(n, n, nb, nb, 0, 0);
-    descB.init(n, nrhs, nb, nb, 0, 0);
+    int descA[DDLA_DLEN_], descB[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descA, handle, n, n, nb, nb, 0, 0));
+    DDLA_CHECK(ddlaDescInit(descB, handle, n, nrhs, nb, nb, 0, 0));
 
-    auto h_A = make_local<T>(descA, [&](int i, int j){ return spd_value<T>(i, j); });
-    auto h_B = make_local<T>(descB, [&](int i, int j){
+    auto h_A = make_local<T>(handle, descA, [&](int i, int j){ return spd_value<T>(i, j); });
+    auto h_B = make_local<T>(handle, descB, [&](int i, int j){
         T sum(0.0);
         for(int l = 0; l < n; ++l){
             sum += spd_value<T>(i, l) * x_value_real<T>(l, j);
@@ -50,16 +51,16 @@ void check_ppotrf_real(const ddla::DdlaHandle_t& handle, const Shape& base)
     check_ddla_sync(handle);
 
     int info = -1;
-    const bool is_nega = ddla::ppotrf('L', n, d_A.ptr, 1, 1, descA, info);
+    const bool is_nega = ddla::ppotrf(handle, 'L', n, d_A.ptr, 1, 1, descA, info);
     require_close(handle, "ppotrf_real(status)",
                   std::abs(info) + (is_nega ? 1.0 : 0.0), 0.0);
     check_ddla_sync(handle);
 
-    ddla::ppotrs('L', 'L', 'N', n, nrhs, d_A.ptr, descA, d_B.ptr, descB, is_nega);
+    ddla::ppotrs(handle, 'L', 'L', 'N', n, nrhs, d_A.ptr, descA, d_B.ptr, descB, is_nega);
     check_ddla_sync(handle);
 
     auto x = download(handle, d_B.ptr, h_B.size());
-    const double sol_err = local_max_error<T>(descB, x, [](int i, int j){
+    const double sol_err = local_max_error<T>(handle, descB, x, [](int i, int j){
         return x_value_real<T>(i, j);
     });
     const double tol = std::is_same_v<T, float> ? 3e-3 : 1e-9;
@@ -75,12 +76,12 @@ void check_pposv_real(const ddla::DdlaHandle_t& handle, const Shape& base)
     const int nb = base.nb;
     const int n = square_size(handle, base);
     const int nrhs = nrhs_size(base);
-    ddla::DdlaDesc descA(handle), descB(handle);
-    descA.init(n, n, nb, nb, 0, 0);
-    descB.init(n, nrhs, nb, nb, 0, 0);
+    int descA[DDLA_DLEN_], descB[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descA, handle, n, n, nb, nb, 0, 0));
+    DDLA_CHECK(ddlaDescInit(descB, handle, n, nrhs, nb, nb, 0, 0));
 
-    auto h_A = make_local<T>(descA, [&](int i, int j){ return spd_value<T>(i, j); });
-    auto h_B = make_local<T>(descB, [&](int i, int j){
+    auto h_A = make_local<T>(handle, descA, [&](int i, int j){ return spd_value<T>(i, j); });
+    auto h_B = make_local<T>(handle, descB, [&](int i, int j){
         T sum(0.0);
         for(int l = 0; l < n; ++l){
             sum += spd_value<T>(i, l) * x_value_real<T>(l, j);
@@ -95,14 +96,14 @@ void check_pposv_real(const ddla::DdlaHandle_t& handle, const Shape& base)
     check_ddla_sync(handle);
 
     int info = -1;
-    ddla::pposv('L', 'L', 'N', n, nrhs,
+    ddla::pposv(handle, 'L', 'L', 'N', n, nrhs,
                 d_A.ptr, 1, 1, descA,
                 d_B.ptr, 1, 1, descB, info);
     require_close(handle, "pposv_real(status)", std::abs(info), 0.0);
     check_ddla_sync(handle);
 
     auto x = download(handle, d_B.ptr, h_B.size());
-    const double sol_err = local_max_error<T>(descB, x, [](int i, int j){
+    const double sol_err = local_max_error<T>(handle, descB, x, [](int i, int j){
         return x_value_real<T>(i, j);
     });
     const double tol = std::is_same_v<T, float> ? 3e-3 : 1e-9;

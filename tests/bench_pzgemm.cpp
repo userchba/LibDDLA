@@ -5,6 +5,7 @@
 #include <vector>
 #include <complex>
 #include <ddla/ddla.h>
+#include "test_desc_helpers.h"
 #include "ddla_connector.h"
 #include "ddla_stream_impl.h"
 
@@ -32,17 +33,17 @@ std::complex<double> op_value(char trans, const std::vector<std::complex<double>
 // Lightweight correctness check for small matrices only.
 void check_correctness(char transa, char transb,
                        int m, int n, int k,
-                       const DdlaDesc& descA, const DdlaDesc& descB, const DdlaDesc& descC,
+                       const DdlaHandle_t& handle, const int* descA, const int* descB, const int* descC,
                        const std::vector<std::complex<double>>& h_A,
                        const std::vector<std::complex<double>>& h_B,
                        const std::vector<std::complex<double>>& h_C_out,
                        int myid, int nprocs)
 {
-    auto gather_global = [&](const DdlaDesc& desc, const std::vector<std::complex<double>>& local)
+    auto gather_global = [&](const int* desc, const std::vector<std::complex<double>>& local)
                          -> std::vector<std::complex<double>>
     {
-        int mg = desc.m();
-        int ng = desc.n();
+        int mg = desc[DDLA_M_];
+        int ng = desc[DDLA_N_];
         std::vector<std::complex<double>> global(mg * ng);
         std::vector<int> recvcounts(nprocs), displs(nprocs);
         int loc_size = static_cast<int>(local.size());
@@ -53,20 +54,20 @@ void check_correctness(char transa, char transb,
         MPI_Allgatherv(local.data(), loc_size, MPI_C_DOUBLE_COMPLEX,
                        all_local.data(), recvcounts.data(), displs.data(), MPI_C_DOUBLE_COMPLEX,
                        MPI_COMM_WORLD);
-        int npcols = desc.npcols();
+        int npcols = ddla_test::npcols(handle);
         for(int src=0; src<nprocs; src++){
             int prow = src / npcols;
             int pcol = src % npcols;
             int offset = displs[src];
             int count = recvcounts[src];
             if(count == 0) continue;
-            int m_loc = num_loc(mg, desc.mb(), prow, desc.irsrc(), desc.nprows());
-            int n_loc = num_loc(ng, desc.nb(), pcol, desc.icsrc(), desc.npcols());
+            int m_loc = num_loc(mg, desc[DDLA_MB_], prow, desc[DDLA_RSRC_], ddla_test::nprows(handle));
+            int n_loc = num_loc(ng, desc[DDLA_NB_], pcol, desc[DDLA_CSRC_], npcols);
             if(m_loc * n_loc != count) continue;
             for(int j_loc=0; j_loc<n_loc; j_loc++){
-                int j_g = indxl2g(j_loc, desc.nb(), pcol, desc.icsrc(), desc.npcols());
+                int j_g = indxl2g(j_loc, desc[DDLA_NB_], pcol, desc[DDLA_CSRC_], npcols);
                 for(int i_loc=0; i_loc<m_loc; i_loc++){
-                    int i_g = indxl2g(i_loc, desc.mb(), prow, desc.irsrc(), desc.nprows());
+                    int i_g = indxl2g(i_loc, desc[DDLA_MB_], prow, desc[DDLA_RSRC_], ddla_test::nprows(handle));
                     global[i_g + j_g * mg] = all_local[offset + i_loc + j_loc * m_loc];
                 }
             }
@@ -116,17 +117,17 @@ void bench_one(char transa, char transb, int N, int nb,
     int myid = ddla_handle->myid;
     int nprocs = ddla_handle->nprocs;
 
-    DdlaDesc descA(ddla_handle);
-    descA.init(m, k, nb, nb, 0, 0);
-    DdlaDesc descB(ddla_handle);
-    descB.init(k, n, nb, nb, 0, 0);
-    DdlaDesc descC(ddla_handle);
-    descC.init(m, n, nb, nb, 0, 0);
+    int descA[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descA, ddla_handle, m, k, nb, nb, 0, 0));
+    int descB[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descB, ddla_handle, k, n, nb, nb, 0, 0));
+    int descC[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descC, ddla_handle, m, n, nb, nb, 0, 0));
 
     // Initialize with deterministic pseudo-random data
-    std::vector<std::complex<double>> h_A(descA.m_loc() * descA.n_loc());
-    std::vector<std::complex<double>> h_B(descB.m_loc() * descB.n_loc());
-    std::vector<std::complex<double>> h_C(descC.m_loc() * descC.n_loc());
+    std::vector<std::complex<double>> h_A(ddla_test::m_loc(ddla_handle, descA) * ddla_test::n_loc(ddla_handle, descA));
+    std::vector<std::complex<double>> h_B(ddla_test::m_loc(ddla_handle, descB) * ddla_test::n_loc(ddla_handle, descB));
+    std::vector<std::complex<double>> h_C(ddla_test::m_loc(ddla_handle, descC) * ddla_test::n_loc(ddla_handle, descC));
 
     // Simple LCG for reproducible data (avoid heavy mt19937 for large sizes)
     auto gen_val = [](uint64_t seed) -> std::complex<double> {
@@ -157,14 +158,14 @@ void bench_one(char transa, char transb, int N, int nb,
 
     // Warmup
     for(int it = 0; it < n_warmup; it++){
-        pgemm(transa, transb, m, n, k, alpha, d_A, descA, d_B, descB, beta, d_C, descC);
+        pgemm(ddla_handle, transa, transb, m, n, k, alpha, d_A, descA, d_B, descB, beta, d_C, descC);
         RUNTIME_CHECK(runtimeStreamSynchronize(ddla_handle->stream));
     }
 
     // Timed iterations
     double t_start = MPI_Wtime();
     for(int it = 0; it < n_iter; it++){
-        pgemm(transa, transb, m, n, k, alpha, d_A, descA, d_B, descB, beta, d_C, descC);
+        pgemm(ddla_handle, transa, transb, m, n, k, alpha, d_A, descA, d_B, descB, beta, d_C, descC);
         RUNTIME_CHECK(runtimeStreamSynchronize(ddla_handle->stream));
     }
     double t_end = MPI_Wtime();
@@ -173,7 +174,7 @@ void bench_one(char transa, char transb, int N, int nb,
     // Correctness check for small sizes only
     if(N <= 1000){
         RUNTIME_CHECK(runtimeMemcpy(h_C.data(), d_C, sizeof(std::complex<double>) * h_C.size(), runtimeMemcpyDeviceToHost));
-        check_correctness(transa, transb, m, n, k, descA, descB, descC,
+        check_correctness(transa, transb, m, n, k, ddla_handle, descA, descB, descC,
                           h_A, h_B, h_C, myid, nprocs);
     }
 
@@ -185,7 +186,7 @@ void bench_one(char transa, char transb, int N, int nb,
     MPI_Reduce(&elapsed, &max_elapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
     if(myid == 0){
-        std::cout << "  pgemm(" << transa << "," << transb << ")"
+        std::cout << "  pgemm(ddla_handle, " << transa << "," << transb << ")"
                   << "  N=" << N
                   << "  time=" << max_elapsed << "s"
                   << "  perf=" << (flops / max_elapsed / 1e9) << " GFLOPS"
@@ -259,7 +260,7 @@ int main(int argc, char* argv[])
                     bench_one(ta, tb, N, nb, ddla_handle, n_warmup, n_iter);
                 } catch(const std::exception& e) {
                     if(myid == 0){
-                        std::cerr << "  pgemm(" << ta << "," << tb << ") N=" << N
+                        std::cerr << "  pgemm(ddla_handle, " << ta << "," << tb << ") N=" << N
                                   << " FAILED: " << e.what() << std::endl;
                     }
                 }

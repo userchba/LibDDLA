@@ -1,4 +1,5 @@
 #include <ddla/ddla.h>
+#include "ddla_desc.h"
 #include "ddla_connector.h"
 #include "ddla_stream_impl.h"
 #include "require_gpu.h"
@@ -61,15 +62,20 @@ __global__ void pdam_kernel(const T1* alpha, T2* A,
 }
 
 template <typename T1, typename T2>
-void pdam(const T1& alpha, T2* d_A, const DdlaDesc& array_descA, const int& n)
+void pdam(const DdlaHandle_t& handle, const T1& alpha, T2* d_A, const int* array_descA, const int& n)
 {
+    check_desc(array_descA, handle);
+    int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
+    ddlaGetGridDims(handle, nprows, npcols);
+    ddlaGetGridCoords(handle, myprow, mypcol);
+
+
     // Logical sub-matrix order: n < 0 means the whole matrix (descriptor dims).
-    const int n_eff = (n < 0) ? array_descA.m() : n;
+    const int n_eff = (n < 0) ? array_descA[DDLA_M_] : n;
     assert(n_eff >= 0);
-    assert(n_eff <= array_descA.m() && n_eff <= array_descA.n());
+    assert(n_eff <= array_descA[DDLA_M_] && n_eff <= array_descA[DDLA_N_]);
     if (n_eff <= 0) return;
 
-    DdlaHandle_t handle = array_descA.ddla_handle();
     detail::require_gpu_backend(handle, "pdam");
     runtimeStream_t stream = handle->stream;
 
@@ -87,22 +93,22 @@ void pdam(const T1& alpha, T2* d_A, const DdlaDesc& array_descA, const int& n)
     pdam_kernel<deviceT1, deviceT2><<<gridSize, blockSize, 0, stream>>>(
         d_alpha, d_A_dev,
         n_eff,
-        array_descA.mb(), array_descA.nb(),
-        array_descA.irsrc(), array_descA.icsrc(),
-        array_descA.myprow(), array_descA.mypcol(),
-        array_descA.nprows(), array_descA.npcols(),
-        array_descA.lld());
+        array_descA[DDLA_MB_], array_descA[DDLA_NB_],
+        array_descA[DDLA_RSRC_], array_descA[DDLA_CSRC_],
+        myprow, mypcol,
+        nprows, npcols,
+        array_descA[DDLA_LLD_]);
     RUNTIME_CHECK(runtimeGetLastError());
 
     RUNTIME_CHECK(runtimeFreeAsync(d_alpha, stream));
 }
 
 // Supported type combinations match LibRPA's DeviceConnector::pdam.
-template void pdam<float, float>(const float&, float*, const DdlaDesc&, const int&);
-template void pdam<double, double>(const double&, double*, const DdlaDesc&, const int&);
-template void pdam<float, std::complex<float>>(const float&, std::complex<float>*, const DdlaDesc&, const int&);
-template void pdam<std::complex<float>, std::complex<float>>(const std::complex<float>&, std::complex<float>*, const DdlaDesc&, const int&);
-template void pdam<double, std::complex<double>>(const double&, std::complex<double>*, const DdlaDesc&, const int&);
-template void pdam<std::complex<double>, std::complex<double>>(const std::complex<double>&, std::complex<double>*, const DdlaDesc&, const int&);
+template void pdam<float, float>(const DdlaHandle_t&, const float&, float*, const int*, const int&);
+template void pdam<double, double>(const DdlaHandle_t&, const double&, double*, const int*, const int&);
+template void pdam<float, std::complex<float>>(const DdlaHandle_t&, const float&, std::complex<float>*, const int*, const int&);
+template void pdam<std::complex<float>, std::complex<float>>(const DdlaHandle_t&, const std::complex<float>&, std::complex<float>*, const int*, const int&);
+template void pdam<double, std::complex<double>>(const DdlaHandle_t&, const double&, std::complex<double>*, const int*, const int&);
+template void pdam<std::complex<double>, std::complex<double>>(const DdlaHandle_t&, const std::complex<double>&, std::complex<double>*, const int*, const int&);
 
 } // namespace ddla

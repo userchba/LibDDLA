@@ -7,6 +7,7 @@
 #include <vector>
 #include <complex>
 #include <ddla/ddla.h>
+#include "test_desc_helpers.h"
 #include "ddla_connector.h"
 #include <random>
 #include "ddla_stream_impl.h"
@@ -32,18 +33,18 @@ void check_pgemm(char transa, char transb,
                  int m, int n, int k, int nb,
                  const DdlaHandle_t& ddla_handle)
 {
-    DdlaDesc descA(ddla_handle);
-    descA.init(m, k, nb, nb, 0, 0);
-    DdlaDesc descB(ddla_handle);
-    descB.init(k, n, nb, nb, 0, 0);
-    DdlaDesc descC(ddla_handle);
-    descC.init(m, n, nb, nb, 0, 0);
+    int descA[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descA, ddla_handle, m, k, nb, nb, 0, 0));
+    int descB[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descB, ddla_handle, k, n, nb, nb, 0, 0));
+    int descC[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descC, ddla_handle, m, n, nb, nb, 0, 0));
 
-    int myid = descC.mypcol() + descC.myprow() * descC.npcols();
+    int myid = ddla_test::mypcol(ddla_handle) + ddla_test::myprow(ddla_handle) * ddla_test::npcols(ddla_handle);
 
-    std::vector<std::complex<double>> h_A(descA.m_loc() * descA.n_loc());
-    std::vector<std::complex<double>> h_B(descB.m_loc() * descB.n_loc());
-    std::vector<std::complex<double>> h_C(descC.m_loc() * descC.n_loc());
+    std::vector<std::complex<double>> h_A(ddla_test::m_loc(ddla_handle, descA) * ddla_test::n_loc(ddla_handle, descA));
+    std::vector<std::complex<double>> h_B(ddla_test::m_loc(ddla_handle, descB) * ddla_test::n_loc(ddla_handle, descB));
+    std::vector<std::complex<double>> h_C(ddla_test::m_loc(ddla_handle, descC) * ddla_test::n_loc(ddla_handle, descC));
 
     std::mt19937 gen(42 + myid);
     std::uniform_real_distribution<double> dist(-1.0, 1.0);
@@ -66,19 +67,19 @@ void check_pgemm(char transa, char transb,
     std::complex<double> beta(0.0, 0.0);
 
     double start = MPI_Wtime();
-    pgemm(transa, transb, m, n, k, alpha, d_A, descA, d_B, descB, beta, d_C, descC);
+    pgemm(ddla_handle, transa, transb, m, n, k, alpha, d_A, descA, d_B, descB, beta, d_C, descC);
     RUNTIME_CHECK(runtimeStreamSynchronize(ddla_handle->stream));
     double elapsed = MPI_Wtime() - start;
 
-    std::vector<std::complex<double>> h_C_out(descC.m_loc() * descC.n_loc());
+    std::vector<std::complex<double>> h_C_out(ddla_test::m_loc(ddla_handle, descC) * ddla_test::n_loc(ddla_handle, descC));
     RUNTIME_CHECK(runtimeMemcpy(h_C_out.data(), d_C, sizeof(std::complex<double>) * h_C_out.size(), runtimeMemcpyDeviceToHost));
 
     int nprocs;
     MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
 
-    auto gather_global = [&](const DdlaDesc& desc, const std::vector<std::complex<double>>& local)->std::vector<std::complex<double>>{
-        int mg = desc.m();
-        int ng = desc.n();
+    auto gather_global = [&](const int* desc, const std::vector<std::complex<double>>& local)->std::vector<std::complex<double>>{
+        int mg = desc[DDLA_M_];
+        int ng = desc[DDLA_N_];
         std::vector<std::complex<double>> global(mg * ng);
         std::vector<int> recvcounts(nprocs);
         std::vector<int> displs(nprocs);
@@ -90,20 +91,20 @@ void check_pgemm(char transa, char transb,
         MPI_Allgatherv(local.data(), loc_size, MPI_C_DOUBLE_COMPLEX,
                        all_local.data(), recvcounts.data(), displs.data(), MPI_C_DOUBLE_COMPLEX,
                        MPI_COMM_WORLD);
-        int npcols = desc.npcols();
+        int npcols = ddla_test::npcols(ddla_handle);
         for(int src=0; src<nprocs; src++){
             int prow = src / npcols;
             int pcol = src % npcols;
             int offset = displs[src];
             int count = recvcounts[src];
             if(count == 0) continue;
-            int m_loc = num_loc(mg, desc.mb(), prow, desc.irsrc(), desc.nprows());
-            int n_loc = num_loc(ng, desc.nb(), pcol, desc.icsrc(), desc.npcols());
+            int m_loc = num_loc(mg, desc[DDLA_MB_], prow, desc[DDLA_RSRC_], ddla_test::nprows(ddla_handle));
+            int n_loc = num_loc(ng, desc[DDLA_NB_], pcol, desc[DDLA_CSRC_], npcols);
             if(m_loc * n_loc != count) continue;
             for(int j_loc=0; j_loc<n_loc; j_loc++){
-                int j_g = indxl2g(j_loc, desc.nb(), pcol, desc.icsrc(), desc.npcols());
+                int j_g = indxl2g(j_loc, desc[DDLA_NB_], pcol, desc[DDLA_CSRC_], npcols);
                 for(int i_loc=0; i_loc<m_loc; i_loc++){
-                    int i_g = indxl2g(i_loc, desc.mb(), prow, desc.irsrc(), desc.nprows());
+                    int i_g = indxl2g(i_loc, desc[DDLA_MB_], prow, desc[DDLA_RSRC_], ddla_test::nprows(ddla_handle));
                     global[i_g + j_g * mg] = all_local[offset + i_loc + j_loc * m_loc];
                 }
             }
@@ -136,15 +137,15 @@ void check_pgemm(char transa, char transb,
     MPI_Reduce(&max_err, &global_max_err, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
     if(myid == 0){
-        std::cout << "pgemm(" << transa << "," << transb << ") "
+        std::cout << "pgemm(ddla_handle, " << transa << "," << transb << ") "
                   << m << "x" << n << "x" << k
-                  << " grid " << descC.nprows() << "x" << descC.npcols()
+                  << " grid " << ddla_test::nprows(ddla_handle) << "x" << ddla_test::npcols(ddla_handle)
                   << " time " << elapsed << "s"
                   << " max_err " << global_max_err << std::endl;
     }
 
     if(global_max_err > 1e-10){
-        std::cerr << "FAIL: pgemm(" << transa << "," << transb << ") error too large" << std::endl;
+        std::cerr << "FAIL: pgemm(ddla_handle, " << transa << "," << transb << ") error too large" << std::endl;
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 

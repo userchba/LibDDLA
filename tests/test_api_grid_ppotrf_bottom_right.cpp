@@ -145,20 +145,20 @@ struct LocalMatrix {
 };
 
 template <typename T, typename Fn>
-LocalMatrix<T> make_local_with_padding(const ddla::DdlaDesc& desc, Fn value)
+LocalMatrix<T> make_local_with_padding(const ddla::DdlaHandle_t& handle, const int* desc, Fn value)
 {
-    const size_t logical_count = static_cast<size_t>(desc.lld()) * desc.n_loc();
+    const size_t logical_count = static_cast<size_t>(desc[DDLA_LLD_]) * ddla_test::n_loc(handle, desc);
     const size_t allocation_count = std::max<size_t>(1, logical_count);
     LocalMatrix<T> local{
         std::vector<T>(allocation_count, padding_sentinel<T>()),
         std::vector<unsigned char>(allocation_count, 0)
     };
 
-    for(int jloc = 0; jloc < desc.n_loc(); ++jloc){
-        const int j = desc.indx_l2g_c(jloc);
-        for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
-            const int i = desc.indx_l2g_r(iloc);
-            const size_t offset = iloc + static_cast<size_t>(jloc) * desc.lld();
+    for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
+        const int j = indx_l2g_c(desc, handle, jloc);
+        for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc); ++iloc){
+            const int i = indx_l2g_r(desc, handle, iloc);
+            const size_t offset = iloc + static_cast<size_t>(jloc) * desc[DDLA_LLD_];
             local.values[offset] = value(i, j);
             local.valid[offset] = 1;
         }
@@ -182,10 +182,10 @@ template <typename T>
 void check_success_case(const ddla::DdlaHandle_t& handle, char uplo, int n, int nb,
                         int irsrc, int icsrc)
 {
-    ddla::DdlaDesc desc(handle);
-    desc.init(n, n, nb, nb, irsrc, icsrc);
+    int desc[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(desc, handle, n, n, nb, nb, irsrc, icsrc));
 
-    auto input = make_local_with_padding<T>(desc, [=](int i, int j){
+    auto input = make_local_with_padding<T>(handle, desc, [=](int i, int j){
         if(uplo == 'U'){
             return i <= j ? upper_product_value<T>(i, j, n)
                           : opposite_triangle_sentinel<T>(i, j, n);
@@ -198,7 +198,7 @@ void check_success_case(const ddla::DdlaHandle_t& handle, char uplo, int n, int 
     check_ddla_sync(handle);
 
     int info = -1;
-    ddla::ppotrf_bottom_right(uplo, n, d_A.ptr, desc, info);
+    ddla::ppotrf_bottom_right(handle, uplo, n, d_A.ptr, desc, info);
     RUNTIME_CHECK(runtimeGetLastError());
     auto output = download(handle, d_A.ptr, input.values.size());
 
@@ -211,11 +211,11 @@ void check_success_case(const ddla::DdlaHandle_t& handle, char uplo, int n, int 
                          static_cast<double>(std::abs(output[offset] - padding_sentinel<T>())));
         }
     }
-    for(int jloc = 0; jloc < desc.n_loc(); ++jloc){
-        const int j = desc.indx_l2g_c(jloc);
-        for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
-            const int i = desc.indx_l2g_r(iloc);
-            const size_t offset = iloc + static_cast<size_t>(jloc) * desc.lld();
+    for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
+        const int j = indx_l2g_c(desc, handle, jloc);
+        for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc); ++iloc){
+            const int i = indx_l2g_r(desc, handle, iloc);
+            const size_t offset = iloc + static_cast<size_t>(jloc) * desc[DDLA_LLD_];
             const bool in_factor = uplo == 'U' ? i <= j : i >= j;
             if(in_factor){
                 const T expected = uplo == 'U'
@@ -244,10 +244,10 @@ template <typename T>
 void check_failure_case(const ddla::DdlaHandle_t& handle, char uplo, int n, int nb,
                         int irsrc, int icsrc, int failed_pivot)
 {
-    ddla::DdlaDesc desc(handle);
-    desc.init(n, n, nb, nb, irsrc, icsrc);
+    int desc[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(desc, handle, n, n, nb, nb, irsrc, icsrc));
 
-    auto input = make_local_with_padding<T>(desc, [=](int i, int j){
+    auto input = make_local_with_padding<T>(handle, desc, [=](int i, int j){
         const bool opposite_triangle = uplo == 'U' ? i > j : i < j;
         if(opposite_triangle) return opposite_triangle_sentinel<T>(i, j, n);
         if(i != j) return T{};
@@ -258,7 +258,7 @@ void check_failure_case(const ddla::DdlaHandle_t& handle, char uplo, int n, int 
     check_ddla_sync(handle);
 
     int info = -1;
-    ddla::ppotrf_bottom_right(uplo, n, d_A.ptr, desc, info);
+    ddla::ppotrf_bottom_right(handle, uplo, n, d_A.ptr, desc, info);
     RUNTIME_CHECK(runtimeGetLastError());
     auto output = download(handle, d_A.ptr, input.values.size());
 
@@ -278,13 +278,13 @@ void check_failure_case(const ddla::DdlaHandle_t& handle, char uplo, int n, int 
                          static_cast<double>(std::abs(output[offset] - padding_sentinel<T>())));
         }
     }
-    for(int jloc = 0; jloc < desc.n_loc(); ++jloc){
-        const int j = desc.indx_l2g_c(jloc);
-        for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
-            const int i = desc.indx_l2g_r(iloc);
+    for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
+        const int j = indx_l2g_c(desc, handle, jloc);
+        for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc); ++iloc){
+            const int i = indx_l2g_r(desc, handle, iloc);
             const bool opposite_triangle = uplo == 'U' ? i > j : i < j;
             if(!opposite_triangle) continue;
-            const size_t offset = iloc + static_cast<size_t>(jloc) * desc.lld();
+            const size_t offset = iloc + static_cast<size_t>(jloc) * desc[DDLA_LLD_];
             update_error(sentinel_error,
                          static_cast<double>(std::abs(
                              output[offset]
@@ -326,9 +326,9 @@ void check_zero_local_blocks(const ddla::DdlaHandle_t& handle, int nb,
     ddlaGetGridDims(handle, nprows, npcols_unused);
     if(nprows == 1) return;
 
-    ddla::DdlaDesc desc(handle);
-    desc.init(nb - 1, nb - 1, nb, nb, irsrc, icsrc);
-    const int local_has_zero = desc.m_loc() == 0 || desc.n_loc() == 0 ? 1 : 0;
+    int desc[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(desc, handle, nb - 1, nb - 1, nb, nb, irsrc, icsrc));
+    const int local_has_zero = ddla_test::m_loc(handle, desc) == 0 || ddla_test::n_loc(handle, desc) == 0 ? 1 : 0;
     int zero_ranks = 0;
     MPI_Allreduce(&local_has_zero, &zero_ranks, 1, MPI_INT, MPI_SUM, ddlaGetCommunicator(handle));
     require_close(handle, "ppotrf_bottom_right zero-local-block coverage",

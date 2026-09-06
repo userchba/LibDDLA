@@ -1,4 +1,5 @@
 #include <ddla/ddla.h>
+#include "ddla_desc.h"
 #include <algorithm>
 #include <cassert>
 #include <cstring>
@@ -39,14 +40,14 @@ inline const char* transport_block_backend_name(DdlaBackend backend)
 // ---------------------------------------------------------------------------
 template <DdlaBackend Backend, typename T>
 void transport_block(
-    const char& sData, const char& trans,
+    const DdlaHandle_t& handle, const char& sData, const char& trans,
     const int& m, const int& n,
-    const T* d_A, const int& ia, const int& ja, const DdlaDesc& array_descA,
+    const T* d_A, const int& ia, const int& ja, const int* array_descA,
     T* d_block_A)
 {
     if (m == 0 || n == 0) return;
 
-    DdlaHandle_t h = array_descA.ddla_handle();
+    DdlaHandle_t h = handle;
     if (h == nullptr) {
         throw std::runtime_error("transport_block: null handle");
     }
@@ -62,7 +63,10 @@ void transport_block(
     assert(sData == 'C' || sData == 'R');
     assert(trans == 'N' || trans == 'T' || trans == 'C');
 
-    const DdlaDesc& d = array_descA;
+    check_desc(array_descA, handle);
+    int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
+    ddlaGetGridDims(handle, nprows, npcols);
+    ddlaGetGridCoords(handle, myprow, mypcol);
     const int myrank = h->myid;
 
     // ---- divergent leaf operations: the only genuine CPU/GPU differences --
@@ -88,61 +92,61 @@ void transport_block(
     };
 
     // ---- index math: identical across both formerly-separate implementations
-    int i_loc = num_loc(ia, d.mb(), d.myprow(), d.irsrc(), d.nprows());
-    int j_loc = num_loc(ja, d.nb(), d.mypcol(), d.icsrc(), d.npcols());
-    int m_loc = num_loc(ia + m, d.mb(), d.myprow(), d.irsrc(), d.nprows());
-    int n_loc = num_loc(ja + n, d.nb(), d.mypcol(), d.icsrc(), d.npcols());
-    int owner_row = indxg2p(ia, d.mb(), d.irsrc(), d.nprows());
-    int owner_col = indxg2p(ja, d.nb(), d.icsrc(), d.npcols());
+    int i_loc = num_loc(ia, array_descA[DDLA_MB_], myprow, array_descA[DDLA_RSRC_], nprows);
+    int j_loc = num_loc(ja, array_descA[DDLA_NB_], mypcol, array_descA[DDLA_CSRC_], npcols);
+    int m_loc = num_loc(ia + m, array_descA[DDLA_MB_], myprow, array_descA[DDLA_RSRC_], nprows);
+    int n_loc = num_loc(ja + n, array_descA[DDLA_NB_], mypcol, array_descA[DDLA_CSRC_], npcols);
+    int owner_row = indxg2p(ia, array_descA[DDLA_MB_], array_descA[DDLA_RSRC_], nprows);
+    int owner_col = indxg2p(ja, array_descA[DDLA_NB_], array_descA[DDLA_CSRC_], npcols);
 
     if (trans == 'N') {
         if (sData == 'R' && n_loc > j_loc) {
             int cols = n_loc - j_loc;
-            if (d.myprow() == owner_row)
-                copy_block(d_block_A, m, d_A + i_loc + (std::size_t)j_loc * d.lld(), m, cols, d.lld());
+            if (myprow == owner_row)
+                copy_block(d_block_A, m, d_A + i_loc + (std::size_t)j_loc * array_descA[DDLA_LLD_], m, cols, array_descA[DDLA_LLD_]);
             commBcast<Backend>(h, CommScope::Col, d_block_A, (std::size_t)m * cols, owner_row);
         } else if (sData == 'C' && m_loc > i_loc) {
             int rows = m_loc - i_loc;
-            if (d.mypcol() == owner_col)
-                copy_block(d_block_A, rows, d_A + i_loc + (std::size_t)j_loc * d.lld(), rows, n, d.lld());
+            if (mypcol == owner_col)
+                copy_block(d_block_A, rows, d_A + i_loc + (std::size_t)j_loc * array_descA[DDLA_LLD_], rows, n, array_descA[DDLA_LLD_]);
             commBcast<Backend>(h, CommScope::Row, d_block_A, (std::size_t)rows * n, owner_col);
         }
-    } else if (d.nprows() == d.npcols()) {
+    } else if (nprows == npcols) {
         // ---- square-grid transposed path -----------------------------------
-        int trans_j_loc = num_loc(ja, d.nb(), d.myprow(), d.icsrc(), d.nprows());
-        int trans_n_loc = num_loc(ja + n, d.nb(), d.myprow(), d.icsrc(), d.nprows());
-        int trans_i_loc = num_loc(ia, d.mb(), d.mypcol(), d.irsrc(), d.npcols());
-        int trans_m_loc = num_loc(ia + m, d.mb(), d.mypcol(), d.irsrc(), d.npcols());
+        int trans_j_loc = num_loc(ja, array_descA[DDLA_NB_], myprow, array_descA[DDLA_CSRC_], nprows);
+        int trans_n_loc = num_loc(ja + n, array_descA[DDLA_NB_], myprow, array_descA[DDLA_CSRC_], nprows);
+        int trans_i_loc = num_loc(ia, array_descA[DDLA_MB_], mypcol, array_descA[DDLA_RSRC_], npcols);
+        int trans_m_loc = num_loc(ia + m, array_descA[DDLA_MB_], mypcol, array_descA[DDLA_RSRC_], npcols);
 
         if (sData == 'R') {
             if (n_loc > j_loc) {
                 int cols = n_loc - j_loc;
-                if (d.myprow() == owner_row) {
-                    copy_block(d_block_A, m, d_A + i_loc + (std::size_t)j_loc * d.lld(), m, cols, d.lld());
-                    if (d.myprow() != d.mypcol())
-                        commSend<Backend>(h, CommScope::Col, d_block_A, (std::size_t)m * cols, d.mypcol());
-                } else if (d.myprow() == d.mypcol()) {
+                if (myprow == owner_row) {
+                    copy_block(d_block_A, m, d_A + i_loc + (std::size_t)j_loc * array_descA[DDLA_LLD_], m, cols, array_descA[DDLA_LLD_]);
+                    if (myprow != mypcol)
+                        commSend<Backend>(h, CommScope::Col, d_block_A, (std::size_t)m * cols, mypcol);
+                } else if (myprow == mypcol) {
                     commRecv<Backend>(h, CommScope::Col, d_block_A, (std::size_t)m * cols, owner_row);
                 }
             }
             if (trans_n_loc > trans_j_loc) {
                 int tcols = trans_n_loc - trans_j_loc;
-                commBcast<Backend>(h, CommScope::Row, d_block_A, (std::size_t)tcols * m, d.myprow());
+                commBcast<Backend>(h, CommScope::Row, d_block_A, (std::size_t)tcols * m, myprow);
             }
         } else { // sData == 'C'
             if (m_loc > i_loc) {
                 int rows = m_loc - i_loc;
-                if (d.mypcol() == owner_col) {
-                    pack_transpose(d_block_A, n, d_A + i_loc + (std::size_t)j_loc * d.lld(), rows, n, d.lld());
-                    if (d.myprow() != d.mypcol())
-                        commSend<Backend>(h, CommScope::Row, d_block_A, (std::size_t)rows * n, d.myprow());
-                } else if (d.myprow() == d.mypcol()) {
+                if (mypcol == owner_col) {
+                    pack_transpose(d_block_A, n, d_A + i_loc + (std::size_t)j_loc * array_descA[DDLA_LLD_], rows, n, array_descA[DDLA_LLD_]);
+                    if (myprow != mypcol)
+                        commSend<Backend>(h, CommScope::Row, d_block_A, (std::size_t)rows * n, myprow);
+                } else if (myprow == mypcol) {
                     commRecv<Backend>(h, CommScope::Row, d_block_A, (std::size_t)rows * n, owner_col);
                 }
             }
             if (trans_m_loc > trans_i_loc) {
                 int trows = trans_m_loc - trans_i_loc;
-                commBcast<Backend>(h, CommScope::Col, d_block_A, (std::size_t)trows * n, d.mypcol());
+                commBcast<Backend>(h, CommScope::Col, d_block_A, (std::size_t)trows * n, mypcol);
             }
         }
     } else {
@@ -162,27 +166,27 @@ void transport_block(
         };
 
         if (sData == 'R') {
-            const int target_j_loc = num_loc(ja, d.nb(), d.myprow(), d.icsrc(), d.nprows());
-            const int target_n_loc = num_loc(ja + n, d.nb(), d.myprow(), d.icsrc(), d.nprows());
+            const int target_j_loc = num_loc(ja, array_descA[DDLA_NB_], myprow, array_descA[DDLA_CSRC_], nprows);
+            const int target_n_loc = num_loc(ja + n, array_descA[DDLA_NB_], myprow, array_descA[DDLA_CSRC_], nprows);
             const int target_cols = target_n_loc - target_j_loc;
             std::vector<RectBlock> blocks, send_blocks, recv_blocks;
             int send_total = 0;
 
             for (int g = ja; g < ja + n; ) {
-                const int len = block_end(g, d.nb(), ja + n) - g;
-                const int src_col = indxg2p(g, d.nb(), d.icsrc(), d.npcols());
-                const int dst_row = indxg2p(g, d.nb(), d.icsrc(), d.nprows());
+                const int len = block_end(g, array_descA[DDLA_NB_], ja + n) - g;
+                const int src_col = indxg2p(g, array_descA[DDLA_NB_], array_descA[DDLA_CSRC_], npcols);
+                const int dst_row = indxg2p(g, array_descA[DDLA_NB_], array_descA[DDLA_CSRC_], nprows);
                 const int src_rank = h->rc_to_rank(owner_row, src_col);
                 const int dst_rank = h->rc_to_rank(dst_row, 0);
-                const int dst_col_loc = num_loc(g, d.nb(), dst_row, d.icsrc(), d.nprows())
-                                       - num_loc(ja, d.nb(), dst_row, d.icsrc(), d.nprows());
+                const int dst_col_loc = num_loc(g, array_descA[DDLA_NB_], dst_row, array_descA[DDLA_CSRC_], nprows)
+                                       - num_loc(ja, array_descA[DDLA_NB_], dst_row, array_descA[DDLA_CSRC_], nprows);
                 RectBlock block{src_rank, dst_rank, m * len, -1, dst_col_loc * m,
-                                indxg2l(g, d.nb(), d.npcols()), len};
+                                indxg2l(g, array_descA[DDLA_NB_], npcols), len};
 
                 if (src_rank == dst_rank) {
                     if (myrank == src_rank)
                         copy_block(d_block_A + block.dst_offset, m,
-                                   d_A + i_loc + (std::size_t)block.src_loc * d.lld(), m, block.len, d.lld());
+                                   d_A + i_loc + (std::size_t)block.src_loc * array_descA[DDLA_LLD_], m, block.len, array_descA[DDLA_LLD_]);
                 } else {
                     blocks.push_back(block);
                     if (myrank == src_rank) {
@@ -200,7 +204,7 @@ void transport_block(
             T* d_sendbuf = (send_total > 0) ? alloc_buf((std::size_t)send_total) : nullptr;
             for (const auto& block : send_blocks)
                 copy_block(d_sendbuf + block.send_offset, m,
-                           d_A + i_loc + (std::size_t)block.src_loc * d.lld(), m, block.len, d.lld());
+                           d_A + i_loc + (std::size_t)block.src_loc * array_descA[DDLA_LLD_], m, block.len, array_descA[DDLA_LLD_]);
 
             if (!send_blocks.empty() || !recv_blocks.empty()) {
                 commGroupStart<Backend>(h);
@@ -224,28 +228,28 @@ void transport_block(
                 commBcast<Backend>(h, CommScope::Row, d_block_A, (std::size_t)m * target_cols, 0);
             free_buf(d_sendbuf);
         } else { // sData == 'C'
-            const int target_i_loc = num_loc(ia, d.mb(), d.mypcol(), d.irsrc(), d.npcols());
-            const int target_m_loc = num_loc(ia + m, d.mb(), d.mypcol(), d.irsrc(), d.npcols());
+            const int target_i_loc = num_loc(ia, array_descA[DDLA_MB_], mypcol, array_descA[DDLA_RSRC_], npcols);
+            const int target_m_loc = num_loc(ia + m, array_descA[DDLA_MB_], mypcol, array_descA[DDLA_RSRC_], npcols);
             const int target_cols = target_m_loc - target_i_loc;
             std::vector<RectBlock> blocks, send_blocks, recv_blocks;
             int send_total = 0;
 
             for (int g = ia; g < ia + m; ) {
-                const int len = block_end(g, d.mb(), ia + m) - g;
-                const int src_row = indxg2p(g, d.mb(), d.irsrc(), d.nprows());
-                const int dst_col = indxg2p(g, d.mb(), d.irsrc(), d.npcols());
+                const int len = block_end(g, array_descA[DDLA_MB_], ia + m) - g;
+                const int src_row = indxg2p(g, array_descA[DDLA_MB_], array_descA[DDLA_RSRC_], nprows);
+                const int dst_col = indxg2p(g, array_descA[DDLA_MB_], array_descA[DDLA_RSRC_], npcols);
                 const int src_rank = h->rc_to_rank(src_row, owner_col);
                 const int dst_rank = h->rc_to_rank(0, dst_col);
-                const int dst_col_loc = num_loc(g, d.mb(), dst_col, d.irsrc(), d.npcols())
-                                       - num_loc(ia, d.mb(), dst_col, d.irsrc(), d.npcols());
+                const int dst_col_loc = num_loc(g, array_descA[DDLA_MB_], dst_col, array_descA[DDLA_RSRC_], npcols)
+                                       - num_loc(ia, array_descA[DDLA_MB_], dst_col, array_descA[DDLA_RSRC_], npcols);
                 RectBlock block{src_rank, dst_rank, n * len, -1, dst_col_loc * n,
-                                indxg2l(g, d.mb(), d.nprows()), len};
+                                indxg2l(g, array_descA[DDLA_MB_], nprows), len};
 
                 if (src_rank == dst_rank) {
                     if (myrank == src_rank)
                         pack_transpose(d_block_A + block.dst_offset, n,
-                                       d_A + (std::size_t)block.src_loc + (std::size_t)j_loc * d.lld(),
-                                       block.len, n, d.lld());
+                                       d_A + (std::size_t)block.src_loc + (std::size_t)j_loc * array_descA[DDLA_LLD_],
+                                       block.len, n, array_descA[DDLA_LLD_]);
                 } else {
                     blocks.push_back(block);
                     if (myrank == src_rank) {
@@ -263,8 +267,8 @@ void transport_block(
             T* d_sendbuf = (send_total > 0) ? alloc_buf((std::size_t)send_total) : nullptr;
             for (const auto& block : send_blocks)
                 pack_transpose(d_sendbuf + block.send_offset, n,
-                               d_A + (std::size_t)block.src_loc + (std::size_t)j_loc * d.lld(),
-                               block.len, n, d.lld());
+                               d_A + (std::size_t)block.src_loc + (std::size_t)j_loc * array_descA[DDLA_LLD_],
+                               block.len, n, array_descA[DDLA_LLD_]);
 
             if (!send_blocks.empty() || !recv_blocks.empty()) {
                 commGroupStart<Backend>(h);
@@ -295,9 +299,9 @@ void transport_block(
 // Explicit instantiations
 // ---------------------------------------------------------------------------
 #define INSTANTIATE_TRANSPORT_BLOCK(BACKEND, TYPE)                          \
-    template void transport_block<BACKEND, TYPE>(                           \
+    template void transport_block<BACKEND, TYPE>(                           const DdlaHandle_t&, \
         const char&, const char&, const int&, const int&,                  \
-        const TYPE*, const int&, const int&, const DdlaDesc&, TYPE*)
+        const TYPE*, const int&, const int&, const int*, TYPE*)
 
 #if DDLA_HAS_CPU
 INSTANTIATE_TRANSPORT_BLOCK(DdlaBackend::CPU, float);

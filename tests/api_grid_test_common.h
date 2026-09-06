@@ -20,6 +20,7 @@
 #include "ddla_stream.h"
 #include "ptran.h"
 #include "transport_block.h"
+#include "test_desc_helpers.h"
 
 namespace api_grid_test {
 
@@ -55,9 +56,10 @@ inline std::string grid_name(const ddla::DdlaHandle_t& handle)
     return os.str();
 }
 
-inline size_t local_size(const ddla::DdlaDesc& desc)
+inline size_t local_size(const ddla::DdlaHandle_t& handle, const int* desc)
 {
-    return static_cast<size_t>(desc.lld()) * desc.n_loc();
+    return static_cast<size_t>(desc[ddla::DDLA_LLD_])
+         * static_cast<size_t>(ddla_test::n_loc(handle, desc));
 }
 
 inline int round_up_for_grid(int value, int block, int procs)
@@ -347,32 +349,38 @@ inline std::vector<T> download(const ddla::DdlaHandle_t& handle, const T* src, s
 }
 
 template <typename T, typename Fn>
-inline std::vector<T> make_local(const ddla::DdlaDesc& desc, Fn value)
+inline std::vector<T> make_local(const ddla::DdlaHandle_t& handle,
+                                 const int* desc, Fn value)
 {
-    std::vector<T> local(local_size(desc), T{});
-    for(int jloc = 0; jloc < desc.n_loc(); ++jloc){
-        const int j = desc.indx_l2g_c(jloc);
-        if(j >= desc.n()) continue;
-        for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
-            const int i = desc.indx_l2g_r(iloc);
-            if(i >= desc.m()) continue;
-            local[iloc + jloc * desc.lld()] = value(i, j);
+    const int m_loc = ddla_test::m_loc(handle, desc);
+    const int n_loc = ddla_test::n_loc(handle, desc);
+    std::vector<T> local(local_size(handle, desc), T{});
+    for(int jloc = 0; jloc < n_loc; ++jloc){
+        const int j = indx_l2g_c(desc, handle, jloc);
+        if(j >= desc[ddla::DDLA_N_]) continue;
+        for(int iloc = 0; iloc < m_loc; ++iloc){
+            const int i = indx_l2g_r(desc, handle, iloc);
+            if(i >= desc[ddla::DDLA_M_]) continue;
+            local[iloc + jloc * desc[ddla::DDLA_LLD_]] = value(i, j);
         }
     }
     return local;
 }
 
 template <typename T, typename Fn>
-inline double local_max_error(const ddla::DdlaDesc& desc, const std::vector<T>& local, Fn expected)
+inline double local_max_error(const ddla::DdlaHandle_t& handle,
+                              const int* desc, const std::vector<T>& local, Fn expected)
 {
+    const int m_loc = ddla_test::m_loc(handle, desc);
+    const int n_loc = ddla_test::n_loc(handle, desc);
     double err = 0.0;
-    for(int jloc = 0; jloc < desc.n_loc(); ++jloc){
-        const int j = desc.indx_l2g_c(jloc);
-        if(j >= desc.n()) continue;
-        for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
-            const int i = desc.indx_l2g_r(iloc);
-            if(i >= desc.m()) continue;
-            err = std::max(err, static_cast<double>(std::abs(local[iloc + jloc * desc.lld()] - expected(i, j))));
+    for(int jloc = 0; jloc < n_loc; ++jloc){
+        const int j = indx_l2g_c(desc, handle, jloc);
+        if(j >= desc[ddla::DDLA_N_]) continue;
+        for(int iloc = 0; iloc < m_loc; ++iloc){
+            const int i = indx_l2g_r(desc, handle, iloc);
+            if(i >= desc[ddla::DDLA_M_]) continue;
+            err = std::max(err, static_cast<double>(std::abs(local[iloc + jloc * desc[ddla::DDLA_LLD_]] - expected(i, j))));
         }
     }
     return err;
@@ -456,11 +464,11 @@ inline Complex op_value(char trans, int rows, int cols, int i, int j,
     return trans == 'T' ? raw : std::conj(raw);
 }
 
-inline std::vector<Complex> build_rhs(const ddla::DdlaDesc& descB, int n,
+inline std::vector<Complex> build_rhs(const ddla::DdlaHandle_t& handle, const int* descB, int n,
                                       Complex (*matrix)(int, int, int),
                                       int tag)
 {
-    return make_local<Complex>(descB, [&](int i, int j){
+    return make_local<Complex>(handle, descB, [&](int i, int j){
         Complex sum(0.0, 0.0);
         for(int l = 0; l < n; ++l){
             sum += matrix(i, l, tag) * x_value(l, j);
@@ -471,12 +479,12 @@ inline std::vector<Complex> build_rhs(const ddla::DdlaDesc& descB, int n,
 
 // B := op(A)*X (side='L', B is n x nrhs) or B := X*op(A) (side='R',
 // B is nrhs x n), with op(A) chosen by trans via op_value.
-inline std::vector<Complex> build_rhs_side(const ddla::DdlaDesc& descB, int n,
+inline std::vector<Complex> build_rhs_side(const ddla::DdlaHandle_t& handle, const int* descB, int n,
                                            char side, char trans,
                                            Complex (*matrix)(int, int, int),
                                            int tag)
 {
-    return make_local<Complex>(descB, [&](int i, int j){
+    return make_local<Complex>(handle, descB, [&](int i, int j){
         Complex sum(0.0, 0.0);
         for(int l = 0; l < n; ++l){
             if(side == 'L')
@@ -488,12 +496,12 @@ inline std::vector<Complex> build_rhs_side(const ddla::DdlaDesc& descB, int n,
     });
 }
 
-inline void check_solution(const ddla::DdlaHandle_t& handle, const ddla::DdlaDesc& descB,
+inline void check_solution(const ddla::DdlaHandle_t& handle, const int* descB,
                            const Complex* d_B, size_t count,
                            const std::string& name, double tol)
 {
     auto out = download(handle, d_B, count);
-    const double err = local_max_error<Complex>(descB, out, [](int i, int j){
+    const double err = local_max_error<Complex>(handle, descB, out, [](int i, int j){
         return x_value(i, j);
     });
     require_close(handle, name, err, tol);

@@ -8,6 +8,7 @@
 #include <mpi.h>
 
 #include <ddla/ddla.h>
+#include "test_desc_helpers.h"
 #include "ddla_connector.h"
 #include "ddla_stream_impl.h"
 
@@ -21,18 +22,18 @@ Complex value(int i, int j)
 }
 
 // Fill a distributed matrix from a host generator.
-void fill_local(int rows, int cols, const DdlaDesc& desc, Complex* d_A,
+void fill_local(int rows, int cols, const int* desc, Complex* d_A,
                 const DdlaHandle_t& handle)
 {
-    std::vector<Complex> local(static_cast<size_t>(desc.lld()) * desc.n_loc(),
+    std::vector<Complex> local(static_cast<size_t>(desc[DDLA_LLD_]) * ddla_test::n_loc(handle, desc),
                                Complex(0.0, 0.0));
-    for(int jloc = 0; jloc < desc.n_loc(); ++jloc){
-        const int j = desc.indx_l2g_c(jloc);
+    for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
+        const int j = indx_l2g_c(desc, handle, jloc);
         if(j >= cols) continue;
-        for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
-            const int i = desc.indx_l2g_r(iloc);
+        for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc); ++iloc){
+            const int i = indx_l2g_r(desc, handle, iloc);
             if(i >= rows) continue;
-            local[iloc + jloc * desc.lld()] = value(i, j);
+            local[iloc + jloc * desc[DDLA_LLD_]] = value(i, j);
         }
     }
     RUNTIME_CHECK(runtimeMemcpyAsync(d_A, local.data(), local.size() * sizeof(Complex),
@@ -47,10 +48,10 @@ double benchmark_plapiv(char direc, char rowcol, int m, int n,
                         const DdlaHandle_t& handle)
 {
     const int nb = std::min(128, std::min(m, n));
-    DdlaDesc desc(handle);
-    desc.init(m, n, nb, nb, 0, 0);
+    int desc[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(desc, handle, m, n, nb, nb, 0, 0));
 
-    const size_t nelem = static_cast<size_t>(desc.lld()) * desc.n_loc();
+    const size_t nelem = static_cast<size_t>(desc[DDLA_LLD_]) * ddla_test::n_loc(handle, desc);
     Complex* d_A = nullptr;
     RUNTIME_CHECK(runtimeMallocAsync(reinterpret_cast<void**>(&d_A),
                                   std::max<size_t>(1, nelem) * sizeof(Complex),
@@ -59,9 +60,9 @@ double benchmark_plapiv(char direc, char rowcol, int m, int n,
 
     // Pivot vector: swap row/col k with m-1-k for k in [0, m/2).  Local entry
     // for global k stores the 1-based target.
-    std::vector<int> ipiv(desc.m_loc(), 0);
-    for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
-        const int k = desc.indx_l2g_r(iloc);
+    std::vector<int> ipiv(ddla_test::m_loc(handle, desc), 0);
+    for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc); ++iloc){
+        const int k = indx_l2g_r(desc, handle, iloc);
         if(k < m - 1 - k)
             ipiv[iloc] = (m - 1 - k) + 1;
         else
@@ -70,7 +71,7 @@ double benchmark_plapiv(char direc, char rowcol, int m, int n,
 
     MPI_Barrier(handle->comm);
     const double start = MPI_Wtime();
-    plapiv(direc, rowcol, 'C', m, n, d_A, desc, ipiv.data(), desc, nullptr);
+    plapiv(handle, direc, rowcol, 'C', m, n, d_A, desc, ipiv.data(), desc, nullptr);
     RUNTIME_CHECK(runtimeStreamSynchronize(handle->stream));
     MPI_Barrier(handle->comm);
     const double elapsed = MPI_Wtime() - start;
@@ -85,7 +86,7 @@ double benchmark_plapiv(char direc, char rowcol, int m, int n,
         std::cout << "RESULT m=" << m
                   << " n=" << n
                   << " type=complex<double>"
-                  << " op=plapiv(" << direc << "," << rowcol << ",C)"
+                  << " op=plapiv(handle, " << direc << "," << rowcol << ",C)"
                   << " grid=2x2"
                   << " ranks=4"
                   << " nb=" << nb

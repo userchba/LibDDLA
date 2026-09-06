@@ -1,5 +1,6 @@
 #include "ptran.h"
 #include <ddla/ddla.h>
+#include "ddla_desc.h"
 #include "ddla_connector.h"
 #include "ddla_stream_impl.h"
 #include "require_gpu.h"
@@ -152,36 +153,40 @@ __global__ void scatter_blocks_kernel(
  * allowing the free to overlap with subsequent stream work.
  */
 template <typename T>
-void ptran(const T* d_A, const DdlaDesc& descA,
-           T* d_AT, const DdlaDesc& descAT,
+void ptran(const DdlaHandle_t& handle, const T* d_A, const int* descA,
+           T* d_AT, const int* descAT,
            bool conj)
 {
-    assert(descAT.m() == descA.n());
-    assert(descAT.n() == descA.m());
-    assert(descAT.mb() == descA.nb());
-    assert(descAT.nb() == descA.mb());
-    assert(descAT.irsrc() == descA.icsrc());
-    assert(descAT.icsrc() == descA.irsrc());
-    assert(descAT.nprows() == descA.nprows());
-    assert(descAT.npcols() == descA.npcols());
+    check_desc(descAT, handle);
+    check_desc(descA, handle);
+    int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
+    ddlaGetGridDims(handle, nprows, npcols);
+    ddlaGetGridCoords(handle, myprow, mypcol);
 
-    DdlaHandle_t handle = descA.ddla_handle();
+
+    assert(descAT[DDLA_M_] == descA[DDLA_N_]);
+    assert(descAT[DDLA_N_] == descA[DDLA_M_]);
+    assert(descAT[DDLA_MB_] == descA[DDLA_NB_]);
+    assert(descAT[DDLA_NB_] == descA[DDLA_MB_]);
+    assert(descAT[DDLA_RSRC_] == descA[DDLA_CSRC_]);
+    assert(descAT[DDLA_CSRC_] == descA[DDLA_RSRC_]);
+
     detail::require_gpu_backend(handle, "ptran");
     int myrank = handle->myid;
-    int Pr = descA.nprows();
-    int Pc = descA.npcols();
+    int Pr = nprows;
+    int Pc = npcols;
     int nprocs = Pr * Pc;
 
-    int mA = descA.m();
-    int nA = descA.n();
-    int mbA = descA.mb();
-    int nbA = descA.nb();
-    int irsrcA = descA.irsrc();
-    int icsrcA = descA.icsrc();
-    int mbAT = descAT.mb();
-    int nbAT = descAT.nb();
-    int irsrcAT = descAT.irsrc();
-    int icsrcAT = descAT.icsrc();
+    int mA = descA[DDLA_M_];
+    int nA = descA[DDLA_N_];
+    int mbA = descA[DDLA_MB_];
+    int nbA = descA[DDLA_NB_];
+    int irsrcA = descA[DDLA_RSRC_];
+    int icsrcA = descA[DDLA_CSRC_];
+    int mbAT = descAT[DDLA_MB_];
+    int nbAT = descAT[DDLA_NB_];
+    int irsrcAT = descAT[DDLA_RSRC_];
+    int icsrcAT = descAT[DDLA_CSRC_];
 
     int nbr = (mA + mbA - 1) / mbA;
     int nbc = (nA + nbA - 1) / nbA;
@@ -298,9 +303,9 @@ void ptran(const T* d_A, const DdlaDesc& descA,
         for(size_t i = 0; i < send_blocks.size(); i++){
             const auto& b = send_blocks[i];
             h_pack[i] = {b.bm, b.bn,
-                         b.lrow_A + b.lcol_A * descA.lld(),
+                         b.lrow_A + b.lcol_A * descA[DDLA_LLD_],
                          b.offset,
-                         descA.lld(), b.bn};
+                         descA[DDLA_LLD_], b.bn};
         }
         RUNTIME_CHECK(runtimeMallocAsync(reinterpret_cast<void**>(&d_pack_blocks),
             sizeof(TransBlockInfo) * h_pack.size(), stream));
@@ -321,9 +326,9 @@ void ptran(const T* d_A, const DdlaDesc& descA,
         for(size_t i = 0; i < local_blocks.size(); i++){
             const auto& b = local_blocks[i];
             h_local[i] = {b.bm, b.bn,
-                          b.lrow_A + b.lcol_A * descA.lld(),
-                          b.lrow_AT + b.lcol_AT * descAT.lld(),
-                          descA.lld(), descAT.lld()};
+                          b.lrow_A + b.lcol_A * descA[DDLA_LLD_],
+                          b.lrow_AT + b.lcol_AT * descAT[DDLA_LLD_],
+                          descA[DDLA_LLD_], descAT[DDLA_LLD_]};
         }
         RUNTIME_CHECK(runtimeMallocAsync(reinterpret_cast<void**>(&d_local_blocks),
             sizeof(TransBlockInfo) * h_local.size(), stream));
@@ -364,8 +369,8 @@ void ptran(const T* d_A, const DdlaDesc& descA,
             const auto& b = recv_blocks[i];
             h_scatter[i] = {b.bm, b.bn,
                             b.offset,
-                            b.lrow_AT + b.lcol_AT * descAT.lld(),
-                            b.bn, descAT.lld()};
+                            b.lrow_AT + b.lcol_AT * descAT[DDLA_LLD_],
+                            b.bn, descAT[DDLA_LLD_]};
         }
         RUNTIME_CHECK(runtimeMallocAsync(reinterpret_cast<void**>(&d_scatter_blocks),
             sizeof(TransBlockInfo) * h_scatter.size(), stream));
@@ -388,9 +393,9 @@ void ptran(const T* d_A, const DdlaDesc& descA,
     if(d_local_blocks)   RUNTIME_CHECK(runtimeFreeAsync(d_local_blocks, stream));
 }
 
-template void ptran<float>(const float* d_A, const DdlaDesc& descA, float* d_AT, const DdlaDesc& descAT, bool conj);
-template void ptran<double>(const double* d_A, const DdlaDesc& descA, double* d_AT, const DdlaDesc& descAT, bool conj);
-template void ptran<std::complex<float>>(const std::complex<float>* d_A, const DdlaDesc& descA, std::complex<float>* d_AT, const DdlaDesc& descAT, bool conj);
-template void ptran<std::complex<double>>(const std::complex<double>* d_A, const DdlaDesc& descA, std::complex<double>* d_AT, const DdlaDesc& descAT, bool conj);
+template void ptran<float>(const DdlaHandle_t&, const float* d_A, const int* descA, float* d_AT, const int* descAT, bool conj);
+template void ptran<double>(const DdlaHandle_t&, const double* d_A, const int* descA, double* d_AT, const int* descAT, bool conj);
+template void ptran<std::complex<float>>(const DdlaHandle_t&, const std::complex<float>* d_A, const int* descA, std::complex<float>* d_AT, const int* descAT, bool conj);
+template void ptran<std::complex<double>>(const DdlaHandle_t&, const std::complex<double>* d_A, const int* descA, std::complex<double>* d_AT, const int* descAT, bool conj);
 
 } // namespace ddla

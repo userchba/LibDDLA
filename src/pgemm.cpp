@@ -1,4 +1,5 @@
 #include <ddla/ddla.h>
+#include "ddla_desc.h"
 #include <algorithm>
 #include <cassert>
 #include <stdexcept>
@@ -29,32 +30,33 @@ inline const char* pgemm_backend_name(DdlaBackend backend)
 
 template <DdlaBackend Backend, typename T>
 void pgemm(
-    const char& transa, const char& transb,
+    const DdlaHandle_t& handle, const char& transa, const char& transb,
     const int& m, const int& n, const int& k,
     const T& alpha,
-    const T* A, const DdlaDesc& descA,
-    const T* B, const DdlaDesc& descB,
+    const T* A, const int* descA,
+    const T* B, const int* descB,
     const T& beta,
-    T* C, const DdlaDesc& descC)
+    T* C, const int* descC)
 {
     static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
                   "CPU pgemm is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU pgemm is not available in this LibDDLA build");
 
-    DdlaHandle_t h = descA.ddla_handle();
+    DdlaHandle_t h = handle;
 
-    // Validate same-handle requirement (deterministic error instead of assert)
     if (h == nullptr) {
-        throw std::runtime_error("pgemm: null handle on descA");
+        throw std::runtime_error("pgemm: null handle");
     }
-    if (descA.ddla_handle() != descB.ddla_handle() ||
-        descA.ddla_handle() != descC.ddla_handle()) {
-        throw std::runtime_error("pgemm: descriptor handle mismatch");
-    }
-    if (!descA.is_initialized() || !descB.is_initialized() || !descC.is_initialized()) {
-        throw std::runtime_error("pgemm: uninitialized descriptor");
-    }
+    // Each descriptor is validated against this handle's process grid
+    // (dense block-cyclic type, slot ranges, LLD vs LOCr); a descriptor
+    // built against a different process grid is rejected there.
+    check_desc(descA, handle);
+    check_desc(descB, handle);
+    check_desc(descC, handle);
+    int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
+    ddlaGetGridDims(handle, nprows, npcols);
+    ddlaGetGridCoords(handle, myprow, mypcol);
 
     const DdlaBackend actual_backend = ddlaGetBackend(h);
     if (actual_backend != Backend) {
@@ -69,32 +71,32 @@ void pgemm(
     assert(transb == 'N' || transb == 'T' || transb == 'C');
     assert(m >= 0 && n >= 0 && k >= 0);
 
-    const int opA_m = (transa == 'N') ? descA.m() : descA.n();
-    const int opA_n = (transa == 'N') ? descA.n() : descA.m();
-    const int opB_m = (transb == 'N') ? descB.m() : descB.n();
-    const int opB_n = (transb == 'N') ? descB.n() : descB.m();
+    const int opA_m = (transa == 'N') ? descA[DDLA_M_] : descA[DDLA_N_];
+    const int opA_n = (transa == 'N') ? descA[DDLA_N_] : descA[DDLA_M_];
+    const int opB_m = (transb == 'N') ? descB[DDLA_M_] : descB[DDLA_N_];
+    const int opB_n = (transb == 'N') ? descB[DDLA_N_] : descB[DDLA_M_];
     assert(m <= opA_m);
     assert(k <= opA_n);
     assert(k <= opB_m);
     assert(n <= opB_n);
-    assert(m <= descC.m() && n <= descC.n());
+    assert(m <= descC[DDLA_M_] && n <= descC[DDLA_N_]);
     {
         int mbA, kbA, kbB, nbB, mbC, nbC;
-        mbC = descC.mb();
-        nbC = descC.nb();
+        mbC = descC[DDLA_MB_];
+        nbC = descC[DDLA_NB_];
         if (transa == 'N') {
-            mbA = descA.mb();
-            kbA = descA.nb();
+            mbA = descA[DDLA_MB_];
+            kbA = descA[DDLA_NB_];
         } else {
-            mbA = descA.nb();
-            kbA = descA.mb();
+            mbA = descA[DDLA_NB_];
+            kbA = descA[DDLA_MB_];
         }
         if (transb == 'N') {
-            kbB = descB.mb();
-            nbB = descB.nb();
+            kbB = descB[DDLA_MB_];
+            nbB = descB[DDLA_NB_];
         } else {
-            kbB = descB.nb();
-            nbB = descB.mb();
+            kbB = descB[DDLA_NB_];
+            nbB = descB[DDLA_MB_];
         }
         assert(mbA == mbC);
         assert(kbA == kbB);
@@ -103,13 +105,13 @@ void pgemm(
 
     int nb;
     if (transa == 'N')
-        nb = descA.nb();
+        nb = descA[DDLA_NB_];
     else
-        nb = descA.mb();
+        nb = descA[DDLA_MB_];
 
-    const int m_loc_C = num_loc(m, descC.mb(), descC.myprow(), descC.irsrc(), descC.nprows());
-    const int n_loc_C = num_loc(n, descC.nb(), descC.mypcol(), descC.icsrc(), descC.npcols());
-    const int lldC = descC.lld();
+    const int m_loc_C = num_loc(m, descC[DDLA_MB_], myprow, descC[DDLA_RSRC_], nprows);
+    const int n_loc_C = num_loc(n, descC[DDLA_NB_], mypcol, descC[DDLA_CSRC_], npcols);
+    const int lldC = descC[DDLA_LLD_];
 
     // ---- Degenerate-size fast paths (F2) -----------------------------------
     // ScaLAPACK's PxGEMM contract: an empty output (m==0 or n==0) is a no-op,
@@ -134,10 +136,10 @@ void pgemm(
     }
 
     // Buffer sizing
-    const int m_loc_A = num_loc((transa == 'N') ? m : k, descA.mb(), descA.myprow(), descA.irsrc(), descA.nprows());
-    const int n_loc_A = num_loc((transa == 'N') ? k : m, descA.nb(), descA.mypcol(), descA.icsrc(), descA.npcols());
-    const int m_loc_B = num_loc((transb == 'N') ? k : n, descB.mb(), descB.myprow(), descB.irsrc(), descB.nprows());
-    const int n_loc_B = num_loc((transb == 'N') ? n : k, descB.nb(), descB.mypcol(), descB.icsrc(), descB.npcols());
+    const int m_loc_A = num_loc((transa == 'N') ? m : k, descA[DDLA_MB_], myprow, descA[DDLA_RSRC_], nprows);
+    const int n_loc_A = num_loc((transa == 'N') ? k : m, descA[DDLA_NB_], mypcol, descA[DDLA_CSRC_], npcols);
+    const int m_loc_B = num_loc((transb == 'N') ? k : n, descB[DDLA_MB_], myprow, descB[DDLA_RSRC_], nprows);
+    const int n_loc_B = num_loc((transb == 'N') ? n : k, descB[DDLA_NB_], mypcol, descB[DDLA_CSRC_], npcols);
 
     // Scratch buffers (GPU stream-scratch or CPU heap) for the SUMMA panel
     // pipeline, freed explicitly below.  RUNTIME_CHECK throws std::runtime_error
@@ -181,7 +183,7 @@ void pgemm(
             g_ia = 0;
             g_ja = ks;
         }
-        ddla::transport_block<Backend, T>(
+        ddla::transport_block<Backend, T>(handle, 
             sData_a, transa,
             m_a, n_a,
             A, g_ia, g_ja, descA,
@@ -202,7 +204,7 @@ void pgemm(
             g_ib = ks;
             g_jb = 0;
         }
-        ddla::transport_block<Backend, T>(
+        ddla::transport_block<Backend, T>(handle, 
             sData_b, transb,
             m_b, n_b,
             B, g_ib, g_jb, descB,
@@ -253,11 +255,11 @@ void pgemm(
 // Explicit instantiations
 // ---------------------------------------------------------------------------
 #define INSTANTIATE_PGEMM(BACKEND, TYPE)                                     \
-    template void pgemm<BACKEND, TYPE>(                              \
+    template void pgemm<BACKEND, TYPE>(                              const DdlaHandle_t&, \
         const char&, const char&, const int&, const int&, const int&,          \
-        const TYPE&, const TYPE*, const DdlaDesc&,                            \
-        const TYPE*, const DdlaDesc&,                                         \
-        const TYPE&, TYPE*, const DdlaDesc&)
+        const TYPE&, const TYPE*, const int*,                            \
+        const TYPE*, const int*,                                         \
+        const TYPE&, TYPE*, const int*)
 
 #if DDLA_HAS_CPU
 INSTANTIATE_PGEMM(DdlaBackend::CPU, float);

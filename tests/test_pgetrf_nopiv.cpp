@@ -6,6 +6,7 @@
 #include <vector>
 #include <complex>
 #include <ddla/ddla.h>
+#include "test_desc_helpers.h"
 #include "ddla_connector.h"
 #include "scal.h"
 #include "ddla_stream_impl.h"
@@ -14,36 +15,36 @@ using namespace ddla;
 
 void check_pgetrf_nopiv(int n, const DdlaHandle_t& ddla_handle)
 {
-    DdlaDesc matrix_desc(ddla_handle);
-    matrix_desc.init_square_blk(n, n, 0, 0);
-    int nb = std::min(128, matrix_desc.mb());
-    matrix_desc.init(n, n, nb, nb, 0, 0);
+    int matrix_desc[DDLA_DLEN_];
+    ddla_test::init_square_blk(matrix_desc, n, n, 0, 0, ddla_handle);
+    int nb = std::min(128, matrix_desc[DDLA_MB_]);
+    DDLA_CHECK(ddlaDescInit(matrix_desc, ddla_handle, n, n, nb, nb, 0, 0));
 
-    int myid = matrix_desc.mypcol() + matrix_desc.myprow() * matrix_desc.npcols();
+    int myid = ddla_test::mypcol(ddla_handle) + ddla_test::myprow(ddla_handle) * ddla_test::npcols(ddla_handle);
     printf("myid:%d, m_loc:%d, n_loc:%d, mb:%d, nb:%d, m:%d, n:%d\n",
-           myid, matrix_desc.m_loc(), matrix_desc.n_loc(),
-           matrix_desc.mb(), matrix_desc.nb(), matrix_desc.m(), matrix_desc.n());
+           myid, ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc),
+           matrix_desc[DDLA_MB_], matrix_desc[DDLA_NB_], matrix_desc[DDLA_M_], matrix_desc[DDLA_N_]);
 
     std::complex<double> *d_A, *d_A_piv, *d_A_bpiv;
     int* d_ipiv_bpiv;
 
-    const size_t nelem = static_cast<size_t>(matrix_desc.m_loc()) * matrix_desc.n_loc();
+    const size_t nelem = static_cast<size_t>(ddla_test::m_loc(ddla_handle, matrix_desc)) * ddla_test::n_loc(ddla_handle, matrix_desc);
     const size_t size = nelem * sizeof(std::complex<double>);
 
     RUNTIME_CHECK(runtimeMallocAsync((void**)&d_A, size, ddla_handle->stream));
     RUNTIME_CHECK(runtimeMallocAsync((void**)&d_A_piv, size, ddla_handle->stream));
     RUNTIME_CHECK(runtimeMallocAsync((void**)&d_A_bpiv, size, ddla_handle->stream));
-    RUNTIME_CHECK(runtimeMallocAsync((void**)&d_ipiv_bpiv, matrix_desc.m_loc() * sizeof(int), ddla_handle->stream));
+    RUNTIME_CHECK(runtimeMallocAsync((void**)&d_ipiv_bpiv, ddla_test::m_loc(ddla_handle, matrix_desc) * sizeof(int), ddla_handle->stream));
 
     random_generate(d_A, nelem);
     BLAS_CHECK(deblasScal(ddla_handle->blasH, nelem, 0.01, d_A, 1));
     std::complex<double> cons_i = 2.0;
-    for (int i = 0; i < matrix_desc.m(); i++) {
-        int i_loc = matrix_desc.indx_g2l_r(i);
+    for (int i = 0; i < matrix_desc[DDLA_M_]; i++) {
+        int i_loc = indx_g2l_r(matrix_desc, ddla_handle, i);
         if (i_loc < 0) continue;
-        int j_loc = matrix_desc.indx_g2l_c(i);
+        int j_loc = indx_g2l_c(matrix_desc, ddla_handle, i);
         if (j_loc < 0) continue;
-        RUNTIME_CHECK(runtimeMemcpy(d_A + i_loc + j_loc * matrix_desc.lld(), &cons_i,
+        RUNTIME_CHECK(runtimeMemcpy(d_A + i_loc + j_loc * matrix_desc[DDLA_LLD_], &cons_i,
                                   sizeof(std::complex<double>), runtimeMemcpyHostToDevice));
     }
 
@@ -52,12 +53,12 @@ void check_pgetrf_nopiv(int n, const DdlaHandle_t& ddla_handle)
     RUNTIME_CHECK(runtimeStreamSynchronize(ddla_handle->stream));
     MPI_Barrier(MPI_COMM_WORLD);
 
-    std::vector<int> ipiv(matrix_desc.m_loc());
+    std::vector<int> ipiv(ddla_test::m_loc(ddla_handle, matrix_desc));
 
     // 1) pgetrf (partial pivoting)
     int info_piv = -1;
     double t_piv_start = MPI_Wtime();
-    pgetrf(n, n, d_A_piv, matrix_desc, ipiv.data(), info_piv);
+    pgetrf(ddla_handle, n, n, d_A_piv, matrix_desc, ipiv.data(), info_piv);
     RUNTIME_CHECK(runtimeStreamSynchronize(ddla_handle->stream));
     MPI_Barrier(MPI_COMM_WORLD);
     double t_piv = MPI_Wtime() - t_piv_start;
@@ -66,7 +67,7 @@ void check_pgetrf_nopiv(int n, const DdlaHandle_t& ddla_handle)
     // 2) pgetrf_bpiv (block partial pivoting)
     int info_bpiv = -1;
     double t_bpiv_start = MPI_Wtime();
-    pgetrf_bpiv(n, n, d_A_bpiv, matrix_desc, d_ipiv_bpiv, info_bpiv);
+    pgetrf_bpiv(ddla_handle, n, n, d_A_bpiv, matrix_desc, d_ipiv_bpiv, info_bpiv);
     RUNTIME_CHECK(runtimeStreamSynchronize(ddla_handle->stream));
     MPI_Barrier(MPI_COMM_WORLD);
     double t_bpiv = MPI_Wtime() - t_bpiv_start;
@@ -75,7 +76,7 @@ void check_pgetrf_nopiv(int n, const DdlaHandle_t& ddla_handle)
     // 3) pgetrf_nopiv (no pivoting)
     int info_nopiv = -1;
     double t_nopiv_start = MPI_Wtime();
-    pgetrf_nopiv(n, n, d_A, matrix_desc, info_nopiv);
+    pgetrf_nopiv(ddla_handle, n, n, d_A, matrix_desc, info_nopiv);
     RUNTIME_CHECK(runtimeStreamSynchronize(ddla_handle->stream));
     MPI_Barrier(MPI_COMM_WORLD);
     double t_nopiv = MPI_Wtime() - t_nopiv_start;
@@ -93,14 +94,14 @@ void check_pgetrf_nopiv(int n, const DdlaHandle_t& ddla_handle)
     std::complex<double> ln_det_all[3] = {0.0, 0.0, 0.0};
     std::complex<double> tmp;
     for (int ig = 0; ig != n; ig++) {
-        int locr = matrix_desc.indx_g2l_r(ig);
-        int locc = matrix_desc.indx_g2l_c(ig);
+        int locr = indx_g2l_r(matrix_desc, ddla_handle, ig);
+        int locc = indx_g2l_c(matrix_desc, ddla_handle, ig);
         if (locr >= 0 && locc >= 0) {
-            tmp = a[locr + locc * matrix_desc.lld()];
+            tmp = a[locr + locc * matrix_desc[DDLA_LLD_]];
             ln_det_loc[0] += tmp.real() > 0 ? std::log(tmp) : std::log(-tmp);
-            tmp = a_piv[locr + locc * matrix_desc.lld()];
+            tmp = a_piv[locr + locc * matrix_desc[DDLA_LLD_]];
             ln_det_loc[1] += tmp.real() > 0 ? std::log(tmp) : std::log(-tmp);
-            tmp = a_bpiv[locr + locc * matrix_desc.lld()];
+            tmp = a_bpiv[locr + locc * matrix_desc[DDLA_LLD_]];
             ln_det_loc[2] += tmp.real() > 0 ? std::log(tmp) : std::log(-tmp);
         }
     }

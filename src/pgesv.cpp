@@ -1,4 +1,5 @@
 #include <ddla/ddla.h>
+#include "ddla_desc.h"
 #include <cassert>
 #include <vector>
 #include "ddla_connector.h"
@@ -11,18 +12,25 @@ namespace ddla{
 
 template <typename T>
 void pgesv(
-    const char& side, const char& trans, const int& n, const int& nrhs,
-    T* d_A, const DdlaDesc& array_descA,
-    T* d_B, const DdlaDesc& array_descB
+    const DdlaHandle_t& handle, const char& side, const char& trans, const int& n, const int& nrhs,
+    T* d_A, const int* array_descA,
+    T* d_B, const int* array_descB
 )
 {
-    DdlaHandle_t ddla_handle = array_descA.ddla_handle();
+    check_desc(array_descB, handle);
+    check_desc(array_descA, handle);
+    int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
+    ddlaGetGridDims(handle, nprows, npcols);
+    ddlaGetGridCoords(handle, myprow, mypcol);
+
+
+    DdlaHandle_t ddla_handle = handle;
     detail::require_gpu_backend(ddla_handle, "pgesv");
-    assert(n <= array_descA.m() && n <= array_descA.n());
-    const int n_loc_A = num_loc(n, array_descA.mb(), array_descA.myprow(), array_descA.irsrc(), array_descA.nprows());
+    assert(n <= array_descA[DDLA_M_] && n <= array_descA[DDLA_N_]);
+    const int n_loc_A = num_loc(n, array_descA[DDLA_MB_], myprow, array_descA[DDLA_RSRC_], nprows);
     std::vector<int> ipiv(n_loc_A);
     int info = 0;
-    pgetrf(
+    pgetrf(handle, 
         n, n,
         d_A, array_descA,
         ipiv.data(),
@@ -31,7 +39,7 @@ void pgesv(
     if(info !=0){
         throw std::runtime_error("pgesv: pgetrf returned info = " + std::to_string(info));
     }
-    pgetrs(
+    pgetrs(handle, 
         side, trans, n, nrhs,
         d_A, array_descA,
         ipiv.data(),
@@ -40,27 +48,27 @@ void pgesv(
 }
 
 template void pgesv<float>(
-    const char& side, const char& trans, const int& n, const int& nrhs,
-    float* d_A, const DdlaDesc& array_descA,
-    float* d_B, const DdlaDesc& array_descB
+    const DdlaHandle_t&, const char& side, const char& trans, const int& n, const int& nrhs,
+    float* d_A, const int* array_descA,
+    float* d_B, const int* array_descB
 );
 
 template void pgesv<double>(
-    const char& side, const char& trans, const int& n, const int& nrhs,
-    double* d_A, const DdlaDesc& array_descA,
-    double* d_B, const DdlaDesc& array_descB
+    const DdlaHandle_t&, const char& side, const char& trans, const int& n, const int& nrhs,
+    double* d_A, const int* array_descA,
+    double* d_B, const int* array_descB
 );
 
 template void pgesv<std::complex<float>>(
-    const char& side, const char& trans, const int& n, const int& nrhs,
-    std::complex<float>* d_A, const DdlaDesc& array_descA,
-    std::complex<float>* d_B, const DdlaDesc& array_descB
+    const DdlaHandle_t&, const char& side, const char& trans, const int& n, const int& nrhs,
+    std::complex<float>* d_A, const int* array_descA,
+    std::complex<float>* d_B, const int* array_descB
 );
 
 template void pgesv<std::complex<double>>(
-    const char& side, const char& trans, const int& n, const int& nrhs,
-    std::complex<double>* d_A, const DdlaDesc& array_descA,
-    std::complex<double>* d_B, const DdlaDesc& array_descB
+    const DdlaHandle_t&, const char& side, const char& trans, const int& n, const int& nrhs,
+    std::complex<double>* d_A, const int* array_descA,
+    std::complex<double>* d_B, const int* array_descB
 );
 
 }

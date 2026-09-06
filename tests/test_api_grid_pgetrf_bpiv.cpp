@@ -6,22 +6,22 @@ void check_pgetrf_bpiv(const ddla::DdlaHandle_t& handle, const Shape& base)
 {
     const int nb = base.nb;
     const int n = square_size(handle, base);
-    ddla::DdlaDesc descA(handle);
-    descA.init(n, n, nb, nb, 0, 0);
+    int descA[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descA, handle, n, n, nb, nb, 0, 0));
 
     // Run with the no-pivot matrix and with the row-cycled variant that
     // forces real row swaps in every diagonal block.
     for(auto gen : {dominant_value, cycled_value}){
-        auto h_A = make_local<Complex>(descA, [=](int i, int j){ return gen(i, j, n); });
+        auto h_A = make_local<Complex>(handle, descA, [=](int i, int j){ return gen(i, j, n); });
         DeviceBuffer<Complex> d_A(handle, h_A.size());
-        DeviceBuffer<int> d_ipiv(handle, std::max(1, descA.m_loc()));
+        DeviceBuffer<int> d_ipiv(handle, std::max(1, ddla_test::m_loc(handle, descA)));
         upload(handle, d_A.ptr, h_A);
         check_ddla_sync(handle);
 
         int info = -1;
-        ddla::pgetrf_bpiv(n, n, d_A.ptr, descA, d_ipiv.ptr, info);
+        ddla::pgetrf_bpiv(handle, n, n, d_A.ptr, descA, d_ipiv.ptr, info);
         if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
-        require_close(handle, "pgetrf_bpiv(info)", 0.0, 0.0);
+        require_close(handle, "pgetrf_bpiv(handle, info)", 0.0, 0.0);
     }
 }
 

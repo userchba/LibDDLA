@@ -58,44 +58,44 @@ inline std::vector<int> make_g_ipiv(int m)
 
 // Fill the distributed ipiv array from the global pivot vector: the local
 // entry on the owning process holds g_ipiv[k] (1-based) for its global row k.
-inline void fill_ipiv(std::vector<int>& ipiv, const ddla::DdlaDesc& desc,
+inline void fill_ipiv(const ddla::DdlaHandle_t& handle, std::vector<int>& ipiv, const int* desc,
                       const std::vector<int>& g_ipiv)
 {
-    for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
-        const int k = desc.indx_l2g_r(iloc);
+    for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc); ++iloc){
+        const int k = indx_l2g_r(desc, handle, iloc);
         ipiv[iloc] = g_ipiv[k];
     }
 }
 
-inline void check_one_case(const ddla::DdlaHandle_t& handle, const ddla::DdlaDesc& desc,
+inline void check_one_case(const ddla::DdlaHandle_t& handle, const int* desc,
                            int m, int n, char direc, char rowcol,
                            Complex (*value)(int, int), double tol)
 {
-    const std::string name = std::string("plapiv(") + direc + "," + rowcol + ",C)";
+    const std::string name = std::string("plapiv(handle, ") + direc + "," + rowcol + ",C)";
     const std::vector<int> g_ipiv = make_g_ipiv(m);
-    std::vector<int> ipiv(desc.m_loc(), 0);
-    fill_ipiv(ipiv, desc, g_ipiv);
+    std::vector<int> ipiv(ddla_test::m_loc(handle, desc), 0);
+    fill_ipiv(handle, ipiv, desc, g_ipiv);
 
-    const auto h_A = make_local<Complex>(desc, value);
+    const auto h_A = make_local<Complex>(handle, desc, value);
     DeviceBuffer<Complex> d_A(handle, h_A.size());
     upload(handle, d_A.ptr, h_A);
     check_ddla_sync(handle);
 
-    ddla::plapiv(direc, rowcol, 'C', m, n, d_A.ptr, desc, ipiv.data(), desc, nullptr);
+    ddla::plapiv(handle, direc, rowcol, 'C', m, n, d_A.ptr, desc, ipiv.data(), desc, nullptr);
     auto out = download(handle, d_A.ptr, h_A.size());
 
     const auto G = make_global(m, n, value);
     const auto R = apply_pivots_host(G, m, n, direc, rowcol, g_ipiv);
 
     double err = 0.0;
-    for(int jloc = 0; jloc < desc.n_loc(); ++jloc){
-        const int j = desc.indx_l2g_c(jloc);
+    for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
+        const int j = indx_l2g_c(desc, handle, jloc);
         if(j >= n) continue;
-        for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
-            const int i = desc.indx_l2g_r(iloc);
+        for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc); ++iloc){
+            const int i = indx_l2g_r(desc, handle, iloc);
             if(i >= m) continue;
             err = std::max(err, static_cast<double>(
-                std::abs(out[iloc + jloc * desc.lld()] - R[static_cast<size_t>(i) * n + j])));
+                std::abs(out[iloc + jloc * desc[DDLA_LLD_]] - R[static_cast<size_t>(i) * n + j])));
         }
     }
     require_close(handle, name, err, tol);
@@ -109,23 +109,23 @@ inline void check_nonsquare_col(const ddla::DdlaHandle_t& handle,
                                 int m, int n_seg, int nb, char direc,
                                 Complex (*value)(int, int), double tol)
 {
-    const std::string name = std::string("plapiv(") + direc + ",C,C) n_seg=" +
+    const std::string name = std::string("plapiv(handle, ") + direc + ",C,C) n_seg=" +
                              std::to_string(n_seg) + " != m=" + std::to_string(m);
-    ddla::DdlaDesc descB(handle);
-    descB.init(n_seg, m, nb, nb, 0, 0);
-    ddla::DdlaDesc descIP(handle);
-    descIP.init(m, m, nb, nb, 0, 0);
+    int descB[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descB, handle, n_seg, m, nb, nb, 0, 0));
+    int descIP[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descIP, handle, m, m, nb, nb, 0, 0));
 
     const std::vector<int> g_ipiv = make_g_ipiv(m);
-    std::vector<int> ipiv(descIP.m_loc(), 0);
-    fill_ipiv(ipiv, descIP, g_ipiv);
+    std::vector<int> ipiv(ddla_test::m_loc(handle, descIP), 0);
+    fill_ipiv(handle, ipiv, descIP, g_ipiv);
 
-    const auto h_B = make_local<Complex>(descB, value);
+    const auto h_B = make_local<Complex>(handle, descB, value);
     DeviceBuffer<Complex> d_B(handle, h_B.size());
     upload(handle, d_B.ptr, h_B);
     check_ddla_sync(handle);
 
-    ddla::plapiv(direc, 'C', 'C', m, n_seg, d_B.ptr, descB, ipiv.data(), descIP, nullptr);
+    ddla::plapiv(handle, direc, 'C', 'C', m, n_seg, d_B.ptr, descB, ipiv.data(), descIP, nullptr);
     auto out = download(handle, d_B.ptr, h_B.size());
 
     // Global column-swap reference over the n_seg x m matrix (row-major).
@@ -145,12 +145,12 @@ inline void check_nonsquare_col(const ddla::DdlaHandle_t& handle,
     }
 
     double err = 0.0;
-    for(int jloc = 0; jloc < descB.n_loc(); ++jloc){
-        const int j = descB.indx_l2g_c(jloc);
-        for(int iloc = 0; iloc < descB.m_loc(); ++iloc){
-            const int i = descB.indx_l2g_r(iloc);
+    for(int jloc = 0; jloc < ddla_test::n_loc(handle, descB); ++jloc){
+        const int j = indx_l2g_c(descB, handle, jloc);
+        for(int iloc = 0; iloc < ddla_test::m_loc(handle, descB); ++iloc){
+            const int i = indx_l2g_r(descB, handle, iloc);
             err = std::max(err, static_cast<double>(
-                std::abs(out[iloc + jloc * descB.lld()] - G[static_cast<size_t>(i) * m + j])));
+                std::abs(out[iloc + jloc * descB[DDLA_LLD_]] - G[static_cast<size_t>(i) * m + j])));
         }
     }
     require_close(handle, name, err, tol);
@@ -167,8 +167,8 @@ void check_plapiv(const ddla::DdlaHandle_t& handle, const Shape& base)
     // and columns: the pivot vector (distributed by rows of the descriptor)
     // has one entry per pivot in both the 'R' and 'C' cases.
     const int m = round_up_for_grid(base.m, nb, std::max(nprows, npcols));
-    ddla::DdlaDesc desc(handle);
-    desc.init(m, m, nb, nb, 0, 0);
+    int desc[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(desc, handle, m, m, nb, nb, 0, 0));
 
     auto value = [](int i, int j){ return Complex(10.0 * i + j, -0.5 * i + 0.25 * j); };
 

@@ -1,4 +1,5 @@
 #include <ddla/ddla.h>
+#include "ddla_desc.h"
 #include <cassert>
 #include <vector>
 #include <algorithm>
@@ -34,28 +35,30 @@ namespace ddla {
  */
 template<typename T>
 void pgetrf_bpiv(
-    const int& m, const int& n,
-    T* d_A, const DdlaDesc& array_descA,
+    const DdlaHandle_t& handle, const int& m, const int& n,
+    T* d_A, const int* array_descA,
     int* d_ipiv, // device, 1-based global row indices
     int& info  // host
 )
 {
-    assert(m <= array_descA.m()&& n <= array_descA.n());
-    DdlaHandle_t ddla_handle = array_descA.ddla_handle();
+    check_desc(array_descA, handle);
+    int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
+    ddlaGetGridDims(handle, nprows, npcols);
+    ddlaGetGridCoords(handle, myprow, mypcol);
+
+
+    assert(m <= array_descA[DDLA_M_]&& n <= array_descA[DDLA_N_]);
+    DdlaHandle_t ddla_handle = handle;
     detail::require_gpu_backend(ddla_handle, "pgetrf_bpiv");
 
 
-    int nprows = array_descA.nprows();
-    int npcols = array_descA.npcols();
-    int myprow = array_descA.myprow();
-    int mypcol = array_descA.mypcol();
 
-    int nb = array_descA.mb();
-    assert(array_descA.mb() == array_descA.nb());
-    int lld = array_descA.lld();
+    int nb = array_descA[DDLA_MB_];
+    assert(array_descA[DDLA_MB_] == array_descA[DDLA_NB_]);
+    int lld = array_descA[DDLA_LLD_];
 
-    int m_loc = num_loc(m, array_descA.mb(), myprow, array_descA.irsrc(), nprows);
-    int n_loc = num_loc(n, array_descA.nb(), mypcol, array_descA.icsrc(), npcols);
+    int m_loc = num_loc(m, array_descA[DDLA_MB_], myprow, array_descA[DDLA_RSRC_], nprows);
+    int n_loc = num_loc(n, array_descA[DDLA_NB_], mypcol, array_descA[DDLA_CSRC_], npcols);
 
     runtimeStream_t stream = ddla_handle->stream;
     deblasHandle_t blasH = ddla_handle->blasH;
@@ -81,11 +84,11 @@ void pgetrf_bpiv(
     for (int n_s = 0; n_s < std::min(m, n); n_s += nb) {
         nb_real = std::min(nb, std::min(m, n) - n_s);
 
-        int i_loc = array_descA.indx_g2l_r(n_s);
-        int j_loc = array_descA.indx_g2l_c(n_s);
+        int i_loc = indx_g2l_r(array_descA, handle, n_s);
+        int j_loc = indx_g2l_c(array_descA, handle, n_s);
 
-        int owner_row = indxg2p(n_s, nb, array_descA.irsrc(), nprows);
-        int owner_col = indxg2p(n_s, nb, array_descA.icsrc(), npcols);
+        int owner_row = indxg2p(n_s, nb, array_descA[DDLA_RSRC_], nprows);
+        int owner_col = indxg2p(n_s, nb, array_descA[DDLA_CSRC_], npcols);
 
         // ================================================================
         // Step 1: Panel LU -- factor the nb×nb diagonal block in place
@@ -111,7 +114,7 @@ void pgetrf_bpiv(
             // [0, n_s).  getrf wrote these pivots only on (owner_row,
             // owner_col) -- the loop breaks before step 2's row broadcast --
             // so broadcast them first.
-            const int l_cols = num_loc(n_s, nb, mypcol, array_descA.icsrc(), npcols);
+            const int l_cols = num_loc(n_s, nb, mypcol, array_descA[DDLA_CSRC_], npcols);
             if(myprow == owner_row){
                 commBcast(ddla_handle, CommScope::Row, d_ipiv + mm_row_start, (std::size_t)nb_real, owner_col);
                 if(l_cols > 0){
@@ -166,7 +169,7 @@ void pgetrf_bpiv(
             // A = P*L*U (the L part is permuted too).  These local columns
             // hold no data of the current trailing submatrix, so this is a
             // purely local laswp.
-            const int l_cols = num_loc(n_s, nb, mypcol, array_descA.icsrc(), npcols);
+            const int l_cols = num_loc(n_s, nb, mypcol, array_descA[DDLA_CSRC_], npcols);
             if(l_cols > 0){
 #ifdef DDLA_USE_CUDA
                 SOLVER_CHECK(desolverLaswp(
@@ -296,23 +299,23 @@ void pgetrf_bpiv(
 
 // Explicit instantiations
 template void pgetrf_bpiv<float>(
-    const int& m, const int& n,
-    float* d_A, const DdlaDesc& array_descA,
+    const DdlaHandle_t&, const int& m, const int& n,
+    float* d_A, const int* array_descA,
     int* ipiv, int& info
 );
 template void pgetrf_bpiv<double>(
-    const int& m, const int& n,
-    double* d_A, const DdlaDesc& array_descA,
+    const DdlaHandle_t&, const int& m, const int& n,
+    double* d_A, const int* array_descA,
     int* ipiv, int& info
 );
 template void pgetrf_bpiv<std::complex<float>>(
-    const int& m, const int& n,
-    std::complex<float>* d_A, const DdlaDesc& array_descA,
+    const DdlaHandle_t&, const int& m, const int& n,
+    std::complex<float>* d_A, const int* array_descA,
     int* ipiv, int& info
 );
 template void pgetrf_bpiv<std::complex<double>>(
-    const int& m, const int& n,
-    std::complex<double>* d_A, const DdlaDesc& array_descA,
+    const DdlaHandle_t&, const int& m, const int& n,
+    std::complex<double>* d_A, const int* array_descA,
     int* ipiv, int& info
 );
 

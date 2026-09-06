@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <ddla/ddla.h>
+#include "ddla_desc.h"
 #include "ddla_connector.h"
 #include "ddla_stream_impl.h"
 #include "require_gpu.h"
@@ -63,18 +64,23 @@ void update_diagonal_tile(
 
 template <typename T>
 void ppotrf_bottom_right(
-    const char& uplo, const int& n,
-    T* d_A, const DdlaDesc& descA, int& info
+    const DdlaHandle_t& handle, const char& uplo, const int& n,
+    T* d_A, const int* descA, int& info
 )
 {
+    check_desc(descA, handle);
+    int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
+    ddlaGetGridDims(handle, nprows, npcols);
+    ddlaGetGridCoords(handle, myprow, mypcol);
+
+
     assert(uplo == 'U' || uplo == 'L');
     assert(n >= 0);
-    assert(descA.is_initialized());
-    assert(n <= descA.m() && n <= descA.n());
-    assert(descA.mb() == descA.nb());
-    assert(descA.nprows() == descA.npcols());
+    assert(descA[DDLA_DTYPE_] == DDLA_BLOCK_CYCLIC_2D);
+    assert(n <= descA[DDLA_M_] && n <= descA[DDLA_N_]);
+    assert(descA[DDLA_MB_] == descA[DDLA_NB_]);
+    assert(nprows == npcols);
 
-    const DdlaHandle_t handle = descA.ddla_handle();
     detail::require_gpu_backend(handle, "ppotrf_bottom_right");
     assert(handle != nullptr);
 
@@ -83,21 +89,19 @@ void ppotrf_bottom_right(
         return;
     }
 
-    const int nb = descA.nb();
+    const int nb = descA[DDLA_NB_];
     assert(nb > 0);
 
-    const int nprocs_dim = descA.nprows();
-    const int myprow = descA.myprow();
-    const int mypcol = descA.mypcol();
-    const int lld = descA.lld();
+    const int nprocs_dim = nprows;
+    const int lld = descA[DDLA_LLD_];
 
     const runtimeStream_t stream = handle->stream;
     const deblasHandle_t blas_handle = handle->blasH;
 
     const int max_local_rows = num_loc(
-        n, nb, myprow, descA.irsrc(), nprocs_dim);
+        n, nb, myprow, descA[DDLA_RSRC_], nprocs_dim);
     const int max_local_cols = num_loc(
-        n, nb, mypcol, descA.icsrc(), nprocs_dim);
+        n, nb, mypcol, descA[DDLA_CSRC_], nprocs_dim);
     assert(d_A != nullptr || max_local_rows == 0 || max_local_cols == 0);
 
     T* d_diag = nullptr;
@@ -158,14 +162,14 @@ void ppotrf_bottom_right(
         block_start -= nb){
         const int block_width = std::min(nb, n - block_start);
         const int owner_row = indxg2p(
-            block_start, nb, descA.irsrc(), nprocs_dim);
+            block_start, nb, descA[DDLA_RSRC_], nprocs_dim);
         const int owner_col = indxg2p(
-            block_start, nb, descA.icsrc(), nprocs_dim);
+            block_start, nb, descA[DDLA_CSRC_], nprocs_dim);
 
         const int local_row_prefix = num_loc(
-            block_start, nb, myprow, descA.irsrc(), nprocs_dim);
+            block_start, nb, myprow, descA[DDLA_RSRC_], nprocs_dim);
         const int local_col_prefix = num_loc(
-            block_start, nb, mypcol, descA.icsrc(), nprocs_dim);
+            block_start, nb, mypcol, descA[DDLA_CSRC_], nprocs_dim);
         assert(local_row_prefix % nb == 0);
         assert(local_col_prefix % nb == 0);
 
@@ -241,13 +245,13 @@ void ppotrf_bottom_right(
             // A row tile owned by relay_row under irsrc is the same global
             // tile that this process column owns under icsrc.
             const int relay_row =
-                (mypcol + descA.irsrc() - descA.icsrc() + nprocs_dim)
+                (mypcol + descA[DDLA_RSRC_] - descA[DDLA_CSRC_] + nprocs_dim)
                 % nprocs_dim;
             if(local_col_prefix > 0){
                 if(myprow == relay_row){
                     const int relay_row_count = num_loc(
                         block_start, nb, relay_row,
-                        descA.irsrc(), nprocs_dim);
+                        descA[DDLA_RSRC_], nprocs_dim);
                     assert(relay_row_count == local_col_prefix);
                     RUNTIME_CHECK(runtimeMemcpyAsync(
                         d_col_panel, d_row_panel,
@@ -297,13 +301,13 @@ void ppotrf_bottom_right(
             // A column tile owned by relay_col under icsrc is the same global
             // tile that this process row owns under irsrc.
             const int relay_col =
-                (myprow + descA.icsrc() - descA.irsrc() + nprocs_dim)
+                (myprow + descA[DDLA_CSRC_] - descA[DDLA_RSRC_] + nprocs_dim)
                 % nprocs_dim;
             if(local_row_prefix > 0){
                 if(mypcol == relay_col){
                     const int relay_col_count = num_loc(
                         block_start, nb, relay_col,
-                        descA.icsrc(), nprocs_dim);
+                        descA[DDLA_CSRC_], nprocs_dim);
                     assert(relay_col_count == local_row_prefix);
                     RUNTIME_CHECK(runtimeMemcpyAsync(
                         d_row_panel, d_col_panel,
@@ -322,12 +326,12 @@ void ppotrf_bottom_right(
             local_col < local_col_prefix;
             local_col += nb){
             const int global_col = indxl2g(
-                local_col, nb, mypcol, descA.icsrc(), nprocs_dim);
+                local_col, nb, mypcol, descA[DDLA_CSRC_], nprocs_dim);
             for(int local_row = 0;
                 local_row < local_row_prefix;
                 local_row += nb){
                 const int global_row = indxl2g(
-                    local_row, nb, myprow, descA.irsrc(), nprocs_dim);
+                    local_row, nb, myprow, descA[DDLA_RSRC_], nprocs_dim);
                 if((uplo == 'U' && global_row > global_col)
                    || (uplo == 'L' && global_row < global_col)){
                     continue;
@@ -405,12 +409,12 @@ void ppotrf_bottom_right(
 }
 
 template void ppotrf_bottom_right<float>(
-    const char&, const int&, float*, const DdlaDesc&, int&);
+    const DdlaHandle_t&, const char&, const int&, float*, const int*, int&);
 template void ppotrf_bottom_right<double>(
-    const char&, const int&, double*, const DdlaDesc&, int&);
+    const DdlaHandle_t&, const char&, const int&, double*, const int*, int&);
 template void ppotrf_bottom_right<std::complex<float>>(
-    const char&, const int&, std::complex<float>*, const DdlaDesc&, int&);
+    const DdlaHandle_t&, const char&, const int&, std::complex<float>*, const int*, int&);
 template void ppotrf_bottom_right<std::complex<double>>(
-    const char&, const int&, std::complex<double>*, const DdlaDesc&, int&);
+    const DdlaHandle_t&, const char&, const int&, std::complex<double>*, const int*, int&);
 
 } // namespace ddla

@@ -1,60 +1,63 @@
-#include <ddla/ddla_desc.h>
-#include "ddla_stream_impl.h"
+#include "ddla_desc.h"
+
+#include <algorithm>
+#include <stdexcept>
+#include <string>
 
 namespace ddla{
 
-void DdlaDesc::init_square_blk(const int &m, const int &n, const int &irsrc, const int &icsrc)
+void check_desc(const int* desc, const DdlaHandle_t& handle)
 {
-    int mb = std::ceil(double(m) / nprows_);
-    int nb = std::ceil(double(n) / npcols_);
-    int nb_real = std::min(mb, nb); // use the smaller block size
-    this->init(m, n, nb_real, nb_real, irsrc, icsrc);
-    return;
+    if (desc == nullptr)
+        throw std::invalid_argument("ddla: null ScaLAPACK descriptor");
+    if (handle == nullptr)
+        throw std::invalid_argument(
+            "ddla: null handle for ScaLAPACK descriptor");
+    if (desc[DDLA_DTYPE_] != DDLA_BLOCK_CYCLIC_2D)
+        throw std::invalid_argument(
+            "ddla: unsupported descriptor type "
+            + std::to_string(desc[DDLA_DTYPE_])
+            + "; only dense block-cyclic (DTYPE_ == 1) is supported");
+
+    int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
+    ddlaGetGridDims(handle, nprows, npcols);
+    ddlaGetGridCoords(handle, myprow, mypcol);
+    if (nprows <= 0 || npcols <= 0)
+        throw std::invalid_argument(
+            "ddla: handle carries no process grid");
+
+    if (desc[DDLA_M_] < 0 || desc[DDLA_N_] < 0)
+        throw std::invalid_argument(
+            "ddla: descriptor M/N must be non-negative, got M="
+            + std::to_string(desc[DDLA_M_]) + " N="
+            + std::to_string(desc[DDLA_N_]));
+    if (desc[DDLA_MB_] <= 0 || desc[DDLA_NB_] <= 0)
+        throw std::invalid_argument(
+            "ddla: descriptor MB/NB must be positive, got MB="
+            + std::to_string(desc[DDLA_MB_]) + " NB="
+            + std::to_string(desc[DDLA_NB_]));
+    if (desc[DDLA_RSRC_] < 0 || desc[DDLA_RSRC_] >= nprows
+        || desc[DDLA_CSRC_] < 0 || desc[DDLA_CSRC_] >= npcols)
+        throw std::invalid_argument(
+            "ddla: descriptor RSRC/CSRC outside the process grid ("
+            + std::to_string(nprows) + "x" + std::to_string(npcols)
+            + "), got RSRC=" + std::to_string(desc[DDLA_RSRC_])
+            + " CSRC=" + std::to_string(desc[DDLA_CSRC_]));
+
+    // ScaLAPACK allows LLD_A to be larger than max(1, LOCr(m)), for callers
+    // whose local buffer is over-allocated, so accept any value at least that
+    // big and reject one that would index inside a column -- which is also
+    // the check that catches a descriptor built against a different process
+    // grid.
+    const int required_lld =
+        std::max(1, num_loc(desc[DDLA_M_], desc[DDLA_MB_], myprow,
+                            desc[DDLA_RSRC_], nprows));
+    if (desc[DDLA_LLD_] < required_lld)
+        throw std::invalid_argument(
+            "ddla: ScaLAPACK descriptor LLD_A=" + std::to_string(desc[DDLA_LLD_])
+            + " is smaller than the required max(1, LOCr(M_A))="
+            + std::to_string(required_lld)
+            + "; the descriptor does not match this handle's process grid");
 }
-
-DdlaDesc::DdlaDesc(const DdlaHandle_t& ddla_handle)
-{
-    this->ddla_handle_ = ddla_handle;
-    this->nprows_ = ddla_handle->nprows_;
-    this->npcols_ = ddla_handle->npcols_;
-    this->myprow_ = ddla_handle->myprow_;
-    this->mypcol_ = ddla_handle->mypcol_;
-}
-
-void DdlaDesc::set_ddla_handle(const DdlaHandle_t& ddla_handle)
-{
-    this->ddla_handle_ = ddla_handle;
-    this->nprows_ = ddla_handle->nprows_;
-    this->npcols_ = ddla_handle->npcols_;
-    this->myprow_ = ddla_handle->myprow_;
-    this->mypcol_ = ddla_handle->mypcol_;
-    if(is_initialized_){
-        this->init(this->m_, this->n_, this->mb_, this->nb_, this->irsrc_, this->icsrc_);
-    }
-    return;
-
-}
-
-void DdlaDesc::init(const int &m, const int &n, const int &mb, const int &nb, const int &irsrc, const int &icsrc){
-    this->m_ = m;
-    this->n_ = n;
-    this->mb_ = mb;
-    this->nb_ = nb;
-    this->irsrc_ = irsrc;
-    this->icsrc_ = icsrc;
-    // compute local sizes
-    this->m_local_ = num_loc(m, mb, myprow_, irsrc_, nprows_);
-    this->n_local_ = num_loc(n, nb, mypcol_, icsrc_, npcols_);
-    this->lld_ = std::max(this->m_local_,1);
-    is_initialized_ = true;
-    return;
-}
-
-int DdlaDesc::indx_g2l_r(int gindx) const{
-    if(this->myprow_ != indxg2p(gindx, this->mb_, this->irsrc_, this->nprows_) || gindx >= this->m_)
-        return -1;
-    return indxg2l(gindx, this->mb_, this->nprows_);
-}
-
 
 }

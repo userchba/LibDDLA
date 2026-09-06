@@ -20,10 +20,10 @@ void check_non_square_block_transpose(
     constexpr int icsrc = 0;
     constexpr int tag = 17;
 
-    ddla::DdlaDesc desc(handle);
-    desc.init(m, n, mb, nb, irsrc, icsrc);
+    int desc[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(desc, handle, m, n, mb, nb, irsrc, icsrc));
 
-    auto h_A = make_local<Complex>(desc, [](int i, int j){
+    auto h_A = make_local<Complex>(handle, desc, [](int i, int j){
         return general_value(i, j, tag);
     });
     DeviceBuffer<Complex> d_A(handle, h_A.size());
@@ -37,9 +37,9 @@ void check_non_square_block_transpose(
         const size_t output_count = static_cast<size_t>(row_panel_rows)
                                   * target_row_columns;
         const size_t buffer_count = static_cast<size_t>(row_panel_rows)
-                                  * std::max(desc.n_loc(), target_row_columns);
+                                  * std::max(ddla_test::n_loc(handle, desc), target_row_columns);
         DeviceBuffer<Complex> d_row(handle, buffer_count);
-        ddla::transport_block(
+        ddla::transport_block(handle, 
             'R', trans, row_panel_rows, n,
             d_A.ptr, 0, 0, desc, d_row.ptr
         );
@@ -74,9 +74,9 @@ void check_non_square_block_transpose(
         const size_t output_count = static_cast<size_t>(col_panel_cols)
                                   * target_col_rows;
         const size_t buffer_count = static_cast<size_t>(col_panel_cols)
-                                  * std::max(desc.m_loc(), target_col_rows);
+                                  * std::max(ddla_test::m_loc(handle, desc), target_col_rows);
         DeviceBuffer<Complex> d_col(handle, buffer_count);
-        ddla::transport_block(
+        ddla::transport_block(handle, 
             'C', trans, m, col_panel_cols,
             d_A.ptr, 0, 0, desc, d_col.ptr
         );
@@ -116,23 +116,23 @@ void check_host_tunnel_workspace(const ddla::DdlaHandle_t& handle)
     const int m = mb * nprows;
     const int n = local_columns * npcols;
 
-    ddla::DdlaDesc desc(handle);
-    desc.init(m, n, mb, nb, 0, 0);
+    int desc[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(desc, handle, m, n, mb, nb, 0, 0));
 
-    auto h_A = make_local<Complex>(desc, [](int i, int j){
+    auto h_A = make_local<Complex>(handle, desc, [](int i, int j){
         return general_value(i, j, tag);
     });
     DeviceBuffer<Complex> d_A(handle, h_A.size());
     upload(handle, d_A.ptr, h_A);
 
-    const size_t count = static_cast<size_t>(mb) * desc.n_loc();
+    const size_t count = static_cast<size_t>(mb) * ddla_test::n_loc(handle, desc);
     DeviceBuffer<Complex> d_row(handle, count);
-    ddla::transport_block('R', 'N', mb, n, d_A.ptr, 0, 0, desc, d_row.ptr);
+    ddla::transport_block(handle, 'R', 'N', mb, n, d_A.ptr, 0, 0, desc, d_row.ptr);
     auto h_row = download(handle, d_row.ptr, count);
 
     double err = 0.0;
-    for(int jloc = 0; jloc < desc.n_loc(); ++jloc){
-        const int j = desc.indx_l2g_c(jloc);
+    for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
+        const int j = indx_l2g_c(desc, handle, jloc);
         for(int i = 0; i < mb; ++i){
             err = std::max(
                 err,
@@ -154,38 +154,38 @@ void check_transport_block(const ddla::DdlaHandle_t& handle, const Shape& base)
     ddlaGetGridCoords(handle, myprow, mypcol);
     const int m = round_up_for_grid(base.m, nb, nprows);
     const int n = round_up_for_grid(base.n, nb, npcols);
-    ddla::DdlaDesc desc(handle);
-    desc.init(m, n, nb, nb, 0, 0);
+    int desc[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(desc, handle, m, n, nb, nb, 0, 0));
 
-    auto h_A = make_local<Complex>(desc, [](int i, int j){ return general_value(i, j, 7); });
+    auto h_A = make_local<Complex>(handle, desc, [](int i, int j){ return general_value(i, j, 7); });
     DeviceBuffer<Complex> d_A(handle, h_A.size());
     upload(handle, d_A.ptr, h_A);
 
     const int rows = std::min(nb, m);
-    DeviceBuffer<Complex> d_row(handle, static_cast<size_t>(rows) * desc.n_loc());
-    ddla::transport_block('R', 'N', rows, n, d_A.ptr, 0, 0, desc, d_row.ptr);
-    auto h_row = download(handle, d_row.ptr, static_cast<size_t>(rows) * desc.n_loc());
+    DeviceBuffer<Complex> d_row(handle, static_cast<size_t>(rows) * ddla_test::n_loc(handle, desc));
+    ddla::transport_block(handle, 'R', 'N', rows, n, d_A.ptr, 0, 0, desc, d_row.ptr);
+    auto h_row = download(handle, d_row.ptr, static_cast<size_t>(rows) * ddla_test::n_loc(handle, desc));
     double err_row = 0.0;
-    for(int jloc = 0; jloc < desc.n_loc(); ++jloc){
-        const int j = desc.indx_l2g_c(jloc);
+    for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
+        const int j = indx_l2g_c(desc, handle, jloc);
         for(int r = 0; r < rows; ++r){
             err_row = std::max(err_row, std::abs(h_row[r + jloc * rows] - general_value(r, j, 7)));
         }
     }
-    require_close(handle, "transport_block(R,N)", err_row, 1e-12);
+    require_close(handle, "transport_block(handle, R,N)", err_row, 1e-12);
 
     const int cols = std::min(nb, n);
-    DeviceBuffer<Complex> d_col(handle, static_cast<size_t>(desc.m_loc()) * cols);
-    ddla::transport_block('C', 'N', m, cols, d_A.ptr, 0, 0, desc, d_col.ptr);
-    auto h_col = download(handle, d_col.ptr, static_cast<size_t>(desc.m_loc()) * cols);
+    DeviceBuffer<Complex> d_col(handle, static_cast<size_t>(ddla_test::m_loc(handle, desc)) * cols);
+    ddla::transport_block(handle, 'C', 'N', m, cols, d_A.ptr, 0, 0, desc, d_col.ptr);
+    auto h_col = download(handle, d_col.ptr, static_cast<size_t>(ddla_test::m_loc(handle, desc)) * cols);
     double err_col = 0.0;
     for(int c = 0; c < cols; ++c){
-        for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
-            const int i = desc.indx_l2g_r(iloc);
-            err_col = std::max(err_col, std::abs(h_col[iloc + c * desc.m_loc()] - general_value(i, c, 7)));
+        for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc); ++iloc){
+            const int i = indx_l2g_r(desc, handle, iloc);
+            err_col = std::max(err_col, std::abs(h_col[iloc + c * ddla_test::m_loc(handle, desc)] - general_value(i, c, 7)));
         }
     }
-    require_close(handle, "transport_block(C,N)", err_col, 1e-12);
+    require_close(handle, "transport_block(handle, C,N)", err_col, 1e-12);
 
     check_non_square_block_transpose(handle, base);
     check_host_tunnel_workspace(handle);

@@ -26,6 +26,7 @@
 #include <cusolverMp.h>
 
 #include <ddla/ddla.h>
+#include "test_desc_helpers.h"
 #include "ddla_connector.h"
 #include <ddla/ddla_desc.h>
 #include <ddla/ddla_handle_t.h>
@@ -294,35 +295,35 @@ std::vector<Complex> make_phase(int n)
     return phase;
 }
 
-std::vector<Complex> make_compact_hpd(const ddla::DdlaDesc& desc,
+std::vector<Complex> make_compact_hpd(const ddla::DdlaHandle_t& handle, const int* desc,
                                       const std::vector<Complex>& phase)
 {
-    const int n = desc.n();
+    const int n = desc[DDLA_N_];
     const double scale = 1.0 / static_cast<double>(n);
-    const size_t count = static_cast<size_t>(desc.lld())
-                       * static_cast<size_t>(desc.n_loc());
+    const size_t count = static_cast<size_t>(desc[DDLA_LLD_])
+                       * static_cast<size_t>(ddla_test::n_loc(handle, desc));
     std::vector<Complex> local(count, Complex(0.0, 0.0));
-    std::vector<int> global_rows(static_cast<size_t>(desc.m_loc()));
-    std::vector<int> global_cols(static_cast<size_t>(desc.n_loc()));
+    std::vector<int> global_rows(static_cast<size_t>(ddla_test::m_loc(handle, desc)));
+    std::vector<int> global_cols(static_cast<size_t>(ddla_test::n_loc(handle, desc)));
 
-    for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
-        global_rows[static_cast<size_t>(iloc)] = desc.indx_l2g_r(iloc);
+    for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc); ++iloc){
+        global_rows[static_cast<size_t>(iloc)] = indx_l2g_r(desc, handle, iloc);
     }
-    for(int jloc = 0; jloc < desc.n_loc(); ++jloc){
-        global_cols[static_cast<size_t>(jloc)] = desc.indx_l2g_c(jloc);
+    for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
+        global_cols[static_cast<size_t>(jloc)] = indx_l2g_c(desc, handle, jloc);
     }
 
-    for(int jloc = 0; jloc < desc.n_loc(); ++jloc){
+    for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
         const int j = global_cols[static_cast<size_t>(jloc)];
         if(j >= n) continue;
         const Complex phase_j = std::conj(phase[static_cast<size_t>(j)]);
-        for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
+        for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc); ++iloc){
             const int i = global_rows[static_cast<size_t>(iloc)];
             if(i >= n) continue;
             Complex value = scale * phase[static_cast<size_t>(i)] * phase_j;
             if(i == j) value += Complex(1.0, 0.0);
             local[static_cast<size_t>(iloc)
-                  + static_cast<size_t>(jloc) * desc.lld()] = value;
+                  + static_cast<size_t>(jloc) * desc[DDLA_LLD_]] = value;
         }
     }
     return local;
@@ -364,7 +365,8 @@ struct VendorProblem {
 };
 
 VendorProblem create_vendor_problem(int n, int process_row, int process_col,
-                                    const ddla::DdlaDesc& compact_desc,
+                                    const ddla::DdlaHandle_t& handle,
+                                    const int* compact_desc,
                                     const Complex* d_compact_reference,
                                     const VendorContext& context,
                                     cudaStream_t stream)
@@ -386,8 +388,8 @@ VendorProblem create_vendor_problem(int n, int process_row, int process_col,
     problem.count = static_cast<size_t>(problem.lld)
                   * static_cast<size_t>(problem.allocated_cols);
 
-    if(problem.local_rows != compact_desc.m_loc()
-       || problem.local_cols != compact_desc.n_loc()){
+    if(problem.local_rows != ddla_test::m_loc(handle, compact_desc)
+       || problem.local_cols != ddla_test::n_loc(handle, compact_desc)){
         abort_with_message(
             "LibDDLA and cuSOLVERMp disagree on the logical local shape");
     }
@@ -426,7 +428,7 @@ VendorProblem create_vendor_problem(int n, int process_row, int process_col,
             problem.d_reference,
             static_cast<size_t>(problem.lld) * sizeof(Complex),
             d_compact_reference,
-            static_cast<size_t>(compact_desc.lld()) * sizeof(Complex),
+            static_cast<size_t>(compact_desc[DDLA_LLD_]) * sizeof(Complex),
             static_cast<size_t>(problem.local_rows) * sizeof(Complex),
             static_cast<size_t>(problem.local_cols),
             cudaMemcpyDeviceToDevice, stream));
@@ -519,7 +521,8 @@ double finalize_logdet(double local_sum, int local_valid,
 }
 
 double compact_logdet_error(const Complex* d_matrix,
-                            const ddla::DdlaDesc& desc,
+                            const ddla::DdlaHandle_t& handle,
+                            const int* desc,
                             bool cholesky, cudaStream_t stream,
                             MPI_Comm comm, int rank, const char* label)
 {
@@ -528,15 +531,15 @@ double compact_logdet_error(const Complex* d_matrix,
     int local_diagonal_count = 0;
     std::vector<Complex> block(static_cast<size_t>(kBlockSize) * kBlockSize);
 
-    for(int start = 0; start < desc.n(); start += kBlockSize){
-        const int iloc = desc.indx_g2l_r(start);
-        const int jloc = desc.indx_g2l_c(start);
+    for(int start = 0; start < desc[DDLA_N_]; start += kBlockSize){
+        const int iloc = indx_g2l_r(desc, handle, start);
+        const int jloc = indx_g2l_c(desc, handle, start);
         if(iloc < 0 || jloc < 0) continue;
-        const int width = std::min(kBlockSize, desc.n() - start);
+        const int width = std::min(kBlockSize, desc[DDLA_N_] - start);
         BENCH_CUDA_CHECK(cudaMemcpy2D(
             block.data(), static_cast<size_t>(width) * sizeof(Complex),
-            d_matrix + iloc + static_cast<size_t>(jloc) * desc.lld(),
-            static_cast<size_t>(desc.lld()) * sizeof(Complex),
+            d_matrix + iloc + static_cast<size_t>(jloc) * desc[DDLA_LLD_],
+            static_cast<size_t>(desc[DDLA_LLD_]) * sizeof(Complex),
             static_cast<size_t>(width) * sizeof(Complex), width,
             cudaMemcpyDeviceToHost));
         for(int k = 0; k < width; ++k){
@@ -563,7 +566,7 @@ double compact_logdet_error(const Complex* d_matrix,
     }
     BENCH_CUDA_CHECK(cudaStreamSynchronize(stream));
     return finalize_logdet(local_sum, local_valid, local_diagonal_count,
-                           desc.n(), label, comm, rank);
+                           desc[DDLA_N_], label, comm, rank);
 }
 
 double padded_logdet_error(const VendorProblem& problem,
@@ -625,7 +628,7 @@ struct RunResult {
 
 RunResult run_libddla(Algorithm algorithm, int n,
                       Complex* d_matrix, const Complex* d_reference,
-                      size_t count, const ddla::DdlaDesc& desc,
+                      size_t count, const int* desc,
                       const ddla::DdlaHandle_t& handle)
 {
     if(count > 0){
@@ -640,7 +643,7 @@ RunResult run_libddla(Algorithm algorithm, int n,
     BENCH_MPI_CHECK(MPI_Barrier(handle->comm));
     const double start = MPI_Wtime();
     if(algorithm == Algorithm::libddla_ppotrf_lower){
-        sign_correction = ddla::ppotrf(
+        sign_correction = ddla::ppotrf(handle, 
             'L', n, d_matrix, 1, 1, desc, info);
     }else{
         abort_with_message("internal error: vendor algorithm sent to LibDDLA");
@@ -655,7 +658,7 @@ RunResult run_libddla(Algorithm algorithm, int n,
                                handle->comm, handle->myid);
     const bool cholesky = algorithm == Algorithm::libddla_ppotrf_lower;
     const double logdet_error = compact_logdet_error(
-        d_matrix, desc, cholesky, handle->stream, handle->comm,
+        d_matrix, handle, desc, cholesky, handle->stream, handle->comm,
         handle->myid, algorithm_name(algorithm));
     return {max_elapsed, logdet_error};
 }
@@ -727,14 +730,14 @@ void benchmark_dimension(int n, int repetitions, int warmup_size, bool warmup,
 {
     const std::vector<Complex> phase = make_phase(n);
 
-    ddla::DdlaDesc desc(handle);
-    desc.init(n, n, kBlockSize, kBlockSize, kSourceRow, kSourceCol);
-    const size_t compact_count = static_cast<size_t>(desc.lld())
-                               * static_cast<size_t>(desc.n_loc());
+    int desc[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(desc, handle, n, n, kBlockSize, kBlockSize, kSourceRow, kSourceCol));
+    const size_t compact_count = static_cast<size_t>(desc[DDLA_LLD_])
+                               * static_cast<size_t>(ddla_test::n_loc(handle, desc));
     Complex* d_compact_reference = allocate_device<Complex>(compact_count);
     Complex* d_compact_matrix = allocate_device<Complex>(compact_count);
     {
-        const std::vector<Complex> host = make_compact_hpd(desc, phase);
+        const std::vector<Complex> host = make_compact_hpd(handle, desc, phase);
         if(compact_count > 0){
             BENCH_CUDA_CHECK(cudaMemcpyAsync(
                 d_compact_reference, host.data(),
@@ -744,7 +747,7 @@ void benchmark_dimension(int n, int repetitions, int warmup_size, bool warmup,
         BENCH_CUDA_CHECK(cudaStreamSynchronize(handle->stream));
     }
     VendorProblem vendor_problem = create_vendor_problem(
-        n, handle->myprow_, handle->mypcol_, desc, d_compact_reference,
+        n, handle->myprow_, handle->mypcol_, handle, desc, d_compact_reference,
         vendor_context, handle->stream);
 
     const std::vector<Algorithm> algorithms = {

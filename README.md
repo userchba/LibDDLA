@@ -196,25 +196,42 @@ ddla::ddla_set(handle, MPI_COMM_WORLD, 'R');   // auto process grid (row-major)
   The automatic form (`'R'`) derives a 2D grid from the number of MPI ranks.
 - **Destroy** with `ddla::ddla_destroy(handle)` when done.
 
-### Descriptor (`DdlaDesc`)
+### Descriptor (ScaLAPACK `int[9]`)
 
-A `DdlaDesc` captures the 2D block-cyclic layout of a distributed matrix:
-global rows/cols (`m`, `n`), block sizes (`mb`, `nb`), process-grid coordinates
-(`nprows`, `npcols`, `myprow`, `mypcol`), source-process offsets (`irsrc`,
-`icsrc`), and local dimensions (`m_loc`, `n_loc`, `lld`).
+Distributed routines describe matrix layouts with a plain length-9 int array
+in ScaLAPACK's `DESCINIT` layout, plus the handle that owns the process grid.
+Slot constants live in `<ddla/ddla_desc.h>`: `DDLA_DTYPE_`, `DDLA_CTXT_`,
+`DDLA_M_`, `DDLA_N_`, `DDLA_MB_`, `DDLA_NB_`, `DDLA_RSRC_`, `DDLA_CSRC_`,
+`DDLA_LLD_`, `DDLA_DLEN_`.
+
+**Important:** `desc[DDLA_CTXT_]` is ignored. A BLACS context is an index into
+a table private to the BLACS library that minted it, so the process grid,
+communicators and stream always come from the `DdlaHandle_t` passed alongside
+the descriptor. Every descriptor is validated against that grid, and a
+mismatch (usually an `LLD_A` too small for the local row count) throws
+`std::invalid_argument`.
 
 **Important:** most factorization and solve routines require square blocks
-(`mb == nb`).  Use `init_square_blk` to enforce this automatically.
+(`mb == nb`).
 
 ```cpp
 int m = 4096, n = 64;
-ddla::DdlaDesc desc(handle);
-desc.init_square_blk(m, n, 0, 0);   // derives one square block size from the grid
+int desc[ddla::DDLA_DLEN_];
+DDLA_CHECK(ddlaDescInit(desc, handle, m, n, 64, 64, 0, 0));  // mb == nb: square blocks
+// Over-allocated local buffer? Raise the leading dimension afterwards:
+// desc[DDLA_LLD_] += extra_rows;
 ```
 
+`ddlaDescInit` fills the descriptor the way `DESCINIT` does and derives the
+tight `LLD = max(1, LOCr(M_A))` from the handle's grid.
+
 Free index-mapping helpers are in `<ddla/ddla_desc.h>`:
-`indxg2p`, `indxg2l`, `indxl2g`, `num_loc`.  They match the ScaLAPACK
-convention exactly.
+`indxg2p`, `indxg2l`, `indxl2g`, `num_loc` (the ScaLAPACK convention), plus
+desc-level `indx_g2l_r` / `indx_g2l_c` / `indx_l2g_r` / `indx_l2g_c`, each
+taking `(const int* desc, const DdlaHandle_t& handle, index)`. Local extents
+are not stored in a descriptor; derive them with
+`num_loc(desc[DDLA_M_], desc[DDLA_MB_], myprow, desc[DDLA_RSRC_], nprows)`
+after fetching the grid with `ddlaGetGridDims` / `ddlaGetGridCoords`.
 
 ### Local device matrices
 
@@ -228,23 +245,30 @@ int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
 
     ddla::DdlaHandle_t handle;
-    ddla::ddla_init(handle);
-    ddla::ddla_set(handle, MPI_COMM_WORLD, 'R');
+    ddla::ddlaInit(handle);
+    ddla::ddlaSet(handle, MPI_COMM_WORLD, 'R');
 
     int n = 4096, nrhs = 64;
-    ddla::DdlaDesc descA(handle), descB(handle);
-    descA.init_square_blk(n, n, 0, 0);
-    descB.init_square_blk(n, nrhs, 0, 0);
+    int descA[ddla::DDLA_DLEN_], descB[ddla::DDLA_DLEN_];
+    // Square blocks (mb == nb): use block size 64 for both matrices.
+    ddla::DDLA_CHECK(ddlaDescInit(descA, handle, n, n, 64, 64, 0, 0));
+    ddla::DDLA_CHECK(ddlaDescInit(descB, handle, n, nrhs, 64, 64, 0, 0));
+
+    int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
+    ddla::ddlaGetGridDims(handle, nprows, npcols);
+    ddla::ddlaGetGridCoords(handle, myprow, mypcol);
+    const long m_locA = ddla::num_loc(n, 64, myprow, 0, nprows);
+    const long n_locB = ddla::num_loc(nrhs, 64, mypcol, 0, npcols);
 
     double *d_A = nullptr, *d_B = nullptr;
-    ddla::ddla_malloc(&d_A, descA.m_loc() * descA.n_loc() * sizeof(double), handle);
-    ddla::ddla_malloc(&d_B, descB.m_loc() * descB.n_loc() * sizeof(double), handle);
+    ddla::ddlaMalloc(&d_A, m_locA * 64 * sizeof(double), handle);
+    ddla::ddlaMalloc(&d_B, n_locB * 64 * sizeof(double), handle);
 
     // ... fill matrices, call ddla routines ...
 
-    ddla::ddla_free(d_A, handle);
-    ddla::ddla_free(d_B, handle);
-    ddla::ddla_destroy(handle);
+    ddla::ddlaFree(d_A, handle);
+    ddla::ddlaFree(d_B, handle);
+    ddla::ddlaDestroy(handle);
     MPI_Finalize();
     return 0;
 }
@@ -266,10 +290,11 @@ handle zero-byte requests (zero bytes sets `*ptr = nullptr`).
 | `ddla_set` | Configure process grid (auto `'R'` or explicit `nprows`×`npcols`) |
 | `ddla_destroy` | Tear down handle |
 | `ddla_get_stream` | Return the default device stream from a handle |
-| `DdlaDesc` | 2D block-cyclic matrix descriptor |
-| `DdlaDesc::init_square_blk` | Initialize `mb = nb` from global row/col counts |
-| `DdlaDesc::init` | Initialize with explicit block sizes |
+| `ddlaDescInit` | Fill a ScaLAPACK-layout `int[9]` descriptor (`DESCINIT` equivalent) |
+| `int[9]` descriptor | 2D block-cyclic matrix layout, slots `DDLA_DTYPE_` … `DDLA_LLD_` |
+| `ddlaGetGridDims` / `ddlaGetGridCoords` | Process grid of a handle |
 | `indxg2p` / `indxg2l` / `indxl2g` / `num_loc` | Free index-mapping functions |
+| `indx_g2l_r` / `indx_g2l_c` / `indx_l2g_r` / `indx_l2g_c` | Desc-level index mapping `(desc, handle, index)` |
 
 ### Distributed BLAS and data movement
 
@@ -362,7 +387,7 @@ LibDDLA/
 ├── include/ddla/         Public headers
 │   ├── ddla.h            Main API declarations (all Doxygen comments)
 │   ├── ddla_handle_t.h   Handle type, init/set/destroy, ddla_malloc/ddla_free
-│   ├── ddla_desc.h       DdlaDesc descriptor and index mapping helpers
+│   ├── ddla_desc.h       ScaLAPACK int[9] descriptor contract and index mapping helpers
 │   ├── ddla_connector.h  CUDA/HIP type aliases, macros, CHECK utilities, runtime alloc/copy wrappers
 │   ├── ddla_stream.h     DdlaStream (internal)
 │   ├── transport_block.h Distributed-to-local block extraction

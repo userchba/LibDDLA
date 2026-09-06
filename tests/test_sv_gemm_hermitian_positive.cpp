@@ -7,6 +7,7 @@
 #include <complex>
 #include <string>
 #include <ddla/ddla.h>
+#include "test_desc_helpers.h"
 #include "ddla_connector.h"
 #include "ddla_stream_impl.h"
 #include "scal.h"
@@ -21,17 +22,17 @@ using namespace ddla;
  */
 void check_sv_gemm_hermitian_positive(int n, const DdlaHandle_t& ddla_handle)
 {
-    DdlaDesc matrix_desc(ddla_handle);
-    matrix_desc.init_square_blk(n, n, 0, 0);
-    int nb = std::min(128, matrix_desc.mb());
-    matrix_desc.init(n, n, nb, nb, 0, 0);
+    int matrix_desc[DDLA_DLEN_];
+    ddla_test::init_square_blk(matrix_desc, n, n, 0, 0, ddla_handle);
+    int nb = std::min(128, matrix_desc[DDLA_MB_]);
+    DDLA_CHECK(ddlaDescInit(matrix_desc, ddla_handle, n, n, nb, nb, 0, 0));
 
-    int myid = matrix_desc.mypcol() + matrix_desc.myprow() * matrix_desc.npcols();
+    int myid = ddla_test::mypcol(ddla_handle) + ddla_test::myprow(ddla_handle) * ddla_test::npcols(ddla_handle);
     printf("myid:%d, m_loc:%d, n_loc:%d, mb:%d, nb:%d, m:%d, n:%d\n",
-           myid, matrix_desc.m_loc(), matrix_desc.n_loc(),
-           matrix_desc.mb(), matrix_desc.nb(), matrix_desc.m(), matrix_desc.n());
+           myid, ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc),
+           matrix_desc[DDLA_MB_], matrix_desc[DDLA_NB_], matrix_desc[DDLA_M_], matrix_desc[DDLA_N_]);
 
-    const size_t nelem = static_cast<size_t>(matrix_desc.m_loc()) * matrix_desc.n_loc();
+    const size_t nelem = static_cast<size_t>(ddla_test::m_loc(ddla_handle, matrix_desc)) * ddla_test::n_loc(ddla_handle, matrix_desc);
     const size_t size = nelem * sizeof(std::complex<double>);
 
     std::complex<double>* d_B   = nullptr; // 随机矩阵 B
@@ -54,7 +55,7 @@ void check_sv_gemm_hermitian_positive(int n, const DdlaHandle_t& ddla_handle)
     RUNTIME_CHECK(runtimeMemcpyAsync(d_Bcp, d_B, size, runtimeMemcpyDeviceToDevice, ddla_handle->stream));
 
     // ---- 2. 构造 Hermitian 正定矩阵 A = B^H * B（pgemm 'C','N'）----
-    pgemm('C', 'N', n, n, n,
+    pgemm(ddla_handle, 'C', 'N', n, n, n,
           std::complex<double>(1.0, 0.0),
           d_B, matrix_desc,
           d_Bcp, matrix_desc,
@@ -63,12 +64,12 @@ void check_sv_gemm_hermitian_positive(int n, const DdlaHandle_t& ddla_handle)
 
     // ---- 3. 加 lambda * I 改善条件数 ----
     std::complex<double> diag_shift(1.0, 0.0);
-    for (int i = 0; i < matrix_desc.m(); i++) {
-        int i_loc = matrix_desc.indx_g2l_r(i);
+    for (int i = 0; i < matrix_desc[DDLA_M_]; i++) {
+        int i_loc = indx_g2l_r(matrix_desc, ddla_handle, i);
         if (i_loc < 0) continue;
-        int j_loc = matrix_desc.indx_g2l_c(i);
+        int j_loc = indx_g2l_c(matrix_desc, ddla_handle, i);
         if (j_loc < 0) continue;
-        RUNTIME_CHECK(runtimeMemcpy(d_A + i_loc + j_loc * matrix_desc.lld(), &diag_shift,
+        RUNTIME_CHECK(runtimeMemcpy(d_A + i_loc + j_loc * matrix_desc[DDLA_LLD_], &diag_shift,
                                   sizeof(std::complex<double>), runtimeMemcpyHostToDevice));
     }
 
@@ -77,12 +78,12 @@ void check_sv_gemm_hermitian_positive(int n, const DdlaHandle_t& ddla_handle)
 
     // ---- 4. 构造分布式单位矩阵 I ----
     std::vector<std::complex<double>> h_identity(nelem, std::complex<double>(0.0, 0.0));
-    for (int i = 0; i < matrix_desc.m(); i++) {
-        int i_loc = matrix_desc.indx_g2l_r(i);
+    for (int i = 0; i < matrix_desc[DDLA_M_]; i++) {
+        int i_loc = indx_g2l_r(matrix_desc, ddla_handle, i);
         if (i_loc < 0) continue;
-        int j_loc = matrix_desc.indx_g2l_c(i);
+        int j_loc = indx_g2l_c(matrix_desc, ddla_handle, i);
         if (j_loc < 0) continue;
-        h_identity[i_loc + j_loc * matrix_desc.lld()] = std::complex<double>(1.0, 0.0);
+        h_identity[i_loc + j_loc * matrix_desc[DDLA_LLD_]] = std::complex<double>(1.0, 0.0);
     }
     RUNTIME_CHECK(runtimeMemcpyAsync(d_I, h_identity.data(), size, runtimeMemcpyHostToDevice, ddla_handle->stream));
 
@@ -92,16 +93,16 @@ void check_sv_gemm_hermitian_positive(int n, const DdlaHandle_t& ddla_handle)
     // ---- 5. LU 分解解 A * X = I → d_I 变为 X = A^-1，d_A 变为 LU 因子 ----
     printf("myid:%d, start pgesv\n", myid);
     double start_time_sv = MPI_Wtime();
-    pgesv('L', 'N', n, n, d_A, matrix_desc, d_I, matrix_desc);
+    pgesv(ddla_handle, 'L', 'N', n, n, d_A, matrix_desc, d_I, matrix_desc);
     RUNTIME_CHECK(runtimeStreamSynchronize(ddla_handle->stream));
     MPI_Barrier(MPI_COMM_WORLD);
     double t_sv = MPI_Wtime() - start_time_sv;
     printf("myid:%d, pgesv time:%lf\n", myid, t_sv);
 
     // ---- 6. 计算 A^\dagger * X = A^H * A^-1（A Hermitian → A^H = A → 应为单位矩阵）----
-    printf("myid:%d, start pgemm (A^dagger * X)\n", myid);
+    printf("myid:%d, start pgemm(ddla_handle, A^dagger * X)\n", myid);
     double start_time_gemm = MPI_Wtime();
-    pgemm('C', 'N', n, n, n,
+    pgemm(ddla_handle, 'C', 'N', n, n, n,
           std::complex<double>(1.0, 0.0),
           d_Acp, matrix_desc,
           d_I, matrix_desc,
@@ -118,14 +119,14 @@ void check_sv_gemm_hermitian_positive(int n, const DdlaHandle_t& ddla_handle)
     RUNTIME_CHECK(runtimeStreamSynchronize(ddla_handle->stream));
 
     double local_max_err = 0.0;
-    for (int i = 0; i < matrix_desc.m(); i++) {
-        int i_loc = matrix_desc.indx_g2l_r(i);
+    for (int i = 0; i < matrix_desc[DDLA_M_]; i++) {
+        int i_loc = indx_g2l_r(matrix_desc, ddla_handle, i);
         if (i_loc < 0) continue;
-        for (int j = 0; j < matrix_desc.n(); j++) {
-            int j_loc = matrix_desc.indx_g2l_c(j);
+        for (int j = 0; j < matrix_desc[DDLA_N_]; j++) {
+            int j_loc = indx_g2l_c(matrix_desc, ddla_handle, j);
             if (j_loc < 0) continue;
             double expected = (i == j) ? 1.0 : 0.0;
-            std::complex<double> val = h_result[i_loc + j_loc * matrix_desc.lld()];
+            std::complex<double> val = h_result[i_loc + j_loc * matrix_desc[DDLA_LLD_]];
             double err = std::abs(val - std::complex<double>(expected, 0.0));
             if (err > local_max_err) local_max_err = err;
         }

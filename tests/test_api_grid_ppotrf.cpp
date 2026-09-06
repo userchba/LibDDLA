@@ -9,31 +9,31 @@ void check_ppotrf(const ddla::DdlaHandle_t& handle, const Shape& base)
     const int nb = base.nb;
     const int n = square_size(handle, base);
     const int nrhs = nrhs_size(base);
-    ddla::DdlaDesc descA(handle), descB(handle);
-    descA.init(n, n, nb, nb, 0, 0);
-    descB.init(n, nrhs, nb, nb, 0, 0);
+    int descA[ddla::DDLA_DLEN_], descB[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descA, handle, n, n, nb, nb, 0, 0));
+    DDLA_CHECK(ddlaDescInit(descB, handle, n, nrhs, nb, nb, 0, 0));
 
     {
-        ddla::DdlaDesc tiny_desc(handle);
-        tiny_desc.init(1, 1, nb, nb, 0, 0);
-        auto h_tiny = make_local<Complex>(tiny_desc, [](int, int){ return Complex(4.0, 0.0); });
+        int tiny_desc[ddla::DDLA_DLEN_];
+        DDLA_CHECK(ddlaDescInit(tiny_desc, handle, 1, 1, nb, nb, 0, 0));
+        auto h_tiny = make_local<Complex>(handle, tiny_desc, [](int, int){ return Complex(4.0, 0.0); });
         DeviceBuffer<Complex> d_tiny(handle, h_tiny.size());
         upload(handle, d_tiny.ptr, h_tiny);
         check_ddla_sync(handle);
 
         int tiny_info = -1;
-        const bool tiny_is_nega = ddla::ppotrf('L', 1, d_tiny.ptr, 1, 1,
+        const bool tiny_is_nega = ddla::ppotrf(handle, 'L', 1, d_tiny.ptr, 1, 1,
                                                tiny_desc, tiny_info);
         const double tiny_status_err = std::abs(tiny_info) + (tiny_is_nega ? 1.0 : 0.0);
-        require_close(handle, "ppotrf(tiny status)", tiny_status_err, 0.0);
+        require_close(handle, "ppotrf(handle, tiny status)", tiny_status_err, 0.0);
         auto tiny_out = download(handle, d_tiny.ptr, h_tiny.size());
-        const double tiny_value_err = local_max_error<Complex>(
+        const double tiny_value_err = local_max_error<Complex>(handle, 
             tiny_desc, tiny_out, [](int, int){ return Complex(2.0, 0.0); });
-        require_close(handle, "ppotrf(tiny factor)", tiny_value_err, 1e-12);
+        require_close(handle, "ppotrf(handle, tiny factor)", tiny_value_err, 1e-12);
     }
 
     {
-        auto h_not_pd = make_local<Complex>(descA, [](int i, int j){
+        auto h_not_pd = make_local<Complex>(handle, descA, [](int i, int j){
             if(i != j) return Complex(0.0, 0.0);
             return Complex(i == 0 ? -1.0 : 2.0, 0.0);
         });
@@ -42,15 +42,15 @@ void check_ppotrf(const ddla::DdlaHandle_t& handle, const Shape& base)
         check_ddla_sync(handle);
 
         int not_pd_info = -1;
-        const bool not_pd_is_nega = ddla::ppotrf('L', n, d_not_pd.ptr, 1, 1,
+        const bool not_pd_is_nega = ddla::ppotrf(handle, 'L', n, d_not_pd.ptr, 1, 1,
                                                  descA, not_pd_info);
         const double not_pd_err = std::abs(not_pd_info - 1)
                                 + (not_pd_is_nega ? 1.0 : 0.0);
-        require_close(handle, "ppotrf(non-PD cleanup)", not_pd_err, 0.0);
+        require_close(handle, "ppotrf(handle, non-PD cleanup)", not_pd_err, 0.0);
     }
 
-    auto h_A = make_local<Complex>(descA, [=](int i, int j){ return hpd_value(i, j, n); });
-    auto h_B = build_rhs(descB, n, hpd_value, n);
+    auto h_A = make_local<Complex>(handle, descA, [=](int i, int j){ return hpd_value(i, j, n); });
+    auto h_B = build_rhs(handle, descB, n, hpd_value, n);
 
     DeviceBuffer<Complex> d_A(handle, h_A.size());
     DeviceBuffer<Complex> d_B(handle, h_B.size());
@@ -59,9 +59,9 @@ void check_ppotrf(const ddla::DdlaHandle_t& handle, const Shape& base)
     check_ddla_sync(handle);
 
     int info = -1;
-    const bool is_nega = ddla::ppotrf('L', n, d_A.ptr, 1, 1, descA, info);
+    const bool is_nega = ddla::ppotrf(handle, 'L', n, d_A.ptr, 1, 1, descA, info);
     if(info != 0 || is_nega) MPI_Abort(ddlaGetCommunicator(handle), 1);
-    ddla::ppotrs('L', 'L', 'N', n, nrhs, d_A.ptr, descA, d_B.ptr, descB, is_nega);
+    ddla::ppotrs(handle, 'L', 'L', 'N', n, nrhs, d_A.ptr, descA, d_B.ptr, descB, is_nega);
     check_solution(handle, descB, d_B.ptr, h_B.size(), "ppotrf", 5e-9);
 }
 

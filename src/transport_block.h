@@ -1,7 +1,7 @@
 #ifndef TRANSPORT_BLOCK_H
 #define TRANSPORT_BLOCK_H
 
-// Public <ddla/ddla.h> first: owns DdlaDesc, DdlaBackend,
+// Public <ddla/ddla.h> first: owns DdlaBackend,
 // default_backend_v, and every public default argument -- hipcc/clang
 // rejects redeclarations that introduce defaults later.
 #include <ddla/ddla.h>
@@ -19,9 +19,10 @@ namespace ddla{
 // unchanged, resolving Backend from the default in any GPU/dual build.
 template <DdlaBackend Backend, typename T>
 void transport_block(
+    const DdlaHandle_t& handle,
     const char& sData, const char& trans,
     const int& m, const int& n,
-    const T* d_A, const int& ia, const int& ja, const DdlaDesc& array_descA,
+    const T* d_A, const int& ia, const int& ja, const int* array_descA,
     T* d_block_A
 );
 

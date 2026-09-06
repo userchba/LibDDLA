@@ -43,9 +43,9 @@ inline Complex head_value(int i, int j, int n, int head_idx)
 // build_rhs (api_grid_test_common.h) only accepts a plain function pointer,
 // which can't capture head_idx -- inline the same B = A*X_known
 // construction here instead.
-inline std::vector<Complex> build_head_rhs(const ddla::DdlaDesc& descB, int n, int head_idx)
+inline std::vector<Complex> build_head_rhs(const ddla::DdlaHandle_t& handle, const int* descB, int n, int head_idx)
 {
-    return make_local<Complex>(descB, [&](int i, int j){
+    return make_local<Complex>(handle, descB, [&](int i, int j){
         Complex sum(0.0, 0.0);
         for(int l = 0; l < n; ++l){
             sum += head_value(i, l, n, head_idx) * x_value(l, j);
@@ -63,15 +63,15 @@ inline std::vector<Complex> build_head_rhs(const ddla::DdlaDesc& descB, int n, i
 void check_head_case(const ddla::DdlaHandle_t& handle, int n, int nrhs, int nb,
                      int head_idx_1based, const std::string& label)
 {
-    ddla::DdlaDesc descA(handle), descB(handle);
-    descA.init(n, n, nb, nb, 0, 0);
-    descB.init(n, nrhs, nb, nb, 0, 0);
+    int descA[ddla::DDLA_DLEN_], descB[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descA, handle, n, n, nb, nb, 0, 0));
+    DDLA_CHECK(ddlaDescInit(descB, handle, n, nrhs, nb, nb, 0, 0));
 
     const int head_idx0 = head_idx_1based - 1; // 0-based, for the value functions
-    auto h_A = make_local<Complex>(descA, [=](int i, int j){
+    auto h_A = make_local<Complex>(handle, descA, [=](int i, int j){
         return head_value(i, j, n, head_idx0);
     });
-    auto h_B = build_head_rhs(descB, n, head_idx0);
+    auto h_B = build_head_rhs(handle, descB, n, head_idx0);
 
     DeviceBuffer<Complex> d_A(handle, h_A.size());
     DeviceBuffer<Complex> d_B(handle, h_B.size());
@@ -82,7 +82,7 @@ void check_head_case(const ddla::DdlaHandle_t& handle, int n, int nrhs, int nb,
     const int location = (head_idx_1based == n) ? -1 : head_idx_1based;
 
     int info = -1;
-    const bool is_nega = ddla::ppotrf('L', n, d_A.ptr, 1, 1, descA, info, true, location);
+    const bool is_nega = ddla::ppotrf(handle, 'L', n, d_A.ptr, 1, 1, descA, info, true, location);
     if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
     // The construction is diagonally dominant everywhere except at
     // head_idx, so the head correction must fire for this test to be
@@ -92,7 +92,7 @@ void check_head_case(const ddla::DdlaHandle_t& handle, int n, int nrhs, int nb,
 
     // Same location forwarded to ppotrs; the B permutation (if any) happens
     // inside ppotrs.
-    ddla::ppotrs('L', 'L', 'N', n, nrhs, d_A.ptr, descA, d_B.ptr, descB, is_nega, location);
+    ddla::ppotrs(handle, 'L', 'L', 'N', n, nrhs, d_A.ptr, descA, d_B.ptr, descB, is_nega, location);
 
     check_solution(handle, descB, d_B.ptr, h_B.size(), label, 5e-9);
 }

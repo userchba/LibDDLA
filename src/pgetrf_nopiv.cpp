@@ -1,4 +1,5 @@
 #include <ddla/ddla.h>
+#include "ddla_desc.h"
 #include <cassert>
 #include <algorithm>
 #include "ddla_connector.h"
@@ -28,27 +29,29 @@ namespace ddla {
  */
 template<typename T>
 void pgetrf_nopiv(
-    const int& m, const int& n,
-    T* d_A, const DdlaDesc& array_descA,
+    const DdlaHandle_t& handle, const int& m, const int& n,
+    T* d_A, const int* array_descA,
     int& info  // host
 )
 {
-    assert(m <= array_descA.m() && n <= array_descA.n());
-    DdlaHandle_t ddla_handle = array_descA.ddla_handle();
+    check_desc(array_descA, handle);
+    int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
+    ddlaGetGridDims(handle, nprows, npcols);
+    ddlaGetGridCoords(handle, myprow, mypcol);
+
+
+    assert(m <= array_descA[DDLA_M_] && n <= array_descA[DDLA_N_]);
+    DdlaHandle_t ddla_handle = handle;
     detail::require_gpu_backend(ddla_handle, "pgetrf_nopiv");
 
 
-    int nprows = array_descA.nprows();
-    int npcols = array_descA.npcols();
-    int myprow = array_descA.myprow();
-    int mypcol = array_descA.mypcol();
 
-    int nb = array_descA.mb();
-    assert(array_descA.mb() == array_descA.nb());
-    int lld = array_descA.lld();
+    int nb = array_descA[DDLA_MB_];
+    assert(array_descA[DDLA_MB_] == array_descA[DDLA_NB_]);
+    int lld = array_descA[DDLA_LLD_];
 
-    int m_loc = num_loc(m, array_descA.mb(), myprow, array_descA.irsrc(), nprows);
-    int n_loc = num_loc(n, array_descA.nb(), mypcol, array_descA.icsrc(), npcols);
+    int m_loc = num_loc(m, array_descA[DDLA_MB_], myprow, array_descA[DDLA_RSRC_], nprows);
+    int n_loc = num_loc(n, array_descA[DDLA_NB_], mypcol, array_descA[DDLA_CSRC_], npcols);
 
     runtimeStream_t stream = ddla_handle->stream;
     deblasHandle_t blasH = ddla_handle->blasH;
@@ -73,11 +76,11 @@ void pgetrf_nopiv(
     for (int n_s = 0; n_s < std::min(m, n); n_s += nb) {
         nb_real = std::min(nb, std::min(m, n) - n_s);
 
-        int i_loc = array_descA.indx_g2l_r(n_s);
-        int j_loc = array_descA.indx_g2l_c(n_s);
+        int i_loc = indx_g2l_r(array_descA, handle, n_s);
+        int j_loc = indx_g2l_c(array_descA, handle, n_s);
 
-        int owner_row = indxg2p(n_s, nb, array_descA.irsrc(), nprows);
-        int owner_col = indxg2p(n_s, nb, array_descA.icsrc(), npcols);
+        int owner_row = indxg2p(n_s, nb, array_descA[DDLA_RSRC_], nprows);
+        int owner_col = indxg2p(n_s, nb, array_descA[DDLA_CSRC_], npcols);
 
         // ================================================================
         // Step 1: Panel LU -- factor the nb*nb diagonal block in place
@@ -211,23 +214,23 @@ void pgetrf_nopiv(
 
 // Explicit instantiations
 template void pgetrf_nopiv<float>(
-    const int& m, const int& n,
-    float* d_A, const DdlaDesc& array_descA,
+    const DdlaHandle_t&, const int& m, const int& n,
+    float* d_A, const int* array_descA,
     int& info
 );
 template void pgetrf_nopiv<double>(
-    const int& m, const int& n,
-    double* d_A, const DdlaDesc& array_descA,
+    const DdlaHandle_t&, const int& m, const int& n,
+    double* d_A, const int* array_descA,
     int& info
 );
 template void pgetrf_nopiv<std::complex<float>>(
-    const int& m, const int& n,
-    std::complex<float>* d_A, const DdlaDesc& array_descA,
+    const DdlaHandle_t&, const int& m, const int& n,
+    std::complex<float>* d_A, const int* array_descA,
     int& info
 );
 template void pgetrf_nopiv<std::complex<double>>(
-    const int& m, const int& n,
-    std::complex<double>* d_A, const DdlaDesc& array_descA,
+    const DdlaHandle_t&, const int& m, const int& n,
+    std::complex<double>* d_A, const int* array_descA,
     int& info
 );
 

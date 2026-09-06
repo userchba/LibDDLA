@@ -18,6 +18,7 @@
 #include <vector>
 #include <mpi.h>
 #include <ddla/ddla.h>
+#include "test_desc_helpers.h"
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 
@@ -110,34 +111,36 @@ static int check_one(
     int rowsB = (transb == 'N') ? K : N;
     int colsB = (transb == 'N') ? N : K;
 
-    DdlaDesc descA(handle); descA.init(rowsA, colsA, nb, nb, irsrc, icsrc);
-    DdlaDesc descB(handle); descB.init(rowsB, colsB, nb, nb, irsrc, icsrc);
-    DdlaDesc descC(handle); descC.init(M, N, nb, nb, irsrc, icsrc);
+    int descA[DDLA_DLEN_]; DDLA_CHECK(ddlaDescInit(descA, handle,
+                                                   rowsA, colsA, nb, nb, irsrc, icsrc));
+    int descB[DDLA_DLEN_]; DDLA_CHECK(ddlaDescInit(descB, handle,
+                                                   rowsB, colsB, nb, nb, irsrc, icsrc));
+    int descC[DDLA_DLEN_]; DDLA_CHECK(ddlaDescInit(descC, handle, M, N, nb, nb, irsrc, icsrc));
 
-    std::vector<T> h_A(std::max(1, descA.lld() * descA.n_loc()));
-    std::vector<T> h_B(std::max(1, descB.lld() * descB.n_loc()));
-    std::vector<T> h_C(std::max(1, descC.lld() * descC.n_loc()));
+    std::vector<T> h_A(std::max(1, descA[DDLA_LLD_] * ddla_test::n_loc(handle, descA)));
+    std::vector<T> h_B(std::max(1, descB[DDLA_LLD_] * ddla_test::n_loc(handle, descB)));
+    std::vector<T> h_C(std::max(1, descC[DDLA_LLD_] * ddla_test::n_loc(handle, descC)));
 
     // fill local blocks deterministically from global indices
-    for (int jl = 0; jl < descA.n_loc(); ++jl) {
-        int jg = indxl2g(jl, descA.nb(), descA.mypcol(), descA.icsrc(), descA.npcols());
-        for (int il = 0; il < descA.m_loc(); ++il) {
-            int ig = indxl2g(il, descA.mb(), descA.myprow(), descA.irsrc(), descA.nprows());
-            h_A[il + jl * descA.lld()] = elem_val<T>(ig, jg, 0);
+    for (int jl = 0; jl < ddla_test::n_loc(handle, descA); ++jl) {
+        int jg = indxl2g(jl, descA[DDLA_NB_], ddla_test::mypcol(handle), descA[DDLA_CSRC_], ddla_test::npcols(handle));
+        for (int il = 0; il < ddla_test::m_loc(handle, descA); ++il) {
+            int ig = indxl2g(il, descA[DDLA_MB_], ddla_test::myprow(handle), descA[DDLA_RSRC_], ddla_test::nprows(handle));
+            h_A[il + jl * descA[DDLA_LLD_]] = elem_val<T>(ig, jg, 0);
         }
     }
-    for (int jl = 0; jl < descB.n_loc(); ++jl) {
-        int jg = indxl2g(jl, descB.nb(), descB.mypcol(), descB.icsrc(), descB.npcols());
-        for (int il = 0; il < descB.m_loc(); ++il) {
-            int ig = indxl2g(il, descB.mb(), descB.myprow(), descB.irsrc(), descB.nprows());
-            h_B[il + jl * descB.lld()] = elem_val<T>(ig, jg, 1000);
+    for (int jl = 0; jl < ddla_test::n_loc(handle, descB); ++jl) {
+        int jg = indxl2g(jl, descB[DDLA_NB_], ddla_test::mypcol(handle), descB[DDLA_CSRC_], ddla_test::npcols(handle));
+        for (int il = 0; il < ddla_test::m_loc(handle, descB); ++il) {
+            int ig = indxl2g(il, descB[DDLA_MB_], ddla_test::myprow(handle), descB[DDLA_RSRC_], ddla_test::nprows(handle));
+            h_B[il + jl * descB[DDLA_LLD_]] = elem_val<T>(ig, jg, 1000);
         }
     }
-    for (int jl = 0; jl < descC.n_loc(); ++jl) {
-        int jg = indxl2g(jl, descC.nb(), descC.mypcol(), descC.icsrc(), descC.npcols());
-        for (int il = 0; il < descC.m_loc(); ++il) {
-            int ig = indxl2g(il, descC.mb(), descC.myprow(), descC.irsrc(), descC.nprows());
-            h_C[il + jl * descC.lld()] = elem_val<T>(ig, jg, 2000);
+    for (int jl = 0; jl < ddla_test::n_loc(handle, descC); ++jl) {
+        int jg = indxl2g(jl, descC[DDLA_NB_], ddla_test::mypcol(handle), descC[DDLA_CSRC_], ddla_test::npcols(handle));
+        for (int il = 0; il < ddla_test::m_loc(handle, descC); ++il) {
+            int ig = indxl2g(il, descC[DDLA_MB_], ddla_test::myprow(handle), descC[DDLA_RSRC_], ddla_test::nprows(handle));
+            h_C[il + jl * descC[DDLA_LLD_]] = elem_val<T>(ig, jg, 2000);
         }
     }
 
@@ -151,13 +154,13 @@ static int check_one(
 
     // ---- compute with ddla::pgemm ----
     if (use_default_backend) {
-        pgemm<>(transa, transb, M, N, K, alpha,
+        pgemm<>(handle, transa, transb, M, N, K, alpha,
                 h_A.data(), descA,
                 h_B.data(), descB,
                 beta,
                 h_C.data(), descC);
     } else {
-        pgemm<DdlaBackend::CPU>(
+        pgemm<DdlaBackend::CPU>(handle, 
             transa, transb, M, N, K, alpha,
             h_A.data(), descA,
             h_B.data(), descB,
@@ -166,15 +169,15 @@ static int check_one(
     }
 
     // ---- gather global C from all ranks to rank 0 for checking ----
-    auto gather_global = [&](const DdlaDesc& desc, const std::vector<T>& local) -> std::vector<T> {
-        int mg = desc.m(), ng = desc.n();
+    auto gather_global = [&](const int* desc, const std::vector<T>& local) -> std::vector<T> {
+        int mg = desc[DDLA_M_], ng = desc[DDLA_N_];
         std::vector<T> global;
         if (myid == 0) global.resize(mg * ng, T(0));
 
         // determine maximum local size to send
-        int loc_m = desc.m_loc();
-        int loc_n = desc.n_loc();
-        int loc_ld = desc.lld();
+        int loc_m = ddla_test::m_loc(handle, desc);
+        int loc_n = ddla_test::n_loc(handle, desc);
+        int loc_ld = desc[DDLA_LLD_];
 
         // For simplicity, serialize local into contiguous (loc_m * loc_n) buffer
         std::vector<T> sendbuf(loc_m * loc_n);
@@ -218,14 +221,14 @@ static int check_one(
             for (int r = 0; r < nprocs; ++r) {
                 int r_row, r_col;
                 ddlaRankToRc(handle, r, r_row, r_col);
-                int r_loc_m = num_loc(mg, desc.mb(), r_row, desc.irsrc(), desc.nprows());
-                int r_loc_n = num_loc(ng, desc.nb(), r_col, desc.icsrc(), desc.npcols());
+                int r_loc_m = num_loc(mg, desc[DDLA_MB_], r_row, desc[DDLA_RSRC_], ddla_test::nprows(handle));
+                int r_loc_n = num_loc(ng, desc[DDLA_NB_], r_col, desc[DDLA_CSRC_], ddla_test::npcols(handle));
                 // byte offset -> element offset
                 const T* src = recvbuf.data() + displs[r] / static_cast<int>(sizeof(T));
                 for (int jr = 0; jr < r_loc_n; ++jr) {
-                    int jg = indxl2g(jr, desc.nb(), r_col, desc.icsrc(), desc.npcols());
+                    int jg = indxl2g(jr, desc[DDLA_NB_], r_col, desc[DDLA_CSRC_], ddla_test::npcols(handle));
                     for (int ir = 0; ir < r_loc_m; ++ir) {
-                        int ig = indxl2g(ir, desc.mb(), r_row, desc.irsrc(), desc.nprows());
+                        int ig = indxl2g(ir, desc[DDLA_MB_], r_row, desc[DDLA_RSRC_], ddla_test::nprows(handle));
                         global[ig + jg * mg] = src[ir + jr * r_loc_m];
                     }
                 }
@@ -352,17 +355,19 @@ static int run_tests_for_type(const char* type_name,
     // when K == 0).
     {
         const int M = 17, N = 20, nb = 8;
-        DdlaDesc descA(handle); descA.init(M, 0, nb, nb, irsrc, icsrc);   // K == 0
-        DdlaDesc descB(handle); descB.init(0, N, nb, nb, irsrc, icsrc);   // K == 0
-        DdlaDesc descC(handle); descC.init(M, N, nb, nb, irsrc, icsrc);
+        int descA[DDLA_DLEN_]; DDLA_CHECK(ddlaDescInit(descA, handle,
+                                                       M, 0, nb, nb, irsrc, icsrc));   // K == 0
+        int descB[DDLA_DLEN_]; DDLA_CHECK(ddlaDescInit(descB, handle,
+                                                       0, N, nb, nb, irsrc, icsrc));   // K == 0
+        int descC[DDLA_DLEN_]; DDLA_CHECK(ddlaDescInit(descC, handle, M, N, nb, nb, irsrc, icsrc));
 
         std::vector<T> h_A(1), h_B(1);
-        std::vector<T> h_C(std::max(1, descC.lld() * descC.n_loc()));
-        for (int jl = 0; jl < descC.n_loc(); ++jl) {
-            int jg = indxl2g(jl, descC.nb(), descC.mypcol(), descC.icsrc(), descC.npcols());
-            for (int il = 0; il < descC.m_loc(); ++il) {
-                int ig = indxl2g(il, descC.mb(), descC.myprow(), descC.irsrc(), descC.nprows());
-                h_C[il + jl * descC.lld()] = elem_val<T>(ig, jg, 3000);
+        std::vector<T> h_C(std::max(1, descC[DDLA_LLD_] * ddla_test::n_loc(handle, descC)));
+        for (int jl = 0; jl < ddla_test::n_loc(handle, descC); ++jl) {
+            int jg = indxl2g(jl, descC[DDLA_NB_], ddla_test::mypcol(handle), descC[DDLA_CSRC_], ddla_test::npcols(handle));
+            for (int il = 0; il < ddla_test::m_loc(handle, descC); ++il) {
+                int ig = indxl2g(il, descC[DDLA_MB_], ddla_test::myprow(handle), descC[DDLA_RSRC_], ddla_test::nprows(handle));
+                h_C[il + jl * descC[DDLA_LLD_]] = elem_val<T>(ig, jg, 3000);
             }
         }
         std::vector<T> h_C_orig = h_C;
@@ -375,7 +380,7 @@ static int run_tests_for_type(const char* type_name,
             beta = T(-0.75, 0.5);
         }
 
-        pgemm<DdlaBackend::CPU>('N', 'N', M, N, 0, alpha,
+        pgemm<DdlaBackend::CPU>(handle, 'N', 'N', M, N, 0, alpha,
                                 h_A.data(), descA,
                                 h_B.data(), descB,
                                 beta,

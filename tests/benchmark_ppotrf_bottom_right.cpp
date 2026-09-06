@@ -12,6 +12,7 @@
 #include <mpi.h>
 
 #include <ddla/ddla.h>
+#include "test_desc_helpers.h"
 #include "ddla_connector.h"
 #include "ddla_stream_impl.h"
 
@@ -329,14 +330,14 @@ bool validate_options(Options& options, int nranks, std::string& error)
     return true;
 }
 
-std::size_t local_size(const ddla::DdlaDesc& desc)
+std::size_t local_size(const ddla::DdlaHandle_t& handle, const int* desc)
 {
-    return static_cast<std::size_t>(desc.lld()) * desc.n_loc();
+    return static_cast<std::size_t>(desc[DDLA_LLD_]) * ddla_test::n_loc(handle, desc);
 }
 
-std::vector<Complex> make_local_hpd(const ddla::DdlaDesc& desc)
+std::vector<Complex> make_local_hpd(const ddla::DdlaHandle_t& handle, const int* desc)
 {
-    const int n = desc.n();
+    const int n = desc[DDLA_N_];
     const double scale = 1.0 / static_cast<double>(n);
     const double two_pi = 2.0 * std::acos(-1.0);
 
@@ -349,16 +350,16 @@ std::vector<Complex> make_local_hpd(const ddla::DdlaDesc& desc)
 
     // A = I + v*v^H/n has eigenvalues 1 and 2, so both factorizations see
     // exactly the same dense, well-conditioned Hermitian positive-definite A.
-    std::vector<Complex> local(local_size(desc), Complex(0.0, 0.0));
-    for(int jloc = 0; jloc < desc.n_loc(); ++jloc){
-        const int j = desc.indx_l2g_c(jloc);
+    std::vector<Complex> local(local_size(handle, desc), Complex(0.0, 0.0));
+    for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
+        const int j = indx_l2g_c(desc, handle, jloc);
         if(j >= n) continue;
-        for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
-            const int i = desc.indx_l2g_r(iloc);
+        for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc); ++iloc){
+            const int i = indx_l2g_r(desc, handle, iloc);
             if(i >= n) continue;
             Complex value = scale * phase[i] * std::conj(phase[j]);
             if(i == j) value += Complex(1.0, 0.0);
-            local[iloc + static_cast<std::size_t>(jloc) * desc.lld()] = value;
+            local[iloc + static_cast<std::size_t>(jloc) * desc[DDLA_LLD_]] = value;
         }
     }
     return local;
@@ -376,7 +377,7 @@ void reset_matrix(const ddla::DdlaHandle_t& handle, Complex* d_work,
 
 double run_once(Algorithm algorithm, int n, Complex* d_work,
                 const Complex* d_reference, std::size_t count,
-                const ddla::DdlaDesc& desc,
+                const int* desc,
                 const Options& options, const ddla::DdlaHandle_t& handle)
 {
     reset_matrix(handle, d_work, d_reference, count);
@@ -386,10 +387,10 @@ double run_once(Algorithm algorithm, int n, Complex* d_work,
     MPI_CHECK(MPI_Barrier(handle->comm));
     const double start = MPI_Wtime();
     if(algorithm == Algorithm::standard){
-        sign_correction = ddla::ppotrf(
+        sign_correction = ddla::ppotrf(handle, 
             options.uplo, n, d_work, 1, 1, desc, info);
     }else{
-        ddla::ppotrf_bottom_right(options.uplo, n, d_work, desc, info);
+        ddla::ppotrf_bottom_right(handle, options.uplo, n, d_work, desc, info);
     }
     RUNTIME_CHECK(runtimeStreamSynchronize(handle->stream));
     const double local_elapsed = MPI_Wtime() - start;
@@ -440,11 +441,11 @@ void print_run(const char* kind, Algorithm algorithm, int iteration,
 void benchmark_size(int n, const Options& options,
                     const ddla::DdlaHandle_t& handle)
 {
-    ddla::DdlaDesc desc(handle);
-    desc.init(n, n, options.block_size, options.block_size,
-              options.irsrc, options.icsrc);
+    int desc[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(desc, handle,
+                            n, n, options.block_size, options.block_size, options.irsrc, options.icsrc));
 
-    const std::size_t count = local_size(desc);
+    const std::size_t count = local_size(handle, desc);
     const std::size_t allocation_count = std::max<std::size_t>(count, 1);
     Complex* d_reference = nullptr;
     Complex* d_work = nullptr;
@@ -454,7 +455,7 @@ void benchmark_size(int n, const Options& options,
                                    allocation_count * sizeof(Complex), handle->stream));
 
     {
-        const std::vector<Complex> h_reference = make_local_hpd(desc);
+        const std::vector<Complex> h_reference = make_local_hpd(handle, desc);
         if(count > 0){
             RUNTIME_CHECK(runtimeMemcpyAsync(d_reference, h_reference.data(),
                                            count * sizeof(Complex),

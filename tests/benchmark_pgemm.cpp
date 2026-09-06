@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <ddla/ddla.h>
+#include "test_desc_helpers.h"
 #include "ddla_connector.h"
 #include "ddla_stream_impl.h"
 
@@ -27,15 +28,15 @@ void benchmark_pgemm(int n, char transa, char transb,
                      std::vector<BenchResult>& results)
 {
     int nb = std::min(128, n);
-    DdlaDesc descA(ddla_handle);
-    descA.init(n, n, nb, nb, 0, 0);
-    DdlaDesc descB(ddla_handle);
-    descB.init(n, n, nb, nb, 0, 0);
-    DdlaDesc descC(ddla_handle);
-    descC.init(n, n, nb, nb, 0, 0);
+    int descA[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descA, ddla_handle, n, n, nb, nb, 0, 0));
+    int descB[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descB, ddla_handle, n, n, nb, nb, 0, 0));
+    int descC[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descC, ddla_handle, n, n, nb, nb, 0, 0));
 
-    int myid = descC.mypcol() + descC.myprow() * descC.npcols();
-    const size_t nelem = static_cast<size_t>(descA.m_loc()) * descA.n_loc();
+    int myid = ddla_test::mypcol(ddla_handle) + ddla_test::myprow(ddla_handle) * ddla_test::npcols(ddla_handle);
+    const size_t nelem = static_cast<size_t>(ddla_test::m_loc(ddla_handle, descA)) * ddla_test::n_loc(ddla_handle, descA);
     const size_t size = nelem * sizeof(std::complex<double>);
 
     std::complex<double>* d_A = nullptr;
@@ -53,7 +54,7 @@ void benchmark_pgemm(int n, char transa, char transb,
     std::complex<double> beta(0.0, 0.0);
 
     // Warm up
-    pgemm(transa, transb, n, n, n, alpha, d_A, descA, d_B, descB, beta, d_C, descC);
+    pgemm(ddla_handle, transa, transb, n, n, n, alpha, d_A, descA, d_B, descB, beta, d_C, descC);
     RUNTIME_CHECK(runtimeStreamSynchronize(ddla_handle->stream));
     MPI_Barrier(MPI_COMM_WORLD);
 
@@ -61,7 +62,7 @@ void benchmark_pgemm(int n, char transa, char transb,
     int niter = (n <= 1000) ? 10 : (n <= 5000 ? 3 : 1);
     double start = MPI_Wtime();
     for (int iter = 0; iter < niter; iter++) {
-        pgemm(transa, transb, n, n, n, alpha, d_A, descA, d_B, descB, beta, d_C, descC);
+        pgemm(ddla_handle, transa, transb, n, n, n, alpha, d_A, descA, d_B, descB, beta, d_C, descC);
     }
     RUNTIME_CHECK(runtimeStreamSynchronize(ddla_handle->stream));
     MPI_Barrier(MPI_COMM_WORLD);

@@ -10,6 +10,7 @@
 #include "benchmark_grid_options.h"
 
 #include <ddla/ddla.h>
+#include "test_desc_helpers.h"
 #include "ddla_connector.h"
 #include "ddla_stream_impl.h"
 #include "scal.h"
@@ -20,9 +21,9 @@ using Complex = std::complex<double>;
 
 constexpr unsigned long long kRandomSeed = 20260710ULL;
 
-void fill_matrix(int n, const DdlaDesc& desc, Complex* d_A, const DdlaHandle_t& handle)
+void fill_matrix(int n, const int* desc, Complex* d_A, const DdlaHandle_t& handle)
 {
-    const size_t nelem = static_cast<size_t>(desc.m_loc()) * desc.n_loc();
+    const size_t nelem = static_cast<size_t>(ddla_test::m_loc(handle, desc)) * ddla_test::n_loc(handle, desc);
     derandGenerator_t generator;
     DERAND_CHECK(derandCreateGenerator(&generator, DERAND_RNG_PSEUDO_DEFAULT));
     DERAND_CHECK(derandSetPseudoRandomGeneratorSeed(
@@ -34,10 +35,10 @@ void fill_matrix(int n, const DdlaDesc& desc, Complex* d_A, const DdlaHandle_t& 
 
     const Complex diag(2.0, 0.0);
     for(int i = 0; i < n; ++i){
-        const int iloc = desc.indx_g2l_r(i);
-        const int jloc = desc.indx_g2l_c(i);
+        const int iloc = indx_g2l_r(desc, handle, i);
+        const int jloc = indx_g2l_c(desc, handle, i);
         if(iloc >= 0 && jloc >= 0){
-            RUNTIME_CHECK(runtimeMemcpyAsync(d_A + iloc + jloc * desc.lld(), &diag,
+            RUNTIME_CHECK(runtimeMemcpyAsync(d_A + iloc + jloc * desc[DDLA_LLD_], &diag,
                                           sizeof(Complex), runtimeMemcpyHostToDevice,
                                           handle->stream));
         }
@@ -49,21 +50,21 @@ double benchmark_pgetrf(int n, const DdlaHandle_t& handle,
                         const benchmark_cli::Options& options, bool warmup)
 {
     const int nb = std::min(128, n);
-    DdlaDesc desc(handle);
-    desc.init(n, n, nb, nb, 0, 0);
+    int desc[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(desc, handle, n, n, nb, nb, 0, 0));
 
-    const size_t nelem = static_cast<size_t>(desc.m_loc()) * desc.n_loc();
+    const size_t nelem = static_cast<size_t>(ddla_test::m_loc(handle, desc)) * ddla_test::n_loc(handle, desc);
     Complex* d_A = nullptr;
     RUNTIME_CHECK(runtimeMallocAsync(reinterpret_cast<void**>(&d_A),
                                   nelem * sizeof(Complex), handle->stream));
     fill_matrix(n, desc, d_A, handle);
 
-    std::vector<int> ipiv(desc.m_loc());
+    std::vector<int> ipiv(ddla_test::m_loc(handle, desc));
     int info = -1;
 
     MPI_Barrier(handle->comm);
     const double start = MPI_Wtime();
-    pgetrf(n, n, d_A, desc, ipiv.data(), info);
+    pgetrf(handle, n, n, d_A, desc, ipiv.data(), info);
     RUNTIME_CHECK(runtimeStreamSynchronize(handle->stream));
     MPI_Barrier(handle->comm);
     const double elapsed = MPI_Wtime() - start;

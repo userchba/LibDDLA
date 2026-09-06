@@ -39,20 +39,20 @@ template <>
 const char* scalar_name<std::complex<double>>() { return "complex<double>"; }
 
 template <typename T, typename Matrix>
-void run_case(const ddla::DdlaHandle_t& handle, const ddla::DdlaDesc& desc,
+void run_case(const ddla::DdlaHandle_t& handle, const int* desc,
               const std::string& case_name, int panel_width, Matrix matrix,
               int expected_info, int expected_pivot = -1)
 {
-    auto h_A = make_local<T>(desc, matrix);
+    auto h_A = make_local<T>(handle, desc, matrix);
     DeviceBuffer<T> d_A(handle, h_A.size());
     upload(handle, d_A.ptr, h_A);
     check_ddla_sync(handle);
 
-    std::vector<int> ipiv(desc.m_loc(), -1);
+    std::vector<int> ipiv(ddla_test::m_loc(handle, desc), -1);
     int info = -1;
-    ddla::pgetf2(desc.m(), desc.n(), panel_width, d_A.ptr, 0, desc, ipiv.data(), info);
+    ddla::pgetf2(handle, desc[DDLA_M_], desc[DDLA_N_], panel_width, d_A.ptr, 0, desc, ipiv.data(), info);
 
-    const std::string label = std::string("pgetf2(") + scalar_name<T>()
+    const std::string label = std::string("pgetf2(handle, ") + scalar_name<T>()
                             + "/" + case_name + ")";
     require_close(handle, label + " info", std::abs(info - expected_info), 0.0);
     if(expected_pivot >= 0){
@@ -66,7 +66,7 @@ void run_case(const ddla::DdlaHandle_t& handle, const ddla::DdlaDesc& desc,
 
 template <typename T>
 void check_scalar_type(const ddla::DdlaHandle_t& handle,
-                       const ddla::DdlaDesc& desc, int n, int nb)
+                       const int* desc, int n, int nb)
 {
     int nprows = 0, npcols_unused = 0;
     ddlaGetGridDims(handle, nprows, npcols_unused);
@@ -129,8 +129,8 @@ void check_pgetf2(const ddla::DdlaHandle_t& handle, const Shape& base)
 {
     const int nb = base.nb;
     const int n = square_size(handle, base);
-    ddla::DdlaDesc descA(handle);
-    descA.init(n, n, nb, nb, 0, 0);
+    int descA[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descA, handle, n, n, nb, nb, 0, 0));
 
     check_scalar_type<float>(handle, descA, n, nb);
     check_scalar_type<double>(handle, descA, n, nb);

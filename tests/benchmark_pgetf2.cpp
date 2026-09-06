@@ -10,6 +10,7 @@
 #include "benchmark_grid_options.h"
 
 #include <ddla/ddla.h>
+#include "test_desc_helpers.h"
 #include "ddla_connector.h"
 #include "ddla_stream_impl.h"
 
@@ -23,19 +24,19 @@ constexpr int kBlockSize = 128;
 constexpr int kPanelWidth = 32;
 constexpr int kDefaultRepeats = 7;
 
-void initialize_panel_matrix(int n, const ddla::DdlaDesc& desc, Complex* d_A,
+void initialize_panel_matrix(int n, const int* desc, Complex* d_A,
                              const ddla::DdlaHandle_t& handle)
 {
-    const size_t count = static_cast<size_t>(desc.lld()) * desc.n_loc();
+    const size_t count = static_cast<size_t>(desc[DDLA_LLD_]) * ddla_test::n_loc(handle, desc);
     RUNTIME_CHECK(runtimeMemsetAsync(d_A, 0, count * sizeof(Complex), handle->stream));
 
     const Complex diagonal(2.0, 0.0);
     for(int i = 0; i < std::min(n, kPanelWidth); ++i){
-        const int iloc = desc.indx_g2l_r(i);
-        const int jloc = desc.indx_g2l_c(i);
+        const int iloc = indx_g2l_r(desc, handle, i);
+        const int jloc = indx_g2l_c(desc, handle, i);
         if(iloc >= 0 && jloc >= 0){
             RUNTIME_CHECK(runtimeMemcpyAsync(
-                d_A + iloc + static_cast<size_t>(jloc) * desc.lld(),
+                d_A + iloc + static_cast<size_t>(jloc) * desc[DDLA_LLD_],
                 &diagonal, sizeof(Complex), runtimeMemcpyHostToDevice, handle->stream));
         }
     }
@@ -44,17 +45,17 @@ void initialize_panel_matrix(int n, const ddla::DdlaDesc& desc, Complex* d_A,
 
 double benchmark_size(int n, int repeats, const ddla::DdlaHandle_t& handle)
 {
-    ddla::DdlaDesc desc(handle);
-    desc.init(n, n, kBlockSize, kBlockSize, 0, 0);
+    int desc[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(desc, handle, n, n, kBlockSize, kBlockSize, 0, 0));
 
-    const size_t count = static_cast<size_t>(desc.lld()) * desc.n_loc();
+    const size_t count = static_cast<size_t>(desc[DDLA_LLD_]) * ddla_test::n_loc(handle, desc);
     Complex* d_A = nullptr;
     RUNTIME_CHECK(runtimeMallocAsync(reinterpret_cast<void**>(&d_A),
                                    std::max<size_t>(count, 1) * sizeof(Complex),
                                    handle->stream));
     initialize_panel_matrix(n, desc, d_A, handle);
 
-    std::vector<int> ipiv(desc.m_loc(), -1);
+    std::vector<int> ipiv(ddla_test::m_loc(handle, desc), -1);
     std::vector<double> times;
     if(handle->myid == 0){
         times.reserve(repeats);
@@ -66,7 +67,7 @@ double benchmark_size(int n, int repeats, const ddla::DdlaHandle_t& handle)
 
         MPI_CHECK(MPI_Barrier(handle->comm));
         const double start = MPI_Wtime();
-        ddla::pgetf2(n, n, kPanelWidth, d_A, 0, desc, ipiv.data(), info);
+        ddla::pgetf2(handle, n, n, kPanelWidth, d_A, 0, desc, ipiv.data(), info);
         RUNTIME_CHECK(runtimeStreamSynchronize(handle->stream));
         const double elapsed = MPI_Wtime() - start;
 

@@ -1,4 +1,5 @@
 #include <ddla/ddla.h>
+#include "ddla_desc.h"
 #include <cassert>
 #include <cstddef>
 #include "ddla_connector.h"
@@ -19,21 +20,27 @@ namespace ddla{
 
 template<typename T>
 bool ppotrf(
-    const char& uplo, const int& n,
-    T* A, const int& ia, const int& ja, const DdlaDesc& array_descA,
+    const DdlaHandle_t& handle, const char& uplo, const int& n,
+    T* A, const int& ia, const int& ja, const int* array_descA,
     int& info, // host pointer
     bool is_head, int location
 )
 {
+    check_desc(array_descA, handle);
+    int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
+    ddlaGetGridDims(handle, nprows, npcols);
+    ddlaGetGridCoords(handle, myprow, mypcol);
+
+
     bool is_nega = false;
     assert(uplo == 'L' || uplo == 'U');
-    assert(array_descA.mb() == array_descA.nb());
+    assert(array_descA[DDLA_MB_] == array_descA[DDLA_NB_]);
     assert(n > 0);
-    assert(n <= array_descA.m() && n <= array_descA.n());
+    assert(n <= array_descA[DDLA_M_] && n <= array_descA[DDLA_N_]);
     // The factorization operates on the leading n x n sub-matrix anchored at
     // global (0,0); ia/ja are reserved and must be 1 (1-based).
     assert(ia == 1 && ja == 1);
-    DdlaHandle_t ddla_handle = array_descA.ddla_handle();
+    DdlaHandle_t ddla_handle = handle;
     detail::require_gpu_backend(ddla_handle, "ppotrf");
     if(is_head)
     if(location != -1 && location != n){
@@ -43,12 +50,12 @@ bool ppotrf(
         // triangles) Hermitian array, so both swaps touching every row/
         // column entry keeps the matrix consistently Hermitian afterward --
         // this is not a packed-triangle representation.
-        pswap(
+        pswap(handle, 
             n,
-            A, location, 1, array_descA, array_descA.m(),
-            A, n, 1, array_descA, array_descA.m()
+            A, location, 1, array_descA, array_descA[DDLA_M_],
+            A, n, 1, array_descA, array_descA[DDLA_M_]
         );
-        pswap(
+        pswap(handle, 
             // Was: A, 1, location, array_descA, 1 as the second operand --
             // swapping column `location` with itself, a no-op that left the
             // column swap half of the permutation never applied.
@@ -58,18 +65,14 @@ bool ppotrf(
         );
     }
 
-    int nb = array_descA.mb();
-    int lldA = array_descA.lld();
+    int nb = array_descA[DDLA_MB_];
+    int lldA = array_descA[DDLA_LLD_];
 
-    int nprows = array_descA.nprows();
-    int npcols = array_descA.npcols();
-    int myprow = array_descA.myprow();
-    int mypcol = array_descA.mypcol();
     // Logical local extents of the leading-block n x n sub-matrix; the
     // descriptor may describe a larger matrix, so all local sizes below are
     // derived from the logical n via num_loc.
-    const int m_loc_A = num_loc(n, array_descA.mb(), myprow, array_descA.irsrc(), nprows);
-    const int n_loc_A = num_loc(n, array_descA.nb(), mypcol, array_descA.icsrc(), npcols);
+    const int m_loc_A = num_loc(n, array_descA[DDLA_MB_], myprow, array_descA[DDLA_RSRC_], nprows);
+    const int n_loc_A = num_loc(n, array_descA[DDLA_NB_], mypcol, array_descA[DDLA_CSRC_], npcols);
 
     runtimeStream_t stream=ddla_handle->stream;
     deblasHandle_t blasH=ddla_handle->blasH;
@@ -125,11 +128,11 @@ bool ppotrf(
     for(int n_s = 0; n_s < n; n_s += nb)
     {
         nb_real = std::min(nb, n - n_s);
-        mm_row_start = num_loc(n_s, nb, myprow, array_descA.irsrc(), nprows);
-        mm_col_start = num_loc(n_s, nb, mypcol, array_descA.icsrc(), npcols);
+        mm_row_start = num_loc(n_s, nb, myprow, array_descA[DDLA_RSRC_], nprows);
+        mm_col_start = num_loc(n_s, nb, mypcol, array_descA[DDLA_CSRC_], npcols);
 
-        owner_row = indxg2p(n_s, nb, array_descA.irsrc(), nprows);
-        owner_col = indxg2p(n_s, nb, array_descA.icsrc(), npcols);
+        owner_row = indxg2p(n_s, nb, array_descA[DDLA_RSRC_], nprows);
+        owner_col = indxg2p(n_s, nb, array_descA[DDLA_CSRC_], npcols);
 
         if(myprow == owner_row && mypcol == owner_col)
         {
@@ -276,12 +279,12 @@ bool ppotrf(
             col_remain = length_col % nb;
             row_s = nb + row_remain;
             if(row_remain != 0){
-                int g_row_s = array_descA.indx_l2g_r(m_loc_A - row_remain);
+                int g_row_s = indx_l2g_r(array_descA, handle, m_loc_A - row_remain);
                 int g_col_s;
                 int length_col_real =  length_col;
                 do{
                     length_col_real -= nb;
-                    g_col_s = array_descA.indx_l2g_c(mm_col_start + length_col_real);
+                    g_col_s = indx_l2g_c(array_descA, handle, mm_col_start + length_col_real);
                 }while(g_row_s < g_col_s);
                 length_col_real += nb;
                 if(length_col_real > 0)
@@ -293,12 +296,12 @@ bool ppotrf(
                     );
             }
             if(col_remain != 0){
-                int g_col_s = array_descA.indx_l2g_c(n_loc_A - col_remain);
+                int g_col_s = indx_l2g_c(array_descA, handle, n_loc_A - col_remain);
                 int g_row_s;
                 int length_row_real = length_row + nb;
                 do{
                     length_row_real -= nb;
-                    g_row_s = array_descA.indx_l2g_r(mm_row_start + length_row - length_row_real);
+                    g_row_s = indx_l2g_r(array_descA, handle, mm_row_start + length_row - length_row_real);
                 }while(g_row_s < g_col_s);
                 if(length_row_real > 0)
                     gemm<DdlaBackend::GPU, T>(ddla_handle, 'N', 'C',
@@ -309,12 +312,12 @@ bool ppotrf(
                     );
             }
             for(;row_s <= num_row_block * nb; row_s += nb){
-                int g_row_s = array_descA.indx_l2g_r(m_loc_A - row_s);
+                int g_row_s = indx_l2g_r(array_descA, handle, m_loc_A - row_s);
                 int g_col_s;
                 col_s = col_remain;
                 do{
                     col_s += nb;
-                    g_col_s = array_descA.indx_l2g_c(n_loc_A - col_s);
+                    g_col_s = indx_l2g_c(array_descA, handle, n_loc_A - col_s);
                 }while(g_row_s < g_col_s);
                 for(; col_s <= num_col_block * nb; col_s += nb){
                     h_A_array[i_batch_count] = d_block_col + length_row - row_s;
@@ -393,11 +396,11 @@ bool ppotrf(
                 if(row_remain != 0){
                     const int row_offset = row_full;
                     const int row_loc = mm_row_start + row_offset;
-                    const int g_row = array_descA.indx_l2g_r(row_loc);
+                    const int g_row = indx_l2g_r(array_descA, handle, row_loc);
                     for(int col_offset = 0; col_offset < length_col; col_offset += nb){
                         const int col_loc = mm_col_start + col_offset;
                         const int col_len = std::min(nb, length_col - col_offset);
-                        const int g_col = array_descA.indx_l2g_c(col_loc);
+                        const int g_col = indx_l2g_c(array_descA, handle, col_loc);
                         if(g_row >= g_col)
                             continue;
                         gemm<DdlaBackend::GPU, T>(ddla_handle, 'C', 'N',
@@ -414,10 +417,10 @@ bool ppotrf(
                 if(col_remain != 0){
                     const int col_offset = col_full;
                     const int col_loc = mm_col_start + col_offset;
-                    const int g_col = array_descA.indx_l2g_c(col_loc);
+                    const int g_col = indx_l2g_c(array_descA, handle, col_loc);
                     for(int row_offset = 0; row_offset < row_full; row_offset += nb){
                         const int row_loc = mm_row_start + row_offset;
-                        const int g_row = array_descA.indx_l2g_r(row_loc);
+                        const int g_row = indx_l2g_r(array_descA, handle, row_loc);
                         if(g_row >= g_col)
                             continue;
                         gemm<DdlaBackend::GPU, T>(ddla_handle, 'C', 'N',
@@ -434,10 +437,10 @@ bool ppotrf(
                 i_batch_count = 0;
                 for(int row_offset = 0; row_offset < row_full; row_offset += nb){
                     const int row_loc = mm_row_start + row_offset;
-                    const int g_row = array_descA.indx_l2g_r(row_loc);
+                    const int g_row = indx_l2g_r(array_descA, handle, row_loc);
                     for(int col_offset = 0; col_offset < col_full; col_offset += nb){
                         const int col_loc = mm_col_start + col_offset;
-                        const int g_col = array_descA.indx_l2g_c(col_loc);
+                        const int g_col = indx_l2g_c(array_descA, handle, col_loc);
                         if(g_row >= g_col)
                             continue;
                         h_A_array[i_batch_count] = d_block_col + row_offset * nb_real;
@@ -469,29 +472,29 @@ bool ppotrf(
 }
 
 template bool ppotrf<float>(
-    const char& uplo, const int& n,
-    float* A, const int& ia, const int& ja, const DdlaDesc& array_descA,
+    const DdlaHandle_t&, const char& uplo, const int& n,
+    float* A, const int& ia, const int& ja, const int* array_descA,
     int& info, // host pointer
     bool is_head, int location
 );
 
 template bool ppotrf<double>(
-    const char& uplo, const int& n,
-    double* A, const int& ia, const int& ja, const DdlaDesc& array_descA,
+    const DdlaHandle_t&, const char& uplo, const int& n,
+    double* A, const int& ia, const int& ja, const int* array_descA,
     int& info, // host pointer
     bool is_head, int location
 );
 
 template bool ppotrf<std::complex<float>>(
-    const char& uplo, const int& n,
-    std::complex<float>* A, const int& ia, const int& ja, const DdlaDesc& array_descA,
+    const DdlaHandle_t&, const char& uplo, const int& n,
+    std::complex<float>* A, const int& ia, const int& ja, const int* array_descA,
     int& info, // host pointer
     bool is_head, int location
 );
 
 template bool ppotrf<std::complex<double>>(
-    const char& uplo, const int& n,
-    std::complex<double>* A, const int& ia, const int& ja, const DdlaDesc& array_descA,
+    const DdlaHandle_t&, const char& uplo, const int& n,
+    std::complex<double>* A, const int& ia, const int& ja, const int* array_descA,
     int& info, // host pointer
     bool is_head, int location
 );

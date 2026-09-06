@@ -28,19 +28,20 @@ inline int padded_size(int n, int nb, int nprows, int npcols)
 }
 
 // Gather the leading m x n block of a local buffer into a global m x n array.
-inline std::vector<Complex> gather_leading(const ddla::DdlaDesc& desc,
+inline std::vector<Complex> gather_leading(const ddla::DdlaHandle_t& handle,
+                                           const int* desc,
                                            const std::vector<Complex>& local,
                                            int m, int n)
 {
     std::vector<Complex> G(static_cast<size_t>(m) * n, Complex(0, 0));
-    for(int jloc = 0; jloc < desc.n_loc(); ++jloc){
-        const int j = desc.indx_l2g_c(jloc);
+    for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
+        const int j = indx_l2g_c(desc, handle, jloc);
         if(j >= n) continue;
-        for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
-            const int i = desc.indx_l2g_r(iloc);
+        for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc); ++iloc){
+            const int i = indx_l2g_r(desc, handle, iloc);
             if(i >= m) continue;
             G[static_cast<size_t>(i) * n + j] =
-                local[iloc + static_cast<size_t>(jloc) * desc.lld()];
+                local[iloc + static_cast<size_t>(jloc) * desc[DDLA_LLD_]];
         }
     }
     return G;
@@ -56,18 +57,19 @@ inline double global_max_abs_diff(const std::vector<Complex>& A,
 }
 
 // Max deviation of every element outside the leading m x n block from sentinel.
-inline double padding_max_err(const ddla::DdlaDesc& desc,
+inline double padding_max_err(const ddla::DdlaHandle_t& handle,
+                              const int* desc,
                               const std::vector<Complex>& local,
                               int m, int n)
 {
     double err = 0.0;
-    for(int jloc = 0; jloc < desc.n_loc(); ++jloc){
-        const int j = desc.indx_l2g_c(jloc);
-        for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
-            const int i = desc.indx_l2g_r(iloc);
+    for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
+        const int j = indx_l2g_c(desc, handle, jloc);
+        for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc); ++iloc){
+            const int i = indx_l2g_r(desc, handle, iloc);
             if(i < m && j < n) continue;
             err = std::max(err, std::abs(
-                local[iloc + static_cast<size_t>(jloc) * desc.lld()] - kSentinel));
+                local[iloc + static_cast<size_t>(jloc) * desc[DDLA_LLD_]] - kSentinel));
         }
     }
     return err;
@@ -76,17 +78,19 @@ inline double padding_max_err(const ddla::DdlaDesc& desc,
 // Build a padded local buffer: sentinel everywhere, then the leading m x n
 // block filled by value(i, j).
 template <typename Fn>
-inline std::vector<Complex> make_padded_local(const ddla::DdlaDesc& desc,
+inline std::vector<Complex> make_padded_local(const ddla::DdlaHandle_t& handle,
+                                              const int* desc,
                                               int m, int n, Fn value)
 {
-    std::vector<Complex> local(static_cast<size_t>(desc.lld()) * desc.n_loc(), kSentinel);
-    for(int jloc = 0; jloc < desc.n_loc(); ++jloc){
-        const int j = desc.indx_l2g_c(jloc);
+    std::vector<Complex> local(static_cast<size_t>(desc[DDLA_LLD_])
+                               * ddla_test::n_loc(handle, desc), kSentinel);
+    for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
+        const int j = indx_l2g_c(desc, handle, jloc);
         if(j >= n) continue;
-        for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
-            const int i = desc.indx_l2g_r(iloc);
+        for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc); ++iloc){
+            const int i = indx_l2g_r(desc, handle, iloc);
             if(i >= m) continue;
-            local[iloc + static_cast<size_t>(jloc) * desc.lld()] = value(i, j);
+            local[iloc + static_cast<size_t>(jloc) * desc[DDLA_LLD_]] = value(i, j);
         }
     }
     return local;
@@ -106,18 +110,18 @@ struct CaseResult {
 // gathered output and check the padding against the sentinel.
 inline void check_leading_block(const ddla::DdlaHandle_t& handle,
                                 const std::string& name,
-                                const ddla::DdlaDesc& desc_exact,
-                                const ddla::DdlaDesc& desc_padded,
+                                const int* desc_exact,
+                                const int* desc_padded,
                                 const std::vector<Complex>& exact_local,
                                 const std::vector<Complex>& padded_local,
                                 int m, int n, double tol)
 {
-    const auto exact_G = gather_leading(desc_exact, exact_local, m, n);
-    const auto padded_G = gather_leading(desc_padded, padded_local, m, n);
+    const auto exact_G = gather_leading(handle, desc_exact, exact_local, m, n);
+    const auto padded_G = gather_leading(handle, desc_padded, padded_local, m, n);
     const double lead_err = global_max_abs_diff(exact_G, padded_G);
     require_close(handle, name + " leading-block", lead_err, tol);
 
-    const double pad_err = padding_max_err(desc_padded, padded_local, m, n);
+    const double pad_err = padding_max_err(handle, desc_padded, padded_local, m, n);
     require_close(handle, name + " padding-untouched", pad_err, 0.0);
 }
 
@@ -140,12 +144,12 @@ void check_ptrtrs_submatrix(const ddla::DdlaHandle_t& handle, const Shape& base)
             for(char trans : {'N', 'T'}){
                 const std::string name = std::string("ptrtrs-sub(") + side + "," + uplo + "," + trans + ")";
 
-                ddla::DdlaDesc descA_ex(handle), descB_ex(handle);
-                descA_ex.init(n, n, nb, nb, 0, 0);
-                descB_ex.init(b_rows, b_cols, nb, nb, 0, 0);
-                ddla::DdlaDesc descA_p(handle), descB_p(handle);
-                descA_p.init(P, P, nb, nb, 0, 0);
-                descB_p.init(P, P, nb, nb, 0, 0);
+                int descA_ex[ddla::DDLA_DLEN_], descB_ex[ddla::DDLA_DLEN_];
+                DDLA_CHECK(ddlaDescInit(descA_ex, handle, n, n, nb, nb, 0, 0));
+                DDLA_CHECK(ddlaDescInit(descB_ex, handle, b_rows, b_cols, nb, nb, 0, 0));
+                int descA_p[ddla::DDLA_DLEN_], descB_p[ddla::DDLA_DLEN_];
+                DDLA_CHECK(ddlaDescInit(descA_p, handle, P, P, nb, nb, 0, 0));
+                DDLA_CHECK(ddlaDescInit(descB_p, handle, P, P, nb, nb, 0, 0));
 
                 auto triA = [&](int i, int j){
                     return (uplo == 'L') ? triangular_l_value(i, j)
@@ -170,18 +174,18 @@ void check_ptrtrs_submatrix(const ddla::DdlaHandle_t& handle, const Shape& base)
                 // exact run
                 std::vector<Complex> exact_out;
                 {
-                    auto h_A = make_local<Complex>(descA_ex, triA);
-                    auto h_B = make_local<Complex>(descB_ex, rhsB);
+                    auto h_A = make_local<Complex>(handle, descA_ex, triA);
+                    auto h_B = make_local<Complex>(handle, descB_ex, rhsB);
                     DeviceBuffer<Complex> d_A(handle, h_A.size());
                     DeviceBuffer<Complex> d_B(handle, h_B.size());
                     upload(handle, d_A.ptr, h_A);
                     upload(handle, d_B.ptr, h_B);
                     check_ddla_sync(handle);
-                    ddla::ptrtrs(side, uplo, trans, 'N',
+                    ddla::ptrtrs(handle, side, uplo, trans, 'N',
                                  b_rows, b_cols, d_A.ptr, descA_ex, d_B.ptr, descB_ex);
                     exact_out = download(handle, d_B.ptr, h_B.size());
                     // Verify exact run against the analytical solution.
-                    const double err = local_max_error<Complex>(descB_ex, exact_out, [](int i, int j){
+                    const double err = local_max_error<Complex>(handle, descB_ex, exact_out, [](int i, int j){
                         return x_value(i, j);
                     });
                     require_close(handle, name + " exact", err, 2e-10);
@@ -189,14 +193,14 @@ void check_ptrtrs_submatrix(const ddla::DdlaHandle_t& handle, const Shape& base)
 
                 // padded run
                 {
-                    auto h_A = make_padded_local(descA_p, n, n, triA);
-                    auto h_B = make_padded_local(descB_p, b_rows, b_cols, rhsB);
+                    auto h_A = make_padded_local(handle, descA_p, n, n, triA);
+                    auto h_B = make_padded_local(handle, descB_p, b_rows, b_cols, rhsB);
                     DeviceBuffer<Complex> d_A(handle, h_A.size());
                     DeviceBuffer<Complex> d_B(handle, h_B.size());
                     upload(handle, d_A.ptr, h_A);
                     upload(handle, d_B.ptr, h_B);
                     check_ddla_sync(handle);
-                    ddla::ptrtrs(side, uplo, trans, 'N',
+                    ddla::ptrtrs(handle, side, uplo, trans, 'N',
                                  b_rows, b_cols, d_A.ptr, descA_p, d_B.ptr, descB_p);
                     auto out = download(handle, d_B.ptr, h_B.size());
                     check_leading_block(handle, name,
@@ -224,32 +228,32 @@ void check_pgetrf_pgetrs_submatrix(const ddla::DdlaHandle_t& handle, const Shape
     // --- pgetrf: A in-place LU factors ---
     {
         const std::string name = "pgetrf-sub";
-        ddla::DdlaDesc descA_ex(handle), descA_p(handle);
-        descA_ex.init(n, n, nb, nb, 0, 0);
-        descA_p.init(P, P, nb, nb, 0, 0);
+        int descA_ex[ddla::DDLA_DLEN_], descA_p[ddla::DDLA_DLEN_];
+        DDLA_CHECK(ddlaDescInit(descA_ex, handle, n, n, nb, nb, 0, 0));
+        DDLA_CHECK(ddlaDescInit(descA_p, handle, P, P, nb, nb, 0, 0));
 
         auto A = [&](int i, int j){ return dominant_value(i, j, n); };
 
         std::vector<Complex> exact_out;
         {
-            auto h_A = make_local<Complex>(descA_ex, A);
+            auto h_A = make_local<Complex>(handle, descA_ex, A);
             DeviceBuffer<Complex> d_A(handle, h_A.size());
             upload(handle, d_A.ptr, h_A);
             check_ddla_sync(handle);
-            std::vector<int> ipiv(descA_ex.m_loc());
+            std::vector<int> ipiv(ddla_test::m_loc(handle, descA_ex));
             int info = -1;
-            ddla::pgetrf(n, n, d_A.ptr, descA_ex, ipiv.data(), info);
+            ddla::pgetrf(handle, n, n, d_A.ptr, descA_ex, ipiv.data(), info);
             if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
             exact_out = download(handle, d_A.ptr, h_A.size());
         }
         {
-            auto h_A = make_padded_local(descA_p, n, n, A);
+            auto h_A = make_padded_local(handle, descA_p, n, n, A);
             DeviceBuffer<Complex> d_A(handle, h_A.size());
             upload(handle, d_A.ptr, h_A);
             check_ddla_sync(handle);
-            std::vector<int> ipiv(descA_p.m_loc());
+            std::vector<int> ipiv(ddla_test::m_loc(handle, descA_p));
             int info = -1;
-            ddla::pgetrf(n, n, d_A.ptr, descA_p, ipiv.data(), info);
+            ddla::pgetrf(handle, n, n, d_A.ptr, descA_p, ipiv.data(), info);
             if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
             auto out = download(handle, d_A.ptr, h_A.size());
             check_leading_block(handle, name, descA_ex, descA_p,
@@ -262,12 +266,12 @@ void check_pgetrf_pgetrs_submatrix(const ddla::DdlaHandle_t& handle, const Shape
         const int b_rows = (side == 'L') ? n : nrhs;
         const int b_cols = (side == 'L') ? nrhs : n;
         const std::string name = std::string("pgetrs-sub(") + side + ")";
-        ddla::DdlaDesc descA_ex(handle), descA_p(handle);
-        ddla::DdlaDesc descB_ex(handle), descB_p(handle);
-        descA_ex.init(n, n, nb, nb, 0, 0);
-        descB_ex.init(b_rows, b_cols, nb, nb, 0, 0);
-        descA_p.init(P, P, nb, nb, 0, 0);
-        descB_p.init(P, P, nb, nb, 0, 0);
+        int descA_ex[ddla::DDLA_DLEN_], descA_p[ddla::DDLA_DLEN_];
+        int descB_ex[ddla::DDLA_DLEN_], descB_p[ddla::DDLA_DLEN_];
+        DDLA_CHECK(ddlaDescInit(descA_ex, handle, n, n, nb, nb, 0, 0));
+        DDLA_CHECK(ddlaDescInit(descB_ex, handle, b_rows, b_cols, nb, nb, 0, 0));
+        DDLA_CHECK(ddlaDescInit(descA_p, handle, P, P, nb, nb, 0, 0));
+        DDLA_CHECK(ddlaDescInit(descB_p, handle, P, P, nb, nb, 0, 0));
 
         auto A = [&](int i, int j){ return dominant_value(i, j, n); };
         auto B = [&](int i, int j){
@@ -281,33 +285,33 @@ void check_pgetrf_pgetrs_submatrix(const ddla::DdlaHandle_t& handle, const Shape
 
         std::vector<Complex> exact_out;
         {
-            auto h_A = make_local<Complex>(descA_ex, A);
-            auto h_B = make_local<Complex>(descB_ex, B);
+            auto h_A = make_local<Complex>(handle, descA_ex, A);
+            auto h_B = make_local<Complex>(handle, descB_ex, B);
             DeviceBuffer<Complex> d_A(handle, h_A.size());
             DeviceBuffer<Complex> d_B(handle, h_B.size());
             upload(handle, d_A.ptr, h_A);
             upload(handle, d_B.ptr, h_B);
             check_ddla_sync(handle);
-            std::vector<int> ipiv(descA_ex.m_loc());
+            std::vector<int> ipiv(ddla_test::m_loc(handle, descA_ex));
             int info = -1;
-            ddla::pgetrf(n, n, d_A.ptr, descA_ex, ipiv.data(), info);
+            ddla::pgetrf(handle, n, n, d_A.ptr, descA_ex, ipiv.data(), info);
             if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
-            ddla::pgetrs(side, 'N', n, nrhs, d_A.ptr, descA_ex, ipiv.data(), d_B.ptr, descB_ex);
+            ddla::pgetrs(handle, side, 'N', n, nrhs, d_A.ptr, descA_ex, ipiv.data(), d_B.ptr, descB_ex);
             exact_out = download(handle, d_B.ptr, h_B.size());
         }
         {
-            auto h_A = make_padded_local(descA_p, n, n, A);
-            auto h_B = make_padded_local(descB_p, b_rows, b_cols, B);
+            auto h_A = make_padded_local(handle, descA_p, n, n, A);
+            auto h_B = make_padded_local(handle, descB_p, b_rows, b_cols, B);
             DeviceBuffer<Complex> d_A(handle, h_A.size());
             DeviceBuffer<Complex> d_B(handle, h_B.size());
             upload(handle, d_A.ptr, h_A);
             upload(handle, d_B.ptr, h_B);
             check_ddla_sync(handle);
-            std::vector<int> ipiv(descA_p.m_loc());
+            std::vector<int> ipiv(ddla_test::m_loc(handle, descA_p));
             int info = -1;
-            ddla::pgetrf(n, n, d_A.ptr, descA_p, ipiv.data(), info);
+            ddla::pgetrf(handle, n, n, d_A.ptr, descA_p, ipiv.data(), info);
             if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
-            ddla::pgetrs(side, 'N', n, nrhs, d_A.ptr, descA_p, ipiv.data(), d_B.ptr, descB_p);
+            ddla::pgetrs(handle, side, 'N', n, nrhs, d_A.ptr, descA_p, ipiv.data(), d_B.ptr, descB_p);
             auto out = download(handle, d_B.ptr, h_B.size());
             check_leading_block(handle, name, descB_ex, descB_p,
                                 exact_out, out, b_rows, b_cols, 5e-9);
@@ -331,29 +335,29 @@ void check_ppotrf_pposv_submatrix(const ddla::DdlaHandle_t& handle, const Shape&
     // --- ppotrf ---
     {
         const std::string name = "ppotrf-sub";
-        ddla::DdlaDesc descA_ex(handle), descA_p(handle);
-        descA_ex.init(n, n, nb, nb, 0, 0);
-        descA_p.init(P, P, nb, nb, 0, 0);
+        int descA_ex[ddla::DDLA_DLEN_], descA_p[ddla::DDLA_DLEN_];
+        DDLA_CHECK(ddlaDescInit(descA_ex, handle, n, n, nb, nb, 0, 0));
+        DDLA_CHECK(ddlaDescInit(descA_p, handle, P, P, nb, nb, 0, 0));
         auto A = [&](int i, int j){ return hpd_value(i, j, n); };
 
         std::vector<Complex> exact_out;
         {
-            auto h_A = make_local<Complex>(descA_ex, A);
+            auto h_A = make_local<Complex>(handle, descA_ex, A);
             DeviceBuffer<Complex> d_A(handle, h_A.size());
             upload(handle, d_A.ptr, h_A);
             check_ddla_sync(handle);
             int info = -1;
-            ddla::ppotrf('L', n, d_A.ptr, 1, 1, descA_ex, info);
+            ddla::ppotrf(handle, 'L', n, d_A.ptr, 1, 1, descA_ex, info);
             if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
             exact_out = download(handle, d_A.ptr, h_A.size());
         }
         {
-            auto h_A = make_padded_local(descA_p, n, n, A);
+            auto h_A = make_padded_local(handle, descA_p, n, n, A);
             DeviceBuffer<Complex> d_A(handle, h_A.size());
             upload(handle, d_A.ptr, h_A);
             check_ddla_sync(handle);
             int info = -1;
-            ddla::ppotrf('L', n, d_A.ptr, 1, 1, descA_p, info);
+            ddla::ppotrf(handle, 'L', n, d_A.ptr, 1, 1, descA_p, info);
             if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
             auto out = download(handle, d_A.ptr, h_A.size());
             check_leading_block(handle, name, descA_ex, descA_p,
@@ -364,32 +368,32 @@ void check_ppotrf_pposv_submatrix(const ddla::DdlaHandle_t& handle, const Shape&
     // --- pposv (covers ppotrf + ppotrs) ---
     {
         const std::string name = "pposv-sub";
-        ddla::DdlaDesc descA_ex(handle), descA_p(handle);
-        ddla::DdlaDesc descB_ex(handle), descB_p(handle);
-        descA_ex.init(n, n, nb, nb, 0, 0);
-        descB_ex.init(n, nrhs, nb, nb, 0, 0);
-        descA_p.init(P, P, nb, nb, 0, 0);
-        descB_p.init(P, P, nb, nb, 0, 0);
+        int descA_ex[ddla::DDLA_DLEN_], descA_p[ddla::DDLA_DLEN_];
+        int descB_ex[ddla::DDLA_DLEN_], descB_p[ddla::DDLA_DLEN_];
+        DDLA_CHECK(ddlaDescInit(descA_ex, handle, n, n, nb, nb, 0, 0));
+        DDLA_CHECK(ddlaDescInit(descB_ex, handle, n, nrhs, nb, nb, 0, 0));
+        DDLA_CHECK(ddlaDescInit(descA_p, handle, P, P, nb, nb, 0, 0));
+        DDLA_CHECK(ddlaDescInit(descB_p, handle, P, P, nb, nb, 0, 0));
         auto A = [&](int i, int j){ return hpd_value(i, j, n); };
-        auto B = build_rhs(descB_ex, n, hpd_value, n);
+        auto B = build_rhs(handle, descB_ex, n, hpd_value, n);
 
         std::vector<Complex> exact_out;
         {
-            auto h_A = make_local<Complex>(descA_ex, A);
+            auto h_A = make_local<Complex>(handle, descA_ex, A);
             DeviceBuffer<Complex> d_A(handle, h_A.size());
             DeviceBuffer<Complex> d_B(handle, B.size());
             upload(handle, d_A.ptr, h_A);
             upload(handle, d_B.ptr, B);
             check_ddla_sync(handle);
             int info = -1;
-            ddla::pposv('L', 'L', 'N', n, nrhs, d_A.ptr, 1, 1, descA_ex,
+            ddla::pposv(handle, 'L', 'L', 'N', n, nrhs, d_A.ptr, 1, 1, descA_ex,
                         d_B.ptr, 1, 1, descB_ex, info);
             if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
             exact_out = download(handle, d_B.ptr, B.size());
         }
         {
-            auto h_A = make_padded_local(descA_p, n, n, A);
-            auto h_B = make_padded_local(descB_p, n, nrhs, [&](int i, int j){
+            auto h_A = make_padded_local(handle, descA_p, n, n, A);
+            auto h_B = make_padded_local(handle, descB_p, n, nrhs, [&](int i, int j){
                 Complex sum(0, 0);
                 for(int l = 0; l < n; ++l)
                     sum += hpd_value(i, l, n) * x_value(l, j);
@@ -401,7 +405,7 @@ void check_ppotrf_pposv_submatrix(const ddla::DdlaHandle_t& handle, const Shape&
             upload(handle, d_B.ptr, h_B);
             check_ddla_sync(handle);
             int info = -1;
-            ddla::pposv('L', 'L', 'N', n, nrhs, d_A.ptr, 1, 1, descA_p,
+            ddla::pposv(handle, 'L', 'L', 'N', n, nrhs, d_A.ptr, 1, 1, descA_p,
                         d_B.ptr, 1, 1, descB_p, info);
             if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
             auto out = download(handle, d_B.ptr, h_B.size());
@@ -424,30 +428,30 @@ void check_ppotrf_br_submatrix(const ddla::DdlaHandle_t& handle, const Shape& ba
     const int P = padded_size(n, nb, nprows, npcols);
 
     const std::string name = "ppotrf_bottom_right-sub";
-    ddla::DdlaDesc descA_ex(handle), descA_p(handle);
-    descA_ex.init(n, n, nb, nb, 0, 0);
-    descA_p.init(P, P, nb, nb, 0, 0);
+    int descA_ex[ddla::DDLA_DLEN_], descA_p[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descA_ex, handle, n, n, nb, nb, 0, 0));
+    DDLA_CHECK(ddlaDescInit(descA_p, handle, P, P, nb, nb, 0, 0));
     // Hermitian positive-definite for uplo='U' bottom-right factorization.
     auto A = [&](int i, int j){ return hpd_value(i, j, n); };
 
     std::vector<Complex> exact_out;
     {
-        auto h_A = make_local<Complex>(descA_ex, A);
+        auto h_A = make_local<Complex>(handle, descA_ex, A);
         DeviceBuffer<Complex> d_A(handle, h_A.size());
         upload(handle, d_A.ptr, h_A);
         check_ddla_sync(handle);
         int info = -1;
-        ddla::ppotrf_bottom_right('U', n, d_A.ptr, descA_ex, info);
+        ddla::ppotrf_bottom_right(handle, 'U', n, d_A.ptr, descA_ex, info);
         if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
         exact_out = download(handle, d_A.ptr, h_A.size());
     }
     {
-        auto h_A = make_padded_local(descA_p, n, n, A);
+        auto h_A = make_padded_local(handle, descA_p, n, n, A);
         DeviceBuffer<Complex> d_A(handle, h_A.size());
         upload(handle, d_A.ptr, h_A);
         check_ddla_sync(handle);
         int info = -1;
-        ddla::ppotrf_bottom_right('U', n, d_A.ptr, descA_p, info);
+        ddla::ppotrf_bottom_right(handle, 'U', n, d_A.ptr, descA_p, info);
         if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
         auto out = download(handle, d_A.ptr, h_A.size());
         check_leading_block(handle, name, descA_ex, descA_p,
@@ -479,33 +483,33 @@ void check_plapiv_submatrix(const ddla::DdlaHandle_t& handle, const Shape& base)
         for(char rowcol : {'R', 'C'}){
             const std::string name = std::string("plapiv-sub(") + direc + "," + rowcol + ")";
             const int seg = (rowcol == 'R') ? m : m; // square matrix, segment = m
-            ddla::DdlaDesc desc_ex(handle), desc_p(handle);
-            desc_ex.init(m, m, nb, nb, 0, 0);
-            desc_p.init(P, P, nb, nb, 0, 0);
+            int desc_ex[ddla::DDLA_DLEN_], desc_p[ddla::DDLA_DLEN_];
+            DDLA_CHECK(ddlaDescInit(desc_ex, handle, m, m, nb, nb, 0, 0));
+            DDLA_CHECK(ddlaDescInit(desc_p, handle, P, P, nb, nb, 0, 0));
 
             std::vector<Complex> exact_out;
             {
-                std::vector<int> ipiv(desc_ex.m_loc(), 0);
-                for(int iloc = 0; iloc < desc_ex.m_loc(); ++iloc)
-                    ipiv[iloc] = g_ipiv[desc_ex.indx_l2g_r(iloc)];
-                auto h_A = make_local<Complex>(desc_ex, value);
+                std::vector<int> ipiv(ddla_test::m_loc(handle, desc_ex), 0);
+                for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc_ex); ++iloc)
+                    ipiv[iloc] = g_ipiv[indx_l2g_r(desc_ex, handle, iloc)];
+                auto h_A = make_local<Complex>(handle, desc_ex, value);
                 DeviceBuffer<Complex> d_A(handle, h_A.size());
                 upload(handle, d_A.ptr, h_A);
                 check_ddla_sync(handle);
-                ddla::plapiv(direc, rowcol, 'C', m, seg, d_A.ptr, desc_ex, ipiv.data(), desc_ex, nullptr);
+                ddla::plapiv(handle, direc, rowcol, 'C', m, seg, d_A.ptr, desc_ex, ipiv.data(), desc_ex, nullptr);
                 exact_out = download(handle, d_A.ptr, h_A.size());
             }
             {
-                std::vector<int> ipiv(desc_p.m_loc(), 0);
-                for(int iloc = 0; iloc < desc_p.m_loc(); ++iloc){
-                    const int k = desc_p.indx_l2g_r(iloc);
+                std::vector<int> ipiv(ddla_test::m_loc(handle, desc_p), 0);
+                for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc_p); ++iloc){
+                    const int k = indx_l2g_r(desc_p, handle, iloc);
                     ipiv[iloc] = (k < m) ? g_ipiv[k] : k + 1;
                 }
-                auto h_A = make_padded_local(desc_p, m, m, value);
+                auto h_A = make_padded_local(handle, desc_p, m, m, value);
                 DeviceBuffer<Complex> d_A(handle, h_A.size());
                 upload(handle, d_A.ptr, h_A);
                 check_ddla_sync(handle);
-                ddla::plapiv(direc, rowcol, 'C', m, seg, d_A.ptr, desc_p, ipiv.data(), desc_p, nullptr);
+                ddla::plapiv(handle, direc, rowcol, 'C', m, seg, d_A.ptr, desc_p, ipiv.data(), desc_p, nullptr);
                 auto out = download(handle, d_A.ptr, h_A.size());
                 check_leading_block(handle, name, desc_ex, desc_p,
                                     exact_out, out, m, m, 1e-12);
@@ -528,8 +532,8 @@ void check_pdam_submatrix(const ddla::DdlaHandle_t& handle, const Shape& base)
     auto value = [](int i, int j){ return Complex(3.0 + 0.01 * i, -0.02 * j); };
     const Complex alpha(0.5, -0.25);
 
-    ddla::DdlaDesc desc_p(handle);
-    desc_p.init(P, P, nb, nb, 0, 0);
+    int desc_p[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(desc_p, handle, P, P, nb, nb, 0, 0));
 
     // Reference: add alpha to the leading n x n diagonal only.
     auto expected = [&](int i, int j){
@@ -538,23 +542,23 @@ void check_pdam_submatrix(const ddla::DdlaHandle_t& handle, const Shape& base)
         return v;
     };
 
-    auto h_A = make_padded_local(desc_p, P, P, value);  // whole buffer is "matrix"
+    auto h_A = make_padded_local(handle, desc_p, P, P, value);  // whole buffer is "matrix"
     DeviceBuffer<Complex> d_A(handle, h_A.size());
     upload(handle, d_A.ptr, h_A);
     check_ddla_sync(handle);
 
-    ddla::pdam(alpha, d_A.ptr, desc_p, n);
+    ddla::pdam(handle, alpha, d_A.ptr, desc_p, n);
     auto out = download(handle, d_A.ptr, h_A.size());
 
     // Leading n x n matches expected; padding (i>=n or j>=n) untouched.
     double err = 0.0;
-    for(int jloc = 0; jloc < desc_p.n_loc(); ++jloc){
-        const int j = desc_p.indx_l2g_c(jloc);
-        for(int iloc = 0; iloc < desc_p.m_loc(); ++iloc){
-            const int i = desc_p.indx_l2g_r(iloc);
+    for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc_p); ++jloc){
+        const int j = indx_l2g_c(desc_p, handle, jloc);
+        for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc_p); ++iloc){
+            const int i = indx_l2g_r(desc_p, handle, iloc);
             const Complex want = (i < P && j < P) ? expected(i, j) : kSentinel;
             err = std::max(err, std::abs(
-                out[iloc + static_cast<size_t>(jloc) * desc_p.lld()] - want));
+                out[iloc + static_cast<size_t>(jloc) * desc_p[DDLA_LLD_]] - want));
         }
     }
     require_close(handle, "pdam-sub", err, 1e-12);

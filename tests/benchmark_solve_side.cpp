@@ -8,6 +8,7 @@
 #include <mpi.h>
 
 #include <ddla/ddla.h>
+#include "test_desc_helpers.h"
 #include "ddla_connector.h"
 #include "ddla_stream_impl.h"
 
@@ -42,18 +43,18 @@ Complex rhs_value(int i, int j, int n)
 }
 
 template <typename Fn>
-void fill_local(int rows, int cols, const DdlaDesc& desc, Complex* d_A,
+void fill_local(int rows, int cols, const int* desc, Complex* d_A,
                 const DdlaHandle_t& handle, Fn value)
 {
-    std::vector<Complex> local(static_cast<size_t>(desc.lld()) * desc.n_loc(),
+    std::vector<Complex> local(static_cast<size_t>(desc[DDLA_LLD_]) * ddla_test::n_loc(handle, desc),
                                Complex(0.0, 0.0));
-    for(int jloc = 0; jloc < desc.n_loc(); ++jloc){
-        const int j = desc.indx_l2g_c(jloc);
+    for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
+        const int j = indx_l2g_c(desc, handle, jloc);
         if(j >= cols) continue;
-        for(int iloc = 0; iloc < desc.m_loc(); ++iloc){
-            const int i = desc.indx_l2g_r(iloc);
+        for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc); ++iloc){
+            const int i = indx_l2g_r(desc, handle, iloc);
             if(i >= rows) continue;
-            local[iloc + jloc * desc.lld()] = value(i, j);
+            local[iloc + jloc * desc[DDLA_LLD_]] = value(i, j);
         }
     }
     RUNTIME_CHECK(runtimeMemcpyAsync(d_A, local.data(), local.size() * sizeof(Complex),
@@ -65,16 +66,16 @@ void fill_local(int rows, int cols, const DdlaDesc& desc, Complex* d_A,
 double benchmark_ppotrs(char side, int n, int nrhs, const DdlaHandle_t& handle)
 {
     const int nb = std::min(128, n);
-    DdlaDesc descA(handle), descB(handle);
-    descA.init(n, n, nb, nb, 0, 0);
+    int descA[DDLA_DLEN_], descB[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descA, handle, n, n, nb, nb, 0, 0));
     if(side == 'L'){
-        descB.init(n, nrhs, nb, nb, 0, 0);
+        DDLA_CHECK(ddlaDescInit(descB, handle, n, nrhs, nb, nb, 0, 0));
     }else{
-        descB.init(nrhs, n, nb, nb, 0, 0);
+        DDLA_CHECK(ddlaDescInit(descB, handle, nrhs, n, nb, nb, 0, 0));
     }
 
-    const size_t a_nelem = static_cast<size_t>(descA.lld()) * descA.n_loc();
-    const size_t b_nelem = static_cast<size_t>(descB.lld()) * descB.n_loc();
+    const size_t a_nelem = static_cast<size_t>(descA[DDLA_LLD_]) * ddla_test::n_loc(handle, descA);
+    const size_t b_nelem = static_cast<size_t>(descB[DDLA_LLD_]) * ddla_test::n_loc(handle, descB);
     Complex* d_A = nullptr;
     Complex* d_B = nullptr;
     RUNTIME_CHECK(runtimeMallocAsync(reinterpret_cast<void**>(&d_A),
@@ -89,12 +90,12 @@ double benchmark_ppotrs(char side, int n, int nrhs, const DdlaHandle_t& handle)
     fill_local(b_rows, b_cols, descB, d_B, handle, [&](int i, int j){ return rhs_value(i, j, n); });
 
     int info = -1;
-    ppotrf('L', n, d_A, 1, 1, descA, info);
+    ppotrf(handle, 'L', n, d_A, 1, 1, descA, info);
     RUNTIME_CHECK(runtimeStreamSynchronize(handle->stream));
 
     MPI_Barrier(handle->comm);
     const double start = MPI_Wtime();
-    ppotrs(side, 'L', 'N', n, nrhs, d_A, descA, d_B, descB);
+    ppotrs(handle, side, 'L', 'N', n, nrhs, d_A, descA, d_B, descB);
     RUNTIME_CHECK(runtimeStreamSynchronize(handle->stream));
     MPI_Barrier(handle->comm);
     const double elapsed = MPI_Wtime() - start;
@@ -110,7 +111,7 @@ double benchmark_ppotrs(char side, int n, int nrhs, const DdlaHandle_t& handle)
         std::cout << "RESULT n=" << n
                   << " nrhs=" << nrhs
                   << " type=complex<double>"
-                  << " op=ppotrs(" << side << ",L,N)"
+                  << " op=ppotrs(handle, " << side << ",L,N)"
                   << " grid=2x2"
                   << " ranks=4"
                   << " nb=" << nb
@@ -125,16 +126,16 @@ double benchmark_ppotrs(char side, int n, int nrhs, const DdlaHandle_t& handle)
 double benchmark_pgetrs(char side, int n, int nrhs, const DdlaHandle_t& handle)
 {
     const int nb = std::min(128, n);
-    DdlaDesc descA(handle), descB(handle);
-    descA.init(n, n, nb, nb, 0, 0);
+    int descA[DDLA_DLEN_], descB[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descA, handle, n, n, nb, nb, 0, 0));
     if(side == 'L'){
-        descB.init(n, nrhs, nb, nb, 0, 0);
+        DDLA_CHECK(ddlaDescInit(descB, handle, n, nrhs, nb, nb, 0, 0));
     }else{
-        descB.init(nrhs, n, nb, nb, 0, 0);
+        DDLA_CHECK(ddlaDescInit(descB, handle, nrhs, n, nb, nb, 0, 0));
     }
 
-    const size_t a_nelem = static_cast<size_t>(descA.lld()) * descA.n_loc();
-    const size_t b_nelem = static_cast<size_t>(descB.lld()) * descB.n_loc();
+    const size_t a_nelem = static_cast<size_t>(descA[DDLA_LLD_]) * ddla_test::n_loc(handle, descA);
+    const size_t b_nelem = static_cast<size_t>(descB[DDLA_LLD_]) * ddla_test::n_loc(handle, descB);
     Complex* d_A = nullptr;
     Complex* d_B = nullptr;
     RUNTIME_CHECK(runtimeMallocAsync(reinterpret_cast<void**>(&d_A),
@@ -148,14 +149,14 @@ double benchmark_pgetrs(char side, int n, int nrhs, const DdlaHandle_t& handle)
     const int b_cols = (side == 'L') ? nrhs : n;
     fill_local(b_rows, b_cols, descB, d_B, handle, [&](int i, int j){ return rhs_value(i, j, n); });
 
-    std::vector<int> ipiv(descA.m_loc());
+    std::vector<int> ipiv(ddla_test::m_loc(handle, descA));
     int info = -1;
-    pgetrf(n, n, d_A, descA, ipiv.data(), info);
+    pgetrf(handle, n, n, d_A, descA, ipiv.data(), info);
     RUNTIME_CHECK(runtimeStreamSynchronize(handle->stream));
 
     MPI_Barrier(handle->comm);
     const double start = MPI_Wtime();
-    pgetrs(side, 'N', n, nrhs, d_A, descA, ipiv.data(), d_B, descB);
+    pgetrs(handle, side, 'N', n, nrhs, d_A, descA, ipiv.data(), d_B, descB);
     RUNTIME_CHECK(runtimeStreamSynchronize(handle->stream));
     MPI_Barrier(handle->comm);
     const double elapsed = MPI_Wtime() - start;
@@ -171,7 +172,7 @@ double benchmark_pgetrs(char side, int n, int nrhs, const DdlaHandle_t& handle)
         std::cout << "RESULT n=" << n
                   << " nrhs=" << nrhs
                   << " type=complex<double>"
-                  << " op=pgetrs(" << side << ",N)"
+                  << " op=pgetrs(handle, " << side << ",N)"
                   << " grid=2x2"
                   << " ranks=4"
                   << " nb=" << nb
@@ -213,7 +214,7 @@ int main(int argc, char** argv)
     if(handle->myid == 0){
         std::cout << "=== solve benchmark: complex<double>, 4 MPI ranks, 2x2 grid, nrhs=n ==="
                   << std::endl;
-        std::cout << "=== side='L' vs side='R' for ppotrs and pgetrs (trans='N'), solve-only timing ==="
+        std::cout << "=== side='L' vs side='R' for ppotrs and pgetrs(handle, trans='N'), solve-only timing ==="
                   << std::endl;
     }
 

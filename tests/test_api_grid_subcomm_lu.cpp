@@ -12,10 +12,10 @@ void run_factorization_case(const ddla::DdlaHandle_t& handle,
 {
     const int n = 6;
     const int nb = 2;
-    ddla::DdlaDesc descA(handle);
-    descA.init(n, n, nb, nb, 0, 0);
+    int descA[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descA, handle, n, n, nb, nb, 0, 0));
 
-    auto h_A = make_local<Complex>(descA, [=](int i, int j){
+    auto h_A = make_local<Complex>(handle, descA, [=](int i, int j){
         return dominant_value(i, j, n);
     });
     DeviceBuffer<Complex> d_A(handle, h_A.size());
@@ -77,21 +77,21 @@ int main(int argc, char** argv)
         ddla::ddlaSet(handle, role_comm, 1, active_size);
 
         run_factorization_case(handle, "subcomm pgetrf",
-            [](Complex* d_A, const ddla::DdlaDesc& descA, int& info){
-                std::vector<int> ipiv(std::max(1, descA.m_loc()));
-                ddla::pgetrf(descA.m(), descA.n(), d_A, descA, ipiv.data(), info);
+            [&](Complex* d_A, const int* descA, int& info){
+                std::vector<int> ipiv(std::max(1, ddla_test::m_loc(handle, descA)));
+                ddla::pgetrf(handle, descA[DDLA_M_], descA[DDLA_N_], d_A, descA, ipiv.data(), info);
             });
 
         run_factorization_case(handle, "subcomm pgetrf_bpiv",
-            [&](Complex* d_A, const ddla::DdlaDesc& descA, int& info){
-                DeviceBuffer<int> d_ipiv(handle, std::max(1, descA.m_loc()));
-                ddla::pgetrf_bpiv(descA.m(), descA.n(), d_A, descA,
+            [&](Complex* d_A, const int* descA, int& info){
+                DeviceBuffer<int> d_ipiv(handle, std::max(1, ddla_test::m_loc(handle, descA)));
+                ddla::pgetrf_bpiv(handle, descA[DDLA_M_], descA[DDLA_N_], d_A, descA,
                                   d_ipiv.ptr, info);
             });
 
         run_factorization_case(handle, "subcomm pgetrf_nopiv",
-            [](Complex* d_A, const ddla::DdlaDesc& descA, int& info){
-                ddla::pgetrf_nopiv(descA.m(), descA.n(), d_A, descA, info);
+            [&](Complex* d_A, const int* descA, int& info){
+                ddla::pgetrf_nopiv(handle, descA[DDLA_M_], descA[DDLA_N_], d_A, descA, info);
             });
 
         check_ddla_sync(handle);

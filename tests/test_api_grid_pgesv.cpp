@@ -7,20 +7,20 @@ void check_pgesv(const ddla::DdlaHandle_t& handle, const Shape& base)
     const int nb = base.nb;
     const int n = square_size(handle, base);
     const int nrhs = nrhs_size(base);
-    ddla::DdlaDesc descA(handle);
-    descA.init(n, n, nb, nb, 0, 0);
+    int descA[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descA, handle, n, n, nb, nb, 0, 0));
 
-    auto h_A = make_local<Complex>(descA, [=](int i, int j){ return dominant_value(i, j, n); });
+    auto h_A = make_local<Complex>(handle, descA, [=](int i, int j){ return dominant_value(i, j, n); });
 
     auto run_case = [&](char side, char trans){
-        const std::string name = std::string("pgesv(") + side + "," + trans + ")";
+        const std::string name = std::string("pgesv(handle, ") + side + "," + trans + ")";
         // side='L': B is n x nrhs, solve op(A)*X = B;
         // side='R': B is nrhs x n, solve X*op(A) = B.
         const int b_rows = (side == 'L') ? n : nrhs;
         const int b_cols = (side == 'L') ? nrhs : n;
-        ddla::DdlaDesc descB(handle);
-        descB.init(b_rows, b_cols, nb, nb, 0, 0);
-        auto h_B = build_rhs_side(descB, n, side, trans, dominant_value, n);
+        int descB[ddla::DDLA_DLEN_];
+        DDLA_CHECK(ddlaDescInit(descB, handle, b_rows, b_cols, nb, nb, 0, 0));
+        auto h_B = build_rhs_side(handle, descB, n, side, trans, dominant_value, n);
 
         DeviceBuffer<Complex> d_A(handle, h_A.size());
         DeviceBuffer<Complex> d_B(handle, h_B.size());
@@ -28,7 +28,7 @@ void check_pgesv(const ddla::DdlaHandle_t& handle, const Shape& base)
         upload(handle, d_B.ptr, h_B);
         check_ddla_sync(handle);
 
-        ddla::pgesv(side, trans, n, nrhs, d_A.ptr, descA, d_B.ptr, descB);
+        ddla::pgesv(handle, side, trans, n, nrhs, d_A.ptr, descA, d_B.ptr, descB);
         check_solution(handle, descB, d_B.ptr, h_B.size(), name, 5e-9);
     };
 

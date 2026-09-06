@@ -41,12 +41,14 @@ inline void DDLA_CHECK(ddlaStatus_t status,
  * @param uplo   'U' or 'L' -- which triangle of A is stored.
  * @param trans  'N' (no transpose), 'T' (transpose), 'C' (conjugate-transpose).
  * @param diag   'U' (unit diagonal) or 'N' (non-unit diagonal).
+ * @param handle Handle owning the process grid and stream; every descriptor
+ *               is interpreted against it.
  * @param m      Number of rows of B.
  * @param n      Number of columns of B.
  * @param d_A    Device pointer to distributed triangular matrix A.
- * @param array_descA  DdlaDesc for A (must be square, mb == nb).
+ * @param descA  ScaLAPACK int[9] descriptor for A (must be square, mb == nb).
  * @param d_B    Device pointer to RHS / solution B.
- * @param array_descB  DdlaDesc for B.
+ * @param descB  ScaLAPACK int[9] descriptor for B.
  *
  * The descriptors may describe matrices larger than the logical sub-matrix
  * (leading block anchored at global (0,0)); only the leading m x n block of B
@@ -54,10 +56,11 @@ inline void DDLA_CHECK(ddlaStatus_t status,
  */
 template<typename T>
 void ptrtrs(
+    const DdlaHandle_t& handle,
     const char& side, const char& uplo, const char& trans, const char& diag,
     const int& m, const int& n,
-    T* d_A, const DdlaDesc& array_descA,
-    T* d_B, const DdlaDesc& array_descB
+    T* d_A, const int* descA,
+    T* d_B, const int* descB
 );
 
 /**
@@ -77,10 +80,12 @@ void ptrtrs(
  * @param m       Number of pivots (rows/columns of A to pivot).
  * @param n       For rowcol='R': number of columns in A; for rowcol='C':
  *                number of rows in A (the fixed segment length).
+ * @param handle Handle owning the process grid and stream.
  * @param d_A     Device pointer to distributed matrix A.
- * @param array_descA   DdlaDesc for A.
+ * @param descA   ScaLAPACK int[9] descriptor for A.
  * @param ipiv    Host array of pivot indices (1-based, length >= m).
- * @param array_descIP  DdlaDesc for pivot vector (same row distribution as A).
+ * @param descIP  ScaLAPACK int[9] descriptor for the pivot vector
+ *                (same row distribution as A).
  * @param iwork   Workspace (unused, pass nullptr).
  *
  * The descriptor may describe a matrix larger than the logical sub-matrix
@@ -90,10 +95,11 @@ void ptrtrs(
  */
 template <typename T>
 void plapiv(
+    const DdlaHandle_t& handle,
     const char& direc, const char& rowcol, const char& pivroc,
     const int& m, const int& n,
-    T* d_A,const DdlaDesc& array_descA,
-    const int* ipiv, const DdlaDesc& array_descIP,
+    T* d_A, const int* descA,
+    const int* ipiv, const int* descIP,
     int* iwork
 );
 
@@ -106,23 +112,25 @@ void plapiv(
  * different processes.
  *
  * @tparam T        Scalar type.
+ * @param handle Handle owning the process grid and stream.
  * @param N     Length of the segment to swap.
  * @param A     Device pointer to distributed matrix A.
  * @param ia    Starting global row index in A (1-based).
  * @param ja    Starting global column index in A (1-based).
- * @param array_descA  DdlaDesc for A.
+ * @param descA ScaLAPACK int[9] descriptor for A.
  * @param inca  1 (swap columns) or m_A (swap rows).
  * @param B     Device pointer to distributed matrix B.
  * @param ib    Starting global row index in B (1-based).
  * @param jb    Starting global column index in B (1-based).
- * @param array_descB  DdlaDesc for B.
+ * @param descB ScaLAPACK int[9] descriptor for B.
  * @param incb  Increment for B (must match inca when inca == 1).
  */
 template <typename T>
 void pswap(
-    const int& N, 
-    T* A, int ia, int ja, const DdlaDesc& array_descA, const int& inca,
-    T* B, int ib, int jb, const DdlaDesc& array_descB, const int& incb
+    const DdlaHandle_t& handle,
+    const int& N,
+    T* A, int ia, int ja, const int* descA, const int& inca,
+    T* B, int ib, int jb, const int* descB, const int& incb
 );
 
 /**
@@ -139,14 +147,16 @@ void pswap(
  * @param nb_real  Actual width of this panel (<= nb).
  * @param d_A      Device pointer to matrix A (input/output).
  * @param n_s      Global starting column index of the panel.
- * @param array_descA  DdlaDesc for A.
+ * @param handle   Handle owning the process grid and stream.
+ * @param descA    ScaLAPACK int[9] descriptor for A.
  * @param ipiv     Host pivot array (output, 1-based).
  * @param info     0 on success, >0 if singular.
  */
 template <typename T>
 void pgetf2(
+    const DdlaHandle_t& handle,
     const int& m, const int& n, const int& nb_real,
-    T* d_A, const int& n_s, const DdlaDesc& array_descA,
+    T* d_A, const int& n_s, const int* descA,
     int* ipiv, // host
     int& info  // host
 );
@@ -163,14 +173,16 @@ void pgetf2(
  * @param nb_real  Actual panel width.
  * @param d_A      Device pointer to matrix A.
  * @param n_start  Global starting column of the panel.
- * @param array_descA  DdlaDesc for A.
+ * @param handle   Handle owning the process grid and stream.
+ * @param descA    ScaLAPACK int[9] descriptor for A.
  * @param ipiv     Host pivot array (output).
  * @param info     0 on success.
  */
 template <typename T>
 void pgetf2_panel(
+    const DdlaHandle_t& handle,
     const int& m, const int& n, const int& nb_real,
-    T* d_A, const int& n_start, const DdlaDesc& array_descA,
+    T* d_A, const int& n_start, const int* descA,
     int* ipiv, // host
     int& info  // host
 );
@@ -194,14 +206,16 @@ void pgetf2_panel(
  * @param m        Number of rows of A (<= desc.m()).
  * @param n        Number of columns of A (<= desc.n()).
  * @param d_A      Device pointer to matrix A (input/output -- L+U factors).
- * @param array_descA  DdlaDesc for A (mb == nb required).
- * @param ipiv     Host pivot array (output, 1-based, length >= m_loc).
+ * @param handle   Handle owning the process grid and stream.
+ * @param descA    ScaLAPACK int[9] descriptor for A (mb == nb required).
+ * @param ipiv     Host pivot array (output, 1-based, length >= local rows).
  * @param info     0 on success, >0 if singular.
  */
 template <typename T>
 void pgetrf(
+    const DdlaHandle_t& handle,
     const int& m, const int& n,
-    T* d_A, const DdlaDesc& array_descA,
+    T* d_A, const int* descA,
     int* ipiv, // host
     int& info  // host
 );
@@ -224,13 +238,14 @@ void pgetrf(
  * @param m        Number of rows of A.
  * @param n        Number of columns of A.
  * @param d_A      Device pointer to matrix A (input/output -- L+U factors).
- * @param array_descA  DdlaDesc for A (mb == nb required).
+ * @param handle   Handle owning the process grid and stream.
+ * @param descA    ScaLAPACK int[9] descriptor for A (mb == nb required).
  * @param d_ipiv   device pivot array (output, 1-based block-local offsets,
- *                 length >= m_loc).
+ *                 length >= local rows).
  * @param info     host info 0 on success, >0 if singular. 
  */
 template <typename T>
-void pgetrf_bpiv(const int& m, const int& n, T* d_A, const DdlaDesc& array_descA, int* d_ipiv, int& info);
+void pgetrf_bpiv(const DdlaHandle_t& handle, const int& m, const int& n, T* d_A, const int* descA, int* d_ipiv, int& info);
 
 /**
  * @brief Distributed LU factorization without pivoting.
@@ -248,11 +263,12 @@ void pgetrf_bpiv(const int& m, const int& n, T* d_A, const DdlaDesc& array_descA
  * @param m        Number of rows of A.
  * @param n        Number of columns of A.
  * @param d_A      Device pointer to matrix A (input/output -- L+U factors).
- * @param array_descA  DdlaDesc for A (mb == nb required).
+ * @param handle   Handle owning the process grid and stream.
+ * @param descA    ScaLAPACK int[9] descriptor for A (mb == nb required).
  * @param info     host info: 0 on success, >0 if U(k,k) is exactly zero.
  */
 template <typename T>
-void pgetrf_nopiv(const int& m, const int& n, T* d_A, const DdlaDesc& array_descA, int& info);
+void pgetrf_nopiv(const DdlaHandle_t& handle, const int& m, const int& n, T* d_A, const int* descA, int& info);
 
 /**
  * @brief Local LU factorization without pivoting.
@@ -294,17 +310,19 @@ void getrf_nopiv(int m, int n, T* d_A, int lda, int* d_info, const DdlaHandle_t&
  * @param n       Order of matrix A.
  * @param nrhs    Number of right-hand sides.
  * @param d_A     Device pointer to LU factors (from pgetrf).
- * @param array_descA  DdlaDesc for A.
+ * @param handle  Handle owning the process grid and stream.
+ * @param descA   ScaLAPACK int[9] descriptor for A.
  * @param ipiv    Host pivot array from pgetrf.
  * @param d_B     Device pointer to RHS / solution B (input/output).
- * @param array_descB  DdlaDesc for B.
+ * @param descB   ScaLAPACK int[9] descriptor for B.
  */
 template <typename T>
 void pgetrs(
+    const DdlaHandle_t& handle,
     const char& side, const char& trans, const int& n, const int& nrhs,
-    T* d_A, const DdlaDesc& array_descA,
+    T* d_A, const int* descA,
     const int* ipiv, // host
-    T* d_B, const DdlaDesc& array_descB
+    T* d_B, const int* descB
 );
 
 /**
@@ -322,15 +340,17 @@ void pgetrs(
  * @param n       Order of matrix A.
  * @param nrhs    Number of right-hand sides.
  * @param d_A     Device pointer to LU factors (from pgetrf_nopiv).
- * @param array_descA  DdlaDesc for A.
+ * @param handle  Handle owning the process grid and stream.
+ * @param descA   ScaLAPACK int[9] descriptor for A.
  * @param d_B     Device pointer to RHS / solution B (input/output).
- * @param array_descB  DdlaDesc for B.
+ * @param descB   ScaLAPACK int[9] descriptor for B.
  */
 template <typename T>
 void pgetrs_nopiv(
+    const DdlaHandle_t& handle,
     const char& side, const char& trans, const int& n, const int& nrhs,
-    T* d_A, const DdlaDesc& array_descA,
-    T* d_B, const DdlaDesc& array_descB
+    T* d_A, const int* descA,
+    T* d_B, const int* descB
 );
 
 /**
@@ -347,16 +367,18 @@ void pgetrs_nopiv(
  * @param n       Order of square matrix A.
  * @param nrhs    Number of right-hand sides.
  * @param d_A     Device pointer to A (input: coefficient; output: LU factors).
- * @param array_descA  DdlaDesc for A.
+ * @param handle  Handle owning the process grid and stream.
+ * @param descA   ScaLAPACK int[9] descriptor for A.
  * @param d_B     Device pointer to RHS / solution B (input/output).
- * @param array_descB  DdlaDesc for B.
+ * @param descB   ScaLAPACK int[9] descriptor for B.
  * @throws std::runtime_error if LU factorization fails (info != 0).
  */
 template <typename T>
 void pgesv(
+    const DdlaHandle_t& handle,
     const char& side, const char& trans, const int& n, const int& nrhs,
-    T* d_A, const DdlaDesc& array_descA,
-    T* d_B, const DdlaDesc& array_descB
+    T* d_A, const int* descA,
+    T* d_B, const int* descB
 );
 
 /**
@@ -372,16 +394,18 @@ void pgesv(
  * @param n       Order of square matrix A.
  * @param nrhs    Number of right-hand sides.
  * @param d_A     Device pointer to A (input: coefficient; output: LU factors).
- * @param array_descA  DdlaDesc for A.
+ * @param handle  Handle owning the process grid and stream.
+ * @param descA   ScaLAPACK int[9] descriptor for A.
  * @param d_B     Device pointer to RHS / solution B (input/output).
- * @param array_descB  DdlaDesc for B.
+ * @param descB   ScaLAPACK int[9] descriptor for B.
  * @throws std::runtime_error if LU factorization fails (info != 0).
  */
 template <typename T>
 void pgesv_nopiv(
+    const DdlaHandle_t& handle,
     const char& side, const char& trans, const int& n, const int& nrhs,
-    T* d_A, const DdlaDesc& array_descA,
-    T* d_B, const DdlaDesc& array_descB
+    T* d_A, const int* descA,
+    T* d_B, const int* descB
 );
 
 /**
@@ -405,17 +429,19 @@ void pgesv_nopiv(
  * @param n       Order of matrix A.
  * @param nrhs    Number of right-hand sides.
  * @param d_A     Device pointer to LU factors (from pgetrf_bpiv).
- * @param array_descA  DdlaDesc for A.
+ * @param handle  Handle owning the process grid and stream.
+ * @param descA   ScaLAPACK int[9] descriptor for A.
  * @param d_ipiv  Device pivot array from pgetrf_bpiv (block-local, 1-based).
  * @param d_B     Device pointer to RHS / solution B (input/output).
- * @param array_descB  DdlaDesc for B.
+ * @param descB   ScaLAPACK int[9] descriptor for B.
  */
 template <typename T>
 void pgetrs_bpiv(
+    const DdlaHandle_t& handle,
     const char& side, const char& trans, const int& n, const int& nrhs,
-    T* d_A, const DdlaDesc& array_descA,
+    T* d_A, const int* descA,
     int* d_ipiv, // device
-    T* d_B, const DdlaDesc& array_descB
+    T* d_B, const int* descB
 );
 
 /**
@@ -433,16 +459,18 @@ void pgetrs_bpiv(
  * @param n       Order of square matrix A.
  * @param nrhs    Number of right-hand sides.
  * @param d_A     Device pointer to A (input: coefficient; output: LU factors).
- * @param array_descA  DdlaDesc for A.
+ * @param handle  Handle owning the process grid and stream.
+ * @param descA   ScaLAPACK int[9] descriptor for A.
  * @param d_B     Device pointer to RHS / solution B (input/output).
- * @param array_descB  DdlaDesc for B.
+ * @param descB   ScaLAPACK int[9] descriptor for B.
  * @throws std::runtime_error if LU factorization fails (info != 0).
  */
 template <typename T>
 void pgesv_bpiv(
+    const DdlaHandle_t& handle,
     const char& side, const char& trans, const int& n, const int& nrhs,
-    T* d_A, const DdlaDesc& array_descA,
-    T* d_B, const DdlaDesc& array_descB
+    T* d_A, const int* descA,
+    T* d_B, const int* descB
 );
 
 #endif // DDLA_HAS_GPU
@@ -463,13 +491,14 @@ void pgesv_bpiv(
  * ScaLAPACK-compatible (e.g. for A^T, mb(C) == nb(A) and irsrc(C) == icsrc(A)).
  * The process grid may be rectangular.
  *
- * All three descriptors (@p array_descA, @p array_descB, @p array_descC)
- * must share the same DdlaHandle_t (same backend and process grid).
+ * All three descriptors (@p descA, @p descB, @p descC) are interpreted
+ * against the same @p handle (same backend and process grid).
  * CPU handles require host pointers; GPU handles require device pointers
  * allocated in the selected-accelerator memory space.  No implicit
  * migration between address spaces is performed.
  *
  * @tparam T    Scalar type.
+ * @param handle   Handle owning the process grid, stream and backend.
  * @param transa   Operation applied to A ('N','T','C').
  * @param transb   Operation applied to B ('N','T','C').
  * @param m        Rows of op(A) and C.
@@ -477,22 +506,23 @@ void pgesv_bpiv(
  * @param k        Cols of op(A) / rows of op(B).
  * @param alpha    Scalar multiplier for A*B.
  * @param d_A      Pointer to distributed A (host for CPU, device for GPU).
- * @param array_descA  DdlaDesc for A.
+ * @param descA    ScaLAPACK int[9] descriptor for A.
  * @param d_B      Pointer to distributed B (host for CPU, device for GPU).
- * @param array_descB  DdlaDesc for B.
+ * @param descB    ScaLAPACK int[9] descriptor for B.
  * @param beta     Scalar multiplier for C.
  * @param d_C      Pointer to distributed C (input/output; host for CPU, device for GPU).
- * @param array_descC  DdlaDesc for C.
+ * @param descC    ScaLAPACK int[9] descriptor for C.
  */
 template <DdlaBackend Backend = default_backend_v, typename T>
 void pgemm(
+    const DdlaHandle_t& handle,
     const char& transa, const char& transb,
     const int& m, const int& n, const int& k,
     const T& alpha,
-    const T* d_A, const DdlaDesc& array_descA,
-    const T* d_B, const DdlaDesc& array_descB,
+    const T* d_A, const int* descA,
+    const T* d_B, const int* descB,
     const T& beta,
-    T* d_C, const DdlaDesc& array_descC
+    T* d_C, const int* descC
 );
 
 #if DDLA_HAS_GPU
@@ -506,28 +536,30 @@ void pgemm(
  * and the other is not).
  *
  * @tparam T    Scalar type.
+ * @param handle   Handle owning the process grid and stream.
  * @param transa   Operation for A ('N','T','C').
  * @param transb   Operation for B ('N','T','C').
  * @param m        Rows of C.
  * @param n        Cols of C.
  * @param alpha    Scalar multiplier for op(A).
  * @param d_A      Device pointer to distributed A.
- * @param array_descA  DdlaDesc for A.
+ * @param descA    ScaLAPACK int[9] descriptor for A.
  * @param beta     Scalar multiplier for op(B).
  * @param d_B      Device pointer to distributed B.
- * @param array_descB  DdlaDesc for B.
+ * @param descB    ScaLAPACK int[9] descriptor for B.
  * @param d_C      Device pointer to result C (output).
- * @param array_descC  DdlaDesc for C.
+ * @param descC    ScaLAPACK int[9] descriptor for C.
  */
 template <typename T>
 void pgeadd(
+    const DdlaHandle_t& handle,
     const char& transa, const char& transb,
     const int& m, const int& n,
     const T& alpha,
-    const T* d_A, const DdlaDesc& array_descA,
+    const T* d_A, const int* descA,
     const T& beta,
-    const T* d_B, const DdlaDesc& array_descB,
-    T* d_C, const DdlaDesc& array_descC
+    const T* d_B, const int* descB,
+    T* d_C, const int* descC
 );
 
 /**
@@ -547,15 +579,16 @@ void pgeadd(
  *
  * @tparam T1  Scalar type of the value to add.
  * @tparam T2  Element type of the distributed matrix A.
+ * @param handle Handle owning the process grid and stream.
  * @param alpha  Scalar to add to each diagonal element.
  * @param d_A    Device pointer to distributed matrix A (input/output).
- * @param array_descA  DdlaDesc for A (may describe a matrix larger than the
- *                     leading n x n sub-matrix touched).
- * @param n      Logical order of the leading sub-matrix (<= desc.m());
+ * @param descA  ScaLAPACK int[9] descriptor for A (may describe a matrix
+ *               larger than the leading n x n sub-matrix touched).
+ * @param n      Logical order of the leading sub-matrix (<= desc[DDLA_M_]);
  *               n < 0 means the whole matrix.  Default -1.
  */
 template <typename T1, typename T2>
-void pdam(const T1& alpha, T2* d_A, const DdlaDesc& array_descA, const int& n = -1);
+void pdam(const DdlaHandle_t& handle, const T1& alpha, T2* d_A, const int* descA, const int& n = -1);
 
 /**
  * @brief Distributed Cholesky factorization.
@@ -573,7 +606,8 @@ void pdam(const T1& alpha, T2* d_A, const DdlaDesc& array_descA, const int& n = 
  * @param ia       Reserved; must be 1 (1-based).  The factor operates on the
  *                 leading n x n sub-matrix anchored at global (0,0).
  * @param ja       Reserved; must be 1 (1-based).
- * @param array_descA  DdlaDesc for A (mb == nb required).
+ * @param handle   Handle owning the process grid and stream.
+ * @param descA    ScaLAPACK int[9] descriptor for A (mb == nb required).
  * @param info     0 on success, >0 if not positive-definite.
  * @param is_head  Internal flag for multi-head Cholesky (default false).
  * @param location Internal row/col rearrangement index (default -1).
@@ -586,8 +620,9 @@ void pdam(const T1& alpha, T2* d_A, const DdlaDesc& array_descA, const int& n = 
  */
 template<typename T>
 bool ppotrf(
+    const DdlaHandle_t& handle,
     const char& uplo, const int& n,
-    T* A, const int& ia, const int& ja, const DdlaDesc& array_descA,
+    T* A, const int& ia, const int& ja, const int* descA,
     int& info, // host pointer
     bool is_head = false, int location = -1
 );
@@ -628,7 +663,8 @@ void potrf_bottom_right(
  * @param uplo          'U' for A = U * U^H or 'L' for A = L^H * L.
  * @param n             Order of A (<= desc.m(), desc.n()).
  * @param d_A           Device pointer to the local block-cyclic storage of A.
- * @param array_descA   Descriptor for the distributed matrix A.
+ * @param handle        Handle owning the process grid and stream.
+ * @param descA         ScaLAPACK int[9] descriptor for the distributed matrix A.
  * @param info          0 on success; i > 0 identifies the failed global pivot.
  *
  * The descriptor may describe a matrix larger than the logical n-by-n
@@ -637,8 +673,9 @@ void potrf_bottom_right(
  */
 template <typename T>
 void ppotrf_bottom_right(
+    const DdlaHandle_t& handle,
     const char& uplo, const int& n, T* d_A,
-    const DdlaDesc& array_descA, int& info
+    const int* descA, int& info
 );
 
 /**
@@ -665,19 +702,21 @@ void ppotrf_bottom_right(
  * @param n        Order of A.
  * @param nrhs     Number of right-hand sides.
  * @param d_A      Device pointer to Cholesky factor (from ppotrf).
- * @param array_descA  DdlaDesc for A.
+ * @param handle   Handle owning the process grid and stream.
+ * @param descA    ScaLAPACK int[9] descriptor for A.
  * @param d_B      Device pointer to RHS / solution B (input/output).
- * @param array_descB  DdlaDesc for B.
+ * @param descB    ScaLAPACK int[9] descriptor for B.
  * @param is_nega  Diagonal sign-correction flag (from ppotrf return).
  * @param location Head-correction index forwarded from ppotrf; -1 (or == n)
  *                 means no B permutation.
  */
 template <typename T>
 void ppotrs(
+    const DdlaHandle_t& handle,
     const char& side, const char& uplo, const char& trans,
     const int& n, const int& nrhs,
-    T* d_A, const DdlaDesc& array_descA,
-    T* d_B, const DdlaDesc& array_descB,
+    T* d_A, const int* descA,
+    T* d_B, const int* descB,
     bool is_nega = false, int location = -1
 );
 
@@ -699,21 +738,23 @@ void ppotrs(
  * @param ia       Reserved; must be 1 (1-based).  Solves operate on the
  *                 leading n x n / n x nrhs sub-matrices anchored at (0,0).
  * @param ja       Reserved; must be 1 (1-based).
- * @param array_descA  DdlaDesc for A.
+ * @param handle   Handle owning the process grid and stream.
+ * @param descA    ScaLAPACK int[9] descriptor for A.
  * @param d_B      Device pointer to RHS / solution B (input/output).
  * @param ib       Reserved; must be 1 (1-based).
  * @param jb       Reserved; must be 1 (1-based).
- * @param array_descB  DdlaDesc for B.
+ * @param descB    ScaLAPACK int[9] descriptor for B.
  * @param info     Output: 0 on success, >0 if not positive-definite.
  * @param is_head  Forwarded to ppotrf.
  * @param location Forwarded to ppotrf.
  */
 template <typename T>
 void pposv(
+    const DdlaHandle_t& handle,
     const char& side, const char& uplo, const char& trans,
     const int & n, const int& nrhs,
-    T* d_A, const int& ia, const int& ja, const DdlaDesc& array_descA,
-    T* d_B, const int& ib, const int& jb, const DdlaDesc& array_descB,
+    T* d_A, const int& ia, const int& ja, const int* descA,
+    T* d_B, const int& ib, const int& jb, const int* descB,
     int& info, // host pointer
     bool is_head = false, int location = -1
 );
@@ -783,15 +824,17 @@ void gemmVbatched2s(
     const DdlaHandle_t& handle);
 
 template <typename T>
-void ptran(const T* d_A, const DdlaDesc& descA,
-           T* d_AT, const DdlaDesc& descAT,
+void ptran(const DdlaHandle_t& handle,
+           const T* d_A, const int* descA,
+           T* d_AT, const int* descAT,
            bool conj = false);
 
 template <DdlaBackend Backend = default_backend_v, typename T>
 void transport_block(
+    const DdlaHandle_t& handle,
     const char& sData, const char& trans,
     const int& m, const int& n,
-    const T* d_A, const int& ia, const int& ja, const DdlaDesc& array_descA,
+    const T* d_A, const int& ia, const int& ja, const int* descA,
     T* d_block_A
 );
 
@@ -814,6 +857,7 @@ void iamax(const DdlaHandle_t& handle, int n, const T* x, int incx, int& result)
 template <DdlaBackend Backend = default_backend_v, typename T>
 void geru(const DdlaHandle_t& handle, int m, int n, const T& alpha,
           const T* x, int incx, const T* y, int incy, T* A, int lda);
+
 
 } // namespace ddla
 

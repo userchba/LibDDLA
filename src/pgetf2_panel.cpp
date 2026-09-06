@@ -1,4 +1,5 @@
 #include <ddla/ddla.h>
+#include "ddla_desc.h"
 #include <cassert>
 #include <vector>
 #include "ddla_connector.h"
@@ -13,28 +14,30 @@ namespace ddla{
 template <typename T>
 
 void pgetf2_panel(
-    const int& m, const int& n, const int& nb_real,
-    T* d_A, const int& n_start, const DdlaDesc& array_descA,
+    const DdlaHandle_t& handle, const int& m, const int& n, const int& nb_real,
+    T* d_A, const int& n_start, const int* array_descA,
     int* ipiv, // host
     int& info  // host
 )
 {
-    assert(m <= array_descA.m() && n <= array_descA.n());
-    DdlaHandle_t ddla_handle = array_descA.ddla_handle();
+    check_desc(array_descA, handle);
+    int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
+    ddlaGetGridDims(handle, nprows, npcols);
+    ddlaGetGridCoords(handle, myprow, mypcol);
+
+
+    assert(m <= array_descA[DDLA_M_] && n <= array_descA[DDLA_N_]);
+    DdlaHandle_t ddla_handle = handle;
     detail::require_gpu_backend(ddla_handle, "pgetf2_panel");
 
 
-    int nprows = array_descA.nprows();
-    int npcols = array_descA.npcols();
-    int myprow = array_descA.myprow();
-    int mypcol = array_descA.mypcol();
 
-    int nb = array_descA.mb();
-    assert(array_descA.mb()==array_descA.nb());
-    int lld = array_descA.lld();
+    int nb = array_descA[DDLA_MB_];
+    assert(array_descA[DDLA_MB_]==array_descA[DDLA_NB_]);
+    int lld = array_descA[DDLA_LLD_];
 
-    int m_loc = num_loc(m, array_descA.mb(), myprow, array_descA.irsrc(), nprows);
-    int n_loc = num_loc(n, array_descA.nb(), mypcol, array_descA.icsrc(), npcols);
+    int m_loc = num_loc(m, array_descA[DDLA_MB_], myprow, array_descA[DDLA_RSRC_], nprows);
+    int n_loc = num_loc(n, array_descA[DDLA_NB_], mypcol, array_descA[DDLA_CSRC_], npcols);
 
     const int panel = std::min(32, nb/2>0?nb/2:1);
     int panel_real;
@@ -42,8 +45,8 @@ void pgetf2_panel(
     runtimeStream_t stream=ddla_handle->stream;
     deblasHandle_t blasH=ddla_handle->blasH;
 
-    int mm_row_start = num_loc(n_start, nb, myprow, array_descA.irsrc(), nprows);
-    int mm_col_start = num_loc(n_start, nb, mypcol, array_descA.icsrc(), npcols);
+    int mm_row_start = num_loc(n_start, nb, myprow, array_descA[DDLA_RSRC_], nprows);
+    int mm_col_start = num_loc(n_start, nb, mypcol, array_descA[DDLA_CSRC_], npcols);
     int i_loc,j_loc;
     int owner_row;
 
@@ -52,18 +55,18 @@ void pgetf2_panel(
 
     info = 0;
 
-    int j_s = array_descA.indx_g2l_c(n_start);
+    int j_s = indx_g2l_c(array_descA, handle, n_start);
     
 
     for(int n_s=n_start;n_s<n_start+nb_real;n_s+=panel){
         panel_real = std::min(panel, nb_real+n_start-n_s);
 
-        i_loc = array_descA.indx_g2l_r(n_s);
-        j_loc = array_descA.indx_g2l_c(n_s);
+        i_loc = indx_g2l_r(array_descA, handle, n_s);
+        j_loc = indx_g2l_c(array_descA, handle, n_s);
 
-        owner_row = indxg2p(n_s, nb, array_descA.irsrc(), nprows);
+        owner_row = indxg2p(n_s, nb, array_descA[DDLA_RSRC_], nprows);
         // start pgetf2
-        pgetf2(
+        pgetf2(handle, 
             m, n, panel_real,
             d_A, n_s, array_descA,
             ipiv, info
@@ -113,29 +116,29 @@ void pgetf2_panel(
 }
 
 template void pgetf2_panel<float>(
-    const int& m, const int& n, const int& nb_real,
-    float* d_A, const int& n_start, const DdlaDesc& array_descA,
+    const DdlaHandle_t&, const int& m, const int& n, const int& nb_real,
+    float* d_A, const int& n_start, const int* array_descA,
     int* ipiv, // host
     int& info  // host
 );
 
 template void pgetf2_panel<double>(
-    const int& m, const int& n, const int& nb_real,
-    double* d_A, const int& n_start, const DdlaDesc& array_descA,
+    const DdlaHandle_t&, const int& m, const int& n, const int& nb_real,
+    double* d_A, const int& n_start, const int* array_descA,
     int* ipiv, // host
     int& info  // host
 );
 
 template void pgetf2_panel<std::complex<float>>(
-    const int& m, const int& n, const int& nb_real,
-    std::complex<float>* d_A, const int& n_start, const DdlaDesc& array_descA,
+    const DdlaHandle_t&, const int& m, const int& n, const int& nb_real,
+    std::complex<float>* d_A, const int& n_start, const int* array_descA,
     int* ipiv, // host
     int& info  // host
 );
 
 template void pgetf2_panel<std::complex<double>>(
-    const int& m, const int& n, const int& nb_real,
-    std::complex<double>* d_A, const int& n_start, const DdlaDesc& array_descA,
+    const DdlaHandle_t&, const int& m, const int& n, const int& nb_real,
+    std::complex<double>* d_A, const int& n_start, const int* array_descA,
     int* ipiv, // host
     int& info  // host
 );

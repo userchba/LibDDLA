@@ -42,6 +42,7 @@ void pzgemm_(const char* transa, const char* transb, const int* m, const int* n,
 }
 
 #include <ddla/ddla.h>
+#include "test_desc_helpers.h"
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 
@@ -83,15 +84,15 @@ static std::vector<int> parse_sizes(const std::string& s) {
 /* ------------------------------------------------------------------ */
 /* Helper: allocate and fill local array from global indices           */
 /* ------------------------------------------------------------------ */
-static void fill_local(Z* data, const DdlaDesc& desc,
+static void fill_local(Z* data, const DdlaHandle_t& handle, const int* desc,
                        Z (*elem)(int,int,int))
 {
-    int ncols = desc.n();   // used for elem_val variants if needed
-    for (int jl = 0; jl < desc.n_loc(); ++jl) {
-        int jg = indxl2g(jl, desc.nb(), desc.mypcol(), desc.icsrc(), desc.npcols());
-        for (int il = 0; il < desc.m_loc(); ++il) {
-            int ig = indxl2g(il, desc.mb(), desc.myprow(), desc.irsrc(), desc.nprows());
-            data[il + jl * desc.lld()] = elem(ig, jg, ncols);
+    int ncols = desc[DDLA_N_];   // used for elem_val variants if needed
+    for (int jl = 0; jl < ddla_test::n_loc(handle, desc); ++jl) {
+        int jg = indxl2g(jl, desc[DDLA_NB_], ddla_test::mypcol(handle), desc[DDLA_CSRC_], ddla_test::npcols(handle));
+        for (int il = 0; il < ddla_test::m_loc(handle, desc); ++il) {
+            int ig = indxl2g(il, desc[DDLA_MB_], ddla_test::myprow(handle), desc[DDLA_RSRC_], ddla_test::nprows(handle));
+            data[il + jl * desc[DDLA_LLD_]] = elem(ig, jg, ncols);
         }
     }
 }
@@ -209,14 +210,14 @@ int main(int argc, char** argv)
         const int irsrc = 0, icsrc = 0;  /* zero-based */
 
         /* DDLA descriptors */
-        DdlaDesc descA(handle); descA.init(n, n, nb, nb, irsrc, icsrc);
-        DdlaDesc descB(handle); descB.init(n, n, nb, nb, irsrc, icsrc);
-        DdlaDesc descC(handle); descC.init(n, n, nb, nb, irsrc, icsrc);
+        int descA[DDLA_DLEN_]; DDLA_CHECK(ddlaDescInit(descA, handle, n, n, nb, nb, irsrc, icsrc));
+        int descB[DDLA_DLEN_]; DDLA_CHECK(ddlaDescInit(descB, handle, n, n, nb, nb, irsrc, icsrc));
+        int descC[DDLA_DLEN_]; DDLA_CHECK(ddlaDescInit(descC, handle, n, n, nb, nb, irsrc, icsrc));
 
         /* verify local dimensions */
-        int loc_m_a = descA.m_loc(), loc_n_a = descA.n_loc(), lld_a = descA.lld();
-        int loc_m_b = descB.m_loc(), loc_n_b = descB.n_loc(), lld_b = descB.lld();
-        int loc_m_c = descC.m_loc(), loc_n_c = descC.n_loc(), lld_c = descC.lld();
+        int loc_m_a = ddla_test::m_loc(handle, descA), loc_n_a = ddla_test::n_loc(handle, descA), lld_a = descA[DDLA_LLD_];
+        int loc_m_b = ddla_test::m_loc(handle, descB), loc_n_b = ddla_test::n_loc(handle, descB), lld_b = descB[DDLA_LLD_];
+        int loc_m_c = ddla_test::m_loc(handle, descC), loc_n_c = ddla_test::n_loc(handle, descC), lld_c = descC[DDLA_LLD_];
 
         int expected_m = numroc_(&n, &nb, &blacs_myrow, &irsrc, &blacs_nprow);
         int expected_n = numroc_(&n, &nb, &blacs_mycol, &icsrc, &blacs_npcol);
@@ -286,9 +287,9 @@ int main(int argc, char** argv)
         std::vector<Z> h_C_sca(sz_c);
 
         /* Fill deterministically */
-        fill_local(h_A.data(), descA, elem_val_A);
-        fill_local(h_B.data(), descB, elem_val_B);
-        fill_local(h_C0.data(), descC, elem_val_C0);
+        fill_local(h_A.data(), handle, descA, elem_val_A);
+        fill_local(h_B.data(), handle, descB, elem_val_B);
+        fill_local(h_C0.data(), handle, descC, elem_val_C0);
 
         /* ---- Timing data structures ---- */
         struct Timings {
@@ -303,7 +304,7 @@ int main(int argc, char** argv)
         /* Warmup runs */
         for (int w = 0; w < warmup; ++w) {
             copy_local(h_C_work.data(), h_C0.data(), loc_m_c, loc_n_c, lld_c);
-            pgemm<DdlaBackend::CPU>(
+            pgemm<DdlaBackend::CPU>(handle, 
                 Nchar, Nchar, n, n, n, alpha,
                 h_A.data(), descA,
                 h_B.data(), descB,
@@ -327,7 +328,7 @@ int main(int argc, char** argv)
                 copy_local(h_C_work.data(), h_C0.data(), loc_m_c, loc_n_c, lld_c);
                 MPI_Barrier(MPI_COMM_WORLD);
                 t0 = MPI_Wtime();
-                pgemm<DdlaBackend::CPU>(
+                pgemm<DdlaBackend::CPU>(handle, 
                     Nchar, Nchar, n, n, n, alpha,
                     h_A.data(), descA,
                     h_B.data(), descB,
@@ -370,7 +371,7 @@ int main(int argc, char** argv)
                 copy_local(h_C_work.data(), h_C0.data(), loc_m_c, loc_n_c, lld_c);
                 MPI_Barrier(MPI_COMM_WORLD);
                 t0 = MPI_Wtime();
-                pgemm<DdlaBackend::CPU>(
+                pgemm<DdlaBackend::CPU>(handle, 
                     Nchar, Nchar, n, n, n, alpha,
                     h_A.data(), descA,
                     h_B.data(), descB,
@@ -405,7 +406,7 @@ int main(int argc, char** argv)
         /* ---- Correctness: fresh runs --------------------------------- */
         copy_local(h_C_work.data(), h_C0.data(), loc_m_c, loc_n_c, lld_c);
         /* DDLA */
-        pgemm<DdlaBackend::CPU>(
+        pgemm<DdlaBackend::CPU>(handle, 
             Nchar, Nchar, n, n, n, alpha,
             h_A.data(), descA,
             h_B.data(), descB,
