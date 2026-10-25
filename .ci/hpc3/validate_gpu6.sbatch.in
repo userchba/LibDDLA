@@ -18,7 +18,10 @@ export HOME=@HOME@
 export USER=${SLURM_JOB_USER:?}
 export LOGNAME=$USER
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-export TMPDIR=@BUILD_GPU@/tmp
+# @BUILD_GPU6@ is on the node-local /tmp (see submit.sh); remove it on exit.
+trap 'rm -rf "@BUILD_GPU6@"' EXIT
+trap 'exit 143' TERM
+export TMPDIR=@BUILD_GPU6@/tmp
 mkdir -p "$TMPDIR"
 source @CONTROL@/setup_gpu.sh
 
@@ -28,6 +31,9 @@ command -v cmake mpicxx mpirun nvcc | tee @RESULTS@/gpu6-tools.txt
 
 MPIWRAP=@CONTROL@/gpurank_wrapper.sh
 chmod +x "$MPIWRAP"
+
+stage_gpu_libs @BUILD_GPU6@/gpu-libs &
+stage_libs=$!
 
 # Independent build tree (the two GPU jobs run in parallel).
 cmake -S @SOURCE@ -B @BUILD_GPU6@ \
@@ -42,6 +48,8 @@ cmake -S @SOURCE@ -B @BUILD_GPU6@ \
     -DMPIEXEC_PREFLAGS=--oversubscribe \
     2>&1 | tee @RESULTS@/gpu6-configure.log
 cmake --build @BUILD_GPU6@ --parallel 16 --target test_pgeadd_indexed test_pgemm_branches 2>&1 | tee @RESULTS@/gpu6-build.log
+wait "$stage_libs" || true
+export LD_LIBRARY_PATH=@BUILD_GPU6@/gpu-libs:$LD_LIBRARY_PATH
 
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5
 set +e

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # GPU validation (4-rank suite): configure, build, and run every CTest
 # entry that registers at DDLA_TEST_NP=4 ranks (plus the two 1-rank
-# potrf_bottom_right cases) on 4 V100s — one rank per GPU. Addition and
-# GEMM also run at six ranks in validate_gpu6.sbatch.in.
+# potrf_bottom_right cases) on 4 V100s — each test puts one rank on each
+# GPU, two tests run at a time. Addition and GEMM also run at six ranks in
+# validate_gpu6.sbatch.in.
 #SBATCH --job-name=libddla-hpc3-gpu4
 #SBATCH --partition=@GPU4_PARTITION@
 #SBATCH --nodes=1
@@ -19,6 +20,9 @@ export HOME=@HOME@
 export USER=${SLURM_JOB_USER:?}
 export LOGNAME=$USER
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# @BUILD_GPU@ is on the node-local /tmp (see submit.sh); remove it on exit.
+trap 'rm -rf "@BUILD_GPU@"' EXIT
+trap 'exit 143' TERM
 export TMPDIR=@BUILD_GPU@/tmp
 mkdir -p "$TMPDIR"
 source @CONTROL@/setup_gpu.sh
@@ -32,6 +36,9 @@ nvidia-smi --query-gpu=index,name,memory.total,driver_version --format=csv,nohea
 MPIWRAP=@CONTROL@/gpurank_wrapper.sh
 chmod +x "$MPIWRAP"
 
+stage_gpu_libs @BUILD_GPU@/gpu-libs &
+stage_libs=$!
+
 cmake -S @SOURCE@ -B @BUILD_GPU@ \
     -DDDLA_USE_CUDA=ON \
     -DDDLA_USE_CCL=ON \
@@ -43,11 +50,17 @@ cmake -S @SOURCE@ -B @BUILD_GPU@ \
     -DMPIEXEC_PREFLAGS=--oversubscribe \
     2>&1 | tee @RESULTS@/gpu-configure.log
 cmake --build @BUILD_GPU@ --parallel 16 2>&1 | tee @RESULTS@/gpu-build.log
+wait "$stage_libs" || true
+export LD_LIBRARY_PATH=@BUILD_GPU@/gpu-libs:$LD_LIBRARY_PATH
 
-# Suite registered at four ranks (default DDLA_TEST_NP=4).
+# Suite registered at four ranks (default DDLA_TEST_NP=4). -j8 runs two
+# 4-rank tests at a time (CTest counts each test's ranks through its
+# PROCESSORS property), so every GPU hosts two ranks: 246 s -> 146 s. The
+# largest pair (getrf_nopiv 18.9 GB + pgetrf_nopiv 5.2 GB per GPU) fits the
+# 32 GB V100s (measured 2026-10-24).
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 set +e
-ctest --test-dir @BUILD_GPU@ --output-on-failure -j1 \
+ctest --test-dir @BUILD_GPU@ --output-on-failure -j8 \
     --output-junit @RESULTS@/gpu4-ctest.xml 2>&1 | tee @RESULTS@/gpu4-ctest.log
 rc=${PIPESTATUS[0]}
 set -e

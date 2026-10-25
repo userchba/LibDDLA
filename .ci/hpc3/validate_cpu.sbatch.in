@@ -15,11 +15,18 @@ export HOME=@HOME@
 export USER=${SLURM_JOB_USER:?}
 export LOGNAME=$USER
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# @BUILD_CPU@ is on the node-local /tmp (see submit.sh); remove it on exit.
+trap 'rm -rf "@BUILD_CPU@"' EXIT
+trap 'exit 143' TERM
 export TMPDIR=@BUILD_CPU@/tmp
 mkdir -p "$TMPDIR"
 source @CONTROL@/setup_cpu.sh
 export CUDA_VISIBLE_DEVICES=
 export OMPI_MCA_plm=isolated
+# One OpenMP (and OpenMP-built OpenBLAS) thread per CPU of the rank: unset,
+# each of the 4 ranks starts 8 threads on the 8 allocated CPUs and the suite
+# runs 8x slower (303 s vs 37 s, measured 2026-10-24).
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 echo "job $SLURM_JOB_ID on $(hostname)"
 module -t list 2>&1 | tee @RESULTS@/cpu-modules.txt
