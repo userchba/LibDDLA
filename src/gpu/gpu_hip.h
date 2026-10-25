@@ -234,22 +234,30 @@ constexpr auto gpucclSum = ncclSum;
 #define gpublasZtrsm hipblasZtrsm
 
 // solver
+#define gpusolverCgeqrf hipsolverCgeqrf
+#define gpusolverCgeqrf_bufferSize hipsolverCgeqrf_bufferSize
 #define gpusolverCgetrf hipsolverCgetrf
 #define gpusolverCgetrf_bufferSize hipsolverCgetrf_bufferSize
 #define gpusolverCpotrf hipsolverCpotrf
 #define gpusolverCpotrf_bufferSize hipsolverCpotrf_bufferSize
 #define gpusolverCreate hipsolverCreate
 #define gpusolverDestroy hipsolverDestroy
+#define gpusolverDgeqrf hipsolverDgeqrf
+#define gpusolverDgeqrf_bufferSize hipsolverDgeqrf_bufferSize
 #define gpusolverDgetrf hipsolverDgetrf
 #define gpusolverDgetrf_bufferSize hipsolverDgetrf_bufferSize
 #define gpusolverDpotrf hipsolverDpotrf
 #define gpusolverDpotrf_bufferSize hipsolverDpotrf_bufferSize
 #define gpusolverGetStream hipsolverGetStream
 #define gpusolverSetStream hipsolverSetStream
+#define gpusolverSgeqrf hipsolverSgeqrf
+#define gpusolverSgeqrf_bufferSize hipsolverSgeqrf_bufferSize
 #define gpusolverSgetrf hipsolverSgetrf
 #define gpusolverSgetrf_bufferSize hipsolverSgetrf_bufferSize
 #define gpusolverSpotrf hipsolverSpotrf
 #define gpusolverSpotrf_bufferSize hipsolverSpotrf_bufferSize
+#define gpusolverZgeqrf hipsolverZgeqrf
+#define gpusolverZgeqrf_bufferSize hipsolverZgeqrf_bufferSize
 #define gpusolverZgetrf hipsolverZgetrf
 #define gpusolverZgetrf_bufferSize hipsolverZgetrf_bufferSize
 #define gpusolverZpotrf hipsolverZpotrf

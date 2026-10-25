@@ -16,6 +16,7 @@ runtime. All functions live in the `ddla` namespace.
   selectable per `DdlaHandle_t` at runtime.
 - **The CPU-only backend has a reduced surface.** It currently covers the
   BLAS-1/2/3 wrappers (`gemm`, `scal`, `omatcopy`, `axpy`, `iamax`, `geru`) and
+  the local LAPACK wrappers (`getrf`, `potrf`, `laswp`, `geqrf`, `larft`), `random_generate`, and
   `pgemm`, and the distributed LU (`pgetrf`, `pgetrs`, `pgesv` and their
   `_nopiv` / `_bpiv` variants), Cholesky (`ppotrf`, `ppotrs`, `pposv`, the
   bottom-right variants) and triangular-solve (`ptrtrs`) routines with their
@@ -55,8 +56,9 @@ runtime. All functions live in the `ddla` namespace.
 - **C++17** compiler
 - **MPI** (Open MPI or MPICH)
 - **CPU backend:** a BLAS library (e.g. OpenBLAS) providing the standard
-  Fortran `?gemm`/`?scal`/`?axpy`/`i?amax`/`?ger`/`?geru` symbols and
-  `cblas_?omatcopy`. Point CMake at it with
+  Fortran `?gemm`/`?scal`/`?axpy`/`i?amax`/`?ger`/`?geru`/`?swap` symbols and the LAPACK
+  `?getrf`/`?potrf`/`?laswp`/`?geqrf`/`?geqlf`/`?larft` ones (OpenBLAS and MKL carry LAPACK in the same library; a GPU-only
+  build needs neither). Point CMake at it with
   `-DDDLA_CPU_BLAS_LIBRARY=/path/to/libopenblas.so`, or leave it unset to fall
   back to `find_package(BLAS REQUIRED)`.
 - **CUDA backend:** CUDA Toolkit with cuBLAS, cuSOLVER, cuRAND
@@ -359,6 +361,13 @@ stream for GPU handles) and safely handle zero-byte requests (zero bytes sets
 | `potrf_bottom_right` | Local bottom-right Cholesky (all four scalar types) |
 | `ppotrf_bottom_right` | Distributed bottom-right Cholesky (all four scalar types) |
 
+### QR / QL factorization
+
+| Function | Description |
+|----------|-------------|
+| `pgeqrf(handle, uplo, m, n, ...)` | Distributed Householder QR / QL, selected by `uplo`: `'U'` is `A = Q·R` (ScaLAPACK `PxGEQRF` semantics; R upper triangle, V below the diagonal with implicit unit diagonal), `'L'` is `A = Q·L` (`PxGEQLF` semantics; columns processed right to left, the reflector of column j has its unit entry at row m-n+j, V above it, L lower triangular in the bottom n x n block).  Host `tau` indexed by local column (ScaLAPACK layout); backend-templated, all four scalar types.  Each panel is gathered on one rank of the owner process column and factored there by the single-process `geqrf(uplo)` (LAPACK `?geqrf` / `?geqlf` on the CPU, cuSOLVER / hipSOLVER `geqrf` on the GPU; no communication), and T by the single-process `larft` (LAPACK `?larft` on the CPU, `herk` plus a small kernel on the GPU): a panel costs two point-to-point rounds plus the trailing apply's one Col-scope allreduce, with no per-column collectives and no host synchronization.  `DDLA_QR_PANEL=inplace` selects the other panel variant instead (default `gather`): the columns are factored in place on the distributed matrix, one at a time, with a local `dot` (`nrm2` fallback) plus one Col-scope allreduce for the norm and vendor `scal` / `gemv` / `gerc` for the in-panel update -- nothing is gathered, but every column costs a host round trip, so on the GPU it is about 1.3-4x slower (the same switch applies to the stage-1 panel of `pheevd`); every rank must use the same value  Only the left-side forms exist; the right-side LQ / RQ (`A = L·Q`, `A = R·Q`) are not implemented; the stage-1 band reduction of `pheevd` runs the same QL driver internally on each band panel |
+
+
 **Solve semantics.** For `side='L'` the right-hand side B is `n × nrhs` and
 the system is `op(A)·X = B`; for `side='R'` B is `nrhs × n` and the system is
 `X·op(A) = B`.  The LU-family solves (`pgetrs`, `pgetrs_nopiv`, `pgetrs_bpiv`,
@@ -374,6 +383,8 @@ columns for side='R') when given the same `location` passed to `ppotrf`.
 
 | Function | Description |
 |----------|-------------|
+| `geqrf(handle, uplo, m, n, A, lda, tau)` | Local QR / QL factorization, `uplo` = `'U'` (`A = Q·R`, LAPACK `?geqrf`) or `'L'` (`A = Q·L`, LAPACK `?geqlf`; cuSOLVER / hipSOLVER have no QL, so the GPU runs the vendor `geqrf` on the reversed matrix `J A J`); `tau` lives with the data |
+| `larft(handle, direct, storev, n, k, V, ldv, tau, T, ldt)` | Local triangular factor `T` of a block reflector (LAPACK `?larft`, `storev` = `'C'`): `H = I - V·T·V^H` for `k` reflectors stored as `geqrf` / `geqlf` leave them, `direct` = `'F'` (`T` upper, `H = H(1)…H(k)`) or `'B'` (`T` lower, `H = H(k)…H(1)`); `T` is written whole (zeros in the other triangle).  The GPU needs no vendor routine (cuSOLVER has `Xlarft` only from CUDA 12.4, hipSOLVER none): `herk` forms `V^H V` and one small kernel runs the column recurrence |
 | `gemmVbatched` | Batch of GEMMs with variable dimensions (device-resident dim arrays) |
 | `gemmVbatched2s` | Two-stage variable-batch GEMM with reusable temporary |
 | `random_generate` | Fill device buffer with uniform random values |

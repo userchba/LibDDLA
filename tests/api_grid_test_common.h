@@ -17,7 +17,6 @@
 
 #include <ddla/ddla.h>
 #include "ddla_connector.h"
-#include "ddla_stream.h"
 #include "transport_block.h"
 #include "test_desc_helpers.h"
 
@@ -378,7 +377,8 @@ inline double local_max_error(const ddla::DdlaHandle_t& handle,
         for(int iloc = 0; iloc < m_loc; ++iloc){
             const int i = indx_l2g_r(desc, handle, iloc);
             if(i >= desc[ddla::DDLA_M_]) continue;
-            err = std::max(err, static_cast<double>(std::abs(local[iloc + jloc * desc[ddla::DDLA_LLD_]] - expected(i, j))));
+            const double e = static_cast<double>(std::abs(local[iloc + jloc * desc[ddla::DDLA_LLD_]] - expected(i, j)));
+            if(std::isnan(e) || e > err) err = e;   // std::max would drop a NaN
         }
     }
     return err;
@@ -387,6 +387,10 @@ inline double local_max_error(const ddla::DdlaHandle_t& handle,
 inline void require_close(const ddla::DdlaHandle_t& handle, const std::string& name,
                           double local_err, double tol)
 {
+    // NaN must not slip through MPI_MAX (every comparison against NaN is
+    // false): propagate it as +inf, then let the negated comparison below
+    // fail on a NaN global_err too.
+    if(std::isnan(local_err)) local_err = std::numeric_limits<double>::infinity();
     double global_err = 0.0;
     MPI_Comm comm = ddlaGetCommunicator(handle);
     MPI_Allreduce(&local_err, &global_err, 1, MPI_DOUBLE, MPI_MAX, comm);
@@ -395,13 +399,66 @@ inline void require_close(const ddla::DdlaHandle_t& handle, const std::string& n
         std::cout << "[grid " << grid_name(handle) << "] " << name
                   << " max_err=" << global_err << std::endl;
     }
-    if(global_err > tol){
+    if(!(global_err <= tol)){
         if(rank == 0){
             std::cerr << "FAIL: " << name << " exceeded tolerance " << tol << std::endl;
         }
         MPI_Abort(comm, 1);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Root-only dense check sections.
+//
+// Several grid tests replicate the full leading block on every rank
+// (gather_full's zero-fill + MPI_Allreduce) and then run O(n^3)-class dense
+// host checks -- rebuild Q, form products, residuals -- identically on every
+// rank.  The replicated data makes that work need no communication at all,
+// so run it on rank 0 only and reduce one verdict per section instead of
+// paying the same dense host work on every rank.
+//
+// Do NOT call require_close inside the guarded region: the ranks that
+// skipped the section would never reach its Allreduce.
+// ---------------------------------------------------------------------------
+struct RootSection {
+    const ddla::DdlaHandle_t& handle;
+    bool root;
+    bool ok = true;
+    std::string failed;
+
+    explicit RootSection(const ddla::DdlaHandle_t& h)
+        : handle(h), root(ddlaGetRank(h) == 0) {}
+
+    // Rank-0-only replacement for require_close inside the section: prints
+    // the same one-line evidence and records the verdict.
+    void check(const std::string& name, double err, double tol)
+    {
+        if(!root) return;
+        // Same NaN discipline as require_close: a NaN must fail.
+        if(std::isnan(err)) err = std::numeric_limits<double>::infinity();
+        std::cout << "[grid " << grid_name(handle) << "] " << name
+                  << " max_err=" << err << std::endl;
+        if(!(err <= tol)){
+            ok = false;
+            if(failed.empty()) failed = name;
+        }
+    }
+
+    // Every rank calls this once per section; aborts like require_close.
+    void finish()
+    {
+        MPI_Comm comm = ddlaGetCommunicator(handle);
+        int local_bad = ok ? 0 : 1;
+        int global_bad = 0;
+        MPI_Allreduce(&local_bad, &global_bad, 1, MPI_INT, MPI_MAX, comm);
+        if(global_bad != 0){
+            if(root){
+                std::cerr << "FAIL: " << failed << " exceeded tolerance" << std::endl;
+            }
+            MPI_Abort(comm, 1);
+        }
+    }
+};
 
 inline Complex general_value(int i, int j, int tag)
 {

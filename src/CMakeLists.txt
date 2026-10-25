@@ -39,11 +39,14 @@ if(DDLA_USE_CPU AND NOT DDLA_DUAL_BUILD)
         BLAS/geam.cpp
         BLAS/swap.cpp
         LU/getrf.cpp
+        QR/geqrf.cpp
+        QR/larft.cpp
         Cholesky/potrf.cpp
         LU/laswp.cpp
         BLAS/axpy.cpp
         BLAS/iamax.cpp
         BLAS/geru.cpp
+        BLAS/gerc.cpp
         write_matrix.cpp
         random_generate.cpp
         PBLAS/pgemm.cpp
@@ -76,6 +79,9 @@ if(DDLA_USE_CPU AND NOT DDLA_DUAL_BUILD)
         Cholesky/ppotrs.cpp
         Cholesky/pposv.cpp
         ddla_handle_t.cpp
+        QR/pgeqrf.cpp
+        QR/pgeqr2_panel.cpp
+        QR/qr_larfb.cpp
         ddla_desc.cpp
     )
 else()
@@ -101,11 +107,14 @@ else()
         BLAS/geam.cpp
         BLAS/swap.cpp
         LU/getrf.cpp
+        QR/geqrf.cpp
+        QR/larft.cpp
         Cholesky/potrf.cpp
         LU/laswp.cpp
         BLAS/axpy.cpp
         BLAS/iamax.cpp
         BLAS/geru.cpp
+        BLAS/gerc.cpp
         write_matrix.cpp
         random_generate.cpp
         PBLAS/ptrtrs.cpp
@@ -114,6 +123,7 @@ else()
         LU/lu_panel.cpp
         matrix_transfer_kernels.cpp
         LU/pgetf2_kernels.cpp
+        QR/pgeqrf_kernels.cpp
         LU/pgetrf.cpp
         LU/pgetrf_bpiv.cpp
         LU/pgetrf_nopiv.cpp
@@ -132,6 +142,9 @@ else()
         PBLAS/pgeadd.cpp
         PBLAS/pdam.cpp
         Cholesky/ppotrf.cpp
+        QR/pgeqrf.cpp
+        QR/pgeqr2_panel.cpp
+        QR/qr_larfb.cpp
         Cholesky/potrf_bottom_right.cpp
         Cholesky/potrf_bottom_right_transform.cpp
         Cholesky/ppotrf_bottom_right.cpp
@@ -159,6 +172,7 @@ if(DDLA_USE_CUDA)
         PBLAS/pdam.cpp
         matrix_transfer_kernels.cpp
         LU/pgetf2_kernels.cpp
+        QR/pgeqrf_kernels.cpp
         Cholesky/potrf_bottom_right_transform.cpp
         PBLAS/pgeadd.cpp
         BLAS/trtrm.cpp
@@ -186,6 +200,7 @@ if(DDLA_USE_HIP)
         PBLAS/pdam.cpp
         matrix_transfer_kernels.cpp
         LU/pgetf2_kernels.cpp
+        QR/pgeqrf_kernels.cpp
         Cholesky/potrf_bottom_right_transform.cpp
         PBLAS/pgeadd.cpp
         BLAS/trtrm.cpp
@@ -196,6 +211,21 @@ if(DDLA_USE_HIP)
         PROPERTIES
         LANGUAGE HIP
     )
+endif()
+
+# ---------------------------------------------------------------------------
+# QR panel kernels: disable FMA contraction.  QR/pgeqrf_kernels.cpp (the index maps, the explicit-V builder and the
+# T recurrence of the QR panel) is compiled without contraction, so a result never depends on how the compiler fuses
+# the mul+add chains of the T recurrence (the grid tests also compare the GPU factors against the host LAPACK).
+# The kernels are memory-bound, so the cost is not measurable.
+# ---------------------------------------------------------------------------
+if(DDLA_USE_CUDA)
+    set_source_files_properties(QR/pgeqrf_kernels.cpp PROPERTIES
+        COMPILE_OPTIONS "$<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-fmad=false>")
+endif()
+if(DDLA_USE_HIP)
+    set_source_files_properties(QR/pgeqrf_kernels.cpp PROPERTIES
+        COMPILE_OPTIONS "$<$<COMPILE_LANG_AND_ID:HIP,Clang>:-ffp-contract=off>")
 endif()
 
 target_sources(ddla_lib PRIVATE ${lib_sources})

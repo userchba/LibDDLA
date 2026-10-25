@@ -45,9 +45,8 @@ inline constexpr DdlaBackend local_backend_v = DdlaBackend::CPU;
 
 // ---------------------------------------------------------------------------
 // Private work-queue access (library code only: the public API has no stream).  A GPU handle owns more than one
-// vendor queue: the one every ddla* function runs on (`stream`), the data queue (`stream_data`), the high-priority
-// queue of the pgeqrf lookahead (`stream_hi`) and the level queue of the eigensolver back-transform
-// (`stream_level`, DdlaStream::level_queue()).  These four calls are the ddla* operations the library needs on one
+// vendor queue: the one every ddla* function runs on (`stream`), the data queue (`stream_data`) and the level queue
+// of the eigensolver back-transform (`stream_level`, DdlaStream::level_queue()).  These four calls are the ddla* operations the library needs on one
 // of the extra queues.  Defined in ddla_handle_t.cpp; same validation and CPU behaviour as the public functions.
 // ---------------------------------------------------------------------------
 namespace detail {

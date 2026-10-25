@@ -225,22 +225,30 @@ constexpr auto gpucclSum = ncclSum;
 #define gpublasZtrsm cublasZtrsm
 
 // solver
+#define gpusolverCgeqrf cusolverDnCgeqrf
+#define gpusolverCgeqrf_bufferSize cusolverDnCgeqrf_bufferSize
 #define gpusolverCgetrf_bufferSize cusolverDnCgetrf_bufferSize
 #define gpusolverClaswp cusolverDnClaswp
 #define gpusolverCpotrf cusolverDnCpotrf
 #define gpusolverCpotrf_bufferSize cusolverDnCpotrf_bufferSize
 #define gpusolverCreate cusolverDnCreate
 #define gpusolverDestroy cusolverDnDestroy
+#define gpusolverDgeqrf cusolverDnDgeqrf
+#define gpusolverDgeqrf_bufferSize cusolverDnDgeqrf_bufferSize
 #define gpusolverDgetrf_bufferSize cusolverDnDgetrf_bufferSize
 #define gpusolverDlaswp cusolverDnDlaswp
 #define gpusolverDpotrf cusolverDnDpotrf
 #define gpusolverDpotrf_bufferSize cusolverDnDpotrf_bufferSize
 #define gpusolverGetStream cusolverDnGetStream
 #define gpusolverSetStream cusolverDnSetStream
+#define gpusolverSgeqrf cusolverDnSgeqrf
+#define gpusolverSgeqrf_bufferSize cusolverDnSgeqrf_bufferSize
 #define gpusolverSgetrf_bufferSize cusolverDnSgetrf_bufferSize
 #define gpusolverSlaswp cusolverDnSlaswp
 #define gpusolverSpotrf cusolverDnSpotrf
 #define gpusolverSpotrf_bufferSize cusolverDnSpotrf_bufferSize
+#define gpusolverZgeqrf cusolverDnZgeqrf
+#define gpusolverZgeqrf_bufferSize cusolverDnZgeqrf_bufferSize
 #define gpusolverZgetrf_bufferSize cusolverDnZgetrf_bufferSize
 #define gpusolverZlaswp cusolverDnZlaswp
 #define gpusolverZpotrf cusolverDnZpotrf

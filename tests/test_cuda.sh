@@ -101,6 +101,7 @@ api_grid_files=(
     "test_api_grid_ppotrf"
     "test_api_grid_ppotrs"
     "test_api_grid_pposv"
+    "test_api_grid_pgeqrf"
 )
 
 api_subcomm_files=(

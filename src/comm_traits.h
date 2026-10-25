@@ -48,6 +48,28 @@ inline int MPI_Allreduce(const std::complex<double>* sendbuff, std::complex<doub
     return MPI_Allreduce(sendbuff, recvbuff, count, MPI_DOUBLE_COMPLEX, op, comm);
 }
 
+// In dual builds (GPU vendor + DDLA_HAS_CPU) a single TU can instantiate both
+// the CCL and the CPU path of commAllReduce; there cclOp is ncclRedOp_t and
+// must be translated before it reaches MPI.
+inline MPI_Op to_mpi_op(MPI_Op op) { return op; }
+
+#ifdef DDLA_USE_CCL
+// This must NOT throw: it is called from inside a collective, so a rank that
+// threw would skip the MPI_Allreduce while the others entered it, and the job
+// would hang instead of reporting the error.  An unsupported reduction falls
+// back to MPI_OP_NULL, which MPI rejects with an ordinary error return on
+// every rank -- a collective failure rather than a deadlock.  The library only
+// ever produces the four standard reductions.
+inline MPI_Op to_mpi_op(gpucclRedOp_t op)
+{
+    if (op == gpucclSum)  return MPI_SUM;
+    if (op == gpucclProd) return MPI_PROD;
+    if (op == gpucclMin)  return MPI_MIN;
+    if (op == gpucclMax)  return MPI_MAX;
+    return MPI_OP_NULL;
+}
+#endif
+
 // ---------------------------------------------------------------------------
 // Host staging for the GPU_CPU_TUNNEL path.  These return a typed pointer
 // into a handle-owned, grow-on-demand byte buffer (see DdlaStream), so the
@@ -318,7 +340,8 @@ inline void commAllReduce(const DdlaHandle_t& h, CommScope scope,
                           const T* sbuf, T* rbuf, int count, cclOp op)
 {
     if constexpr (Backend == DdlaBackend::CPU) {
-        MPI_CHECK(MPI_Allreduce(sbuf, rbuf, count, op, CommTraits<Backend>::comm(h, scope)));
+        MPI_CHECK(MPI_Allreduce(sbuf, rbuf, count, to_mpi_op(op),
+                                CommTraits<Backend>::comm(h, scope)));
     } else {
 #if defined(DDLA_USE_GPU_CPU_TUNNEL)
         T* hs = detail::tunnel_staging<T>(h, 0, count);
@@ -326,7 +349,9 @@ inline void commAllReduce(const DdlaHandle_t& h, CommScope scope,
         DDLA_CHECK(ddlaMemcpy(h, hs, sbuf, count * sizeof(T)));
         DDLA_CHECK(ddlaMemcpy(h, hr, rbuf, count * sizeof(T)));
         DDLA_CHECK(ddlaSynchronize(h));
-        MPI_CHECK(MPI_Allreduce(hs, hr, count, op, CommTraits<Backend>::comm(h, scope)));
+        // In TUNNEL+CCL builds cclOp is ncclRedOp_t and must be translated
+        // before it reaches MPI (identity for MPI_Op-only builds).
+        MPI_CHECK(MPI_Allreduce(hs, hr, count, to_mpi_op(op), CommTraits<Backend>::comm(h, scope)));
         DDLA_CHECK(ddlaMemcpy(h, rbuf, hr, count * sizeof(T)));
         DDLA_CHECK(ddlaSynchronize(h));
 #elif defined(DDLA_USE_CCL)

@@ -193,7 +193,7 @@ ddlaStatus_t ddlaDeviceSynchronize(const DdlaHandle_t& handle);
 /// Events (a CPU handle: no-ops).  ddlaEventRecord marks the current end of the work queued on the handle;
 /// ddlaEventWait makes the work queued on the handle FROM NOW ON wait for the marked point without blocking the
 /// calling thread; ddlaEventSynchronize blocks the calling thread until the marked point has completed.  This is
-/// how the library orders two phases that it overlaps (the pgeqrf lookahead panel, the eigensolver
+/// how the library orders two phases that it overlaps (the eigensolver
 /// back-transform): no stream is ever exposed.
 ddlaStatus_t ddlaEventCreate(const DdlaHandle_t& handle, ddlaEvent_t* event);
 ddlaStatus_t ddlaEventDestroy(const DdlaHandle_t& handle, ddlaEvent_t event);

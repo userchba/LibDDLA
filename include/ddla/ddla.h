@@ -545,6 +545,78 @@ void pgemm(
 
 
 /**
+ * @brief Distributed Householder QR / QL factorization (ScaLAPACK PxGEQRF /
+ *        PxGEQLF), selected by @p uplo.
+ *
+ * Factorizes the leading m x n block of the distributed matrix, k = min(m,n),
+ * with reflectors H = I - tau v v^H:
+ *   - @p uplo = 'U' (QR): A = Q R, Q = H(1)...H(k).  R occupies the upper
+ *     triangle of the leading block (complex R has a real diagonal) and V sits
+ *     strictly below it with an implicit unit diagonal, so each v(j) reads as
+ *     e_j + A(j+1:m-1, j).
+ *   - @p uplo = 'L' (QL): A = Q L, Q = H(k)...H(1); the columns are processed
+ *     right to left.  The reflector of column j has its unit entry at row
+ *     m - n + j (zeros below it, v above it, the unit entry implicit) and L is
+ *     lower triangular in the bottom n x n block, on and below its diagonal
+ *     (complex diagonal real) -- the LAPACK ?GEQLF storage, so ?UNGQL / ?UNMQL
+ *     conventions apply.  For m < n only the last k columns carry reflectors;
+ *     the first n - k columns are transformed but own no tau.
+ * Entries of tau that belong to no reflector are left untouched.  Only the
+ * left-side factorizations exist: the right-side LQ / RQ (A = L Q, A = R Q) are
+ * not implemented.
+ *
+ * Backend-templated like @ref gemm: the CPU instantiation runs host BLAS on
+ * HOST pointers, the GPU instantiation runs cuBLAS/hipBLAS on DEVICE
+ * pointers.  @p tau is always HOST memory (LAPACK convention), length
+ * >= LOCc(n), indexed by local column, replicated over the process rows of
+ * each owning process column -- the same for both @p uplo.
+ *
+ * The leading-block contract applies: the descriptor may describe a matrix
+ * larger than m x n.  General mb != nb and any rsrc/csrc are supported; the
+ * panel and its trailing update only ever use A's own row and column
+ * distributions.  Structure: each panel is ONE block column of the descriptor
+ * (width nb; on a single process pass a larger nb for wider panels) and is
+ * GATHERED -- the owner process
+ * column sends its window rows to one root rank, which factors the whole m_w x jb
+ * window with the single-process geqrf (below; uplo selects QR or QL: LAPACK
+ * ?geqrf / ?geqlf on the CPU, cuSOLVER / hipSOLVER geqrf on the GPU), builds T
+ * with the single-process larft (below; ?larft on the CPU, V^H V by herk plus a small
+ * kernel on the GPU), and sends
+ * the rows and T back -- so a panel costs two point-to-point rounds plus the
+ * one Col-scope allreduce of the trailing apply, with no per-column collectives;
+ * tau is copied to the host once at the end of the call.  V and its T factor
+ * are broadcast along the process row, and the not yet factored columns (to the
+ * right of the panel for 'U', to its left for 'L') are updated with a blocked
+ * apply of Q_panel^H.  (With the gathered panel a GPU run takes a pivot of exactly
+ * -0.0 as +0, see geqrf: the sign of that R / L entry and of the reflectors after it
+ * may differ from LAPACK's; the 'inplace' panel below keeps LAPACK's.)
+ *
+ * Panel variant: the environment variable DDLA_QR_PANEL selects it per call -- 'gather' (the default) is the gathered
+ * panel described above, 'inplace' factors the panel columns in place on the distributed A, one column at a time (a local
+ * dot, nrm2 as the fallback, plus one Col allreduce for the norm, the same exact xLARFG scalars on every rank, vendor
+ * scal / gemv / gerc with one more Col allreduce for the in-panel update; V^H V by herk + one allreduce, T by the host
+ * recurrence).  Nothing is gathered, but every column costs a host round trip: on a V100 it is about 1.3-4x slower for
+ * pgeqrf and adds about 7-19% to the pheevd total (the stage-1 band reduction uses the same switch).  Every rank must
+ * use the same value; pgeqrf checks it.
+ *
+ * @tparam Backend DdlaBackend::CPU or DdlaBackend::GPU; must match the handle.
+ * @tparam T       float, double, complex<float> or complex<double>.
+ * @param handle  Handle owning the process grid and stream.
+ * @param uplo    'U' or 'u': A = Q R;  'L' or 'l': A = Q L.  Anything else throws.
+ * @param m       Rows of the leading block (0 <= m <= descA[M_]).
+ * @param n       Columns of the leading block (0 <= n <= descA[N_]).
+ * @param A     Distributed matrix (destroyed; holds the factor and V on exit).
+ * @param descA   ScaLAPACK int[9] descriptor for A.
+ * @param tau     HOST, length >= LOCc(n): reflector scalars (output).
+ * @param info    HOST status: always 0 on return; argument errors throw.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void pgeqrf(const DdlaHandle_t& handle, char uplo, int m, int n,
+            T* A, const int* descA,
+            T* tau,
+            int& info);
+
+/**
  * @brief Distributed addition: C(ic:ic+m-1,jc:jc+n-1) = alpha*op(A) + beta*op(B).
  *
  * The block sizes of op(A), op(B), and C must match: N keeps MB/NB;
@@ -1485,6 +1557,17 @@ void geru(const DdlaHandle_t& handle, int m, int n, const T& alpha,
           const T* x, int incx, const T* y, int incy, T* A, int lda);
 
 /**
+ * @brief Backend-templated conjugate rank-1 update: A := alpha * x * y^H + A.
+ *
+ * This is the routine LAPACK's xLARF uses to apply a Householder reflector
+ * from the left:  A := A - tau * v * w^H.  The update touches the leading
+ * m x n submatrix of A only.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void gerc(const DdlaHandle_t& handle, int m, int n, const T& alpha,
+          const T* x, int incx, const T* y, int incy, T* A, int lda);
+
+/**
  * @brief Backend-templated LU factorization with partial pivoting, A = P * L * U (LAPACK ?getrf).
  *
  * A is m x n column-major with lda >= max(1, m); on exit it holds L (unit lower triangular, diagonal not stored) and
@@ -1520,6 +1603,55 @@ void potrf(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda, int* inf
  */
 template <DdlaBackend Backend = default_backend_v, typename T>
 void laswp(const DdlaHandle_t& handle, int n, T* A, int lda, int k1, int k2, const int* ipiv, int incx);
+
+/**
+ * @brief Backend-templated QR or QL factorization of one matrix (LAPACK ?geqrf / ?geqlf): A = Q * R for uplo = 'U',
+ * A = Q * L for uplo = 'L'.
+ *
+ * A is m x n column-major with lda >= max(1, m); k = min(m, n) Householder reflectors H(i) = I - tau(i) v(i) v(i)^H are
+ * produced and Q = H(1) ... H(k) (QR) or H(k) ... H(1) (QL).  The factors are stored exactly as LAPACK stores them.
+ * 'U' (?geqrf): R is on and above the diagonal, v(i) has its unit entry at row i and lies below it.  'L' (?geqlf): L is
+ * on and below the diagonal of the last k columns (the bottom n x n block for m >= n), v(i) has its unit entry at row
+ * m - k + i of column n - k + i and lies above it; tau(i) belongs to that column.  `tau` has k entries.  For complex T
+ * the diagonal of R / L is real.  The reflector scalars follow LAPACK ?larfg (beta = -sign(Re alpha) ||(alpha, x)||),
+ * so tau = 0 and an untouched column when x = 0 and alpha is real.  One difference on the GPU: the vendor routine takes a
+ * pivot alpha of exactly -0.0 as +0 (LAPACK takes it as negative), so for such a pivot beta has the opposite sign and the
+ * reflectors after it differ from LAPACK's; the factorization is valid either way.
+ *
+ * Every pointer lives where the backend does: host memory for a CPU handle, device memory for a GPU handle.  A GPU call
+ * is asynchronous on the handle's stream (the vendor scratch is allocated and freed stream-ordered).  The GPU
+ * implementation has no ?geqlf to call: 'L' factors the row- and column-reversed copy J A J with the vendor geqrf.
+ * m <= 0 or n <= 0 returns; invalid arguments (null handle, backend mismatch, uplo other than 'U'/'u'/'L'/'l',
+ * negative sizes, lda < max(1, m), null A or tau) throw.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void geqrf(const DdlaHandle_t& handle, char uplo, int m, int n, T* A, int lda, T* tau);
+
+/**
+ * @brief Backend-templated triangular factor of a block reflector (LAPACK ?larft, STOREV = 'C'): the T of the compact-WY
+ * form H = I - V T V^H of k Householder reflectors H(i) = I - tau(i) v(i) v(i)^H.
+ *
+ * V is n x k column-major with ldv >= max(1, n), tau holds k scalars, T is k x k with ldt >= k, and k <= n.
+ * direct = 'F': H = H(1) H(2) ... H(k), T is upper triangular; v(i) has its unit entry at row i and lies below it, as
+ * ?geqrf stores it.  direct = 'B': H = H(k) ... H(2) H(1), T is lower triangular; v(i) has its unit entry at row n - k + i
+ * and lies above it, as ?geqlf stores it.  Only the strictly lower (F) / upper (B) trapezoid of V is read: the unit
+ * entries and the zeros are implied, so the output of geqrf can be passed as it is (R / L stays in V's other triangle).
+ * T(i,i) = tau(i).  T is written completely: LAPACK leaves the triangle T does not own alone, here it is zeroed, so T
+ * can be shipped or transposed as a block; the rows of a padded T (ldt > k) are not touched.  Only storev = 'C'
+ * (columnwise, the geqrf layout) is supported.  V is not modified (the CPU LAPACK may touch its unit entries while it
+ * runs and restores them).
+ *
+ * Every pointer lives where the backend does: host memory for a CPU handle, device memory for a GPU handle, tau
+ * included.  The CPU instantiation calls LAPACK ?larft.  The GPU one needs no vendor routine (cuSOLVER has
+ * cusolverDnXlarft only from CUDA 12.4, hipSOLVER none): it forms V^H V with herk on an explicit unit-triangular head /
+ * tail of V and runs the column recurrence of T in one small kernel, asynchronously on the handle's stream (a k x k
+ * scratch pair is allocated and freed stream-ordered).  k <= 0 returns; invalid arguments (null handle, backend
+ * mismatch, direct other than 'F'/'B', storev other than 'C', negative sizes, k > n, ldv < max(1, n), ldt < k, null
+ * V / tau / T) throw.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void larft(const DdlaHandle_t& handle, char direct, char storev, int n, int k, T* V, int ldv, const T* tau, T* Tmat,
+           int ldt);
 
 } // namespace ddla
 

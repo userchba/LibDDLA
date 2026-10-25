@@ -136,6 +136,45 @@ if(DDLA_USE_CPU OR DDLA_DUAL_BUILD)
         list(APPEND math_libs ${BLAS_LIBRARIES})
     endif()
 endif()
+# ---------------------------------------------------------------------------
+# Host LAPACK (Fortran ABI) -- required whenever the LIBRARY is built from
+# source: the QR panel's CPU arm (?GEQRF / ?GEQLF / ?LARFT) and the host references of
+# the QR tests call it on the CPU and GPU backends alike.  CPU-only and dual builds already carry it
+# (OpenBLAS ships LAPACK in the same library the CPU backend links);
+# GPU-only builds must be pointed at one explicitly.  Link-only consumers
+# of an installed LibDDLA (BUILD_TESTS=OFF does not change this; the
+# library target is still built here) see the same requirement.
+# ---------------------------------------------------------------------------
+set(DDLA_LAPACK_LIBRARY "" CACHE FILEPATH "Path to host LAPACK library (pgeqrf host arms)")
+if(DDLA_LAPACK_LIBRARY)
+    if(NOT EXISTS "${DDLA_LAPACK_LIBRARY}")
+        message(FATAL_ERROR "DDLA_LAPACK_LIBRARY set to nonexistent file: ${DDLA_LAPACK_LIBRARY}")
+    endif()
+    message(STATUS "Using host LAPACK: ${DDLA_LAPACK_LIBRARY}")
+    list(APPEND math_libs "${DDLA_LAPACK_LIBRARY}")
+elseif(DDLA_CPU_BLAS_LIBRARY)
+    # OpenBLAS and the other common CPU BLAS builds ship LAPACK in the same
+    # library.  In CPU-only and dual builds that library is already on
+    # math_libs (the CPU-BLAS block above runs whenever DDLA_USE_CPU, and a
+    # dual build sets it); only a GPU-only build must add it here, or the
+    # CPU-arm template instantiations link undefined.
+    if(NOT DDLA_USE_CPU)
+        message(STATUS "Using host LAPACK from DDLA_CPU_BLAS_LIBRARY: ${DDLA_CPU_BLAS_LIBRARY}")
+        list(APPEND math_libs "${DDLA_CPU_BLAS_LIBRARY}")
+    endif()
+else()
+    find_package(LAPACK)
+    if(NOT LAPACK_FOUND)
+        message(FATAL_ERROR "LibDDLA needs a host LAPACK (pgeqrf host arms): pass "
+                            "-DDDLA_LAPACK_LIBRARY=<path> (OpenBLAS works, e.g. "
+                            "-DDDLA_LAPACK_LIBRARY=/path/to/libopenblas.so) or, for "
+                            "CPU/dual builds, -DDDLA_CPU_BLAS_LIBRARY=<path> if that "
+                            "library ships LAPACK (OpenBLAS does).")
+    endif()
+    message(STATUS "Using LAPACK: ${LAPACK_LIBRARIES}")
+    list(APPEND math_libs ${LAPACK_LIBRARIES})
+endif()
+
 # cuda setting
 if(DDLA_USE_CUDA)
     if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
