@@ -64,6 +64,41 @@ void ptrtrs(
 );
 
 /**
+ * @brief Distributed triangular multiply: B := alpha * op(A) * B (side='L')
+ *                                      or B := alpha * B * op(A) (side='R').
+ * @tparam Backend Must match the handle's backend (CPU or GPU).
+ * @tparam T float, double, complex<float> or complex<double>.
+ * @param handle Handle owning the process grid and execution stream.
+ * @param side 'L' or 'R'.
+ * @param uplo 'U' or 'L': the stored triangle of A.
+ * @param trans 'N', 'T' or 'C': no transpose, transpose or conjugate transpose.
+ * @param diag 'N' or 'U': stored or implicit unit diagonal.
+ * @param m Number of rows of B.
+ * @param n Number of columns of B.
+ * @param alpha Scalar multiplier. Zero sets B to zero without reading A or B.
+ * @param A Read-only triangular matrix; must not overlap B.
+ * @param descA ScaLAPACK int[9] descriptor. A has square blocks.
+ * @param B Matrix overwritten by the result, in the handle's backend memory.
+ * @param descB ScaLAPACK int[9] descriptor. Its row block size (left) or column
+ *              block size (right) must match A's block size. Source coordinates
+ *              may differ; the other block size is unrestricted.
+ *
+ * Flags are case-insensitive. Only the leading m x n block of B and the
+ * leading order x order block of A (order=m for left, n for right) participate;
+ * larger descriptors and padded leading dimensions are supported. The unused
+ * triangle and implicit unit diagonal do not contribute to the result.
+ * Empty matrices leave B untouched. Invalid flags, dimensions or block sizes
+ * throw std::invalid_argument, including in Release builds. All ranks in the
+ * handle's grid must call with the same global arguments.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void ptrmm(
+    const DdlaHandle_t& handle, char side, char uplo, char trans, char diag,
+    int m, int n, const T& alpha,
+    const T* A, const int* descA, T* B, const int* descB
+);
+
+/**
  * @brief Apply a pivot permutation to a distributed matrix: swap rows or
  *        columns of A according to a column-cyclic pivot vector.
  *

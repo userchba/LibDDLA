@@ -50,6 +50,7 @@ if(DDLA_USE_CPU AND NOT DDLA_DUAL_BUILD)
         PBLAS/pgemm_stationary.cpp
         transport_block.cpp
         PBLAS/ptrtrs.cpp
+        PBLAS/ptrmm.cpp
         LU/pgetf2.cpp
         LU/pgetf2_panel.cpp
         LU/pgetrf.cpp
@@ -105,6 +106,7 @@ else()
         write_matrix.cpp
         random_generate.cpp
         PBLAS/ptrtrs.cpp
+        PBLAS/ptrmm.cpp
         LU/pgetf2.cpp
         LU/pgetf2_kernels.cpp
         LU/pgetf2_panel.cpp

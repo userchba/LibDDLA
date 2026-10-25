@@ -1,8 +1,9 @@
 name: KSSG validation
 
+# KSSG is unavailable, so this workflow no longer runs on every push.
+# Start it by hand (Actions > KSSG validation > Run workflow) once the
+# cluster is back.
 on:
-  push:
-    branches: [main, develop]
   workflow_dispatch:
     inputs:
       source_sha:
