@@ -49,6 +49,7 @@ if(DDLA_USE_CPU AND NOT DDLA_DUAL_BUILD)
         PBLAS/pgemm.cpp
         PBLAS/pgemm_select.cpp
         PBLAS/pgemm_stationary.cpp
+        matrix_transfer.cpp
         transport_block.cpp
         PBLAS/ptrtrs.cpp
         PBLAS/ptrmm.cpp
@@ -110,6 +111,7 @@ else()
         PBLAS/ptrtrs.cpp
         PBLAS/ptrmm.cpp
         LU/pgetf2.cpp
+        matrix_transfer_kernels.cpp
         LU/pgetf2_kernels.cpp
         LU/pgetf2_panel.cpp
         LU/pgetrf.cpp
@@ -135,6 +137,7 @@ else()
         Cholesky/ppotrf_bottom_right.cpp
         Cholesky/ppotrs.cpp
         Cholesky/pposv.cpp
+        matrix_transfer.cpp
         transport_block.cpp
         ddla_handle_t.cpp
         ddla_desc.cpp
@@ -154,6 +157,7 @@ if(DDLA_USE_CUDA)
         LU/getrf_nopiv.cpp
         BLAS/gemm_vbatched.cpp
         PBLAS/pdam.cpp
+        matrix_transfer_kernels.cpp
         LU/pgetf2_kernels.cpp
         Cholesky/potrf_bottom_right_transform.cpp
         PBLAS/pgeadd.cpp
@@ -180,6 +184,7 @@ if(DDLA_USE_HIP)
         LU/getrf_nopiv.cpp
         BLAS/gemm_vbatched.cpp
         PBLAS/pdam.cpp
+        matrix_transfer_kernels.cpp
         LU/pgetf2_kernels.cpp
         Cholesky/potrf_bottom_right_transform.cpp
         PBLAS/pgeadd.cpp

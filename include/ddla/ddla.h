@@ -169,6 +169,39 @@ void pswap(
 );
 
 /**
+ * @brief Gather a distributed submatrix into a column-major buffer on one rank.
+ *
+ * Copies A(ia:ia+m-1,ja:ja+n-1), with one-based global ia/ja, to dst(0:m,0:n).
+ * All ranks of the handle communicator call with consistent geometry and root.
+ * root is a rank of that communicator, independent of process-grid ordering.
+ * A and dst are device pointers for GPU handles and host pointers for CPU handles.
+ * Only root uses dst/lddst; lddst >= m for a nonempty region. Ranks owning no
+ * selected entries may pass null A. Non-root ranks may pass null dst.
+ * Empty regions access no data. Source entries and destination padding are preserved.
+ * GPU work is ordered on the handle stream; synchronize before host access.
+ * Temporary packing storage is managed internally. Partial overlap is unsupported;
+ * an exact local-view alias is allowed when root owns the complete selected region.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void gather(const DdlaHandle_t& handle, int m, int n,
+            const T* A, int ia, int ja, const int* descA,
+            int root, T* dst, int lddst);
+
+/**
+ * @brief Scatter a root column-major buffer into a distributed submatrix.
+ *
+ * Copies src(0:m,0:n) to A(ia:ia+m-1,ja:ja+n-1), with one-based global ia/ja.
+ * Participation, backend memory, root numbering and alias rules follow gather.
+ * Only root uses src/ldsrc; ldsrc >= m for a nonempty region. Other ranks may pass
+ * null src. Only selected A entries are modified; padding and src are preserved.
+ * Empty regions access no data. GPU work is ordered on the handle stream.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void scatter(const DdlaHandle_t& handle, int m, int n,
+             T* A, int ia, int ja, const int* descA,
+             int root, const T* src, int ldsrc);
+
+/**
  * @brief Internal unblocked panel LU factorization for distributed matrices.
  *
  * Factors the panel starting at global column n_s with width nb_real within the
