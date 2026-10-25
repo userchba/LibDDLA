@@ -20,6 +20,7 @@ if(DDLA_USE_CPU AND NOT DDLA_DUAL_BUILD)
     # code is behind DDLA_USE_CUDA / DDLA_USE_HIP.
     list(APPEND lib_sources
         BLAS/gemm.cpp
+        BLAS/gemm_mixed.cpp
         BLAS/herk.cpp
         BLAS/her2k.cpp
         BLAS/hemv.cpp
@@ -80,6 +81,7 @@ else()
     # GPU-only or dual build: full accelerator source set.
     list(APPEND lib_sources
         BLAS/gemm.cpp
+        BLAS/gemm_mixed.cpp
         BLAS/herk.cpp
         BLAS/her2k.cpp
         BLAS/hemv.cpp
@@ -148,6 +150,7 @@ if(DDLA_USE_CUDA)
         vbatched/zgemm_vbatched_core.cpp
     )
     set_source_files_properties(
+        BLAS/gemm_mixed.cpp
         LU/getrf_nopiv.cpp
         BLAS/gemm_vbatched.cpp
         PBLAS/pdam.cpp
@@ -173,6 +176,7 @@ if(DDLA_USE_HIP)
         vbatched/zgemm_vbatched_core.cpp
     )
     set_source_files_properties(
+        BLAS/gemm_mixed.cpp
         LU/getrf_nopiv.cpp
         BLAS/gemm_vbatched.cpp
         PBLAS/pdam.cpp

@@ -830,6 +830,34 @@ void gemm(
     T* C, int ldc);
 
 /**
+ * @brief Single-process real-by-complex GEMM:
+ * C := alpha * op(A) * op(B) + beta * C.
+ *
+ * Column-major matrices; R is float or double, B/C and alpha/beta have
+ * type std::complex<R>. Flags accept N/T/C (case insensitive); C on real A
+ * is T. Leading dimensions are in elements of each matrix's own type.
+ * Inputs must not overlap C. CPU pointers are host pointers; GPU pointers
+ * are device pointers and work is ordered on the handle's BLAS stream.
+ * No communication is performed. The backend must match the handle.
+ *
+ * Zero m/n returns without accessing matrices. If alpha == 0 or k == 0,
+ * A/B are not accessed; beta == 0 never reads C. Invalid flags, dimensions,
+ * leading dimensions, required null pointers or handles throw.
+ * CPU and large GPU products use bounded column panels of real GEMM;
+ * small GPU products use a fused tiled kernel with no temporary matrices.
+ */
+template <DdlaBackend Backend = default_backend_v, typename R>
+void gemm(
+    const DdlaHandle_t& handle,
+    char transa, char transb,
+    int m, int n, int k,
+    const std::complex<R>& alpha,
+    const R* A, int lda,
+    const std::complex<R>* B, int ldb,
+    const std::complex<R>& beta,
+    std::complex<R>* C, int ldc);
+
+/**
  * @brief Hermitian rank-k update: C := alpha*A*A**H + beta*C  ('N')  or
  *        C := alpha*A**H*A + beta*C.
  *
