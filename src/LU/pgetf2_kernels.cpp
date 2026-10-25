@@ -2,6 +2,7 @@
 #include "ddla_stream_impl.h"
 
 #include <climits>
+#include <algorithm>
 #include <complex>
 #include <type_traits>
 
@@ -35,23 +36,26 @@ __host__ __device__ DeviceComplex<T> operator*(const DeviceComplex<T>& lhs,
     };
 }
 
+// The pivot kernels use the plain-component DeviceComplex above, rather
+// than the thrust::complex mapping in helpers.h; keep their arithmetic and
+// workspace representation unchanged.
 template <typename T>
-struct DeviceScalar {
+struct PivotScalar {
     using type = T;
 };
 
 template <>
-struct DeviceScalar<std::complex<float>> {
+struct PivotScalar<std::complex<float>> {
     using type = DeviceComplex<float>;
 };
 
 template <>
-struct DeviceScalar<std::complex<double>> {
+struct PivotScalar<std::complex<double>> {
     using type = DeviceComplex<double>;
 };
 
 template <typename T>
-using DeviceScalarT = typename DeviceScalar<T>::type;
+using PivotScalarT = typename PivotScalar<T>::type;
 
 template <typename DeviceT>
 struct PivotCandidate {
@@ -151,7 +155,7 @@ __global__ void scale_update_kernel(int length_row, int length_col,
 }
 
 template <typename T>
-DeviceScalarT<T> to_device_scalar(const T& value)
+PivotScalarT<T> to_device_scalar(const T& value)
 {
     if constexpr (std::is_same_v<T, std::complex<float>>
                   || std::is_same_v<T, std::complex<double>>){
@@ -162,7 +166,7 @@ DeviceScalarT<T> to_device_scalar(const T& value)
 }
 
 template <typename T>
-T to_host_scalar(const DeviceScalarT<T>& value)
+T to_host_scalar(const PivotScalarT<T>& value)
 {
     if constexpr (std::is_same_v<T, std::complex<float>>
                   || std::is_same_v<T, std::complex<double>>){
@@ -177,7 +181,7 @@ T to_host_scalar(const DeviceScalarT<T>& value)
 template <typename T>
 std::size_t pgetf2_pivot_workspace_size()
 {
-    using DeviceT = DeviceScalarT<T>;
+    using DeviceT = PivotScalarT<T>;
     static_assert(sizeof(DeviceT) == sizeof(T));
     return sizeof(PivotCandidate<DeviceT>);
 }
@@ -188,7 +192,7 @@ void pgetf2_find_local_pivot(const DdlaHandle_t& handle, const T* d_column, int 
                              double& metric, int& local_index, T& value)
 {
     const gpuStream_t stream = handle->stream;
-    using DeviceT = DeviceScalarT<T>;
+    using DeviceT = PivotScalarT<T>;
     static_assert(sizeof(DeviceT) == sizeof(T));
 
     auto* d_result = static_cast<PivotCandidate<DeviceT>*>(d_workspace);
@@ -217,7 +221,7 @@ void pgetf2_scale_update(const DdlaHandle_t& handle, int length_row, int length_
         return;
     }
 
-    using DeviceT = DeviceScalarT<T>;
+    using DeviceT = PivotScalarT<T>;
     static_assert(sizeof(DeviceT) == sizeof(T));
     const int blocks = (length_row + kUpdateThreads - 1) / kUpdateThreads;
     scale_update_kernel<<<blocks, kUpdateThreads, 0, stream>>>(
@@ -228,6 +232,7 @@ void pgetf2_scale_update(const DdlaHandle_t& handle, int length_row, int length_
     DDLA_CHECK(ddlaGetLastError(handle));
     return;
 }
+
 
 template std::size_t pgetf2_pivot_workspace_size<float>();
 template std::size_t pgetf2_pivot_workspace_size<double>();

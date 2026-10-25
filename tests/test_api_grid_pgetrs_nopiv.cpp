@@ -1,4 +1,5 @@
 #include "api_grid_test_common.h"
+#include "LU/lu_internal.h"
 
 using namespace api_grid_test;
 

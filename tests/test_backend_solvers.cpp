@@ -7,6 +7,7 @@
 // of the same sources, and that the backend named in the template must be the handle's.
 // ---------------------------------------------------------------------------
 #include "api_grid_test_common.h"
+#include "LU/lu_internal.h"
 
 #include <stdexcept>
 #include <type_traits>
@@ -105,7 +106,7 @@ void check_lu(const DdlaHandle_t& h, int n, int nb, int nrhs, bool all_variants)
                 fresh(dA, dB);
                 std::vector<int> ipiv(ddla_test::m_loc(h, descA) + 1, 0);
                 int info = -1;
-                ddla::pgetrf<B>(h, n, n, dA.ptr, descA, ipiv.data(), info);
+                ddla::pgetrf<B>(h, n, n, dA.ptr, 1, 1, descA, ipiv.data(), info);
                 if (info != 0) MPI_Abort(ddlaGetCommunicator(h), 1);
                 ddla::pgetrs<B>(h, c.side, c.trans, n, nrhs, dA.ptr, descA, ipiv.data(), dB.ptr, descB);
                 check_x<T>(h, descB, dB.ptr, h_B.size(), tag_of(B, "pgetrf+pgetrs", ty, what), tol);
@@ -162,7 +163,7 @@ void check_lu_info(const DdlaHandle_t& h, int n, int nb)
         check_ddla_sync(h);
         std::vector<int> ipiv(ddla_test::m_loc(h, descA) + 1, -1);
         int info = -1;
-        ddla::pgetrf<B>(h, n, n, dA.ptr, descA, ipiv.data(), info);
+        ddla::pgetrf<B>(h, n, n, dA.ptr, 1, 1, descA, ipiv.data(), info);
         require_close(h, tag_of(B, "pgetrf", ty, "singular info"), std::abs(info - (zero_at + 1)), 0.0);
     }
     {
@@ -485,7 +486,7 @@ void check_rejected(const DdlaHandle_t& h, const char* name)
     int info = 0;
     std::vector<int> ipiv(ddla_test::m_loc(h, desc) + 1, 0);
     bool threw = false;
-    try { ddla::pgetrf<Wrong>(h, n, n, d.ptr, desc, ipiv.data(), info); } catch (const std::runtime_error&) { threw = true; }
+    try { ddla::pgetrf<Wrong>(h, n, n, d.ptr, 1, 1, desc, ipiv.data(), info); } catch (const std::runtime_error&) { threw = true; }
     bool threw2 = false;
     try { ddla::ptrtrs<Wrong>(h, 'L', 'L', 'N', 'N', n, n, d.ptr, desc, d.ptr, desc); } catch (const std::runtime_error&) { threw2 = true; }
     bool threw3 = false;

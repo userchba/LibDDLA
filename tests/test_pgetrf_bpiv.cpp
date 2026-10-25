@@ -1,4 +1,5 @@
 #include <cassert>
+#include "LU/lu_internal.h"
 #include <cmath>
 #include <mpi.h>
 #include <time.h>
@@ -76,7 +77,7 @@ void check_pzgetrf(int n, const DdlaHandle_t& ddla_handle)
     printf("myid:%d, start sv\n",myid);
     int info = -1;
     double start_time_trf = MPI_Wtime();
-    pgetrf(ddla_handle, n, n, d_A, matrix_desc, ipiv.data(), info);
+    pgetrf(ddla_handle, n, n, d_A, 1, 1, matrix_desc, ipiv.data(), info);
     DDLA_CHECK(ddlaSynchronize(ddla_handle));
     MPI_Barrier(MPI_COMM_WORLD);
     double end_time_trf = MPI_Wtime();

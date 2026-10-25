@@ -1,4 +1,5 @@
 #include <ddla/ddla.h>
+#include "lu_internal.h"
 #include "ddla_desc.h"
 #include <cassert>
 #include <vector>

@@ -35,7 +35,7 @@ runtime. All functions live in the `ddla` namespace.
   the leading block anchored at global (0,0) (the same convention as
   `pgemm`); local extents are derived from the logical dimensions, not the
   descriptor's full size. `pdam` takes an optional `n` (default `-1` = the
-  whole matrix), and `pgetf2` / `pgetf2_panel` take an explicit `n`.
+  whole matrix), and `pgetf2` takes an explicit `n`.
 - **Matrix storage is caller-owned.** LibDDLA routines operate on device pointers
   supplied by the caller. Individual routines may allocate and release temporary
   device workspaces internally.
@@ -334,8 +334,7 @@ stream for GPU handles) and safely handle zero-byte requests (zero bytes sets
 
 | Function | Description |
 |----------|-------------|
-| `pgetf2` | Unblocked panel LU (inner kernel, host pivot array) |
-| `pgetf2_panel` | Alternative panel LU (rank-revealing variant) |
+| `pgetf2` | Blocked panel LU: in-place or gathered inner subpanels (`DDLA_LU_PANEL`), BLAS-3 inner updates |
 | `pgetrf` | LU with partial (row) pivoting |
 | `pgetrf_bpiv` | Block LU with partial pivoting per block row (device pivot array) |
 | `pgetrf_nopiv` | Multi-process LU without pivoting |

@@ -97,7 +97,6 @@ api_grid_files=(
     "test_api_grid_pgesv_nopiv"
     "test_api_grid_pgetrf_bpiv"
     "test_api_grid_pgetf2"
-    "test_api_grid_pgetf2_panel"
     "test_api_grid_getrf_nopiv"
     "test_api_grid_ppotrf"
     "test_api_grid_ppotrs"

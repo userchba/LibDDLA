@@ -23,7 +23,7 @@ void check_pgetrf(const ddla::DdlaHandle_t& handle, const Shape& base)
 
         std::vector<int> singular_ipiv(ddla_test::m_loc(handle, descA), -1);
         int singular_info = -1;
-        ddla::pgetrf(handle, n, n, d_singular.ptr, descA, singular_ipiv.data(), singular_info);
+        ddla::pgetrf(handle, n, n, d_singular.ptr, 1, 1, descA, singular_ipiv.data(), singular_info);
         require_close(handle, "pgetrf(handle, singular info)",
                       std::abs(singular_info - (singular_index + 1)), 0.0);
     }
@@ -39,7 +39,7 @@ void check_pgetrf(const ddla::DdlaHandle_t& handle, const Shape& base)
 
     std::vector<int> ipiv(ddla_test::m_loc(handle, descA));
     int info = -1;
-    ddla::pgetrf(handle, n, n, d_A.ptr, descA, ipiv.data(), info);
+    ddla::pgetrf(handle, n, n, d_A.ptr, 1, 1, descA, ipiv.data(), info);
     if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
     ddla::pgetrs(handle, 'L', 'N', n, nrhs, d_A.ptr, descA, ipiv.data(), d_B.ptr, descB);
     check_solution(handle, descB, d_B.ptr, h_B.size(), "pgetrf", 5e-9);

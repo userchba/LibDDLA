@@ -1,11 +1,14 @@
 #include <ddla/ddla.h>
 #include "ddla_desc.h"
 #include <cassert>
+#include <algorithm>
 #include <complex>
 #include "ddla_connector.h"
 #include "ddla_stream_impl.h"
 #include "require_backend.h"
 #include "comm_traits.h"
+#include "lu_panel.h"
+#include "row_swap.h"
 
 #include "pgetf2_kernels.h"
 
@@ -79,179 +82,166 @@ struct PivotBroadcast {
 
 } // namespace
 
-// Factors the leading-block panel starting at global column n_s of width
-// nb_real (<= nb), for the logical m-by-n sub-matrix anchored at global (0,0)
-// of a possibly-larger descriptor.  All local extents are derived from the
-// logical m/n (num_loc), so the panel kernel never touches rows/columns beyond
-// the leading block.
 template <DdlaBackend Backend, typename T>
-void pgetf2(
-    const DdlaHandle_t& handle, int m, int n, int nb_real,
-    T* A, int n_s, const int* array_descA,
-    int* ipiv, // host
-    int& info  // host
-)
+void lu_impl::factor_inplace(const DdlaHandle_t& h, int m, int n, int width, T* A,
+                             int ia, int ja, const int* desc, int* ipiv, int& info, int swap_ja)
 {
-    check_desc(array_descA, handle);
-    int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
-    ddlaGetGridDims(handle, nprows, npcols);
-    ddlaGetGridCoords(handle, myprow, mypcol);
-
-
-    assert(m <= array_descA[DDLA_M_] && n <= array_descA[DDLA_N_]);
-    DdlaHandle_t ddla_handle = handle;
-    detail::require_backend<Backend>(ddla_handle, "pgetf2");
-
-    MPI_Comm row_comm = ddla_handle->row_comm;
-    MPI_Comm col_comm = ddla_handle->col_comm;
-
-
-    int m_loc = num_loc(m, array_descA[DDLA_MB_], myprow, array_descA[DDLA_RSRC_], nprows);
-    int n_loc = num_loc(n, array_descA[DDLA_NB_], mypcol, array_descA[DDLA_CSRC_], npcols);
-    int lld = array_descA[DDLA_LLD_];
-    int nb = array_descA[DDLA_NB_];
-
-    
-    int max_row;
-    int max_prow;
-    T max_value{};
-
-    T *temp;
-    const size_t row_buffer_elems = static_cast<size_t>(n_loc > 0 ? n_loc : 1);
-    DDLA_CHECK(ddlaMalloc(ddla_handle, &temp, sizeof(T)*row_buffer_elems));
-
-    T *temp_peer = nullptr;
-    DDLA_CHECK(ddlaMalloc(ddla_handle, &temp_peer, sizeof(T)*row_buffer_elems));
-
-    void* d_pivot_workspace = nullptr;   // the GPU pivot kernel's result slot (zero bytes, hence null, on a CPU handle)
-    DDLA_CHECK(ddlaMalloc(ddla_handle, &d_pivot_workspace, pivot_workspace_bytes<Backend, T>()));
-
-    int i_loc = indx_g2l_r(array_descA, handle, n_s);
-    int j_loc = indx_g2l_c(array_descA, handle, n_s);
-
-    int owner_row = indxg2p(n_s, nb, array_descA[DDLA_RSRC_], nprows);
-    int owner_col = indxg2p(n_s, nb, array_descA[DDLA_CSRC_], npcols);
-
-    int mm_row_start = num_loc(n_s, nb, myprow, array_descA[DDLA_RSRC_], nprows);
-    int mm_col_start = num_loc(n_s, nb, mypcol, array_descA[DDLA_CSRC_], npcols);
-
     info = 0;
-    for(int i_tf2 = 0; i_tf2 < nb_real; i_tf2++){
-        // find max_rows and value
-        int i_panel, j_panel;
-        if(i_loc >= 0)
-            i_panel = i_loc + i_tf2;
-        else
-            i_panel = mm_row_start;
-        if(j_loc >= 0)
-            j_panel = j_loc + i_tf2;
-        else
-            j_panel = mm_col_start;
-        if(j_loc >= 0){
-            MaxLoc local_max{-1.0, -1};
-            MaxLoc global_max{-1.0, -1};
-            T local_max_value{};
-            if(i_panel<m_loc){
-                int local_max_index = 0;
-                find_local_pivot<Backend, T>(
-                    ddla_handle, A + j_panel * lld + i_panel, m_loc - i_panel,
-                    d_pivot_workspace,
-                    local_max.value, local_max_index, local_max_value);
-                const int local_row = i_panel + local_max_index;
-                local_max.index = indx_l2g_r(array_descA, handle, local_row);
-            }
-            MPI_CHECK(MPI_Allreduce(&local_max, &global_max, 1,
-                                    MPI_DOUBLE_INT, MPI_MAXLOC, col_comm));
-            max_row = global_max.index;
-            max_prow = indxg2p(max_row, nb, array_descA[DDLA_RSRC_], nprows);
-            if(myprow == max_prow){
-                max_value = local_max_value;
-            }
-            MPI_CHECK(MPI_Bcast(&max_value, static_cast<int>(sizeof(T)), MPI_BYTE,
-                                max_prow, col_comm));
-        }
-
+    if (width == 0) return;
+    int nprows, npcols, myprow, mypcol;
+    ddlaGetGridDims(h, nprows, npcols);
+    ddlaGetGridCoords(h, myprow, mypcol);
+    const int nb = desc[DDLA_MB_], ld = desc[DDLA_LLD_];
+    const int row0 = ia-1, col0 = ja-1;
+    assert(width <= std::min({m,n,nb-col0%nb}));
+    const int row_end = num_loc(row0+m, nb, myprow, desc[DDLA_RSRC_], nprows);
+    const int swap_begin = num_loc(swap_ja-1, nb, mypcol, desc[DDLA_CSRC_], npcols);
+    const int swap_end = num_loc(col0+n, nb, mypcol, desc[DDLA_CSRC_], npcols);
+    const int swap_count = swap_end-swap_begin;
+    const int jl = indx_g2l_c(desc,h,col0);
+    const int owner_col = indxg2p(col0,nb,desc[DDLA_CSRC_],npcols);
+    T *temp = nullptr, *peer = nullptr;
+    DDLA_CHECK(ddlaMalloc(h, &temp, sizeof(T)*std::size_t(std::max(1,swap_count))));
+    DDLA_CHECK(ddlaMalloc(h, &peer, sizeof(T)*std::size_t(std::max(1,swap_count))));
+    void* pivot_workspace = nullptr;
+    DDLA_CHECK(ddlaMalloc(h, &pivot_workspace, pivot_workspace_bytes<Backend,T>()));
+    for (int k=0; k<width; ++k) {
+        const int owner_row = indxg2p(row0+k,nb,desc[DDLA_RSRC_],nprows);
+        const int i = num_loc(row0+k,nb,myprow,desc[DDLA_RSRC_],nprows);
+        const int j = jl >= 0 ? jl+k : 0;
         PivotBroadcast<T> pivot;
-        if(mypcol == owner_col){
-            pivot.max_row = max_row;
-            pivot.max_prow = max_prow;
-            pivot.max_value = max_value;
-        }
-        MPI_CHECK(MPI_Bcast(&pivot, static_cast<int>(sizeof(pivot)), MPI_BYTE, owner_col, row_comm));
-        max_row = pivot.max_row;
-        max_prow = pivot.max_prow;
-        max_value = pivot.max_value;
-
-        int max_loc_row = indx_g2l_r(array_descA, handle, max_row);
-        if(myprow == owner_row){
-            ipiv[i_panel] = max_row + 1; // 1-based index like fortran
-        }
-        // exchange rows
-        if(owner_row == max_prow){
-            if(myprow == owner_row && max_loc_row != i_panel)
-                swap<Backend, T>(
-                    ddla_handle, n_loc,
-                    A + i_panel, lld,
-                    A + max_loc_row, lld
-                );
-        }else{
-            if(myprow == owner_row){
-                DDLA_CHECK(ddlaMemcpy2D(ddla_handle, temp, sizeof(T), A + i_panel, lld * sizeof(T), sizeof(T),
-                                        n_loc));
-                commSendrecv<Backend>(ddla_handle, CommScope::Col, temp, temp_peer, (std::size_t)n_loc, max_prow);
-                DDLA_CHECK(ddlaMemcpy2D(ddla_handle, A + i_panel, lld * sizeof(T), temp_peer, sizeof(T),
-                                        sizeof(T), n_loc));
-            }else if(myprow == max_prow){
-                DDLA_CHECK(ddlaMemcpy2D(ddla_handle, temp, sizeof(T), A + max_loc_row, lld * sizeof(T), sizeof(T),
-                                        n_loc));
-                commSendrecv<Backend>(ddla_handle, CommScope::Col, temp, temp_peer, (std::size_t)n_loc, owner_row);
-                DDLA_CHECK(ddlaMemcpy2D(ddla_handle, A + max_loc_row, lld * sizeof(T), temp_peer, sizeof(T),
-                                        sizeof(T), n_loc));
+        if (jl >= 0) {
+            MaxLoc local{-1.0,-1}, global{-1.0,-1};
+            T local_value{};
+            if (i < row_end) {
+                int index = 0;
+                find_local_pivot<Backend,T>(h,A+i+std::size_t(j)*ld,row_end-i,
+                    pivot_workspace,local.value,index,local_value);
+                local.index = indx_l2g_r(desc,h,i+index);
             }
+            MPI_CHECK(MPI_Allreduce(&local,&global,1,MPI_DOUBLE_INT,MPI_MAXLOC,h->col_comm));
+            pivot.max_row = global.index;
+            pivot.max_prow = indxg2p(global.index,nb,desc[DDLA_RSRC_],nprows);
+            if (myprow == pivot.max_prow) pivot.max_value = local_value;
+            MPI_CHECK(MPI_Bcast(&pivot.max_value,static_cast<int>(sizeof(T)),MPI_BYTE,pivot.max_prow,h->col_comm));
         }
-        if(std::abs(max_value) == 0.0){
-            info = n_s+i_tf2+1;
-            break;
-        }
-        if(j_loc>=0){
-            const T inverse_pivot = T(1.0) / max_value;
-            int64_t a_off;
-            int length_row;
-            
-            if(i_loc>=0){
-                a_off = (i_panel + 1) + j_panel * lld;
-                length_row = m_loc - (i_panel + 1);
-            }else{
-                a_off = mm_row_start + j_panel * lld;
-                length_row = m_loc - mm_row_start;
+        MPI_CHECK(MPI_Bcast(&pivot,static_cast<int>(sizeof(pivot)),MPI_BYTE,owner_col,h->row_comm));
+        if (myprow == owner_row) ipiv[i] = pivot.max_row+1;
+        if (swap_count > 0)
+            detail::swap_rows<Backend,T>(h, A, desc, row0+k, swap_begin,
+                                         A, desc, pivot.max_row, swap_begin,
+                                         swap_count, temp, peer);
+        if (std::abs(pivot.max_value) == 0.0) { info=k+1; break; }
+        if (jl >= 0) {
+            const int columns = width-k-1;
+            if (myprow == owner_row && columns > 0)
+                DDLA_CHECK(ddlaMemcpy2D(h,temp,sizeof(T),A+i+std::size_t(j+1)*ld,
+                    std::size_t(ld)*sizeof(T),sizeof(T),columns));
+            if (columns > 0) commBcast<Backend>(h,CommScope::Col,temp,std::size_t(columns),owner_row);
+            const int row_after = myprow == owner_row ? i+1 : i;
+            if (row_after < row_end) {
+                T* column = A+row_after+std::size_t(j)*ld;
+                scale_update<Backend,T>(h,row_end-row_after,columns,T(1.0)/pivot.max_value,
+                    column,temp,columns > 0 ? column+ld : column,ld);
             }
-            int length_col = nb_real - i_tf2 - 1;
-            if(myprow == owner_row && length_col>0){
-                DDLA_CHECK(ddlaMemcpy2D(ddla_handle, temp, 1 * sizeof(T), A + i_panel + (j_panel + 1) * lld,
-                                        lld * sizeof(T), 1*sizeof(T), length_col));
-            }
-            if(length_col>0)
-                commBcast<Backend>(ddla_handle, CommScope::Col, temp, (std::size_t)length_col, owner_row);
-            // multipliers l = a / pivot, then the rank-1 update of the panel columns to the right: A -= l * u^T
-            T* trailing = length_col > 0 ? A + a_off + lld : A + a_off;
-            scale_update<Backend, T>(
-                ddla_handle, length_row, length_col, inverse_pivot,
-                A + a_off, temp, trailing, lld);
         }
     }
-    DDLA_CHECK(ddlaFree(ddla_handle, temp));
-    DDLA_CHECK(ddlaFree(ddla_handle, temp_peer));
-    DDLA_CHECK(ddlaFree(ddla_handle, d_pivot_workspace));
-    if(info != 0){
-        DDLA_CHECK(ddlaSynchronize(ddla_handle));
-    }
+    DDLA_CHECK(ddlaFree(h,temp));
+    DDLA_CHECK(ddlaFree(h,peer));
+    DDLA_CHECK(ddlaFree(h,pivot_workspace));
+    if (info != 0) DDLA_CHECK(ddlaSynchronize(h));
 }
 
-#define INSTANTIATE_PGETF2(BACKEND, TYPE)                                   \
-    template void pgetf2<BACKEND, TYPE>(const DdlaHandle_t&, int m, int n, int nb_real, \
-    TYPE* A, int n_s, const int* array_descA, \
-    int* ipiv, \
-    int& info)
+// The blocked width factorization; it selects the panel method itself. DDLA_LU_PANEL=gather factors every inner
+// subpanel on one root rank (panel_gather) and lets the trsm/bcast/gemm updates below distribute the rest of the
+// panel, DDLA_LU_PANEL=inplace (default) factors the same subpanels on the distributed A (factor_inplace). The
+// subpanel width min(32, nb/2) bounds the root's serial work in the gather mode; a panel no wider than that
+// degenerates to a single subpanel with no inner update. The nb row-boundary term keeps every subpanel's diagonal
+// block inside one process row so the trsm below holds it on a single rank. swap_ja retains the first selected
+// column of the enclosing call: a driver that factors later block columns still pivots the preceding L columns.
+template <DdlaBackend Backend, typename T>
+void pgetf2(const DdlaHandle_t& handle, int m, int n, int width, T* A, int ia, int ja,
+            const int* desc, int* ipiv, int& info, lu_impl::Workspace<T>& workspace, int swap_ja)
+{
+    info = 0;
+    if (width == 0) return;
+    int nprows, npcols, myprow, mypcol;
+    ddlaGetGridDims(handle, nprows, npcols);
+    ddlaGetGridCoords(handle, myprow, mypcol);
+    const int nb = desc[DDLA_MB_], ld = desc[DDLA_LLD_];
+    const int row0 = ia-1, col0 = ja-1;
+    const bool gather = lu_impl::use_gather(handle);
+    const int inner = std::min(32, std::max(1, nb/2));
+    const int row_end = num_loc(row0+m, nb, myprow, desc[DDLA_RSRC_], nprows);
+    const int col_end = num_loc(col0+width, nb, mypcol, desc[DDLA_CSRC_], npcols);
+    const int panel_col = indx_g2l_c(desc, handle, col0);
+    T* temp_U = nullptr;
+    DDLA_CHECK(ddlaMalloc(handle, &temp_U, sizeof(T)*std::size_t(width)*inner));
+    for (int k = 0; k < width; ) {
+        const int b = std::min({inner, width-k, nb-(row0+k)%nb});
+        const int r = row0+k, c = col0+k;
+        const int il = indx_g2l_r(desc, handle, r), jl = indx_g2l_c(desc, handle, c);
+        if (gather)
+            lu_impl::panel_gather<Backend,T>(handle, m-k, n-k, b, A, ia+k, ja+k,
+                                             desc, ipiv, info, workspace, swap_ja);
+        else
+            lu_impl::factor_inplace<Backend,T>(handle, m-k, n-k, b, A, ia+k, ja+k,
+                                               desc, ipiv, info, swap_ja);
+        if (info != 0) {
+            if (info > 0) info += k;
+            DDLA_CHECK(ddlaFree(handle, temp_U));
+            return;
+        }
+        const int row_after = num_loc(r+b, nb, myprow, desc[DDLA_RSRC_], nprows);
+        const int col_after = num_loc(c+b, nb, mypcol, desc[DDLA_CSRC_], npcols);
+        if (panel_col >= 0 && col_after < col_end) {
+            const int pr = indxg2p(r, nb, desc[DDLA_RSRC_], nprows);
+            if (il >= 0) {
+                trsm<Backend,T>(handle, 'L', 'L', 'N', 'U', b, col_end-col_after, T(1),
+                    A+il+std::size_t(jl)*ld, ld, A+il+std::size_t(col_after)*ld, ld);
+                DDLA_CHECK(ddlaMemcpy2D(handle, temp_U, std::size_t(b)*sizeof(T),
+                    A+il+std::size_t(col_after)*ld, std::size_t(ld)*sizeof(T),
+                    std::size_t(b)*sizeof(T), col_end-col_after));
+            }
+            commBcast<Backend>(handle, CommScope::Col, temp_U, std::size_t(b)*(col_end-col_after), pr);
+        }
+        if (panel_col >= 0 && row_after < row_end && col_after < col_end)
+            gemm<Backend,T>(handle, 'N', 'N', row_end-row_after, col_end-col_after, b,
+                -1.0, A+row_after+std::size_t(jl)*ld, ld, temp_U, b, 1.0,
+                A+row_after+std::size_t(col_after)*ld, ld);
+        k += b;
+    }
+    DDLA_CHECK(ddlaFree(handle, temp_U));
+}
+
+template <DdlaBackend Backend, typename T>
+void pgetf2(const DdlaHandle_t& handle, int m, int n, int width, T* A, int ia, int ja,
+            const int* desc, int* ipiv, int& info)
+{
+    detail::require_backend<Backend>(handle,"pgetf2");
+    lu_impl::validate(handle,m,n,A,ia,ja,desc,ipiv,width < 0 ? -2 : width);
+    lu_impl::Workspace<T> workspace(handle);
+    pgetf2<Backend,T>(handle,m,n,width,A,ia,ja,desc,ipiv,info,workspace,ja);
+}
+
+#define INSTANTIATE_PGETF2(BACKEND, TYPE) \
+    template void pgetf2<BACKEND,TYPE>(const DdlaHandle_t&, int, int, int, TYPE*, int, int, const int*, int*, int&); \
+    template void pgetf2<BACKEND,TYPE>(const DdlaHandle_t&, int, int, int, TYPE*, int, int, const int*, int*, int&, lu_impl::Workspace<TYPE>&, int)
+
+#define INSTANTIATE_PRIVATE(B,T) template void lu_impl::factor_inplace<B,T>(const DdlaHandle_t&, int, int, int, T*, int, int, const int*, int*, int&, int)
+#if DDLA_HAS_CPU
+INSTANTIATE_PRIVATE(DdlaBackend::CPU, float);
+INSTANTIATE_PRIVATE(DdlaBackend::CPU, double);
+INSTANTIATE_PRIVATE(DdlaBackend::CPU, std::complex<float>);
+INSTANTIATE_PRIVATE(DdlaBackend::CPU, std::complex<double>);
+#endif
+#if DDLA_HAS_GPU
+INSTANTIATE_PRIVATE(DdlaBackend::GPU, float);
+INSTANTIATE_PRIVATE(DdlaBackend::GPU, double);
+INSTANTIATE_PRIVATE(DdlaBackend::GPU, std::complex<float>);
+INSTANTIATE_PRIVATE(DdlaBackend::GPU, std::complex<double>);
+#endif
+#undef INSTANTIATE_PRIVATE
 
 #if DDLA_HAS_CPU
 INSTANTIATE_PGETF2(DdlaBackend::CPU, float);

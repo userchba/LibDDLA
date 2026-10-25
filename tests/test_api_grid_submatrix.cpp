@@ -242,7 +242,7 @@ void check_pgetrf_pgetrs_submatrix(const ddla::DdlaHandle_t& handle, const Shape
             check_ddla_sync(handle);
             std::vector<int> ipiv(ddla_test::m_loc(handle, descA_ex));
             int info = -1;
-            ddla::pgetrf(handle, n, n, d_A.ptr, descA_ex, ipiv.data(), info);
+            ddla::pgetrf(handle, n, n, d_A.ptr, 1, 1, descA_ex, ipiv.data(), info);
             if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
             exact_out = download(handle, d_A.ptr, h_A.size());
         }
@@ -253,7 +253,7 @@ void check_pgetrf_pgetrs_submatrix(const ddla::DdlaHandle_t& handle, const Shape
             check_ddla_sync(handle);
             std::vector<int> ipiv(ddla_test::m_loc(handle, descA_p));
             int info = -1;
-            ddla::pgetrf(handle, n, n, d_A.ptr, descA_p, ipiv.data(), info);
+            ddla::pgetrf(handle, n, n, d_A.ptr, 1, 1, descA_p, ipiv.data(), info);
             if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
             auto out = download(handle, d_A.ptr, h_A.size());
             check_leading_block(handle, name, descA_ex, descA_p,
@@ -294,7 +294,7 @@ void check_pgetrf_pgetrs_submatrix(const ddla::DdlaHandle_t& handle, const Shape
             check_ddla_sync(handle);
             std::vector<int> ipiv(ddla_test::m_loc(handle, descA_ex));
             int info = -1;
-            ddla::pgetrf(handle, n, n, d_A.ptr, descA_ex, ipiv.data(), info);
+            ddla::pgetrf(handle, n, n, d_A.ptr, 1, 1, descA_ex, ipiv.data(), info);
             if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
             ddla::pgetrs(handle, side, 'N', n, nrhs, d_A.ptr, descA_ex, ipiv.data(), d_B.ptr, descB_ex);
             exact_out = download(handle, d_B.ptr, h_B.size());
@@ -309,7 +309,7 @@ void check_pgetrf_pgetrs_submatrix(const ddla::DdlaHandle_t& handle, const Shape
             check_ddla_sync(handle);
             std::vector<int> ipiv(ddla_test::m_loc(handle, descA_p));
             int info = -1;
-            ddla::pgetrf(handle, n, n, d_A.ptr, descA_p, ipiv.data(), info);
+            ddla::pgetrf(handle, n, n, d_A.ptr, 1, 1, descA_p, ipiv.data(), info);
             if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
             ddla::pgetrs(handle, side, 'N', n, nrhs, d_A.ptr, descA_p, ipiv.data(), d_B.ptr, descB_p);
             auto out = download(handle, d_B.ptr, h_B.size());

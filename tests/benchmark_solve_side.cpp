@@ -142,7 +142,7 @@ double benchmark_pgetrs(char side, int n, int nrhs, const DdlaHandle_t& handle)
 
     std::vector<int> ipiv(ddla_test::m_loc(handle, descA));
     int info = -1;
-    pgetrf(handle, n, n, d_A, descA, ipiv.data(), info);
+    pgetrf(handle, n, n, d_A, 1, 1, descA, ipiv.data(), info);
     DDLA_CHECK(ddlaSynchronize(handle));
 
     MPI_Barrier(handle->comm);

@@ -202,105 +202,60 @@ void scatter(const DdlaHandle_t& handle, int m, int n,
              int root, const T* src, int ldsrc);
 
 /**
- * @brief Internal unblocked panel LU factorization for distributed matrices.
- *
- * Factors the panel starting at global column n_s with width nb_real within the
- * leading-block sub-matrix of size m-by-n (n_s + nb_real <= n).  This is the
- * inner kernel called by pgetrf to factor each diagonal block.  Outputs pivot
- * indices into ipiv (1-based).
- *
- * @tparam T   Scalar type.
- * @param m        Total rows of the logical sub-matrix (<= desc.m()).
- * @param n        Total columns of the logical sub-matrix (<= desc.n()).
- * @param nb_real  Actual width of this panel (<= nb).
- * @param A      Pointer in the selected backend to matrix A (input/output).
- * @param n_s      Global starting column index of the panel.
- * @param handle   Handle owning the process grid and stream.
- * @param descA    ScaLAPACK int[9] descriptor for A.
- * @param ipiv     Host pivot array (output, 1-based).
- * @param info     0 on success, >0 if singular.
- */
-template <DdlaBackend Backend = default_backend_v, typename T>
-void pgetf2(
-    const DdlaHandle_t& handle,
-    int m, int n, int nb_real,
-    T* A, int n_s, const int* descA,
-    int* ipiv, // host
-    int& info  // host
-);
-
-/**
- * @brief Alternative panel LU factorization (rank-revealing variant).
- *
- * Uses a slightly different communication pattern than pgetf2 for
- * pivot selection within a panel.
- *
- * @tparam T   Scalar type.
- * @param m        Total rows of the logical sub-matrix (<= desc.m()).
- * @param n        Total columns of the logical sub-matrix (<= desc.n()).
- * @param nb_real  Actual panel width.
- * @param A      Pointer in the selected backend to matrix A.
- * @param n_start  Global starting column of the panel.
- * @param handle   Handle owning the process grid and stream.
- * @param descA    ScaLAPACK int[9] descriptor for A.
- * @param ipiv     Host pivot array (output).
- * @param info     0 on success.
- */
-template <DdlaBackend Backend = default_backend_v, typename T>
-void pgetf2_panel(
-    const DdlaHandle_t& handle,
-    int m, int n, int nb_real,
-    T* A, int n_start, const int* descA,
-    int* ipiv, // host
-    int& info  // host
-);
-
-/**
  * @brief Distributed LU factorization with partial (row) pivoting:
  *        A = P * L * U.
  *
  * Factors a distributed m-by-n matrix panel by panel:
- *   1. Factor the diagonal block (pgetf2).
+ *   1. Factor the active panel.
  *   2. Broadcast L and U factors along process rows / columns.
  *   3. Solve for the U panel (trsm).
  *   4. Update the trailing submatrix (gemm: C -= L*U).
  *
+ * Each block-column panel uses inner subpanels and BLAS-3 updates.
+ * DDLA_LU_PANEL=inplace (default) factors each inner subpanel in the distributed
+ * matrix; gather uses local getrf on its diagonal owner. Communication workspaces
+ * are reused across panels. All ranks must agree on the selector. No factorization or
+ * pivot bitwise equivalence between the methods is promised.
+ *
  * Requires square blocks (mb == nb).  Corresponds to ScaLAPACK
- * PZGETRF / PDGETRF.  The descriptor may describe a matrix larger than the
- * logical m-by-n sub-matrix (leading block anchored at global (0,0)); only
- * the leading m x n block is factored.
+ * PZGETRF / PDGETRF. ia,ja are one-based global indices; m,n are extents of
+ * A(ia:ia+m-1,ja:ja+n-1). Independent, unaligned offsets are supported. Only
+ * this region is changed, including its previously computed L columns when
+ * later pivots are applied. Empty regions access no data. All handle ranks
+ * must provide consistent region and descriptor metadata.
  *
  * @tparam T   Scalar type.
- * @param m        Number of rows of A (<= desc.m()).
- * @param n        Number of columns of A (<= desc.n()).
+ * @param m        Number of selected rows.
+ * @param n        Number of selected columns.
  * @param A      Pointer in the selected backend to matrix A (input/output -- L+U factors).
  * @param handle   Handle owning the process grid and stream.
+ * @param ia      First selected global row (one-based).
+ * @param ja      First selected global column (one-based).
  * @param descA    ScaLAPACK int[9] descriptor for A (mb == nb required).
- * @param ipiv     Host pivot array (output, 1-based, length >= local rows).
- * @param info     0 on success, >0 if singular.
+ * @param ipiv     Host row-distributed pivots indexed by local descriptor row; values are
+ *                absolute global one-based pivot rows. Other entries stay unchanged.
+ * @param info     0 on success; >0 is the failing one-based position within the selected submatrix (early stop).
  */
 template <DdlaBackend Backend = default_backend_v, typename T>
 void pgetrf(
     const DdlaHandle_t& handle,
     int m, int n,
-    T* A, const int* descA,
+    T* A, int ia, int ja, const int* descA,
     int* ipiv, // host
     int& info  // host
 );
 
 /**
- * @brief Block LU factorization with partial pivoting within each block row.
+ * @brief Distributed LU factorization without pivoting: A = L * U.
  *
- * Computes A = P*L*U where pivoting is applied at the block level: within each
- * block column the diagonal block is factored with getrf (producing P1 A = L1 U1),
- * then the pivot is applied to the full rows (the already-factored columns as
- * well as the right panel), the U and L panels are computed via trsm, and the
- * trailing submatrix updated via gemm.  The output is a standard LU
- * factorization: each block's row swaps cover every column, including the L
- * part, so the factors can be used with any standard triangular solve.
- *
- * This is a right-looking block algorithm.  Corresponds to the block-wise
- * derivation in README.md (Experimental Routines).
+ * Right-looking block algorithm: at each step the nb x nb diagonal block is
+ * factored with the local getrf_nopiv kernel, the right/lower panels are
+ * computed via trsm, and the trailing submatrix is updated via gemm. The
+ * communication pattern mirrors pgetrf_bpiv, but no row pivots are applied:
+ * L has an implicit unit diagonal and is stored strictly below the diagonal,
+ * U on and above it. Requires square blocks (mb == nb). Factors the whole
+ * described matrix (no sub-matrix offsets). Corresponds to the no-pivot
+ * variant of ScaLAPACK PxGETRF.
  *
  * @tparam T   Scalar type.
  * @param m        Number of rows of A.
@@ -308,58 +263,15 @@ void pgetrf(
  * @param A      Pointer in the selected backend to matrix A (input/output -- L+U factors).
  * @param handle   Handle owning the process grid and stream.
  * @param descA    ScaLAPACK int[9] descriptor for A (mb == nb required).
- * @param pivots   pivot array in the selected backend (output, 1-based block-local offsets,
- *                 length >= local rows).
- * @param info     host info 0 on success, >0 if singular. 
+ * @param info     0 on success; >0 if U(k,k) is exactly zero.
  */
 template <DdlaBackend Backend = default_backend_v, typename T>
-void pgetrf_bpiv(const DdlaHandle_t& handle, int m, int n, T* A, const int* descA, int* pivots, int& info);
-
-/**
- * @brief Distributed LU factorization without pivoting.
- *
- * Factors a distributed m-by-n matrix A in-place as A = L * U without
- * pivoting.  L has implicit unit diagonal and is stored strictly below the
- * diagonal; U is stored on and above the diagonal.
- *
- * Uses a right-looking block algorithm: at each step the nb×nb diagonal
- * block is factored with the local getrf_nopiv, the right/lower panels are
- * computed via trsm, and the trailing submatrix is updated via gemm.  The
- * communication pattern mirrors pgetrf_bpiv, but no row pivots are applied.
- *
- * @tparam T   Scalar type.
- * @param m        Number of rows of A.
- * @param n        Number of columns of A.
- * @param A      Pointer in the selected backend to matrix A (input/output -- L+U factors).
- * @param handle   Handle owning the process grid and stream.
- * @param descA    ScaLAPACK int[9] descriptor for A (mb == nb required).
- * @param info     host info: 0 on success, >0 if U(k,k) is exactly zero.
- */
-template <DdlaBackend Backend = default_backend_v, typename T>
-void pgetrf_nopiv(const DdlaHandle_t& handle, int m, int n, T* A, const int* descA, int& info);
-
-/**
- * @brief Local LU factorization without pivoting.
- *
- * Factors a local (single-process, single-GPU) m-by-n matrix A in-place:
- * A = L * U.  L has implicit unit diagonal, stored strictly below diagonal.
- * U is stored on and above diagonal.
- *
- * Uses a right-looking block algorithm with block size nb=32:
- *   1. Panel factorization via custom getf2_nopiv_kernel.
- *   2. Solve for U panel via a triangular solve (trsm).
- *   3. Update trailing submatrix via gemm.
- *
- * @tparam T   Scalar type.
- * @param m        Number of rows of A.
- * @param n        Number of columns of A.
- * @param A      Pointer in the selected backend to matrix A (input/output -- L+U factors).
- * @param lda      Leading dimension of A.
- * @param info_buffer      Pointer in the selected backend to info (0 on success, k > 0 if U(k,k) is exactly zero).
- * @param ddla_handle DDLA handle (provides stream and BLAS handle).
- */
-template <DdlaBackend Backend = default_backend_v, typename T>
-void getrf_nopiv(int m, int n, T* A, int lda, int* info_buffer, const DdlaHandle_t& ddla_handle);
+void pgetrf_nopiv(
+    const DdlaHandle_t& handle,
+    int m, int n,
+    T* A, const int* descA,
+    int& info  // host
+);
 
 /**
  * @brief Distributed LU solve: solve op(A) * X = B (side='L') or
@@ -474,6 +386,43 @@ void pgesv_nopiv(
     char side, char trans, int n, int nrhs,
     T* A, const int* descA,
     T* B, const int* descB
+);
+
+/**
+ * @brief Distributed block LU factorization with partial pivoting within
+ *        each block row: A = P * L * U.
+ *
+ * Right-looking block algorithm. Each nb x nb diagonal block is factored with
+ * the local getrf (partial pivoting inside the block, P1 A_block = L1 U1);
+ * the block permutation is applied to the full rows -- the already-factored
+ * columns as well as the right panel -- the U and L panels are computed via
+ * trsm, and the trailing submatrix is updated via gemm. Every block's row
+ * swaps cover every column, including the L part, so the output is a standard
+ * LU factorization usable with any standard triangular solve.
+ *
+ * The pivot array @p pivots is a backend array (host for CPU, device for GPU)
+ * holding 1-based offsets within each diagonal block, one entry per local row
+ * of the block's process row; the block permutations act on disjoint row sets,
+ * so pgetrs_bpiv applies them without any data movement. Requires square
+ * blocks (mb == nb). Factors the whole described matrix (no sub-matrix
+ * offsets).
+ *
+ * @tparam T   Scalar type.
+ * @param m        Number of rows of A.
+ * @param n        Number of columns of A.
+ * @param A      Pointer in the selected backend to matrix A (input/output -- L+U factors).
+ * @param handle   Handle owning the process grid and stream.
+ * @param descA    ScaLAPACK int[9] descriptor for A (mb == nb required).
+ * @param pivots   Pivot array in the selected backend (output, 1-based block-local offsets, length >= local rows).
+ * @param info     0 on success; >0 if a diagonal block is singular.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void pgetrf_bpiv(
+    const DdlaHandle_t& handle,
+    int m, int n,
+    T* A, const int* descA,
+    int* pivots, // host for CPU, device for GPU
+    int& info  // host
 );
 
 /**

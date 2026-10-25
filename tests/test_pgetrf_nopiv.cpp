@@ -1,4 +1,5 @@
 #include <cassert>
+#include "LU/lu_internal.h"
 #include <cmath>
 #include <mpi.h>
 #include <iostream>
@@ -59,7 +60,7 @@ void check_pgetrf_nopiv(int n, const DdlaHandle_t& ddla_handle)
     // 1) pgetrf (partial pivoting)
     int info_piv = -1;
     double t_piv_start = MPI_Wtime();
-    pgetrf(ddla_handle, n, n, d_A_piv, matrix_desc, ipiv.data(), info_piv);
+    pgetrf(ddla_handle, n, n, d_A_piv, 1, 1, matrix_desc, ipiv.data(), info_piv);
     DDLA_CHECK(ddlaSynchronize(ddla_handle));
     MPI_Barrier(MPI_COMM_WORLD);
     double t_piv = MPI_Wtime() - t_piv_start;

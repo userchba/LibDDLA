@@ -1,134 +1,94 @@
 #include <ddla/ddla.h>
 #include "ddla_desc.h"
 #include <cassert>
+#include <algorithm>
 #include <vector>
 #include "ddla_connector.h"
 #include "ddla_stream_impl.h"
 #include "require_backend.h"
 #include "comm_traits.h"
+#include "lu_panel.h"
 
 namespace ddla{
 
 template <DdlaBackend Backend, typename T>
-void pgetrf(
-    const DdlaHandle_t& handle, int m, int n,
-    T* A, const int* array_descA,
-    int* ipiv, // host
-    int& info  // host
-)
+void pgetrf(const DdlaHandle_t& handle, int m, int n, T* A, int ia, int ja,
+             const int* desc, int* ipiv, int& info)
 {
-    check_desc(array_descA, handle);
-    int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
+    detail::require_backend<Backend>(handle, "pgetrf");
+    lu_impl::validate(handle, m, n, A, ia, ja, desc, ipiv);
+    lu_impl::Workspace<T> workspace(handle);
+    info = 0;
+    if (m == 0 || n == 0) return;
+
+    int nprows, npcols, myprow, mypcol;
     ddlaGetGridDims(handle, nprows, npcols);
     ddlaGetGridCoords(handle, myprow, mypcol);
+    const int nb = desc[DDLA_MB_], ld = desc[DDLA_LLD_];
+    const int row0 = ia - 1, col0 = ja - 1;
+    const int row_end = num_loc(row0 + m, nb, myprow, desc[DDLA_RSRC_], nprows);
+    const int col_end = num_loc(col0 + n, nb, mypcol, desc[DDLA_CSRC_], npcols);
+    const int local_rows = row_end - num_loc(row0, nb, myprow, desc[DDLA_RSRC_], nprows);
+    const int local_cols = col_end - num_loc(col0, nb, mypcol, desc[DDLA_CSRC_], npcols);
 
+    T *temp_block = nullptr, *temp_L = nullptr, *temp_U = nullptr;
+    DDLA_CHECK(ddlaMalloc(handle, &temp_block, sizeof(T)*std::size_t(nb)*nb));
+    DDLA_CHECK(ddlaMalloc(handle, &temp_L, sizeof(T)*std::size_t(local_rows)*nb));
+    DDLA_CHECK(ddlaMalloc(handle, &temp_U, sizeof(T)*std::size_t(nb)*local_cols));
 
-    DdlaHandle_t ddla_handle = handle;
-    detail::require_backend<Backend>(ddla_handle, "pgetrf");
-    assert(m <= array_descA[DDLA_M_] && n <= array_descA[DDLA_N_]);
+    for (int k = 0; k < std::min(m,n); ) {
+        const int r = row0 + k, c = col0 + k;
+        // Independent offsets can reach row and column block boundaries at
+        // different steps. Each diagonal block must fit both distributions.
+        const int b = std::min({nb-r%nb, nb-c%nb, m-k, n-k});
+        const int il = indx_g2l_r(desc, handle, r), jl = indx_g2l_c(desc, handle, c);
+        const int pr = indxg2p(r, nb, desc[DDLA_RSRC_], nprows);
+        const int pc = indxg2p(c, nb, desc[DDLA_CSRC_], npcols);
 
+        pgetf2<Backend,T>(handle, m-k, n-k, b, A, ia+k, ja+k, desc,
+                          ipiv, info, workspace, ja);
+        if (info != 0) { if (info > 0) info += k; break; }
 
-    int nb = array_descA[DDLA_MB_];
-    int nb_real;
-    assert(array_descA[DDLA_MB_]==array_descA[DDLA_NB_]);
-    int lld = array_descA[DDLA_LLD_];
-
-    int m_loc = num_loc(m, array_descA[DDLA_MB_], myprow, array_descA[DDLA_RSRC_], nprows);
-    int n_loc = num_loc(n, array_descA[DDLA_NB_], mypcol, array_descA[DDLA_CSRC_], npcols);
-
-
-    int mm_row_start = 0;
-    int mm_col_start = 0;
-    int i_loc,j_loc;
-    int owner_row,owner_col;
-
-    T *temp_block;
-    DDLA_CHECK(ddlaMalloc(ddla_handle, &temp_block, sizeof(T)*nb*nb));
-
-    T *temp_L;
-    DDLA_CHECK(ddlaMalloc(ddla_handle, &temp_L, sizeof(T)*m_loc*nb));
-
-    T *temp_U;
-    DDLA_CHECK(ddlaMalloc(ddla_handle, &temp_U, sizeof(T)*nb*n_loc));
-
-    info = 0;
-
-    for(int n_s=0;n_s<std::min(m,n);n_s+=nb){
-        nb_real = std::min(nb, std::min(m,n)-n_s);
-
-        i_loc = indx_g2l_r(array_descA, handle, n_s);
-        j_loc = indx_g2l_c(array_descA, handle, n_s);
-
-        owner_row = indxg2p(n_s, nb, array_descA[DDLA_RSRC_], nprows);
-        owner_col = indxg2p(n_s, nb, array_descA[DDLA_CSRC_], npcols);
-
-
-        // start pgetf2
-
-        pgetf2_panel<Backend>(handle, 
-            m, n, nb_real,
-            A, n_s, array_descA,
-            ipiv, info
-        );
-        // finish pgetf2
-        if(info != 0){
-            break;
+        const int row_after = num_loc(r+b, nb, myprow, desc[DDLA_RSRC_], nprows);
+        const int col_after = num_loc(c+b, nb, mypcol, desc[DDLA_CSRC_], npcols);
+        if (jl >= 0) {
+            if (il >= 0)
+                DDLA_CHECK(ddlaMemcpy2D(handle, temp_block, std::size_t(b)*sizeof(T),
+                    A+il+std::size_t(jl)*ld, std::size_t(ld)*sizeof(T), std::size_t(b)*sizeof(T), b));
+            if (row_after < row_end)
+                DDLA_CHECK(ddlaMemcpy2D(handle, temp_L, std::size_t(row_end-row_after)*sizeof(T),
+                    A+row_after+std::size_t(jl)*ld, std::size_t(ld)*sizeof(T),
+                    std::size_t(row_end-row_after)*sizeof(T), b));
         }
-        // update trailing matrix
-        if(i_loc>=0)
-            mm_row_start +=nb; // update row start   
-        if(j_loc>=0){
-            mm_col_start+=nb;
-            if(i_loc>=0){
-                DDLA_CHECK(ddlaMemcpy2D(ddla_handle, temp_block, nb_real * sizeof(T), A + i_loc + j_loc * lld,
-                                        lld * sizeof(T), nb_real * sizeof(T), nb_real));
-                
-            }
-            if(mm_row_start<m_loc){
-                DDLA_CHECK(ddlaMemcpy2D(ddla_handle, temp_L, (m_loc-mm_row_start) * sizeof(T),
-                                        A + mm_row_start + j_loc * lld, lld * sizeof(T),
-                                        (m_loc - mm_row_start) * sizeof(T), nb_real));
+        if (row_after < row_end)
+            commBcast<Backend>(handle, CommScope::Row, temp_L, std::size_t(row_end-row_after)*b, pc);
+        if (il >= 0) {
+            commBcast<Backend>(handle, CommScope::Row, temp_block, std::size_t(b)*b, pc);
+            if (col_after < col_end) {
+                trsm<Backend,T>(handle, 'L', 'L', 'N', 'U', b, col_end-col_after, T(1),
+                    temp_block, b, A+il+std::size_t(col_after)*ld, ld);
+                DDLA_CHECK(ddlaMemcpy2D(handle, temp_U, std::size_t(b)*sizeof(T),
+                    A+il+std::size_t(col_after)*ld, std::size_t(ld)*sizeof(T),
+                    std::size_t(b)*sizeof(T), col_end-col_after));
             }
         }
-        if(mm_row_start<m_loc){
-            commBcast<Backend>(ddla_handle, CommScope::Row, temp_L, (std::size_t)(m_loc - mm_row_start) * nb_real, owner_col);
-        }
-        // broadcast block column
-        if(i_loc>=0){
-            commBcast<Backend>(ddla_handle, CommScope::Row, temp_block, (std::size_t)nb_real * nb_real, owner_col);
-            if(mm_col_start<n_loc){
-                trsm<Backend, T>(
-                    ddla_handle, 'L', 'L', 'N', 'U',
-                    nb_real, n_loc - mm_col_start, T(1),
-                    temp_block, nb_real,
-                    A + i_loc + mm_col_start * lld, lld);
-                DDLA_CHECK(ddlaMemcpy2D(ddla_handle, temp_U, nb_real * sizeof(T), A + i_loc + mm_col_start * lld,
-                                        lld * sizeof(T), nb_real * sizeof(T), n_loc - mm_col_start));
-            }   
-        }
-        if(mm_col_start<n_loc){
-            commBcast<Backend>(ddla_handle, CommScope::Col, temp_U, (std::size_t)nb_real * (n_loc - mm_col_start), owner_row);
-        }
-        if(mm_row_start<m_loc&&mm_col_start<n_loc){
-            gemm<Backend, T>(ddla_handle, 'N', 'N',
-                m_loc - mm_row_start, n_loc - mm_col_start, nb_real,
-                -1.0,
-                temp_L, m_loc - mm_row_start,
-                temp_U, nb_real,
-                1.0,
-                A + mm_row_start + mm_col_start * lld, lld);
-        }
+        if (col_after < col_end)
+            commBcast<Backend>(handle, CommScope::Col, temp_U, std::size_t(b)*(col_end-col_after), pr);
+        if (row_after < row_end && col_after < col_end)
+            gemm<Backend,T>(handle, 'N', 'N', row_end-row_after, col_end-col_after, b,
+                -1.0, temp_L, row_end-row_after, temp_U, b, 1.0,
+                A+row_after+std::size_t(col_after)*ld, ld);
+        k += b;
     }
-    DDLA_CHECK(ddlaFree(ddla_handle, temp_block));
-    DDLA_CHECK(ddlaFree(ddla_handle, temp_L));
-    DDLA_CHECK(ddlaFree(ddla_handle, temp_U));
-    DDLA_CHECK(ddlaSynchronize(ddla_handle));
-
+    DDLA_CHECK(ddlaFree(handle, temp_block));
+    DDLA_CHECK(ddlaFree(handle, temp_L));
+    DDLA_CHECK(ddlaFree(handle, temp_U));
+    DDLA_CHECK(ddlaSynchronize(handle));
 }
 
 #define INSTANTIATE_PGETRF(BACKEND, TYPE)                                   \
     template void pgetrf<BACKEND, TYPE>(const DdlaHandle_t&, int m, int n, \
-    TYPE* A, const int* array_descA, \
+    TYPE* A, int ia, int ja, const int* array_descA, \
     int* ipiv, \
     int& info)
 

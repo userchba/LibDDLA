@@ -32,7 +32,7 @@ void pgesv(
     int info = 0;
     pgetrf<Backend>(handle, 
         n, n,
-        A, array_descA,
+        A, 1, 1, array_descA,
         ipiv.data(),
         info
     );

@@ -54,7 +54,7 @@ if(DDLA_USE_CPU AND NOT DDLA_DUAL_BUILD)
         PBLAS/ptrtrs.cpp
         PBLAS/ptrmm.cpp
         LU/pgetf2.cpp
-        LU/pgetf2_panel.cpp
+        LU/lu_panel.cpp
         LU/pgetrf.cpp
         LU/pgetrf_bpiv.cpp
         LU/pgetrf_nopiv.cpp
@@ -111,9 +111,9 @@ else()
         PBLAS/ptrtrs.cpp
         PBLAS/ptrmm.cpp
         LU/pgetf2.cpp
+        LU/lu_panel.cpp
         matrix_transfer_kernels.cpp
         LU/pgetf2_kernels.cpp
-        LU/pgetf2_panel.cpp
         LU/pgetrf.cpp
         LU/pgetrf_bpiv.cpp
         LU/pgetrf_nopiv.cpp

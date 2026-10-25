@@ -1,4 +1,5 @@
 #include "api_grid_test_common.h"
+#include "LU/lu_internal.h"
 
 #include <type_traits>
 
@@ -50,7 +51,7 @@ void run_case(const ddla::DdlaHandle_t& handle, const int* desc,
 
     std::vector<int> ipiv(ddla_test::m_loc(handle, desc), -1);
     int info = -1;
-    ddla::pgetf2(handle, desc[DDLA_M_], desc[DDLA_N_], panel_width, d_A.ptr, 0, desc, ipiv.data(), info);
+    ddla::pgetf2(handle, desc[DDLA_M_], desc[DDLA_N_], panel_width, d_A.ptr, 1, 1, desc, ipiv.data(), info);
 
     const std::string label = std::string("pgetf2(handle, ") + scalar_name<T>()
                             + "/" + case_name + ")";
@@ -89,7 +90,7 @@ void run_same_row_swap(const ddla::DdlaHandle_t& handle, const int* desc, int p)
 
     std::vector<int> ipiv(ddla_test::m_loc(handle, desc), -1);
     int info = -1;
-    ddla::pgetf2(handle, desc[DDLA_M_], desc[DDLA_N_], 1, d_A.ptr, 0, desc, ipiv.data(), info);
+    ddla::pgetf2(handle, desc[DDLA_M_], desc[DDLA_N_], 1, d_A.ptr, 1, 1, desc, ipiv.data(), info);
     check_ddla_sync(handle);
     const auto out = download(handle, d_A.ptr, h_A.size());
 
@@ -156,6 +157,13 @@ void check_scalar_type(const ddla::DdlaHandle_t& handle,
     }, 0);
 
     run_case<T>(handle, desc, "exact-singular", 1, [](int i, int j){
+        if(j == 0) return scalar<T>(0.0);
+        return i == j ? scalar<T>(1.0) : scalar<T>(0.0);
+    }, 1);
+
+    // A full-block-width panel (the schedule pgetrf drives) hitting a singular
+    // column must still report info=1 and stop before the inner updates.
+    run_case<T>(handle, desc, "blocked-singular", std::min(nb, n), [](int i, int j){
         if(j == 0) return scalar<T>(0.0);
         return i == j ? scalar<T>(1.0) : scalar<T>(0.0);
     }, 1);

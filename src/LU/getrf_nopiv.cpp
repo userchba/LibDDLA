@@ -1,15 +1,13 @@
 #include <ddla/ddla.h>
+#include "lu_internal.h"
 #include "ddla_connector.h"
 #include "ddla_stream_impl.h"
+#include "helpers.h"
 #include "require_backend.h"
 #include <algorithm>
 #include <cmath>
 #include <complex>
 #include <type_traits>
-
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
-#include <thrust/complex.h>
-#endif
 
 // Maximum panel width for the register-based getf2_nopiv kernel.
 // Each thread stores one row of the panel in registers, so this
@@ -157,23 +155,9 @@ void launch_getf2_nopiv_kernel(const DdlaHandle_t& ddla_handle, int jb, T* d_blo
     const int threads = std::min(jb, 512);
     const int shmem   = jb * sizeof(T);
 
-    if constexpr (std::is_same_v<T, std::complex<float>>)
-    {
-        getf2_nopiv_kernel<thrust::complex<float>>
-            <<<1, threads, shmem, stream>>>(
-                jb, jb, reinterpret_cast<thrust::complex<float>*>(d_block), lda, d_info, gbstep);
-    }
-    else if constexpr (std::is_same_v<T, std::complex<double>>)
-    {
-        getf2_nopiv_kernel<thrust::complex<double>>
-            <<<1, threads, shmem, stream>>>(
-                jb, jb, reinterpret_cast<thrust::complex<double>*>(d_block), lda, d_info, gbstep);
-    }
-    else
-    {
-        getf2_nopiv_kernel<T>
-            <<<1, threads, shmem, stream>>>(jb, jb, d_block, lda, d_info, gbstep);
-    }
+    using DeviceT = detail::DeviceScalarT<T>;
+    getf2_nopiv_kernel<DeviceT><<<1, threads, shmem, stream>>>(
+        jb, jb, reinterpret_cast<DeviceT*>(d_block), lda, d_info, gbstep);
     DDLA_CHECK(ddlaGetLastError(ddla_handle));
 }
 

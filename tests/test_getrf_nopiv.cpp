@@ -1,4 +1,5 @@
 #include <cmath>
+#include "LU/lu_internal.h"
 #include <complex>
 #include <cstdlib>
 #include <iostream>
