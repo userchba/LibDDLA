@@ -84,11 +84,9 @@ endif()
 
 add_subdirectory(BLAS)
 add_subdirectory(Cholesky)
-add_subdirectory(Eigensolver)
 add_subdirectory(LU)
 add_subdirectory(PBLAS)
 add_subdirectory(QR)
-add_subdirectory(SVD)
 add_subdirectory(vbatched)
 
 # ---------------------------------------------------------------------------
