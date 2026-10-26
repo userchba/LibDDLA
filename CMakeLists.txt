@@ -148,6 +148,9 @@ endif()
 # library target is still built here) see the same requirement.
 # ---------------------------------------------------------------------------
 set(DDLA_LAPACK_LIBRARY "" CACHE FILEPATH "Path to host LAPACK library (pgeqrf host arms)")
+if(NOT DDLA_LAPACK_LIBRARY AND NOT DDLA_CPU_BLAS_LIBRARY AND DEFINED ENV{OPENBLAS} AND EXISTS "$ENV{OPENBLAS}")
+    set(DDLA_LAPACK_LIBRARY "$ENV{OPENBLAS}")
+endif()
 if(DDLA_LAPACK_LIBRARY)
     if(NOT EXISTS "${DDLA_LAPACK_LIBRARY}")
         message(FATAL_ERROR "DDLA_LAPACK_LIBRARY set to nonexistent file: ${DDLA_LAPACK_LIBRARY}")
