@@ -28,6 +28,8 @@ option(DDLA_USE_HIP "Build with HIP" OFF)
 option(DDLA_USE_DEBUG "DEBUG for program" OFF)
 option(DDLA_USE_CCL "ENABLE NCCL or RCCL" OFF)
 option(DDLA_USE_GPU_CPU_TUNNEL "use gpu cpu tunnel for communication" OFF)
+option(DDLA_ENABLE_FORTRAN "Build the Fortran bindings (ddla_fortran library + module)" OFF)
+option(DDLA_ENABLE_PYTHON "Build the Python bindings and C-ABI library" OFF)
 if(DDLA_USE_CUDA AND DDLA_USE_HIP)
     message(FATAL_ERROR "Cannot enable both CUDA and HIP")
 endif()
@@ -220,8 +222,32 @@ if(DDLA_USE_CUDA)
 endif(DDLA_USE_CUDA)
 add_subdirectory(src)
 
+# ---------------------------------------------------------------------------
+# Fortran & Python bindings (optional)
+# ---------------------------------------------------------------------------
+if(DDLA_ENABLE_FORTRAN)
+    include(CheckLanguage)
+    check_language(Fortran)
+    if(CMAKE_Fortran_COMPILER)
+        enable_language(Fortran)
+    else()
+        message(FATAL_ERROR "DDLA_ENABLE_FORTRAN is ON but no Fortran compiler was found")
+    endif()
+endif()
+
 if(BUILD_TESTS)
     enable_testing()
+endif()
+
+if(DDLA_ENABLE_FORTRAN OR DDLA_ENABLE_PYTHON)
+    add_subdirectory(fortran)
+endif()
+
+if(DDLA_ENABLE_PYTHON AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/python/CMakeLists.txt")
+    add_subdirectory(python)
+endif()
+
+if(BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 # ---------------------------------------------------------------------------

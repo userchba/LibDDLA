@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ddla"
+version = "0.1.0"
+description = "Python bindings for LibDDLA distributed dense linear algebra"
+readme = "README.md"
+requires-python = ">=3.6"
+dependencies = [
+    "numpy>=1.18",
+]
+
+[project.optional-dependencies]
+mpi = ["mpi4py"]
