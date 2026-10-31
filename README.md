@@ -1,6 +1,6 @@
 # LibDDLA — Distributed Dense Linear Algebra
 
-LibDDLA 0.0.5 is a C++17 template library for **distributed dense linear algebra**.
+LibDDLA 0.0.6 is a C++17 template library for **distributed dense linear algebra**.
 It provides ScaLAPACK-style APIs with 2D block-cyclic data distribution over an
 MPI process grid, with a CPU (OpenBLAS/vendor BLAS), CUDA, or HIP backend
 selected at build time, including an optional dual CPU+GPU build that compiles
@@ -14,13 +14,11 @@ runtime. All functions live in the `ddla` namespace.
   are mutually exclusive). Combining `DDLA_USE_CPU` with `DDLA_USE_CUDA` or
   `DDLA_USE_HIP` builds a **dual** library containing both backends,
   selectable per `DdlaHandle_t` at runtime.
-- **The CPU-only backend has a reduced surface.** It currently covers the
-  BLAS-1/2/3 wrappers (`gemm`, `scal`, `omatcopy`, `axpy`, `iamax`, `geru`) and
-  the local LAPACK wrappers (`getrf`, `potrf`, `laswp`, `geqrf`, `larft`), `random_generate`, and
-  `pgemm`, and the distributed LU (`pgetrf`, `pgetrs`, `pgesv` and their
-  `_nopiv` / `_bpiv` variants), Cholesky (`ppotrf`, `ppotrs`, `pposv`, the
-  bottom-right variants) and triangular-solve (`ptrtrs`) routines with their
-  helpers (`pgeadd`, `pdam`). Each of them is templated on the
+- **CPU and GPU coverage.** Both backends provide the local BLAS/LAPACK
+  wrappers, including `gemm`, `trmm`, `trtrm`, `gemmBatched`, `getrf`, `potrf`,
+  `geqrf` and `larft`; distributed GEMM, LU, Cholesky, QR/QL, triangular
+  multiplication/solve, and data movement; and `random_generate`.
+  These routines are templated on the
   backend, like `pgemm`: `pgetrf<DdlaBackend::CPU>(handle, ...)` runs on a CPU
   handle (host BLAS/LAPACK, MPI), `<DdlaBackend::GPU>` on a GPU handle, and the
   default is the build's default backend. Only the variable-size batched GEMMs
@@ -31,15 +29,18 @@ runtime. All functions live in the `ddla` namespace.
 - **Supported scalar types** are `float`, `double`, `std::complex<float>`, and
   `std::complex<double>`. The distributed Cholesky family (`ppotrf` /
   `ppotrs` / `pposv`) is instantiated for all four types.
-- **Leading-block sub-matrix support.** Most factorization/solve routines
+- **Submatrix support depends on the routine.** Most factorization/solve routines
   accept descriptors larger than the logical sub-matrix and operate only on
   the leading block anchored at global (0,0) (the same convention as
   `pgemm`); local extents are derived from the logical dimensions, not the
   descriptor's full size. `pdam` takes an optional `n` (default `-1` = the
-  whole matrix), and `pgetf2` takes an explicit `n`.
-- **Matrix storage is caller-owned.** LibDDLA routines operate on device pointers
-  supplied by the caller. Individual routines may allocate and release temporary
-  device workspaces internally.
+  whole matrix). `pgetrf`, `pgeadd`, `gather` and `scatter` support explicit
+  one-based global origins; the `ia/ja` arguments of `ppotrf` and the
+  `ia/ja/ib/jb` arguments of `pposv` must currently be 1.
+- **Matrix storage is caller-owned.** Use host pointers for CPU handles and
+  device pointers for GPU handles. Individual routines may allocate temporary
+  storage internally. `ddla::vector<T>` provides optional ownership of an
+  uninitialized buffer in the handle's memory space; the handle must outlive it.
 - **Integer dimensions (ScaLAPACK-compatible).** Global/local dimensions,
   strides, and indices use `int`, matching ScaLAPACK's descriptor convention.
   Matrices whose element count exceeds `INT_MAX` are not supported; extending
@@ -52,18 +53,24 @@ runtime. All functions live in the `ddla` namespace.
 
 ## Prerequisites
 
-- **CMake** ≥ 3.13
+- **CMake** ≥ 3.18 (the source lists use `TARGET_DIRECTORY` properties)
 - **C++17** compiler
 - **MPI** (Open MPI or MPICH)
 - **CPU backend:** a BLAS library (e.g. OpenBLAS) providing the standard
-  Fortran `?gemm`/`?scal`/`?axpy`/`i?amax`/`?ger`/`?geru`/`?swap` symbols and the LAPACK
-  `?getrf`/`?potrf`/`?laswp`/`?geqrf`/`?geqlf`/`?larft` ones (OpenBLAS and MKL carry LAPACK in the same library; a GPU-only
-  build needs neither). Point CMake at it with
+  Fortran `?gemm`/`?scal`/`?axpy`/`i?amax`/`?ger`/`?geru`/`?swap` symbols,
+  the CBLAS `cblas_cdotc_sub` / `cblas_zdotc_sub` complex-dot interfaces, and
+  the LAPACK `?getrf`/`?potrf`/`?laswp`/`?geqrf`/`?geqlf`/`?larft` ones. OpenBLAS
+  and MKL carry LAPACK in the same library. Point CMake at it with
   `-DDDLA_CPU_BLAS_LIBRARY=/path/to/libopenblas.so`, or leave it unset to fall
   back to `find_package(BLAS REQUIRED)`.
 - **CUDA backend:** CUDA Toolkit with cuBLAS, cuSOLVER, cuRAND
 - **HIP backend:** ROCm / DTK with hipBLAS, hipSOLVER, hipRAND, and a CMake
   version with first-class HIP language support
+- **Host LAPACK:** required by every source build, including GPU-only builds.
+  Use `-DDDLA_LAPACK_LIBRARY=/path/to/libopenblas.so` when it is not already
+  supplied by `DDLA_CPU_BLAS_LIBRARY` or found by `find_package(LAPACK)`.
+  CMake also accepts an existing library path from the `OPENBLAS` environment
+  variable when neither library option is set.
 - **CCL mode:** NCCL or RCCL for direct inter-GPU collectives (enable
   `-DDDLA_USE_CCL=ON`)
 
@@ -99,6 +106,7 @@ cmake --build build-cpu --target install
 ```bash
 cmake -S . -B build-cuda                               \
   -DDDLA_USE_CUDA=ON                                   \
+  -DDDLA_LAPACK_LIBRARY=/path/to/libopenblas.so         \
   -DCMAKE_CUDA_ARCHITECTURES="80"                      \
   -DBUILD_TESTS=ON                                     \
   -DDDLA_USE_CCL=ON                                    \
@@ -112,6 +120,7 @@ cmake --build build-cuda --target install
 ```bash
 cmake -S . -B build-hip                                \
   -DDDLA_USE_HIP=ON                                    \
+  -DDDLA_LAPACK_LIBRARY=/path/to/libopenblas.so         \
   -DCMAKE_HIP_ARCHITECTURES="gfx90a"                   \
   -DBUILD_TESTS=ON                                     \
   -DDDLA_USE_CCL=ON                                    \
@@ -154,9 +163,13 @@ find_package(LibDDLA REQUIRED)
 target_link_libraries(myapp PRIVATE ddla::ddla)
 ```
 
-Downstream translation units must still define the same backend macro(s) used
-to build LibDDLA (`DDLA_USE_CPU`, `DDLA_USE_CUDA`, and/or `DDLA_USE_HIP`,
-matching the build), because the backend selection is compile-time.
+The installed `ddla::ddla` target supplies the include path, MPI dependency
+and configured compile definitions. Public headers obtain build capabilities
+from the generated `<ddla/ddla_config.h>` (`DDLA_HAS_CPU`, `DDLA_HAS_GPU`), so
+applications using only the public API do not need private vendor headers.
+In a dual build, `ddlaInit(handle)` and an omitted compute-template backend
+default to GPU. For CPU calls, create a CPU handle and select
+`DdlaBackend::CPU` explicitly on backend-templated compute routines.
 
 ## CMake options
 
@@ -167,9 +180,12 @@ matching the build), because the backend selection is compile-time.
 | `DDLA_USE_CUDA`           | OFF     | Build for NVIDIA CUDA GPUs |
 | `DDLA_USE_HIP`            | OFF     | Build for AMD HIP/ROCm GPUs |
 | `DDLA_CPU_BLAS_LIBRARY`   | (empty) | Path to a BLAS library for the CPU backend; falls back to `find_package(BLAS REQUIRED)` if unset |
+| `DDLA_LAPACK_LIBRARY`     | (empty) | Host LAPACK for all source builds; otherwise use `DDLA_CPU_BLAS_LIBRARY`, the `OPENBLAS` environment path, or LAPACK discovery |
 | `DDLA_USE_DEBUG`          | OFF     | Enable `DDLA_USE_DEBUG` preprocessor macro |
 | `DDLA_USE_CCL`            | OFF     | Use NCCL (CUDA) or RCCL (HIP) for device collectives (GPU backend required) |
 | `DDLA_USE_GPU_CPU_TUNNEL` | OFF     | Route communication through host staging buffers (D2H → MPI → H2D) (GPU backend required) |
+| `DDLA_ENABLE_FORTRAN`    | OFF     | Build `ddla_c`, the `ddla_fortran` library and Fortran module `ddla`; requires a Fortran compiler |
+| `DDLA_ENABLE_PYTHON`     | OFF     | Build `ddla_c` and stage the Python package; requires a Python 3 interpreter |
 
 When both `DDLA_USE_CCL` and `DDLA_USE_GPU_CPU_TUNNEL` are enabled, the
 GPU-CPU tunnel path takes precedence for communication.  NCCL/RCCL libraries
@@ -200,14 +216,17 @@ All three paths are implemented once in `src/comm_traits.h` (`commSend`,
 #include <ddla/ddla.h>
 #include <mpi.h>
 
-ddla::DdlaHandle_t handle;          // opaque pointer (DdlaStream*)
-ddla::DDLA_CHECK(ddla::ddlaInit(handle));            // create BLAS/Solver handles and device streams
-ddla::DDLA_CHECK(ddla::ddlaSet(handle, MPI_COMM_WORLD, 'R'));   // auto process grid (row-major)
+ddla::DdlaHandle_t handle = nullptr;   // opaque pointer (DdlaStream*)
+ddla::DDLA_CHECK(ddla::ddlaInit(handle));   // select backend and allocate handle
+ddla::DDLA_CHECK(ddla::ddlaSet(handle, MPI_COMM_WORLD, 'R')); // create resources and auto grid
 // or: ddla::DDLA_CHECK(ddla::ddlaSet(handle, MPI_COMM_WORLD, nprows, npcols, 'R'));
 ```
 
 - `ddlaSet` stores the process-grid dimensions and communicator on the handle.
   The automatic form (`'R'`) derives a 2D grid from the number of MPI ranks.
+- Initialize MPI before setting up the handle. In a dual build,
+  `ddlaInit(handle, ddla::DdlaBackend::CPU)` selects the CPU backend;
+  compute calls must use the matching template backend.
 - **Destroy** with `ddla::DDLA_CHECK(ddla::ddlaDestroy(handle))` when done.
 
 ### Distributed matrix multiplication
@@ -246,9 +265,9 @@ mismatch (usually an `LLD_A` too small for the local row count) throws
 ```cpp
 int m = 4096, n = 64;
 int desc[ddla::DDLA_DLEN_];
-DDLA_CHECK(ddlaDescInit(desc, handle, m, n, 64, 64, 0, 0));  // mb == nb: square blocks
+ddla::DDLA_CHECK(ddla::ddlaDescInit(desc, handle, m, n, 64, 64, 0, 0));
 // Over-allocated local buffer? Raise the leading dimension afterwards:
-// desc[DDLA_LLD_] += extra_rows;
+// desc[ddla::DDLA_LLD_] += extra_rows;
 ```
 
 `ddlaDescInit` fills the descriptor the way `DESCINIT` does and derives the
@@ -262,26 +281,28 @@ are not stored in a descriptor; derive them with
 `num_loc(desc[DDLA_M_], desc[DDLA_MB_], myprow, desc[DDLA_RSRC_], nprows)`
 after fetching the grid with `ddlaGetGridDims` / `ddlaGetGridCoords`.
 
-### Local device matrices
+### Local matrix storage
 
 Each MPI rank owns a contiguous local submatrix of size `m_loc × n_loc` stored
-in GPU device memory.  The caller allocates and frees this memory.
+in host memory for a CPU handle or device memory for a GPU handle. The caller
+allocates and frees this memory, with helper calls taking the handle first.
 
 ```cpp
 #include <ddla/ddla.h>
+#include <mpi.h>
 
 int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
 
-    ddla::DdlaHandle_t handle;
-    ddla::ddlaInit(handle);
-    ddla::ddlaSet(handle, MPI_COMM_WORLD, 'R');
+    ddla::DdlaHandle_t handle = nullptr;
+    ddla::DDLA_CHECK(ddla::ddlaInit(handle));
+    ddla::DDLA_CHECK(ddla::ddlaSet(handle, MPI_COMM_WORLD, 'R'));
 
     int n = 4096, nrhs = 64;
     int descA[ddla::DDLA_DLEN_], descB[ddla::DDLA_DLEN_];
     // Square blocks (mb == nb): use block size 64 for both matrices.
-    ddla::DDLA_CHECK(ddlaDescInit(descA, handle, n, n, 64, 64, 0, 0));
-    ddla::DDLA_CHECK(ddlaDescInit(descB, handle, n, nrhs, 64, 64, 0, 0));
+    ddla::DDLA_CHECK(ddla::ddlaDescInit(descA, handle, n, n, 64, 64, 0, 0));
+    ddla::DDLA_CHECK(ddla::ddlaDescInit(descB, handle, n, nrhs, 64, 64, 0, 0));
 
     int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
     ddla::ddlaGetGridDims(handle, nprows, npcols);
@@ -292,16 +313,14 @@ int main(int argc, char** argv) {
     const long n_locB = ddla::num_loc(nrhs, 64, mypcol, 0, npcols);
 
     double *d_A = nullptr, *d_B = nullptr;
-    ddla::DDLA_CHECK(ddlaMalloc(reinterpret_cast<void**>(&d_A),
-                                m_locA * n_locA * sizeof(double), handle));
-    ddla::DDLA_CHECK(ddlaMalloc(reinterpret_cast<void**>(&d_B),
-                                m_locB * n_locB * sizeof(double), handle));
+    ddla::DDLA_CHECK(ddla::ddlaMalloc(handle, &d_A, m_locA * n_locA * sizeof(double)));
+    ddla::DDLA_CHECK(ddla::ddlaMalloc(handle, &d_B, m_locB * n_locB * sizeof(double)));
 
     // ... fill matrices, call ddla routines ...
 
-    ddla::DDLA_CHECK(ddlaFree(d_A, handle));
-    ddla::DDLA_CHECK(ddlaFree(d_B, handle));
-    ddla::DDLA_CHECK(ddlaDestroy(handle));
+    ddla::DDLA_CHECK(ddla::ddlaFree(handle, d_A));
+    ddla::DDLA_CHECK(ddla::ddlaFree(handle, d_B));
+    ddla::DDLA_CHECK(ddla::ddlaDestroy(handle));
     MPI_Finalize();
     return 0;
 }
@@ -313,6 +332,12 @@ handle's backend (host memory for CPU handles, device memory on the handle's
 stream for GPU handles) and safely handle zero-byte requests (zero bytes sets
 `*ptr = nullptr`).
 
+Copies also take the handle first: `ddlaMemcpy(handle, dst, src, bytes)` and
+`ddlaMemcpy2D(handle, dst, dpitch, src, spitch, width, height)`. There is no
+copy-direction argument. GPU copies involving device memory are queued on
+the handle; call `ddlaSynchronize(handle)` before reading their results on
+the host. Pitches and copy sizes are in bytes.
+
 ## API overview
 
 ### Handle and descriptor
@@ -320,8 +345,9 @@ stream for GPU handles) and safely handle zero-byte requests (zero bytes sets
 | Symbol | Description |
 |--------|-------------|
 | `DdlaHandle_t` | Opaque handle type (`DdlaStream*`) |
-| `ddlaInit` | Allocate handle (streams, BLAS/Solver handles, optional CCL comms) |
-| `ddlaSet` | Configure process grid (auto `'R'` or explicit `nprows`×`npcols`) |
+| `ddlaInit` | Allocate a handle and select its backend |
+| `ddlaSet` | Configure the grid (auto `'R'` or explicit `nprows`×`npcols`) and create backend resources |
+| `ddlaGetBackend` / `ddlaBackendAvailable` | Query the handle's backend / compiled backend availability |
 | `ddlaDestroy` | Tear down handle (idempotent) |
 | `ddlaGetStream` | Return the default device stream from a handle (CPU: `nullptr`) |
 | `ddlaDescInit` | Fill a ScaLAPACK-layout `int[9]` descriptor (`DESCINIT` equivalent) |
@@ -337,14 +363,48 @@ stream for GPU handles) and safely handle zero-byte requests (zero bytes sets
 | `pgemm` | `C = α·op(A)·op(B) + β·C`; automatic AB/SUMMA, AC, or BC communication |
 | `pgeadd` | `C = α·op(A) + β·op(B)` with required one-based `ia,ja`, `ib,jb`, `ic,jc`; aligned block layouts only (block sizes and within-block offsets match after `N/T/C`; `N` also requires matching owners); direct local `N,N` addition and one-destination local-region transpose on square grids (`m*n <= INT_MAX`); transpose-copy with `α=1`, `β=0` |
 | `pdam` | Add scalar to the diagonal of a distributed matrix (leading-block, optional `n`; default `-1` = whole matrix) |
+| `ptrmm` | In-place triangular multiply: `B = α·op(A)·B` or `B = α·B·op(A)` |
+| `gather` / `scatter` | Move a submatrix between distributed storage and a column-major buffer on one root rank; explicit one-based origins, host buffers on CPU and device buffers on GPU |
 | `transport_block` | Extract/transpose a contiguous block from a distributed matrix into a local buffer |
+
+### Local BLAS and triangular products
+
+Local calls perform no inter-rank communication. Their column-major matrices
+must live in the handle's memory space, and GPU work uses the handle's stream.
+
+| Function | Description |
+|----------|-------------|
+| `gemm` | `C = α·op(A)·op(B) + β·C`; also has a real-A × complex-B overload with complex C, α and β |
+| `trmm` | Overwrite B with `α·op(A)·B` or `α·B·op(A)` |
+| `trtrm` | `C = α·A·B + β·C` in the selected upper or lower triangle; both inputs use that same triangle |
+| `symm` / `hemm` | Symmetric / Hermitian matrix multiplication |
+| `syrk` / `syr2k` / `herk` / `her2k` | Symmetric / Hermitian rank-k and rank-2k updates |
+| `gemmBatched` | Fixed-size GEMMs over arrays of pointers; arrays and matrices use the handle's memory space |
+
+**TRMM interface change.** Local `trmm` now follows the in-place BLAS form:
+
+```cpp
+ddla::trmm(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb);
+```
+
+The separate output arguments of the former `trmm(..., B, ldb, C, ldc)`
+interface were removed. To preserve B, first copy it into a destination,
+then multiply that destination in place. A must not overlap B. The C ABI,
+Fortran module and generated Python ctypes signatures use the same in-place
+form; rebuild bindings and update old calls. Distributed `ptrmm` already
+overwrites B and retains its existing signature.
+
+`trtrm(handle, uplo, n, alpha, A, lda, B, ldb, beta, C, ldc)` supports
+`uplo='U'` for upper × upper and `'L'` for lower × lower. Both diagonals are
+explicit; neither operand is transposed or conjugated. The opposite triangle
+of C and leading-dimension padding are preserved. A and B may coincide,
+but C must not overlap either input.
 
 ### LU factorization, solve, and drivers
 
 | Function | Description |
 |----------|-------------|
-| `pgetf2` | Blocked panel LU: in-place or gathered inner subpanels (`DDLA_LU_PANEL`), BLAS-3 inner updates |
-| `pgetrf` | LU with partial (row) pivoting |
+| `pgetrf` | LU with partial (row) pivoting on an explicit one-based `ia,ja` submatrix |
 | `pgetrf_bpiv` | Block LU with partial pivoting per block row (device pivot array) |
 | `pgetrf_nopiv` | Multi-process LU without pivoting |
 | `getrf_nopiv` | Local (single-process) LU without pivoting |
@@ -357,6 +417,10 @@ stream for GPU handles) and safely handle zero-byte requests (zero bytes sets
 | `ptrtrs` | Distributed triangular solve (side × uplo × trans × diag) |
 | `plapiv` | Apply pivot permutation to rows or columns, forward or backward |
 | `pswap` | Swap rows or columns between two distributed matrices |
+
+`pgetrf` uses a private blocked panel factorization, `pgetf2`; it is not a
+public API. `DDLA_LU_PANEL=inplace` (default) or `gather` selects the panel
+method, and all ranks must use the same setting.
 
 ### Cholesky
 
@@ -372,7 +436,11 @@ stream for GPU handles) and safely handle zero-byte requests (zero bytes sets
 
 | Function | Description |
 |----------|-------------|
-| `pgeqrf(handle, uplo, m, n, ...)` | Distributed Householder QR / QL, selected by `uplo`: `'U'` is `A = Q·R` (ScaLAPACK `PxGEQRF` semantics; R upper triangle, V below the diagonal with implicit unit diagonal), `'L'` is `A = Q·L` (`PxGEQLF` semantics; columns processed right to left, the reflector of column j has its unit entry at row m-n+j, V above it, L lower triangular in the bottom n x n block).  Host `tau` indexed by local column (ScaLAPACK layout); backend-templated, all four scalar types.  Each panel is gathered on one rank of the owner process column and factored there by the single-process `geqrf(uplo)` (LAPACK `?geqrf` / `?geqlf` on the CPU, cuSOLVER / hipSOLVER `geqrf` on the GPU; no communication), and T by the single-process `larft` (LAPACK `?larft` on the CPU, `herk` plus a small kernel on the GPU): a panel costs two point-to-point rounds plus the trailing apply's one Col-scope allreduce, with no per-column collectives and no host synchronization.  `DDLA_QR_PANEL=inplace` selects the other panel variant instead (default `gather`): the columns are factored in place on the distributed matrix, one at a time, with a local `dot` (`nrm2` fallback) plus one Col-scope allreduce for the norm and vendor `scal` / `gemv` / `gerc` for the in-panel update -- nothing is gathered, but every column costs a host round trip, so on the GPU it is about 1.3-4x slower (the same switch applies to the stage-1 panel of `pheevd`); every rank must use the same value  Only the left-side forms exist; the right-side LQ / RQ (`A = L·Q`, `A = R·Q`) are not implemented; the stage-1 band reduction of `pheevd` runs the same QL driver internally on each band panel |
+| `pgeqrf(handle, uplo, m, n, ...)` | Distributed Householder QR (`'U'`: `A = Q·R`) or QL (`'L'`: `A = Q·L`); all four scalar types, with host `tau` indexed by local column |
+
+Panels use a gathered local `geqrf` by default (`DDLA_QR_PANEL=gather`),
+or the distributed `inplace` variant. All ranks must use the same selector.
+Only QR and QL are implemented; right-side LQ and RQ forms are not provided.
 
 
 **Solve semantics.** For `side='L'` the right-hand side B is `n × nrhs` and
@@ -394,12 +462,23 @@ columns for side='R') when given the same `location` passed to `ppotrf`.
 | `larft(handle, direct, storev, n, k, V, ldv, tau, T, ldt)` | Local triangular factor `T` of a block reflector (LAPACK `?larft`, `storev` = `'C'`): `H = I - V·T·V^H` for `k` reflectors stored as `geqrf` / `geqlf` leave them, `direct` = `'F'` (`T` upper, `H = H(1)…H(k)`) or `'B'` (`T` lower, `H = H(k)…H(1)`); `T` is written whole (zeros in the other triangle).  The GPU needs no vendor routine (cuSOLVER has `Xlarft` only from CUDA 12.4, hipSOLVER none): `herk` forms `V^H V` and one small kernel runs the column recurrence |
 | `gemmVbatched` | Batch of GEMMs with variable dimensions (device-resident dim arrays) |
 | `gemmVbatched2s` | Two-stage variable-batch GEMM with reusable temporary |
-| `random_generate` | Fill device buffer with uniform random values |
+| `random_generate` | Fill a backend-memory buffer with uniform random values |
 
 `random_generate<Backend, T>` is declared in `<ddla/ddla.h>` (as are
 `write_matrix` and all other backend-templated functions), implemented in
 `src/random_generate.cpp`, and explicitly instantiated for `float`, `double`,
 `std::complex<float>`, and `std::complex<double>`.
+
+## Optional language bindings
+
+`-DDDLA_ENABLE_FORTRAN=ON` builds the C-ABI bridge `ddla_c`, the Fortran
+library `ddla_fortran`, and module `ddla`. The installed module is placed
+under `include/ddla/`; link the matching Fortran and C-ABI libraries.
+
+`-DDDLA_ENABLE_PYTHON=ON` builds `ddla_c` and stages the Python package.
+Python does not require a Fortran compiler unless the Fortran option is also
+enabled. Install the Python package separately and set `DDLA_LIB_PATH` to
+the matching `libddla_c.so`; see [Python setup and examples](python/README.md).
 
 ## Testing
 
@@ -420,6 +499,17 @@ The files `tests/test_cuda.sh` and `tests/test_hip.sh` are cluster-specific
 Slurm batch scripts.  They load modules, build, and run the test suite on
 particular machines; adapt their module/partition settings to your own cluster.
 
+On Slurm, request the MPI tasks before launching tests and keep the launched
+rank count within that allocation. CTest's `PROCESSORS` property counts each
+test's ranks; limit concurrent tests to the allocated rank budget. Single-node
+CPU performance measurements should use all physical cores (for example,
+4 ranks × 10 cores on HPC3 `p1`, or 4 × 12 on its 48-core nodes). Correctness
+CI can use a smaller allocation.
+
+The [HPC3 validation guide](.ci/hpc3/README.md) describes the CPU and four-/six-GPU
+jobs, their resource requests and result logs. The
+[KSSG validation guide](.ci/kssg/README.md) describes the manual HIP workflow.
+
 ## Repository layout
 
 ```
@@ -428,6 +518,7 @@ LibDDLA/
 │   ├── ddla.h            Main API declarations (all Doxygen comments)
 │   ├── ddla_handle_t.h   Handle type, init/set/destroy, memory & stream helpers
 │   ├── ddla_desc.h       ScaLAPACK int[9] descriptor contract and index mapping helpers
+│   ├── ddla_vector.h     Owned, uninitialized storage in the handle's memory space
 │   └── ddla_config.h.in  Generated config header template (ddla_config.h at build time)
 ├── src/                  Implementation (one routine per .cpp) and private headers
 │   └── comm_traits.h     Unified communication layer (commSend/commRecv/
@@ -441,17 +532,23 @@ LibDDLA/
 └── LICENSE               LGPL-3.0 license text
 ```
 
-All other headers — the `ddla_connector.h` runtime/CHECK utilities, the
-per-routine backend wrappers (`gemm.h`, `trsm.h`, `scal.h`, `axpy.h`,
-`swap.h`, `geru.h`, `iamax.h`, `geam.h`, `herk.h`, `syrk.h`, `trmm.h`,
-`gemmBatched.h`, `gemmVbatched.h`, `getrf.h`, `potrf.h`, `laswp.h`,
-`random_generate.h`, `write_matrix.h`, `transport_block.h`),
-`ddla_stream.h`, and `comm_traits.h` — are private under `src/` and included
-by relative path; the public surface is the three headers above.
+Implementation headers are private under `src/`. BLAS and LAPACK entry
+checks and execution helpers are declared in `src/BLAS/blas_impl.h` and
+`src/lapack_impl.h`; callers use the public functions in `<ddla/ddla.h>`.
+The stream implementation, workspace helpers and vendor aliases also stay
+private. Operation sources are grouped under `src/BLAS`, `src/PBLAS`,
+`src/LU`, `src/Cholesky`, `src/QR` and `src/vbatched`.
+
+The public `DDLA_HAS_CPU` / `DDLA_HAS_GPU` macros describe library
+capabilities. Private `DDLA_USE_CUDA` / `DDLA_USE_HIP` definitions select the
+vendor API available in a source file; `src/gpu/gpu.h` derives
+`DDLA_GPU_VENDOR` from them. These conditions are distinct: a CPU-only
+consumer can link a GPU-enabled library. `gpu_cpu.h` supplies compatibility
+types for private shared code when neither vendor is selected.
 
 ## Version
 
-**0.0.5** — defined in `src/version.h`.  The shared library SONAME tracks the
+**0.0.6** — defined in `src/version.h`.  The shared library SONAME tracks the
 major version.
 
 ## License

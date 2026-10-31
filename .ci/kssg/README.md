@@ -1,9 +1,11 @@
 # KSSG validation
 
-The `KSSG validation` workflow runs on **every push** to `main` or `develop`.
-It sends the pushed commit to the KSSG cluster
+The `KSSG validation` workflow is **manual only** (`workflow_dispatch`);
+pushes do not start it. Select **Actions → KSSG validation → Run workflow**
+when the cluster is available. It tests the requested `source_sha`, or
+`develop` when that input is omitted, and sends that checkout to the KSSG cluster
 (`cancon.hpccube.com:65023`, login `ac5g1n561p`) over SSH, builds the
-HIP/DCU backend, runs the HIP GPU suite (40 cases) through Slurm, and
+HIP/DCU backend, runs the registered HIP GPU suite through Slurm, and
 publishes one table row per test in the GitHub job summary. Raw logs are
 kept as an artifact. This mirrors the HPC3 setup in `.ci/hpc3/`; **CPU
 validation is owned by the HPC3 workflow** and is deliberately not run
@@ -20,10 +22,13 @@ Repository secret required:
 
 Host verification pins the committed `known_hosts` entry; do not disable it.
 
-The workflow checks out the pushed commit in a fresh directory on KSSG
+The workflow stages the selected source checkout in a fresh directory on KSSG
 (`~/libddla_kssg_ci/runs/github/<run_id>-<attempt>/`), so the pre-existing
 manual tree at `/public/home/ac5g1n561p/app/github/LibDDLA` is never used or
 modified by CI.
+
+CI control files come from `github.workflow_sha`, independently of the
+selected source ref. Test counts depend on that source's CMake registrations.
 
 ## What runs
 

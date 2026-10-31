@@ -5,12 +5,12 @@
 #SBATCH --job-name=libddla-hpc3-gpu6
 #SBATCH --partition=@GPU6_PARTITION@
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
+#SBATCH --ntasks-per-node=@GPU6_GPUS@
 #SBATCH --cpus-per-task=@GPU6_CPUS@
 #SBATCH --gres=gpu:@GPU6_GPUS@
 #SBATCH --mem=@GPU6_MEM@
 #SBATCH --time=@GPU6_TIME@
-#SBATCH --output=@RESULTS@/gpu6-slurm-%j.log
+#SBATCH --output=@RESULTS@/gpu6-slurm.log
 #SBATCH --export=NIL
 
 set -euo pipefail
@@ -46,7 +46,7 @@ cmake -S @SOURCE@ -B @BUILD_GPU6@ \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_CXX_COMPILER=g++ \
     -DMPIEXEC_EXECUTABLE="$MPIWRAP" \
-    -DMPIEXEC_PREFLAGS=--oversubscribe \
+    -DMPIEXEC_PREFLAGS= \
     2>&1 | tee @RESULTS@/gpu6-configure.log
 cmake --build @BUILD_GPU6@ --parallel 16 --target test_pgeadd_indexed test_pgemm_branches 2>&1 | tee @RESULTS@/gpu6-build.log
 wait "$stage_libs" || true

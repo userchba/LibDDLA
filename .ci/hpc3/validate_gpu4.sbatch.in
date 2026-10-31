@@ -2,17 +2,18 @@
 # GPU validation (4-rank suite): configure, build, and run every CTest
 # entry that registers at DDLA_TEST_NP=4 ranks (plus the two 1-rank
 # potrf_bottom_right cases) on 4 V100s — each test puts one rank on each
-# GPU, two tests run at a time. Addition and GEMM also run at six ranks in
+# GPU, with concurrent tests limited to the allocated rank count.
+# Addition and GEMM also run at six ranks in
 # validate_gpu6.sbatch.in.
 #SBATCH --job-name=libddla-hpc3-gpu4
 #SBATCH --partition=@GPU4_PARTITION@
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
+#SBATCH --ntasks-per-node=@GPU4_GPUS@
 #SBATCH --cpus-per-task=@GPU4_CPUS@
 #SBATCH --gres=gpu:@GPU4_GPUS@
 #SBATCH --mem=@GPU4_MEM@
 #SBATCH --time=@GPU4_TIME@
-#SBATCH --output=@RESULTS@/gpu4-slurm-%j.log
+#SBATCH --output=@RESULTS@/gpu4-slurm.log
 #SBATCH --export=NIL
 
 set -euo pipefail
@@ -48,20 +49,17 @@ cmake -S @SOURCE@ -B @BUILD_GPU@ \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_CXX_COMPILER=g++ \
     -DMPIEXEC_EXECUTABLE="$MPIWRAP" \
-    -DMPIEXEC_PREFLAGS=--oversubscribe \
+    -DMPIEXEC_PREFLAGS= \
     2>&1 | tee @RESULTS@/gpu-configure.log
 cmake --build @BUILD_GPU@ --parallel 16 2>&1 | tee @RESULTS@/gpu-build.log
 wait "$stage_libs" || true
 export LD_LIBRARY_PATH=@BUILD_GPU@/gpu-libs:$LD_LIBRARY_PATH
 
-# Suite registered at four ranks (default DDLA_TEST_NP=4). -j8 runs two
-# 4-rank tests at a time (CTest counts each test's ranks through its
-# PROCESSORS property), so every GPU hosts two ranks: 246 s -> 146 s. The
-# largest pair (getrf_nopiv 18.9 GB + pgetrf_nopiv 5.2 GB per GPU) fits the
-# 32 GB V100s (measured 2026-10-24).
+# CTest counts each test's MPI ranks through PROCESSORS. Limit the total
+# number of concurrent ranks to the Slurm task allocation.
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 set +e
-ctest --test-dir @BUILD_GPU@ --output-on-failure -j8 \
+ctest --test-dir @BUILD_GPU@ --output-on-failure --parallel "$SLURM_NTASKS" \
     --output-junit @RESULTS@/gpu4-ctest.xml 2>&1 | tee @RESULTS@/gpu4-ctest.log
 rc=${PIPESTATUS[0]}
 set -e

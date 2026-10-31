@@ -8,8 +8,8 @@ Designed with native **NumPy** array interoperability and **mpi4py** integration
 - **2D Block-Cyclic Distributed Matrix (`DistributedMatrix`)**:
   - Automatically derives process grids and ScaLAPACK `int[9]` descriptors.
   - Interoperates with `numpy.ndarray` on CPU (`order='F'`) with zero-copy data passing.
-  - Native `gather` and `scatter` between local distributed partitions and global NumPy arrays.
-  - GPU backend support for CUDA/HIP device memory buffers and stream synchronization.
+  - `gather` and `scatter` between CPU distributed partitions and global NumPy arrays.
+  - GPU device buffers with explicit `from_host` / `to_host` copies and handle synchronization.
 - **Process Grid Management (`ProcessorLayout`)**:
   - Automatically factors communicator ranks into balanced 2D grid dimensions (`np_rows` x `np_cols`).
   - Seamlessly accepts `mpi4py.MPI.Comm` or falls back to built-in MPI.
@@ -19,12 +19,41 @@ Designed with native **NumPy** array interoperability and **mpi4py** integration
   - `ppotrf` / `ppotrs` / `pposv`: Distributed Cholesky factorization and symmetric/Hermitian positive-definite solve.
   - `pgeqrf`: Distributed Householder QR factorization.
   - `ptrtrs` / `ptrmm`: Distributed triangular solve and triangular matrix multiplication.
-  - `pgeadd` / `pdam`: Distributed matrix addition and diagonal scaling.
+  - `pgeadd` / `pdam`: Distributed matrix addition and addition of a scalar to the diagonal.
 - **Four Standard Precision Types**:
   - Single precision real (`float32` / `'s'`)
   - Double precision real (`float64` / `'d'`)
   - Single precision complex (`complex64` / `'c'`)
   - Double precision complex (`complex128` / `'z'`)
+
+## Build and library discovery
+
+From the repository root, build the native C-ABI library before installing
+the Python package. A Python-only binding build needs no Fortran compiler:
+
+```bash
+cmake -S . -B build-python \
+  -DDDLA_USE_CPU=ON \
+  -DDDLA_CPU_BLAS_LIBRARY=/path/to/libopenblas.so \
+  -DDDLA_ENABLE_PYTHON=ON
+cmake --build build-python --target ddla_python --parallel 4
+python3 -m pip install ./python
+
+export DDLA_LIB_PATH="$PWD/build-python/fortran/libddla_c.so"
+export LD_LIBRARY_PATH="$PWD/build-python/fortran:$PWD/build-python/src${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+```
+
+The package requires NumPy; install `./python[mpi]` to add optional `mpi4py`.
+`DDLA_LIB_PATH` names the native shared library itself. For an installed
+native prefix, `DDLA_DIR=/path/to/install` searches its `lib` and `lib64`
+directories. Load the matching MPI and backend runtime libraries as well.
+The native library must include the backend requested by `Handle`.
+
+Distributed operations are collective over the handle's communicator. Launch the example
+below with an MPI rank count covered by the scheduler allocation, for example
+`mpirun -n 4 python3 example.py`. It uses CPU handles and NumPy host arrays.
+For GPU local-buffer copies, call `handle.synchronize()` before consuming
+results returned by `to_host()`.
 
 ## Quickstart Example
 
@@ -58,3 +87,11 @@ if handle.rank == 0:
 # 5. Clean up
 handle.destroy()
 ```
+
+## TRMM compatibility
+
+The generated C-ABI ctypes bindings for local `trmm` now overwrite B and
+take arguments through `B, ldb`; the former separate `C, ldc` output
+arguments were removed. Update direct `_c_api` calls and use the generated
+bindings from the same source revision as the native library. The high-level
+distributed `ddla.ptrmm` interface already overwrites B and is unchanged.
