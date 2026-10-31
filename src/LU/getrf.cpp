@@ -7,21 +7,29 @@
 // (DDLA_HAS_CPU / DDLA_HAS_GPU).  The vendor calls are private to this translation unit; the public interface is the
 // templated ddla::getrf declared in <ddla/ddla.h>.
 //
-// GPU arm: the vendor routine needs a scratch buffer.  It is sized with the ?getrf_bufferSize query, allocated
-// stream-ordered on the solver's stream (the stream the handle bound it to) and freed there, so the call stays
-// asynchronous: nothing is synchronized, `info` is valid once the caller synchronizes the stream.
+// Three components (src/lapack_impl.h): getrf_check validates, getrf_plan sizes and allocates the vendor workspace,
+// getrf_run factorizes; the public getrf is check -> plan -> run.
+//
+// GPU arm: the vendor routine needs a scratch buffer.  getrf_plan sizes it with the ?getrf_bufferSize query (the
+// maximum over the planned shapes) and allocates it stream-ordered on the handle's stream -- the stream the solver
+// handle is bound to -- and getrf_run re-queries the size of its own shape, so the call stays asynchronous: nothing
+// is synchronized, `info` is valid once the caller synchronizes the stream.
 // ---------------------------------------------------------------------------
 #include <ddla/ddla.h>
 #include <ddla/ddla_handle_t.h>
 
 #include <algorithm>
+#include <cassert>
 #include <complex>
 #include <cstddef>
+#include <initializer_list>
 #include <stdexcept>
 #include <string>
 
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
+#include "lapack_impl.h"
+#include "plan_util.h"
 
 #if DDLA_HAS_CPU
 // Host LAPACK ?getrf (Fortran ABI; the CPU BLAS library must provide LAPACK -- OpenBLAS and MKL do).
@@ -106,30 +114,22 @@ inline gpusolverStatus_t getrf_call(gpusolverHandle_t h, int m, int n, std::comp
     return gpusolverZgetrf(h, m, n, (gpusolverDoubleComplex*)A, lda, (gpusolverDoubleComplex*)work, lwork, ipiv, info);
 }
 
+// The factorization on the device: query the exact lwork of this shape (a host call), check that the planned
+// workspace holds it, run.  The workspace lives in the workspace, on the stream the solver runs on.
 template <typename T>
-gpusolverStatus_t gpu_getrf(gpusolverHandle_t handle, int m, int n, T* A, int lda, int* ipiv, int* info)
+gpusolverStatus_t gpu_getrf(const DdlaHandle_t& handle, vector<T>& work, int m, int n, T* A, int lda,
+                            int* ipiv, int* info)
 {
-    gpuStream_t stream;
-    SOLVER_CHECK(gpusolverGetStream(handle, &stream));
-
     int lwork = 0;
-    SOLVER_CHECK(getrf_buffer_size(handle, m, n, A, lda, &lwork));
-
-    T* work = nullptr;
-    if (lwork > 0)
-        GPU_CHECK(gpuMallocAsync(reinterpret_cast<void**>(&work), static_cast<std::size_t>(lwork) * sizeof(T), stream));
-
-    const gpusolverStatus_t status = getrf_call(handle, m, n, A, lda, work, lwork, ipiv, info);
-
-    if (lwork > 0)
-        GPU_CHECK(gpuFreeAsync(work, stream));
-    return status;
+    SOLVER_CHECK(getrf_buffer_size(static_cast<gpusolverHandle_t>(handle->solverH), m, n, A, lda, &lwork));
+    assert(static_cast<std::size_t>(lwork) <= work.capacity());
+    return getrf_call(static_cast<gpusolverHandle_t>(handle->solverH), m, n, A, lda, lwork > 0 ? work.data() : nullptr, lwork, ipiv, info);
 }
 
 #else // DDLA_GPU_VENDOR
 
 template <typename T>
-gpusolverStatus_t gpu_getrf(gpusolverHandle_t, int, int, T*, int, int*, int*)
+gpusolverStatus_t gpu_getrf(const DdlaHandle_t&, vector<T>&, int, int, T*, int, int*, int*)
 {
     throw std::runtime_error("getrf: no GPU vendor selected at compile time");
 }
@@ -139,8 +139,12 @@ gpusolverStatus_t gpu_getrf(gpusolverHandle_t, int, int, T*, int, int*, int*)
 
 } // anonymous namespace
 
-template <DdlaBackend Backend, typename T>
-void getrf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, int* ipiv, int* info)
+namespace lapack_impl {
+
+// Component 1.
+template <DdlaBackend Backend>
+void getrf_check(const DdlaHandle_t& handle, int m, int n, const void* A, int lda,
+                 const int* ipiv, const int* info)
 {
     static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
                   "CPU getrf is not available in this LibDDLA build");
@@ -159,7 +163,41 @@ void getrf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, int* ipiv, i
     if (m < 0 || n < 0) throw std::runtime_error("getrf: negative matrix size");
     if (info == nullptr) throw std::runtime_error("getrf: null info");
 
-    if (m == 0 || n == 0) {
+    if (m == 0 || n == 0) return;   // nothing to factor: the pointers are not read
+    if (A == nullptr) throw std::runtime_error("getrf: null A");
+    if (ipiv == nullptr) throw std::runtime_error("getrf: null ipiv");
+    if (lda < std::max(1, m)) throw std::runtime_error("getrf: lda too small");
+}
+
+// Component 2: the vendor workspace.  CPU handles (host LAPACK) need none.
+template <typename T>
+vector<T> getrf_plan(const DdlaHandle_t& handle, const Shape* shapes, std::size_t count, T* A, int lda)
+{
+    vector<T> work(handle);
+#if DDLA_HAS_GPU && DDLA_GPU_VENDOR
+    if (ddlaGetBackend(handle) == DdlaBackend::GPU) {
+        int lwork = 0;
+        for (std::size_t i = 0; i < count; ++i) {
+            const Shape& s = shapes[i];
+            if (s.m <= 0 || s.n <= 0) continue;
+            int need = 0;
+            SOLVER_CHECK(getrf_buffer_size(static_cast<gpusolverHandle_t>(handle->solverH), s.m, s.n, A, lda, &need));
+            lwork = std::max(lwork, need);
+        }
+        work.resize(static_cast<std::size_t>(lwork));
+    }
+#else
+    (void)shapes; (void)count; (void)A; (void)lda;
+#endif
+    return work;
+}
+
+// Component 3.
+template <DdlaBackend Backend, typename T>
+void getrf_run(const DdlaHandle_t& handle, [[maybe_unused]] vector<T>& work, int m, int n, T* A, int lda,
+               int* ipiv, int* info)
+{
+    if (m <= 0 || n <= 0) {
         // Nothing to factor: success, reported where the caller will look for it.
         if constexpr (Backend == DdlaBackend::CPU) {
             *info = 0;
@@ -168,9 +206,6 @@ void getrf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, int* ipiv, i
         }
         return;
     }
-    if (A == nullptr) throw std::runtime_error("getrf: null A");
-    if (ipiv == nullptr) throw std::runtime_error("getrf: null ipiv");
-    if (lda < std::max(1, m)) throw std::runtime_error("getrf: lda too small");
 
     if constexpr (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
@@ -178,16 +213,36 @@ void getrf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, int* ipiv, i
 #endif
     } else {
 #if DDLA_HAS_GPU
-        SOLVER_CHECK(gpu_getrf(handle->solverH, m, n, A, lda, ipiv, info));
+        SOLVER_CHECK(gpu_getrf(handle, work, m, n, A, lda, ipiv, info));
 #endif
     }
 }
 
+} // namespace lapack_impl
+
+template <DdlaBackend Backend, typename T>
+void getrf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, int* ipiv, int* info)
+{
+    // 1. parameter check.
+    lapack_impl::getrf_check<Backend>(handle, m, n, A, lda, ipiv, info);
+    // 2. the vendor workspace of this one shape (an empty shape plans nothing).
+    vector<T> work = lapack_impl::getrf_plan<T>(handle, {{m, n}}, A, lda);
+    // 3. the factorization (an empty problem only reports info = 0).
+    lapack_impl::getrf_run<Backend, T>(handle, work, m, n, A, lda, ipiv, info);
+}
+
 #define INSTANTIATE_GETRF(BACKEND, TYPE)                                     \
     template void getrf<BACKEND, TYPE>(                                      \
-        const DdlaHandle_t&, int, int, TYPE*, int, int*, int*)
+        const DdlaHandle_t&, int, int, TYPE*, int, int*, int*);              \
+    template void lapack_impl::getrf_run<BACKEND, TYPE>(                     \
+        const DdlaHandle_t&, vector<TYPE>&, int, int, TYPE*, int, int*, int*)
+#define INSTANTIATE_GETRF_PLAN(TYPE)                                         \
+    template vector<TYPE> lapack_impl::getrf_plan<TYPE>(      \
+        const DdlaHandle_t&, const lapack_impl::Shape*, std::size_t, TYPE*, int)
 
 #if DDLA_HAS_CPU
+template void lapack_impl::getrf_check<DdlaBackend::CPU>(
+    const DdlaHandle_t&, int, int, const void*, int, const int*, const int*);
 INSTANTIATE_GETRF(DdlaBackend::CPU, float);
 INSTANTIATE_GETRF(DdlaBackend::CPU, double);
 INSTANTIATE_GETRF(DdlaBackend::CPU, std::complex<float>);
@@ -195,12 +250,20 @@ INSTANTIATE_GETRF(DdlaBackend::CPU, std::complex<double>);
 #endif
 
 #if DDLA_HAS_GPU
+template void lapack_impl::getrf_check<DdlaBackend::GPU>(
+    const DdlaHandle_t&, int, int, const void*, int, const int*, const int*);
 INSTANTIATE_GETRF(DdlaBackend::GPU, float);
 INSTANTIATE_GETRF(DdlaBackend::GPU, double);
 INSTANTIATE_GETRF(DdlaBackend::GPU, std::complex<float>);
 INSTANTIATE_GETRF(DdlaBackend::GPU, std::complex<double>);
 #endif
 
+INSTANTIATE_GETRF_PLAN(float);
+INSTANTIATE_GETRF_PLAN(double);
+INSTANTIATE_GETRF_PLAN(std::complex<float>);
+INSTANTIATE_GETRF_PLAN(std::complex<double>);
+
+#undef INSTANTIATE_GETRF_PLAN
 #undef INSTANTIATE_GETRF
 
 } // namespace ddla

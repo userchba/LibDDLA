@@ -7,8 +7,33 @@
 #include <ddla/ddla.h>
 #include "ddla_connector.h"
 #include <ddla/ddla_handle_t.h>
+#include "workspace.h"
+#include <iosfwd>
 
 namespace ddla {
+
+namespace matrix_io_impl {
+// Keep the public debugging helper's silent no-op behavior for invalid input.
+template<class T>bool write_matrix_check(const T* A,int m,int n,const char* filename) noexcept
+{return A!=nullptr&&m>0&&n>0&&filename!=nullptr;}
+
+// Only the GPU path needs staging. The zero CPU result is one supported path
+// of this genuinely scratch-using operation, not a separate dummy component.
+template<DdlaBackend Backend,class T>WorkspaceSize write_matrix_workspace_size(int m,int n)
+{
+    detail::WorkspaceLayout layout;
+    if constexpr(Backend==DdlaBackend::GPU)
+        if(m>0&&n>0)layout.host<T>(detail::workspace_mul(std::size_t(m),std::size_t(n)));
+    return layout.size();
+}
+
+// The caller opens/prepares the stream and supplies live host objects for the
+// GPU query's staging span. A, dimensions and capacity are already checked.
+// GPU copies are synchronous, matching the original handle-free utility.
+// Stream/file-buffer ownership and standard stream internals belong to caller.
+template<DdlaBackend Backend,class T>void write_matrix_run(const T* A,int m,int n,
+    std::ostream& output,BufferView<T> host_staging={});
+} // namespace matrix_io_impl
 
 /**
  * @brief Dump a column-major m x n matrix to a text file (debugging aid).

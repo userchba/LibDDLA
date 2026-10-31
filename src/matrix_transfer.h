@@ -4,6 +4,7 @@
 #include <ddla/ddla.h>
 
 #include <cstddef>
+#include <vector>
 
 namespace ddla::matrix_impl {
 
@@ -44,6 +45,21 @@ template <DdlaBackend B, typename T>
 void scatter(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
              const int* desc, int root, const T* src, int ldsrc,
              T* packed, std::size_t capacity, bool group_root = true);
+
+// The same, with the root's list of peer blocks in a caller-owned vector (the
+// versions above build one per call).  A caller that moves many windows
+// reserves `blocks` for the handle's rank count once (blocks.reserve(h->nprocs)),
+// and then neither entry point allocates.
+template <DdlaBackend B, typename T>
+void gather(const DdlaHandle_t& h, int m, int n, const T* A, int ia, int ja,
+            const int* desc, int root, T* dst, int lddst,
+            T* packed, std::size_t capacity, std::vector<Block<T>>& blocks);
+
+template <DdlaBackend B, typename T>
+void scatter(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
+             const int* desc, int root, const T* src, int ldsrc,
+             T* packed, std::size_t capacity, std::vector<Block<T>>& blocks,
+             bool group_root = true);
 
 // GPU copy between count blocks and their entries of the window
 // (matrix_transfer_kernels.cpp), one launch per batch of blocks. scatter

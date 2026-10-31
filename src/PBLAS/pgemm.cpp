@@ -7,7 +7,7 @@
 #include "ddla_connector.h"
 #include <ddla/ddla_config.h>
 #include <ddla/ddla_desc.h>
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include <vector>
 #include "transport_block.h"
 #include "pgemm_impl.h"
@@ -115,7 +115,7 @@ void ab(
     auto sync_panel = [&]() {
         if constexpr (Backend != DdlaBackend::CPU) {
             DDLA_CHECK(ddlaSynchronize(h));
-            DDLA_CHECK(detail::synchronize_on(h, h->stream_data));
+            DDLA_CHECK(detail::synchronize_on(h, static_cast<gpuStream_t>(h->stream_data)));
         }
     };
 

@@ -8,7 +8,7 @@
 #include <type_traits>
 
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 namespace ddla {
 
@@ -70,7 +70,7 @@ void random_generate(const DdlaHandle_t& handle, T* data, const int64_t& lengthO
         GPURAND_CHECK(gpurandCreateGenerator(&gen, GPURAND_RNG_PSEUDO_DEFAULT));
         // Generate on the handle's stream (not the legacy default stream), so the values are ordered with the
         // handle's other work.
-        GPURAND_CHECK(gpurandSetStream(gen, handle->stream));
+        GPURAND_CHECK(gpurandSetStream(gen, static_cast<gpuStream_t>(handle->stream)));
         GPURAND_CHECK(gpurandSetPseudoRandomGeneratorSeed(gen, static_cast<unsigned long long>(seed)));
         if constexpr (std::is_same_v<T, float>) {
             GPURAND_CHECK(gpurandGenerateUniform(gen, data, lengthOfData));

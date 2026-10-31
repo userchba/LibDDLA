@@ -1,7 +1,8 @@
+#include "blas_impl.h"
 // ---------------------------------------------------------------------------
 // Unified backend-templated matrix add / transpose-copy:
 //
-//     C(m x n) := alpha * op(A) + beta * op(B),     op in {'N', 'T', 'C'}.
+//     C(m x n) := alpha * blas_impl::op(A) + beta * blas_impl::op(B),     op in {'N', 'T', 'C'}.
 //
 // Structure follows src/trmm.cpp and src/scal.cpp: one definition covering CPU
 // and GPU, selected with `if constexpr` on the Backend template parameter, the
@@ -32,7 +33,7 @@
 
 #include "blas_enums.h"
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 // ---------------------------------------------------------------------------
 // GPU arm: the vendor calls.  Kept as free gpublasGeam overloads so the
@@ -148,7 +149,7 @@ struct GeamCpuArgs {
     T* C; std::size_t ldc;
 };
 
-// Single operand (beta == 0): C(i,j) := alpha * op(A)(i,j), the copy / transpose-copy path.
+// Single operand (beta == 0): C(i,j) := alpha * blas_impl::op(A)(i,j), the copy / transpose-copy path.
 template <typename T, bool TA, bool CA, bool ONE>
 void copy_tile(const GeamCpuArgs<T>& g, int i0, int i1, int j0, int j1)
 {
@@ -273,8 +274,10 @@ inline char geam_op(char trans)
 
 } // anonymous namespace
 
+namespace blas_impl {
+
 template <DdlaBackend Backend, typename T>
-void geam(const DdlaHandle_t& handle, char transa, char transb, int m, int n,
+void geam_check(const DdlaHandle_t& handle, char transa, char transb, int m, int n,
           const T& alpha, const T* A, int lda,
           const T& beta, const T* B, int ldb,
           T* C, int ldc)
@@ -297,7 +300,7 @@ void geam(const DdlaHandle_t& handle, char transa, char transb, int m, int n,
     const char tb = geam_op(transb);
     if (m <= 0 || n <= 0) return;
 
-    // Leading dimensions: op(A) is m x n, so A itself has m rows for 'N' and n rows otherwise.
+    // Leading dimensions: blas_impl::op(A) is m x n, so A itself has m rows for 'N' and n rows otherwise.
     const bool zero_beta = (beta == T(0));
     if (A == nullptr) throw std::runtime_error("geam: null A");
     if (!zero_beta && B == nullptr) throw std::runtime_error("geam: null B with beta != 0");
@@ -306,6 +309,17 @@ void geam(const DdlaHandle_t& handle, char transa, char transb, int m, int n,
     if (!zero_beta && ldb < std::max(1, tb == 'N' ? m : n)) throw std::runtime_error("geam: ldb too small");
     if (ldc < std::max(1, m)) throw std::runtime_error("geam: ldc too small");
 
+}
+
+template <DdlaBackend Backend, typename T>
+void geam_run(const DdlaHandle_t& handle, char transa, char transb, int m, int n,
+          const T& alpha, const T* A, int lda,
+          const T& beta, const T* B, int ldb,
+          T* C, int ldc)
+{
+    const char ta = upper(transa), tb = upper(transb);
+    if (m <= 0 || n <= 0) return;
+    const bool zero_beta = (beta == T(0));
     if constexpr (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         GeamCpuArgs<T> g;
@@ -325,17 +339,29 @@ void geam(const DdlaHandle_t& handle, char transa, char transb, int m, int n,
 #endif
     } else {
 #if DDLA_HAS_GPU
-        const gpublasOperation_t opA = detail::to_blas_op(ta);
+        const gpublasOperation_t opA = blas_impl::op(ta);
         if (zero_beta) {
             // The vendor routine always reads a second operand: alias it to A (beta == 0 makes its
             // contribution vanish), as the old omatcopy did.
-            BLAS_CHECK(gpublasGeam(handle->blasH, opA, opA, m, n, alpha, A, lda, beta, A, lda, C, ldc));
+            BLAS_CHECK(gpublasGeam(static_cast<gpublasHandle_t>(handle->blasH), opA, opA, m, n, alpha, A, lda, beta, A, lda, C, ldc));
         } else {
-            BLAS_CHECK(gpublasGeam(handle->blasH, opA, detail::to_blas_op(tb), m, n,
+            BLAS_CHECK(gpublasGeam(static_cast<gpublasHandle_t>(handle->blasH), opA, blas_impl::op(tb), m, n,
                                    alpha, A, lda, beta, B, ldb, C, ldc));
         }
 #endif
     }
+}
+
+} // namespace blas_impl
+
+template <DdlaBackend Backend, typename T>
+void geam(const DdlaHandle_t& handle, char transa, char transb, int m, int n,
+          const T& alpha, const T* A, int lda,
+          const T& beta, const T* B, int ldb,
+          T* C, int ldc)
+{
+    blas_impl::geam_check<Backend, T>(handle, transa, transb, m, n, alpha, A, lda, beta, B, ldb, C, ldc);
+    blas_impl::geam_run<Backend, T>(handle, transa, transb, m, n, alpha, A, lda, beta, B, ldb, C, ldc);
 }
 
 #define INSTANTIATE_GEAM(BACKEND, TYPE)                                        \
@@ -359,4 +385,21 @@ INSTANTIATE_GEAM(DdlaBackend::GPU, std::complex<double>);
 
 #undef INSTANTIATE_GEAM
 
+
+#define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
+    template void blas_impl::geam_check<BACKEND, TYPE>(const DdlaHandle_t& handle, char transa, char transb, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE& beta, const TYPE* B, int ldb, TYPE* C, int ldc); \
+    template void blas_impl::geam_run<BACKEND, TYPE>(const DdlaHandle_t& handle, char transa, char transb, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE& beta, const TYPE* B, int ldb, TYPE* C, int ldc);
+#if DDLA_HAS_CPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
+#endif
+#undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

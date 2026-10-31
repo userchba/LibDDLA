@@ -1,3 +1,4 @@
+#include "blas_impl.h"
 // ---------------------------------------------------------------------------
 // Unified backend-templated Hermitian rank-2k update
 //   C := alpha*A*B^H + conj(alpha)*B*A^H + beta*C    (trans = 'N')   or
@@ -34,7 +35,7 @@
 
 #include "blas_enums.h"
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #if DDLA_HAS_CPU
 extern "C" {
@@ -159,8 +160,10 @@ inline gpublasStatus_t gpublasHer2k(
 
 namespace ddla {
 
+namespace blas_impl {
+
 template <DdlaBackend Backend, typename T>
-void her2k(
+void her2k_check(
     const DdlaHandle_t& handle,
     char uplo, char trans,
     int n, int k,
@@ -187,6 +190,23 @@ void her2k(
             (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
     }
 
+    if constexpr (Backend == DdlaBackend::GPU) {
+        (void)detail::to_fill_mode(uplo);
+        (void)detail::to_blas_op(trans);
+    }
+}
+
+template <DdlaBackend Backend, typename T>
+void her2k_run(
+    const DdlaHandle_t& handle,
+    char uplo, char trans,
+    int n, int k,
+    const T& alpha,
+    const T* A, int lda,
+    const T* B, int ldb,
+    const typename real_type<T>::type& beta,
+    T* C, int ldc)
+{
     if constexpr (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         // Real data: HER2K == SYR2K, and 'C' must be spelled 'T' because some
@@ -220,9 +240,9 @@ void her2k(
                       std::is_same_v<T, double> ||
                       std::is_same_v<T, std::complex<float>> ||
                       std::is_same_v<T, std::complex<double>>) {
-            BLAS_CHECK(gpublasHer2k(handle->blasH,
-                                    detail::to_fill_mode(uplo),
-                                    detail::to_blas_op(trans),
+            BLAS_CHECK(gpublasHer2k(static_cast<gpublasHandle_t>(handle->blasH),
+                                    blas_impl::fill(uplo),
+                                    blas_impl::op(trans),
                                     n, k, alpha, A, lda, B, ldb, beta, C, ldc));
         } else {
             static_assert(sizeof(T) == 0, "her2k: unsupported scalar type T");
@@ -233,6 +253,23 @@ void her2k(
         (void)beta; (void)C; (void)ldc;
 #endif
     }
+}
+
+} // namespace blas_impl
+
+template <DdlaBackend Backend, typename T>
+void her2k(
+    const DdlaHandle_t& handle,
+    char uplo, char trans,
+    int n, int k,
+    const T& alpha,
+    const T* A, int lda,
+    const T* B, int ldb,
+    const typename real_type<T>::type& beta,
+    T* C, int ldc)
+{
+    blas_impl::her2k_check<Backend, T>(handle, uplo, trans, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
+    blas_impl::her2k_run<Backend, T>(handle, uplo, trans, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
 }
 
 #define INSTANTIATE_HER2K(BACKEND, TYPE)                                       \
@@ -257,4 +294,21 @@ INSTANTIATE_HER2K(DdlaBackend::GPU, std::complex<double>);
 
 #undef INSTANTIATE_HER2K
 
+
+#define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
+    template void blas_impl::her2k_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, char trans, int n, int k, const TYPE& alpha, const TYPE* A, int lda, const TYPE* B, int ldb, const typename real_type<TYPE>::type& beta, TYPE* C, int ldc); \
+    template void blas_impl::her2k_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, char trans, int n, int k, const TYPE& alpha, const TYPE* A, int lda, const TYPE* B, int ldb, const typename real_type<TYPE>::type& beta, TYPE* C, int ldc);
+#if DDLA_HAS_CPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
+#endif
+#undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

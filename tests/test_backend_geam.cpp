@@ -35,7 +35,7 @@
 
 #include <ddla/ddla.h>
 
-#include "ddla_stream_impl.h"   // DdlaStream::host_threads
+#include "ddla_stream.h"   // DdlaStream::host_threads
 
 using namespace ddla;
 

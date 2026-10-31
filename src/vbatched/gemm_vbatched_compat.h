@@ -17,7 +17,7 @@
 #endif
 
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #include <thrust/complex.h>
 
@@ -27,7 +27,7 @@
 // Launch on the handle's stream and check the launch through the handle.
 #define DDLA_LAUNCH_KERNEL(handle, kernel_tuple, grid, block, shmem, ...)                   \
     do {                                                                                    \
-        gpuLaunchKernelGGL(kernel_tuple, grid, block, shmem, (handle)->stream, __VA_ARGS__); \
+        gpuLaunchKernelGGL(kernel_tuple, grid, block, shmem, static_cast<ddla::gpuStream_t>((handle)->stream), __VA_ARGS__); \
         ddla::DDLA_CHECK(ddla::ddlaGetLastError(handle));                                   \
     } while (false)
 
@@ -141,7 +141,7 @@ inline void ddlaLaunchKernelByPtr(
     T alpha, T beta,
     int max_M, int max_N, int max_K)
 {
-    const ddla::gpuStream_t stream = handle->stream;
+    const ddla::gpuStream_t stream = static_cast<ddla::gpuStream_t>(handle->stream);
     ddla::GPU_CHECK(ddla::gpuLaunchKernelPtr(
         func, grid, block, shmem, stream,
         m, n, k, A, Ai, Aj, lda, B, Bi, Bj, ldb,

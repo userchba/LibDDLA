@@ -1,5 +1,5 @@
 #include "pgemm_test_common.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 void check_selection() {
     int d[DDLA_DLEN_] = {};

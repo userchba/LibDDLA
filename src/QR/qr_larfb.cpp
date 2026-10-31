@@ -1,3 +1,4 @@
+#include "BLAS/blas_impl.h"
 // ---------------------------------------------------------------------------
 // BLAS-3 update step of pgeqrf (moved out of pgeqrf.cpp, 2026-10-11): see pgeqrf_impl.h.
 // ---------------------------------------------------------------------------
@@ -44,20 +45,21 @@ void qr_larfb_left_adj(const QrCtx<T>& ctx, QrWorkspace<T>& ws,
     // lrp == 0 guard keeps a hypothetical row-less rank correct.
     if (lrp > 0) {
         // gemm with beta = 0 overwrites W completely: no zero-fill.
-        gemm<Backend, T>(handle, adj, 'N', jb, nct, lrp, T(1),
+        blas_impl::gemm_run<Backend,T>(handle, adj, 'N', jb, nct, lrp, T(1),
                          V, ldv, Cblk, lld, T(0), W, jb);
     } else if (!solo) {
         DDLA_CHECK(ddlaMemset(handle, W, 0, static_cast<std::size_t>(jb) * nct * sizeof(T)));
     }
     if (!solo)
         commAllReduce<Backend>(handle, CommScope::Col, W, Wp, jb * nct, cclSum);
-    // Solo writes W -> Wp; on multi-row grids the allreduce has already
-    // produced Wp, which TRMM updates in place.
-    trmm<Backend, T>(handle, 'L', t_uplo, adj, 'N', jb, nct, T(1),
-                     T_panel, jb, solo ? W : Wp, jb, Wp, jb);
+    // The unreduced solo result and the multi-row reduced result are each
+    // consumed only by TRMM and the update, so use that live buffer in place.
+    T* const product = solo ? W : Wp;
+    blas_impl::trmm_run<Backend,T>(handle, 'L', t_uplo, adj, 'N', jb, nct, T(1),
+                     T_panel, jb, product, jb);
     if (lrp > 0) {
-        gemm<Backend, T>(handle, 'N', 'N', lrp, nct, jb, T(-1),
-                         V, ldv, Wp, jb, T(1), Cblk, lld);
+        blas_impl::gemm_run<Backend,T>(handle, 'N', 'N', lrp, nct, jb, T(-1),
+                         V, ldv, product, jb, T(1), Cblk, lld);
     }
 }
 

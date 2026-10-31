@@ -1,6 +1,7 @@
+#include "blas_impl.h"
 // ---------------------------------------------------------------------------
 // Unified backend-templated batched matrix multiply over arrays of pointers:
-// for i in [0, batchCount):  C[i] := alpha*op(A[i])*op(B[i]) + beta*C[i].
+// for i in [0, batchCount):  C[i] := alpha*blas_impl::op(A[i])*blas_impl::op(B[i]) + beta*C[i].
 //
 // Structure follows src/herk.cpp exactly: one definition covering CPU (Fortran
 // BLAS) and GPU (cuBLAS/hipBLAS), selected with `if constexpr` on the Backend
@@ -38,7 +39,7 @@
 
 #include "blas_enums.h"
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "host_threads.h"
 
 #if DDLA_HAS_CPU
@@ -218,8 +219,10 @@ inline gpublasStatus_t gpublasGemmBatched(
 
 namespace ddla {
 
+namespace blas_impl {
+
 template <DdlaBackend Backend, typename T>
-void gemmBatched(
+void gemmBatched_check(
     const DdlaHandle_t& handle,
     char transa, char transb,
     int m, int n, int k,
@@ -247,6 +250,24 @@ void gemmBatched(
             (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
     }
 
+    if constexpr (Backend == DdlaBackend::GPU) {
+        (void)detail::to_blas_op(transa);
+        (void)detail::to_blas_op(transb);
+    }
+}
+
+template <DdlaBackend Backend, typename T>
+void gemmBatched_run(
+    const DdlaHandle_t& handle,
+    char transa, char transb,
+    int m, int n, int k,
+    const T& alpha,
+    const T* const Aarray[], int lda,
+    const T* const Barray[], int ldb,
+    const T& beta,
+    T* const Carray[], int ldc,
+    int batchCount)
+{
     if constexpr (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         // One Fortran gemm per matrix, spread over the handle's host threads (see for_each_product).  The characters go to
@@ -286,9 +307,9 @@ void gemmBatched(
                       std::is_same_v<T, double> ||
                       std::is_same_v<T, std::complex<float>> ||
                       std::is_same_v<T, std::complex<double>>) {
-            BLAS_CHECK(gpublasGemmBatched(handle->blasH,
-                                          detail::to_blas_op(transa),
-                                          detail::to_blas_op(transb),
+            BLAS_CHECK(gpublasGemmBatched(static_cast<gpublasHandle_t>(handle->blasH),
+                                          blas_impl::op(transa),
+                                          blas_impl::op(transb),
                                           m, n, k, alpha,
                                           Aarray, lda, Barray, ldb, beta,
                                           Carray, ldc, batchCount));
@@ -301,6 +322,24 @@ void gemmBatched(
         (void)beta; (void)Carray; (void)ldc; (void)batchCount;
 #endif
     }
+}
+
+} // namespace blas_impl
+
+template <DdlaBackend Backend, typename T>
+void gemmBatched(
+    const DdlaHandle_t& handle,
+    char transa, char transb,
+    int m, int n, int k,
+    const T& alpha,
+    const T* const Aarray[], int lda,
+    const T* const Barray[], int ldb,
+    const T& beta,
+    T* const Carray[], int ldc,
+    int batchCount)
+{
+    blas_impl::gemmBatched_check<Backend, T>(handle, transa, transb, m, n, k, alpha, Aarray, lda, Barray, ldb, beta, Carray, ldc, batchCount);
+    blas_impl::gemmBatched_run<Backend, T>(handle, transa, transb, m, n, k, alpha, Aarray, lda, Barray, ldb, beta, Carray, ldc, batchCount);
 }
 
 #define INSTANTIATE_GEMM_BATCHED(BACKEND, TYPE)                                \
@@ -325,4 +364,21 @@ INSTANTIATE_GEMM_BATCHED(DdlaBackend::GPU, std::complex<double>);
 
 #undef INSTANTIATE_GEMM_BATCHED
 
+
+#define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
+    template void blas_impl::gemmBatched_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k, const TYPE& alpha, const TYPE* const Aarray[], int lda, const TYPE* const Barray[], int ldb, const TYPE& beta, TYPE* const Carray[], int ldc, int batchCount); \
+    template void blas_impl::gemmBatched_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k, const TYPE& alpha, const TYPE* const Aarray[], int lda, const TYPE* const Barray[], int ldb, const TYPE& beta, TYPE* const Carray[], int ldc, int batchCount);
+#if DDLA_HAS_CPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
+#endif
+#undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

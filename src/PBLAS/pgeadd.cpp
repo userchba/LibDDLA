@@ -1,6 +1,7 @@
+#include "ddla_connector.h"
 #include <ddla/ddla.h>
 #include "ddla_desc.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "require_backend.h"
 #include "comm_traits.h"
 #include <algorithm>
@@ -69,7 +70,7 @@ void copy_batch(DdlaHandle_t h, char op, const T* src, T* dst, const std::vector
         device_blocks.resize(blocks.size());
         DDLA_CHECK(ddlaMemcpy(h,device_blocks.data(),blocks.data(),blocks.size()*sizeof(CopyBlock)));
         using DT = typename DeviceScalar<T>::type;
-        copy_blocks<DT><<<dim3(blocks.size()),dim3(16,16),0,h->stream>>>(
+        copy_blocks<DT><<<dim3(blocks.size()),dim3(16,16),0,static_cast<gpuStream_t>(h->stream)>>>(
             reinterpret_cast<const DT*>(src),reinterpret_cast<DT*>(dst),device_blocks.data(),op!='N',op=='C');
         DDLA_CHECK(ddlaGetLastError(h));
 #endif

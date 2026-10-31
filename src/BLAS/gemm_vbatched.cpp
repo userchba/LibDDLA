@@ -2,7 +2,7 @@
 #include <ddla/ddla_handle_t.h>
 
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #include "vbatched/gemm_vbatched_compat.h"
 
@@ -330,7 +330,7 @@ void validate_handle(const DdlaHandle_t& handle, const char* who)
         throw std::invalid_argument(std::string(who) + ": template backend does not match the handle backend");
     if constexpr (Backend != DdlaBackend::GPU)
         throw std::invalid_argument(std::string(who) + ": only the GPU backend is implemented");
-    else if (handle->stream == nullptr)
+    else if (static_cast<gpuStream_t>(handle->stream) == nullptr)
         throw std::invalid_argument(std::string(who) + ": invalid DDLA handle");
 }
 

@@ -2,7 +2,7 @@
 #include "ddla_desc.h"
 #include <cassert>
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "require_backend.h"
 #include "transport_block.h"
 #include "comm_traits.h"

@@ -1,4 +1,5 @@
-#include "ddla_stream_impl.h"
+#include "ddla_connector.h"
+#include "ddla_stream.h"
 #include "host_threads.h"
 #include <stdexcept>
 #include <cstdlib>
@@ -265,7 +266,7 @@ ddlaStatus_t ddlaMalloc(const DdlaHandle_t& handle, void** ptr, std::size_t byte
         return (*ptr != nullptr) ? kOk : ddlaStatus_t::DDLA_STATUS_ALLOC_FAILED;
     }
 #if DDLA_GPU_VENDOR
-    return to_status(gpuMallocAsync(ptr, bytes, handle->stream));
+    return to_status(gpuMallocAsync(ptr, bytes, static_cast<gpuStream_t>(handle->stream)));
 #else
     return kInternal;
 #endif
@@ -281,7 +282,7 @@ ddlaStatus_t ddlaFree(const DdlaHandle_t& handle, void* ptr)
         return kOk;
     }
 #if DDLA_GPU_VENDOR
-    return to_status(gpuFreeAsync(ptr, handle->stream));
+    return to_status(gpuFreeAsync(ptr, static_cast<gpuStream_t>(handle->stream)));
 #else
     return kInternal;
 #endif
@@ -325,7 +326,7 @@ ddlaStatus_t ddlaFreeHost(const DdlaHandle_t& handle, void* ptr)
 namespace detail {
 
 ddlaStatus_t memcpy_on(const DdlaHandle_t& handle, void* dst, const void* src, std::size_t bytes,
-                       gpuStream_t queue)
+                       void* queue)
 {
     if (handle == nullptr) return kBadHandle;
 
@@ -342,7 +343,7 @@ ddlaStatus_t memcpy_on(const DdlaHandle_t& handle, void* dst, const void* src, s
         return kOk;
     }
 #if DDLA_GPU_VENDOR
-    return to_status(gpuMemcpyAsync(dst, src, bytes, vendor_kind(route), queue));
+    return to_status(gpuMemcpyAsync(dst, src, bytes, vendor_kind(route), static_cast<gpuStream_t>(queue)));
 #else
     (void)queue;
     return kInternal;
@@ -353,7 +354,7 @@ ddlaStatus_t memcpy_on(const DdlaHandle_t& handle, void* dst, const void* src, s
 
 ddlaStatus_t ddlaMemcpy(const DdlaHandle_t& handle, void* dst, const void* src, std::size_t bytes)
 {
-    return detail::memcpy_on(handle, dst, src, bytes, handle ? handle->stream : nullptr);
+    return detail::memcpy_on(handle, dst, src, bytes, handle ? static_cast<gpuStream_t>(handle->stream) : nullptr);
 }
 
 ddlaStatus_t ddlaMemcpy2D(const DdlaHandle_t& handle, void* dst, std::size_t dpitch,
@@ -376,7 +377,7 @@ ddlaStatus_t ddlaMemcpy2D(const DdlaHandle_t& handle, void* dst, std::size_t dpi
     if (route == CopyRoute::Host) return host_memcpy2d(dst, dpitch, src, spitch, width, height);
 #if DDLA_GPU_VENDOR
     return to_status(gpuMemcpy2DAsync(dst, dpitch, src, spitch, width, height, vendor_kind(route),
-                                      handle->stream));
+                                      static_cast<gpuStream_t>(handle->stream)));
 #else
     return kInternal;
 #endif
@@ -392,7 +393,7 @@ ddlaStatus_t ddlaMemset(const DdlaHandle_t& handle, void* ptr, int value, std::s
         return kOk;
     }
 #if DDLA_GPU_VENDOR
-    return to_status(gpuMemsetAsync(ptr, value, bytes, handle->stream));
+    return to_status(gpuMemsetAsync(ptr, value, bytes, static_cast<gpuStream_t>(handle->stream)));
 #else
     return kInternal;
 #endif
@@ -401,12 +402,12 @@ ddlaStatus_t ddlaMemset(const DdlaHandle_t& handle, void* ptr, int value, std::s
 // -- synchronization and events --------------------------------------------------------------------
 namespace detail {
 
-ddlaStatus_t synchronize_on(const DdlaHandle_t& handle, gpuStream_t queue)
+ddlaStatus_t synchronize_on(const DdlaHandle_t& handle, void* queue)
 {
     if (handle == nullptr) return kBadHandle;
     if (!is_gpu(handle)) return kOk;
 #if DDLA_GPU_VENDOR
-    return to_status(gpuStreamSynchronize(queue));
+    return to_status(gpuStreamSynchronize(static_cast<gpuStream_t>(queue)));
 #else
     (void)queue;
     return kInternal;
@@ -417,7 +418,7 @@ ddlaStatus_t synchronize_on(const DdlaHandle_t& handle, gpuStream_t queue)
 
 ddlaStatus_t ddlaSynchronize(const DdlaHandle_t& handle)
 {
-    return detail::synchronize_on(handle, handle ? handle->stream : nullptr);
+    return detail::synchronize_on(handle, handle ? static_cast<gpuStream_t>(handle->stream) : nullptr);
 }
 
 ddlaStatus_t ddlaDeviceSynchronize(const DdlaHandle_t& handle)
@@ -460,12 +461,12 @@ ddlaStatus_t ddlaEventDestroy(const DdlaHandle_t& handle, ddlaEvent_t event)
 
 namespace detail {
 
-ddlaStatus_t event_record_on(const DdlaHandle_t& handle, ddlaEvent_t event, gpuStream_t queue)
+ddlaStatus_t event_record_on(const DdlaHandle_t& handle, ddlaEvent_t event, void* queue)
 {
     if (handle == nullptr) return kBadHandle;
     if (!is_gpu(handle)) return kOk;
 #if DDLA_GPU_VENDOR
-    return to_status(gpuEventRecord(vendor_event(event), queue));
+    return to_status(gpuEventRecord(vendor_event(event), static_cast<gpuStream_t>(queue)));
 #else
     (void)event; (void)queue;
     return kInternal;
@@ -476,17 +477,17 @@ ddlaStatus_t event_record_on(const DdlaHandle_t& handle, ddlaEvent_t event, gpuS
 
 ddlaStatus_t ddlaEventRecord(const DdlaHandle_t& handle, ddlaEvent_t event)
 {
-    return detail::event_record_on(handle, event, handle ? handle->stream : nullptr);
+    return detail::event_record_on(handle, event, handle ? static_cast<gpuStream_t>(handle->stream) : nullptr);
 }
 
 namespace detail {
 
-ddlaStatus_t event_wait_on(const DdlaHandle_t& handle, ddlaEvent_t event, gpuStream_t queue)
+ddlaStatus_t event_wait_on(const DdlaHandle_t& handle, ddlaEvent_t event, void* queue)
 {
     if (handle == nullptr) return kBadHandle;
     if (!is_gpu(handle)) return kOk;
 #if DDLA_GPU_VENDOR
-    return to_status(gpuStreamWaitEvent(queue, vendor_event(event), 0));
+    return to_status(gpuStreamWaitEvent(static_cast<gpuStream_t>(queue), vendor_event(event), 0));
 #else
     (void)event; (void)queue;
     return kInternal;
@@ -497,7 +498,7 @@ ddlaStatus_t event_wait_on(const DdlaHandle_t& handle, ddlaEvent_t event, gpuStr
 
 ddlaStatus_t ddlaEventWait(const DdlaHandle_t& handle, ddlaEvent_t event)
 {
-    return detail::event_wait_on(handle, event, handle ? handle->stream : nullptr);
+    return detail::event_wait_on(handle, event, handle ? static_cast<gpuStream_t>(handle->stream) : nullptr);
 }
 
 ddlaStatus_t ddlaEventSynchronize(const DdlaHandle_t& handle, ddlaEvent_t event)
@@ -573,13 +574,13 @@ ddlaStatus_t ddlaSetStream(const DdlaHandle_t& handle, void* stream)
             "ddlaSetStream: setting a stream requires a GPU handle");
     }
 #if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
-    handle->stream = static_cast<gpuStream_t>(stream);
+    handle->stream = stream;
 #endif
     // Re-bind the BLAS/solver handles so subsequent calls honor the new
     // stream (mirrors what DdlaStream::init does at creation time).
 #if DDLA_GPU_VENDOR
-    BLAS_CHECK(gpublasSetStream(handle->blasH, handle->stream));
-    SOLVER_CHECK(gpusolverSetStream(handle->solverH, handle->stream));
+    BLAS_CHECK(gpublasSetStream(static_cast<gpublasHandle_t>(handle->blasH), static_cast<gpuStream_t>(handle->stream)));
+    SOLVER_CHECK(gpusolverSetStream(static_cast<gpusolverHandle_t>(handle->solverH), static_cast<gpuStream_t>(handle->stream)));
 #endif
     return ddlaStatus_t::DDLA_STATUS_SUCCESS;
 }

@@ -1,6 +1,7 @@
+#include "ddla_connector.h"
 #include "lu_panel.h"
 #include "ddla_desc.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "comm_traits.h"
 #include "row_swap.h"
 #include "matrix_transfer.h"

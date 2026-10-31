@@ -1,3 +1,4 @@
+#include "blas_impl.h"
 // ---------------------------------------------------------------------------
 // Unified backend-templated Hermitian matrix-vector product
 //   y := alpha*A*x + beta*y.
@@ -32,7 +33,7 @@
 
 #include "blas_enums.h"
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #if DDLA_HAS_CPU
 extern "C" {
@@ -136,8 +137,10 @@ inline gpublasStatus_t gpublasHemv(
 
 namespace ddla {
 
+namespace blas_impl {
+
 template <DdlaBackend Backend, typename T>
-void hemv(
+void hemv_check(
     const DdlaHandle_t& handle,
     char uplo,
     int n,
@@ -164,6 +167,22 @@ void hemv(
             (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
     }
 
+    if constexpr (Backend == DdlaBackend::GPU) {
+        (void)detail::to_fill_mode(uplo);
+    }
+}
+
+template <DdlaBackend Backend, typename T>
+void hemv_run(
+    const DdlaHandle_t& handle,
+    char uplo,
+    int n,
+    const T& alpha,
+    const T* A, int lda,
+    const T* x, int incx,
+    const T& beta,
+    T* y, int incy)
+{
     if constexpr (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         // Real data: HEMV == SYMV; complex data calls xHEMV.  There is no
@@ -194,8 +213,8 @@ void hemv(
                       std::is_same_v<T, double> ||
                       std::is_same_v<T, std::complex<float>> ||
                       std::is_same_v<T, std::complex<double>>) {
-            BLAS_CHECK(gpublasHemv(handle->blasH,
-                                   detail::to_fill_mode(uplo),
+            BLAS_CHECK(gpublasHemv(static_cast<gpublasHandle_t>(handle->blasH),
+                                   blas_impl::fill(uplo),
                                    n, alpha, A, lda, x, incx, beta, y, incy));
         } else {
             static_assert(sizeof(T) == 0, "hemv: unsupported scalar type T");
@@ -205,6 +224,23 @@ void hemv(
         (void)x; (void)incx; (void)beta; (void)y; (void)incy;
 #endif
     }
+}
+
+} // namespace blas_impl
+
+template <DdlaBackend Backend, typename T>
+void hemv(
+    const DdlaHandle_t& handle,
+    char uplo,
+    int n,
+    const T& alpha,
+    const T* A, int lda,
+    const T* x, int incx,
+    const T& beta,
+    T* y, int incy)
+{
+    blas_impl::hemv_check<Backend, T>(handle, uplo, n, alpha, A, lda, x, incx, beta, y, incy);
+    blas_impl::hemv_run<Backend, T>(handle, uplo, n, alpha, A, lda, x, incx, beta, y, incy);
 }
 
 #define INSTANTIATE_HEMV(BACKEND, TYPE)                                        \
@@ -229,4 +265,21 @@ INSTANTIATE_HEMV(DdlaBackend::GPU, std::complex<double>);
 
 #undef INSTANTIATE_HEMV
 
+
+#define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
+    template void blas_impl::hemv_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE* x, int incx, const TYPE& beta, TYPE* y, int incy); \
+    template void blas_impl::hemv_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE* x, int incx, const TYPE& beta, TYPE* y, int incy);
+#if DDLA_HAS_CPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
+#endif
+#undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

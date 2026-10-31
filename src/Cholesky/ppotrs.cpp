@@ -2,7 +2,7 @@
 #include "ddla_desc.h"
 #include <cassert>
 #include <vector>
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "require_backend.h"
 namespace ddla{
 

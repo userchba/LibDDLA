@@ -1,3 +1,4 @@
+#include "blas_impl.h"
 // ---------------------------------------------------------------------------
 // Unified backend-templated Hermitian rank-k update (C := alpha*A*A^H + beta*C).
 //
@@ -25,7 +26,7 @@
 
 #include "blas_enums.h"
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #if DDLA_HAS_CPU
 extern "C" {
@@ -149,8 +150,10 @@ inline gpublasStatus_t gpublasHerk(
 
 namespace ddla {
 
+namespace blas_impl {
+
 template <DdlaBackend Backend, typename T>
-void herk(
+void herk_check(
     const DdlaHandle_t& handle,
     char uplo, char trans,
     int n, int k,
@@ -178,6 +181,23 @@ void herk(
             (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
     }
 
+    if constexpr (Backend == DdlaBackend::GPU) {
+        (void)detail::to_fill_mode(uplo);
+        (void)detail::to_blas_op(trans);
+    }
+}
+
+template <DdlaBackend Backend, typename T>
+void herk_run(
+    const DdlaHandle_t& handle,
+    char uplo, char trans,
+    int n, int k,
+    const typename real_type<T>::type& alpha,
+    const T* A, int lda,
+    const typename real_type<T>::type& beta,
+    T* C, int ldc)
+{
+    using rt = typename real_type<T>::type;
     if constexpr (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         // Real data: HERK == SYRK, and 'C' must be spelled 'T' because some
@@ -211,9 +231,9 @@ void herk(
                       std::is_same_v<T, double> ||
                       std::is_same_v<T, std::complex<float>> ||
                       std::is_same_v<T, std::complex<double>>) {
-            BLAS_CHECK(gpublasHerk(handle->blasH,
-                                   detail::to_fill_mode(uplo),
-                                   detail::to_blas_op(trans),
+            BLAS_CHECK(gpublasHerk(static_cast<gpublasHandle_t>(handle->blasH),
+                                   blas_impl::fill(uplo),
+                                   blas_impl::op(trans),
                                    n, k, alpha, A, lda, beta, C, ldc));
         } else {
             static_assert(sizeof(T) == 0, "herk: unsupported scalar type T");
@@ -223,6 +243,22 @@ void herk(
         (void)alpha; (void)A; (void)lda; (void)beta; (void)C; (void)ldc;
 #endif
     }
+}
+
+} // namespace blas_impl
+
+template <DdlaBackend Backend, typename T>
+void herk(
+    const DdlaHandle_t& handle,
+    char uplo, char trans,
+    int n, int k,
+    const typename real_type<T>::type& alpha,
+    const T* A, int lda,
+    const typename real_type<T>::type& beta,
+    T* C, int ldc)
+{
+    blas_impl::herk_check<Backend, T>(handle, uplo, trans, n, k, alpha, A, lda, beta, C, ldc);
+    blas_impl::herk_run<Backend, T>(handle, uplo, trans, n, k, alpha, A, lda, beta, C, ldc);
 }
 
 #define INSTANTIATE_HERK(BACKEND, TYPE)                                        \
@@ -247,4 +283,21 @@ INSTANTIATE_HERK(DdlaBackend::GPU, std::complex<double>);
 
 #undef INSTANTIATE_HERK
 
+
+#define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
+    template void blas_impl::herk_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, char trans, int n, int k, const typename real_type<TYPE>::type& alpha, const TYPE* A, int lda, const typename real_type<TYPE>::type& beta, TYPE* C, int ldc); \
+    template void blas_impl::herk_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, char trans, int n, int k, const typename real_type<TYPE>::type& alpha, const TYPE* A, int lda, const typename real_type<TYPE>::type& beta, TYPE* C, int ldc);
+#if DDLA_HAS_CPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
+#endif
+#undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

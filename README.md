@@ -125,6 +125,13 @@ cmake --build build-hip --target install
 Combine `DDLA_USE_CPU` with `DDLA_USE_CUDA` (or `DDLA_USE_HIP`) to build both
 backends into one library, selectable per `DdlaHandle_t` at runtime:
 
+The private `DdlaStream` has the same layout for CPU and GPU handles. Streams,
+BLAS/solver handles and CCL communicators occupy opaque `void*` slots; CPU
+handles leave them null. `src/ddla_stream.cpp` provides backend-templated
+resource setup and cleanup in one translation unit. Dual builds compile each
+library source once and generate both backend specializations in that pass;
+they do not build a second CPU copy of the shared sources.
+
 ```bash
 cmake -S . -B build-dual                                \
   -DDDLA_USE_CPU=ON                                      \

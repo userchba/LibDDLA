@@ -1,3 +1,4 @@
+#include "blas_impl.h"
 // ---------------------------------------------------------------------------
 // Unified backend-templated Hermitian matrix-matrix product
 //   C := alpha*A*B + beta*C    (side = 'L')   or
@@ -33,7 +34,7 @@
 
 #include "blas_enums.h"
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #if DDLA_HAS_CPU
 extern "C" {
@@ -143,8 +144,10 @@ inline gpublasStatus_t gpublasHemm(
 
 namespace ddla {
 
+namespace blas_impl {
+
 template <DdlaBackend Backend, typename T>
-void hemm(
+void hemm_check(
     const DdlaHandle_t& handle,
     char side, char uplo,
     int m, int n,
@@ -171,6 +174,23 @@ void hemm(
             (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
     }
 
+    if constexpr (Backend == DdlaBackend::GPU) {
+        (void)detail::to_side_mode(side);
+        (void)detail::to_fill_mode(uplo);
+    }
+}
+
+template <DdlaBackend Backend, typename T>
+void hemm_run(
+    const DdlaHandle_t& handle,
+    char side, char uplo,
+    int m, int n,
+    const T& alpha,
+    const T* A, int lda,
+    const T* B, int ldb,
+    const T& beta,
+    T* C, int ldc)
+{
     if constexpr (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         // Real data: HEMM == SYMM; complex data calls xHEMM.  There is no
@@ -202,9 +222,9 @@ void hemm(
                       std::is_same_v<T, double> ||
                       std::is_same_v<T, std::complex<float>> ||
                       std::is_same_v<T, std::complex<double>>) {
-            BLAS_CHECK(gpublasHemm(handle->blasH,
-                                   detail::to_side_mode(side),
-                                   detail::to_fill_mode(uplo),
+            BLAS_CHECK(gpublasHemm(static_cast<gpublasHandle_t>(handle->blasH),
+                                   blas_impl::side(side),
+                                   blas_impl::fill(uplo),
                                    m, n, alpha, A, lda, B, ldb, beta, C, ldc));
         } else {
             static_assert(sizeof(T) == 0, "hemm: unsupported scalar type T");
@@ -215,6 +235,23 @@ void hemm(
         (void)beta; (void)C; (void)ldc;
 #endif
     }
+}
+
+} // namespace blas_impl
+
+template <DdlaBackend Backend, typename T>
+void hemm(
+    const DdlaHandle_t& handle,
+    char side, char uplo,
+    int m, int n,
+    const T& alpha,
+    const T* A, int lda,
+    const T* B, int ldb,
+    const T& beta,
+    T* C, int ldc)
+{
+    blas_impl::hemm_check<Backend, T>(handle, side, uplo, m, n, alpha, A, lda, B, ldb, beta, C, ldc);
+    blas_impl::hemm_run<Backend, T>(handle, side, uplo, m, n, alpha, A, lda, B, ldb, beta, C, ldc);
 }
 
 #define INSTANTIATE_HEMM(BACKEND, TYPE)                                        \
@@ -239,4 +276,21 @@ INSTANTIATE_HEMM(DdlaBackend::GPU, std::complex<double>);
 
 #undef INSTANTIATE_HEMM
 
+
+#define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
+    template void blas_impl::hemm_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char side, char uplo, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE* B, int ldb, const TYPE& beta, TYPE* C, int ldc); \
+    template void blas_impl::hemm_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char side, char uplo, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE* B, int ldb, const TYPE& beta, TYPE* C, int ldc);
+#if DDLA_HAS_CPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
+#endif
+#undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

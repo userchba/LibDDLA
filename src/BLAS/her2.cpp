@@ -1,3 +1,4 @@
+#include "blas_impl.h"
 // ---------------------------------------------------------------------------
 // Unified backend-templated Hermitian rank-2 update
 //   A := alpha*x*y^H + conj(alpha)*y*x^H + A.
@@ -33,7 +34,7 @@
 
 #include "blas_enums.h"
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #if DDLA_HAS_CPU
 extern "C" {
@@ -131,8 +132,10 @@ inline gpublasStatus_t gpublasHer2(
 
 namespace ddla {
 
+namespace blas_impl {
+
 template <DdlaBackend Backend, typename T>
-void her2(
+void her2_check(
     const DdlaHandle_t& handle,
     char uplo,
     int n,
@@ -158,6 +161,21 @@ void her2(
             (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
     }
 
+    if constexpr (Backend == DdlaBackend::GPU) {
+        (void)detail::to_fill_mode(uplo);
+    }
+}
+
+template <DdlaBackend Backend, typename T>
+void her2_run(
+    const DdlaHandle_t& handle,
+    char uplo,
+    int n,
+    const T& alpha,
+    const T* x, int incx,
+    const T* y, int incy,
+    T* A, int lda)
+{
     if constexpr (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         // Real data: HER2 == SYR2; complex data calls xHER2.  No transpose
@@ -188,8 +206,8 @@ void her2(
                       std::is_same_v<T, double> ||
                       std::is_same_v<T, std::complex<float>> ||
                       std::is_same_v<T, std::complex<double>>) {
-            BLAS_CHECK(gpublasHer2(handle->blasH,
-                                   detail::to_fill_mode(uplo),
+            BLAS_CHECK(gpublasHer2(static_cast<gpublasHandle_t>(handle->blasH),
+                                   blas_impl::fill(uplo),
                                    n, alpha, x, incx, y, incy, A, lda));
         } else {
             static_assert(sizeof(T) == 0, "her2: unsupported scalar type T");
@@ -199,6 +217,22 @@ void her2(
         (void)x; (void)incx; (void)y; (void)incy; (void)A; (void)lda;
 #endif
     }
+}
+
+} // namespace blas_impl
+
+template <DdlaBackend Backend, typename T>
+void her2(
+    const DdlaHandle_t& handle,
+    char uplo,
+    int n,
+    const T& alpha,
+    const T* x, int incx,
+    const T* y, int incy,
+    T* A, int lda)
+{
+    blas_impl::her2_check<Backend, T>(handle, uplo, n, alpha, x, incx, y, incy, A, lda);
+    blas_impl::her2_run<Backend, T>(handle, uplo, n, alpha, x, incx, y, incy, A, lda);
 }
 
 #define INSTANTIATE_HER2(BACKEND, TYPE)                                        \
@@ -223,4 +257,21 @@ INSTANTIATE_HER2(DdlaBackend::GPU, std::complex<double>);
 
 #undef INSTANTIATE_HER2
 
+
+#define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
+    template void blas_impl::her2_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, int n, const TYPE& alpha, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* A, int lda); \
+    template void blas_impl::her2_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, int n, const TYPE& alpha, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* A, int lda);
+#if DDLA_HAS_CPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
+#endif
+#undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

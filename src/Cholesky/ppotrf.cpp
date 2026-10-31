@@ -3,7 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "require_backend.h"
 #include <vector>
 #include <type_traits>

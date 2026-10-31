@@ -2,7 +2,7 @@
 #define DDLA_COMM_TRAITS_H
 
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "mpi_datatype.h"
 #include <vector>
 #include <cstddef>
@@ -142,9 +142,9 @@ struct CommTraits<DdlaBackend::GPU> {
     using comm_t = gpucclComm_t;
     static comm_t comm(const DdlaHandle_t& h, CommScope s) {
         switch (s) {
-            case CommScope::Row: return h->nccl_row_comm;
-            case CommScope::Col: return h->nccl_col_comm;
-            default:             return h->nccl_comm;
+            case CommScope::Row: return static_cast<gpucclComm_t>(h->nccl_row_comm);
+            case CommScope::Col: return static_cast<gpucclComm_t>(h->nccl_col_comm);
+            default:             return static_cast<gpucclComm_t>(h->nccl_comm);
         }
     }
     static void group_start(const DdlaHandle_t&) { CCL_CHECK(gpucclGroupStart()); }
@@ -199,22 +199,35 @@ inline void commGroupStart(const DdlaHandle_t& h) { CommTraits<Backend>::group_s
 template <DdlaBackend Backend = detail::local_backend_v>
 inline void commGroupEnd(const DdlaHandle_t& h) { CommTraits<Backend>::group_end(h); }
 
+// Host broadcasts may use a prepared MPI datatype for strided storage.
+// GPU collectives require contiguous buffers and use the typed overload below.
+template <DdlaBackend Backend = detail::local_backend_v, typename T>
+inline void commBcast(const DdlaHandle_t& h, CommScope scope, T* buf, int count,
+                      MPI_Datatype datatype, int root)
+{
+    static_assert(Backend == DdlaBackend::CPU, "MPI datatypes require a CPU broadcast");
+    MPI_CHECK(MPI_Bcast(buf, count, datatype, root, CommTraits<Backend>::comm(h, scope)));
+}
+
 template <DdlaBackend Backend = detail::local_backend_v, typename T>
 inline void commBcast(const DdlaHandle_t& h, CommScope scope, T* buf, std::size_t count, int root)
 {
     if constexpr (Backend == DdlaBackend::CPU) {
-        MPI_CHECK(MPI_Bcast(buf, (int)count, detail::mpi_datatype<T>(), root,
-                            CommTraits<Backend>::comm(h, scope)));
+        commBcast<Backend>(h, scope, buf, static_cast<int>(count), detail::mpi_datatype<T>(), root);
     } else {
 #if defined(DDLA_USE_GPU_CPU_TUNNEL)
         T* host = detail::tunnel_staging<T>(h, 0, count);
-        DDLA_CHECK(ddlaMemcpy(h, host, buf, count * sizeof(T)));
+        const auto comm = CommTraits<Backend>::comm(h, scope);
+        int rank;
+        MPI_CHECK(MPI_Comm_rank(comm, &rank));
+        // Receive buffers need not contain initialized values before Bcast.
+        if (rank == root) DDLA_CHECK(ddlaMemcpy(h, host, buf, count * sizeof(T)));
         DDLA_CHECK(ddlaSynchronize(h));
-        MPI_CHECK(MPI_Bcast(host, (int)count, detail::mpi_datatype<T>(), root, CommTraits<Backend>::comm(h, scope)));
+        MPI_CHECK(MPI_Bcast(host, (int)count, detail::mpi_datatype<T>(), root, comm));
         DDLA_CHECK(ddlaMemcpy(h, buf, host, count * sizeof(T)));
         DDLA_CHECK(ddlaSynchronize(h));
 #elif defined(DDLA_USE_CCL)
-        CCL_CHECK(gpucclBcast(buf, count * sizeof(T), gpucclInt8, root, CommTraits<Backend>::comm(h, scope), h->stream));
+        CCL_CHECK(gpucclBcast(buf, count * sizeof(T), gpucclInt8, root, CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
 #else
         DDLA_CHECK(ddlaSynchronize(h));
         MPI_CHECK(MPI_Bcast(buf, (int)count, detail::mpi_datatype<T>(), root, CommTraits<Backend>::comm(h, scope)));
@@ -235,7 +248,7 @@ inline void commSend(const DdlaHandle_t& h, CommScope scope, const T* buf, std::
         DDLA_CHECK(ddlaSynchronize(h));
         MPI_CHECK(MPI_Send(host, (int)count, detail::mpi_datatype<T>(), peer, 0, CommTraits<Backend>::comm(h, scope)));
 #elif defined(DDLA_USE_CCL)
-        CCL_CHECK(gpucclSend(buf, count * sizeof(T), gpucclInt8, peer, CommTraits<Backend>::comm(h, scope), h->stream));
+        CCL_CHECK(gpucclSend(buf, count * sizeof(T), gpucclInt8, peer, CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
 #else
         DDLA_CHECK(ddlaSynchronize(h));
         MPI_CHECK(MPI_Send(buf, (int)count, detail::mpi_datatype<T>(), peer, 0, CommTraits<Backend>::comm(h, scope)));
@@ -257,7 +270,7 @@ inline void commRecv(const DdlaHandle_t& h, CommScope scope, T* buf, std::size_t
         DDLA_CHECK(ddlaMemcpy(h, buf, host, count * sizeof(T)));
         DDLA_CHECK(ddlaSynchronize(h));
 #elif defined(DDLA_USE_CCL)
-        CCL_CHECK(gpucclRecv(buf, count * sizeof(T), gpucclInt8, peer, CommTraits<Backend>::comm(h, scope), h->stream));
+        CCL_CHECK(gpucclRecv(buf, count * sizeof(T), gpucclInt8, peer, CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
 #else
         DDLA_CHECK(ddlaSynchronize(h));
         MPI_CHECK(MPI_Recv(buf, (int)count, detail::mpi_datatype<T>(), peer, 0, CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
@@ -347,7 +360,7 @@ inline void commAllReduce(const DdlaHandle_t& h, CommScope scope,
         T* hs = detail::tunnel_staging<T>(h, 0, count);
         T* hr = detail::tunnel_staging<T>(h, 1, count);
         DDLA_CHECK(ddlaMemcpy(h, hs, sbuf, count * sizeof(T)));
-        DDLA_CHECK(ddlaMemcpy(h, hr, rbuf, count * sizeof(T)));
+        // MPI_Allreduce overwrites hr; no copy of the undefined output is needed.
         DDLA_CHECK(ddlaSynchronize(h));
         // In TUNNEL+CCL builds cclOp is ncclRedOp_t and must be translated
         // before it reaches MPI (identity for MPI_Op-only builds).
@@ -356,13 +369,13 @@ inline void commAllReduce(const DdlaHandle_t& h, CommScope scope,
         DDLA_CHECK(ddlaSynchronize(h));
 #elif defined(DDLA_USE_CCL)
         if constexpr (std::is_same_v<T, float>) {
-            CCL_CHECK(gpucclAllReduce(sbuf, rbuf, count, gpucclFloat32, op, CommTraits<Backend>::comm(h, scope), h->stream));
+            CCL_CHECK(gpucclAllReduce(sbuf, rbuf, count, gpucclFloat32, op, CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
         } else if constexpr (std::is_same_v<T, std::complex<float>>) {
-            CCL_CHECK(gpucclAllReduce(sbuf, rbuf, count * 2, gpucclFloat32, op, CommTraits<Backend>::comm(h, scope), h->stream));
+            CCL_CHECK(gpucclAllReduce(sbuf, rbuf, count * 2, gpucclFloat32, op, CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
         } else if constexpr (std::is_same_v<T, double>) {
-            CCL_CHECK(gpucclAllReduce(sbuf, rbuf, count, gpucclFloat64, op, CommTraits<Backend>::comm(h, scope), h->stream));
+            CCL_CHECK(gpucclAllReduce(sbuf, rbuf, count, gpucclFloat64, op, CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
         } else {
-            CCL_CHECK(gpucclAllReduce(sbuf, rbuf, count * 2, gpucclFloat64, op, CommTraits<Backend>::comm(h, scope), h->stream));
+            CCL_CHECK(gpucclAllReduce(sbuf, rbuf, count * 2, gpucclFloat64, op, CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
         }
 #else
         DDLA_CHECK(ddlaSynchronize(h));
@@ -407,7 +420,7 @@ inline void commReduceSum(const DdlaHandle_t& h, CommScope scope,
             constexpr int components = std::is_same_v<T, float> || std::is_same_v<T, double> ? 1 : 2;
             CCL_CHECK(gpucclReduce(sbuf + off, rbuf + off, std::size_t(len) * components,
                                   single ? gpucclFloat32 : gpucclFloat64, gpucclSum,
-                                  root, CommTraits<Backend>::comm(h, scope), h->stream));
+                                  root, CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
 #else
             DDLA_CHECK(ddlaSynchronize(h));
             MPI_CHECK(::MPI_Reduce(in_place ? MPI_IN_PLACE : sbuf + off, rbuf + off, len,
@@ -438,10 +451,10 @@ inline void commAlltoallv(const DdlaHandle_t& h, CommScope scope, int nprocs,
         for (int p = 0; p < nprocs; ++p) {
             if (sendcounts[p] > 0)
                 CCL_CHECK(gpucclSend(sendbuf + sdispls[p], sendcounts[p] * sizeof(T), gpucclInt8, p,
-                                     CommTraits<Backend>::comm(h, scope), h->stream));
+                                     CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
             if (recvcounts[p] > 0)
                 CCL_CHECK(gpucclRecv(recvbuf + rdispls[p], recvcounts[p] * sizeof(T), gpucclInt8, p,
-                                     CommTraits<Backend>::comm(h, scope), h->stream));
+                                     CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
         }
         CommTraits<Backend>::group_end(h);
 #else

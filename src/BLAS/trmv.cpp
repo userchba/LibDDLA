@@ -1,5 +1,6 @@
+#include "blas_impl.h"
 // ---------------------------------------------------------------------------
-// Unified backend-templated triangular matrix-vector product (x := op(A)*x,
+// Unified backend-templated triangular matrix-vector product (x := blas_impl::op(A)*x,
 // in place).
 //
 // Structure follows src/herk.cpp exactly: one definition covering CPU (Fortran
@@ -30,7 +31,7 @@
 
 #include "blas_enums.h"
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #if DDLA_HAS_CPU
 extern "C" {
@@ -133,8 +134,10 @@ inline gpublasStatus_t gpublasTrmv(
 
 namespace ddla {
 
+namespace blas_impl {
+
 template <DdlaBackend Backend, typename T>
-void trmv(
+void trmv_check(
     const DdlaHandle_t& handle,
     char uplo, char trans, char diag,
     int n,
@@ -158,6 +161,21 @@ void trmv(
             (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
     }
 
+    if constexpr (Backend == DdlaBackend::GPU) {
+        (void)detail::to_fill_mode(uplo);
+        (void)detail::to_blas_op(trans);
+        (void)detail::to_diag_type(diag);
+    }
+}
+
+template <DdlaBackend Backend, typename T>
+void trmv_run(
+    const DdlaHandle_t& handle,
+    char uplo, char trans, char diag,
+    int n,
+    const T* A, int lda,
+    T* x, int incx)
+{
     if constexpr (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         // xTRMV takes uplo/trans/diag as characters; forward them unchanged.
@@ -182,10 +200,10 @@ void trmv(
                       std::is_same_v<T, double> ||
                       std::is_same_v<T, std::complex<float>> ||
                       std::is_same_v<T, std::complex<double>>) {
-            BLAS_CHECK(gpublasTrmv(handle->blasH,
-                                   detail::to_fill_mode(uplo),
-                                   detail::to_blas_op(trans),
-                                   detail::to_diag_type(diag),
+            BLAS_CHECK(gpublasTrmv(static_cast<gpublasHandle_t>(handle->blasH),
+                                   blas_impl::fill(uplo),
+                                   blas_impl::op(trans),
+                                   blas_impl::diag(diag),
                                    n, A, lda, x, incx));
         } else {
             static_assert(sizeof(T) == 0, "trmv: unsupported scalar type T");
@@ -195,6 +213,20 @@ void trmv(
         (void)A; (void)lda; (void)x; (void)incx;
 #endif
     }
+}
+
+} // namespace blas_impl
+
+template <DdlaBackend Backend, typename T>
+void trmv(
+    const DdlaHandle_t& handle,
+    char uplo, char trans, char diag,
+    int n,
+    const T* A, int lda,
+    T* x, int incx)
+{
+    blas_impl::trmv_check<Backend, T>(handle, uplo, trans, diag, n, A, lda, x, incx);
+    blas_impl::trmv_run<Backend, T>(handle, uplo, trans, diag, n, A, lda, x, incx);
 }
 
 #define INSTANTIATE_TRMV(BACKEND, TYPE)                                        \
@@ -218,4 +250,21 @@ INSTANTIATE_TRMV(DdlaBackend::GPU, std::complex<double>);
 
 #undef INSTANTIATE_TRMV
 
+
+#define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
+    template void blas_impl::trmv_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, char trans, char diag, int n, const TYPE* A, int lda, TYPE* x, int incx); \
+    template void blas_impl::trmv_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, char trans, char diag, int n, const TYPE* A, int lda, TYPE* x, int incx);
+#if DDLA_HAS_CPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
+#endif
+#undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

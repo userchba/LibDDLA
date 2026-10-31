@@ -43,3 +43,12 @@ CODE_REVIEW.md
 # Local deep-work progress state
 .slim/deepwork/
 .claude_jobs/
+
+# Tool, runtime and test outputs
+.ignore
+.zcode/
+Testing/
+__pycache__/
+*.py[cod]
+slurm-*.out
+._*

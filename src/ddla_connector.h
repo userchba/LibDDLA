@@ -51,10 +51,10 @@ inline constexpr DdlaBackend local_backend_v = DdlaBackend::CPU;
 // ---------------------------------------------------------------------------
 namespace detail {
 
-ddlaStatus_t memcpy_on(const DdlaHandle_t& handle, void* dst, const void* src, std::size_t bytes, gpuStream_t queue);
-ddlaStatus_t synchronize_on(const DdlaHandle_t& handle, gpuStream_t queue);
-ddlaStatus_t event_record_on(const DdlaHandle_t& handle, ddlaEvent_t event, gpuStream_t queue);
-ddlaStatus_t event_wait_on(const DdlaHandle_t& handle, ddlaEvent_t event, gpuStream_t queue);
+ddlaStatus_t memcpy_on(const DdlaHandle_t& handle, void* dst, const void* src, std::size_t bytes, void* queue);
+ddlaStatus_t synchronize_on(const DdlaHandle_t& handle, void* queue);
+ddlaStatus_t event_record_on(const DdlaHandle_t& handle, ddlaEvent_t event, void* queue);
+ddlaStatus_t event_wait_on(const DdlaHandle_t& handle, ddlaEvent_t event, void* queue);
 
 } // namespace detail
 

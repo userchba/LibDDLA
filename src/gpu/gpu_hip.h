@@ -330,4 +330,11 @@ __device__ __forceinline__ T gpuShflDown32(T v, int off)
 
 } // namespace ddla
 
+#define gpublasCsymm hipblasCsymm
+#define gpublasCsyrk hipblasCsyrk
+#define gpublasCsyr2k hipblasCsyr2k
+#define gpublasZsymm hipblasZsymm
+#define gpublasZsyrk hipblasZsyrk
+#define gpublasZsyr2k hipblasZsyr2k
+
 #endif // DDLA_GPU_HIP_H

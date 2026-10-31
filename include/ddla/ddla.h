@@ -98,6 +98,19 @@ void ptrmm(
     const T* A, const int* descA, T* B, const int* descB
 );
 
+/** @brief Local symmetric matrix product for real or complex scalars. */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void symm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
+    const T& alpha, const T* A, int lda, const T* B, int ldb,
+    const T& beta, T* C, int ldc);
+
+/** @brief Local symmetric rank-2k update for real or complex scalars. */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void syr2k(const DdlaHandle_t& handle, char uplo, char trans, int n, int k,
+    const T& alpha, const T* A, int lda, const T* B, int ldb,
+    const T& beta, T* C, int ldc);
+
+
 /**
  * @brief Apply a pivot permutation to a distributed matrix: swap rows or
  *        columns of A according to a column-cyclic pivot vector.
@@ -1250,30 +1263,11 @@ void trsm(
     T* B, int ldb);
 
 /**
- * @brief Symmetric rank-k update: C := alpha*A*A**T + beta*C  ('N')  or
- *        C := alpha*A**T*A + beta*C.
- *
- * Same unified backend-templated form as @ref gemm: the CPU instantiation
- * calls Fortran xSYRK, the GPU instantiation calls cuBLAS/hipBLAS.  CPU
- * consumes HOST pointers, GPU DEVICE pointers.
- *
- * REAL SCALAR TYPES ONLY.  The complex rank-k update is @ref herk, whose
- * alpha and beta are the real type of @p T; instantiating this function with a
- * complex @p T is a compile-time error.
- *
- * @tparam Backend DdlaBackend::CPU or DdlaBackend::GPU; must match the handle.
- * @tparam T       float or double (see above).
- * @param handle Handle whose backend must equal @p Backend.
- * @param uplo   'U' or 'L' -- which triangle of C is updated.
- * @param trans  'N' or 'T' (a 'C' request is normalised to 'T').
- * @param n      Order of C.
- * @param k      Inner dimension (columns of A when @p trans is 'N').
- * @param alpha  Scaling factor for A*A**T.
- * @param A      Input matrix.
- * @param lda    Leading dimension of A.
- * @param beta   Scaling factor for C.
- * @param C      In/out matrix; only the @p uplo triangle is referenced.
- * @param ldc    Leading dimension of C.
+ * @brief Local symmetric rank-k update: C := alpha*A*A^T + beta*C (N),
+ *        or alpha*A^T*A + beta*C (T). Only uplo of C is updated.
+ * @tparam T float, double, complex<float> or complex<double>.
+ * @param trans N/T for complex inputs; real inputs also accept C as T.
+ * Complex symmetry uses no conjugation. Use herk for a Hermitian update.
  */
 template <DdlaBackend Backend = default_backend_v, typename T>
 void syrk(
@@ -1286,34 +1280,31 @@ void syrk(
     T* C, int ldc);
 
 /**
- * @brief Triangular matrix multiply:
- *        side='L' -> C := alpha*op(A)*B  (A m-by-m),
- *        side='R' -> C := alpha*B*op(A)  (A n-by-n).
+ * @brief In-place triangular matrix multiply:
+ *        side='L' -> B := alpha*op(A)*B  (A m-by-m),
+ *        side='R' -> B := alpha*B*op(A)  (A n-by-n).
  *
- * Same unified backend-templated form as @ref gemm: the CPU instantiation
- * calls Fortran xTRMM, the GPU instantiation calls cuBLAS/hipBLAS.  CPU
- * consumes HOST pointers, GPU DEVICE pointers.
- *
- * Unlike Fortran xTRMM, which overwrites B, this interface keeps @p B
- * untouched and writes the product into the separate output @p C; the CPU arm
- * stages B into C before multiplying in place.
+ * The CPU arm calls Fortran xTRMM. The GPU arm calls cuBLAS/hipBLAS with
+ * B as both input and output. CPU pointers are host memory; GPU pointers
+ * are device memory. A must not overlap B. Leading-dimension padding is
+ * untouched. Empty matrices leave B untouched; alpha=0 zeros the logical
+ * matrix without reading A or the old B, and A may then be null.
+ * Flags are case-insensitive; invalid flags or dimensions throw.
  *
  * @tparam Backend DdlaBackend::CPU or DdlaBackend::GPU; must match the handle.
- * @tparam T       float, double, complex<float> or complex<double>.
- * @param handle Handle whose backend must equal @p Backend.
- * @param side   'L' or 'R' -- side on which op(A) multiplies B.
- * @param uplo   'U' or 'L' -- which triangle of A is referenced.
- * @param trans  'N', 'T' or 'C' -- op(A) = A, A**T or A**H.
- * @param diag   'U' (unit diagonal) or 'N' (non-unit).
- * @param m      Rows of B and C.
- * @param n      Columns of B and C.
- * @param alpha  Scaling factor.
- * @param A      Triangular factor; only the @p uplo triangle is referenced.
- * @param lda    Leading dimension of A.
- * @param B      Input matrix (unmodified).
- * @param ldb    Leading dimension of B.
- * @param C      Output matrix.
- * @param ldc    Leading dimension of C.
+ * @tparam T float, double, complex<float> or complex<double>.
+ * @param handle Handle whose backend must equal Backend.
+ * @param side 'L' or 'R': side on which op(A) multiplies B.
+ * @param uplo 'U' or 'L': referenced triangle of A.
+ * @param trans 'N', 'T' or 'C': op(A) = A, A**T or A**H.
+ * @param diag 'U' (implicit unit diagonal) or 'N' (stored diagonal).
+ * @param m Rows of B.
+ * @param n Columns of B.
+ * @param alpha Scaling factor.
+ * @param A Read-only triangular factor; unused triangle/implicit diagonal not read.
+ * @param lda Leading dimension of A, at least max(1,side=='L'?m:n).
+ * @param B Input matrix overwritten by the product.
+ * @param ldb Leading dimension of B, at least max(1,m).
  */
 template <DdlaBackend Backend = default_backend_v, typename T>
 void trmm(
@@ -1322,8 +1313,7 @@ void trmm(
     int m, int n,
     const T& alpha,
     const T* A, int lda,
-    const T* B, int ldb,
-    T* C, int ldc);
+    T* B, int ldb);
 
 /**
  * @brief Triangular times triangular in the selected triangle: C := alpha*A*B + beta*C.

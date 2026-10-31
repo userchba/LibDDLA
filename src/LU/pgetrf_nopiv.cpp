@@ -4,7 +4,7 @@
 #include <cassert>
 #include <algorithm>
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "require_backend.h"
 #include "comm_traits.h"
 

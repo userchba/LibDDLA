@@ -1,3 +1,4 @@
+#include "blas_impl.h"
 // ---------------------------------------------------------------------------
 // Unified backend-templated conjugate dot product (result := x^H * y).
 //
@@ -31,18 +32,14 @@
 // gpublasDotc.  For the real scalar types xDOTC degenerates to the plain dot
 // product.
 //
-// CPU ARM OF THE COMPLEX OVERLOADS: they accumulate in plain C++ instead of
-// calling xDOTC_/zDOTC_.  The Fortran ABI for a function returning a COMPLEX
-// value is compiler-dependent (hidden first argument vs. register return), so
-// the project avoids declaring those symbols; xNRM2 returns a REAL scalar and
-// is safe, complex-valued function returns are not.  The real cases call the
-// BLAS as usual.
+// CPU complex results use the required CBLAS output-pointer interface, avoiding
+// a compiler-dependent complex-valued Fortran function return. CMake checks
+// that the selected CPU BLAS provides both complex DOT entry points.
 // ---------------------------------------------------------------------------
 #include <ddla/ddla.h>
 #include <ddla/ddla_handle_t.h>
 
 #include <complex>
-#include <cstddef>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -50,15 +47,14 @@
 #include "blas_enums.h"
 #include "blas_pointer_mode.h"
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #if DDLA_HAS_CPU
 extern "C" {
-// Real-valued (or real-typed) function returns: safe ABI.  The complex
-// xDOTC/zDOTC are deliberately NOT declared -- see the header comment above;
-// the complex CPU arm accumulates in C++ instead.
 float  sdot_(const int*, const float*, const int*, const float*, const int*);
 double ddot_(const int*, const double*, const int*, const double*, const int*);
+void cblas_cdotc_sub(int, const void*, int, const void*, int, void*);
+void cblas_zdotc_sub(int, const void*, int, const void*, int, void*);
 }
 #endif
 
@@ -153,8 +149,10 @@ inline gpublasStatus_t gpublasDotc(
 
 namespace ddla {
 
+namespace blas_impl {
+
 template <DdlaBackend Backend, typename T>
-void dotc(
+void dotc_check(
     const DdlaHandle_t& handle,
     int n,
     const T* x, int incx,
@@ -178,27 +176,28 @@ void dotc(
             (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
     }
 
+}
+
+template <DdlaBackend Backend, typename T>
+void dotc_run(
+    const DdlaHandle_t& handle,
+    int n,
+    const T* x, int incx,
+    const T* y, int incy,
+    T* result)
+{
     if constexpr (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
-        // HOST result pointer, set by the arm that computed the value: the
-        // real types call the BLAS, the complex types accumulate in C++
-        // (xDOTC's complex-return ABI is not portable -- see the file header).
         if constexpr (std::is_same_v<T, float>) {
             *result = sdot_(&n, x, &incx, y, &incy);
         } else if constexpr (std::is_same_v<T, double>) {
             *result = ddot_(&n, x, &incx, y, &incy);
-        } else if constexpr (std::is_same_v<T, std::complex<float>>) {
-            std::complex<float> acc(0.0f, 0.0f);
-            for (int i = 0; i < n; ++i)
-                acc += std::conj(x[static_cast<std::ptrdiff_t>(i) * incx])
-                     * y[static_cast<std::ptrdiff_t>(i) * incy];
-            *result = acc;
-        } else if constexpr (std::is_same_v<T, std::complex<double>>) {
-            std::complex<double> acc(0.0, 0.0);
-            for (int i = 0; i < n; ++i)
-                acc += std::conj(x[static_cast<std::ptrdiff_t>(i) * incx])
-                     * y[static_cast<std::ptrdiff_t>(i) * incy];
-            *result = acc;
+        } else if constexpr (std::is_same_v<T, std::complex<float>> ||
+                             std::is_same_v<T, std::complex<double>>) {
+            if constexpr (std::is_same_v<T, std::complex<float>>)
+                cblas_cdotc_sub(n, x, incx, y, incy, result);
+            else
+                cblas_zdotc_sub(n, x, incx, y, incy, result);
         } else {
             static_assert(sizeof(T) == 0, "dotc: unsupported scalar type T");
         }
@@ -212,7 +211,7 @@ void dotc(
                       std::is_same_v<T, double> ||
                       std::is_same_v<T, std::complex<float>> ||
                       std::is_same_v<T, std::complex<double>>) {
-            BLAS_CHECK(gpublasDotc(handle->blasH, n, x, incx, y, incy, result));
+            BLAS_CHECK(gpublasDotc(static_cast<gpublasHandle_t>(handle->blasH), n, x, incx, y, incy, result));
         } else {
             static_assert(sizeof(T) == 0, "dotc: unsupported scalar type T");
         }
@@ -220,6 +219,20 @@ void dotc(
         (void)handle; (void)n; (void)x; (void)incx; (void)y; (void)incy; (void)result;
 #endif
     }
+}
+
+} // namespace blas_impl
+
+template <DdlaBackend Backend, typename T>
+void dotc(
+    const DdlaHandle_t& handle,
+    int n,
+    const T* x, int incx,
+    const T* y, int incy,
+    T* result)
+{
+    blas_impl::dotc_check<Backend, T>(handle, n, x, incx, y, incy, result);
+    blas_impl::dotc_run<Backend, T>(handle, n, x, incx, y, incy, result);
 }
 
 #define INSTANTIATE_DOTC(BACKEND, TYPE)                                        \
@@ -242,4 +255,21 @@ INSTANTIATE_DOTC(DdlaBackend::GPU, std::complex<double>);
 
 #undef INSTANTIATE_DOTC
 
+
+#define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
+    template void blas_impl::dotc_check<BACKEND, TYPE>( const DdlaHandle_t& handle, int n, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* result); \
+    template void blas_impl::dotc_run<BACKEND, TYPE>( const DdlaHandle_t& handle, int n, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* result);
+#if DDLA_HAS_CPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
+#endif
+#undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

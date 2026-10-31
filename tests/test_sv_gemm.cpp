@@ -11,7 +11,7 @@
 #include "test_desc_helpers.h"
 #include "ddla_connector.h"
 #include <random>
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 using namespace ddla;
 

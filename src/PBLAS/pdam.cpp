@@ -1,7 +1,7 @@
 #include <ddla/ddla.h>
 #include "ddla_desc.h"
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "require_backend.h"
 #include <complex>
 #include <type_traits>
@@ -100,7 +100,7 @@ void pdam(const DdlaHandle_t& handle, const T1& alpha, T2* A, const int* array_d
         }
     } else {
 #if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
-        const gpuStream_t stream = handle->stream;
+        const gpuStream_t stream = static_cast<gpuStream_t>(handle->stream);
 
         using deviceT1 = typename detail::device_scalar<T1>::type;
         using deviceT2 = typename detail::device_scalar<T2>::type;

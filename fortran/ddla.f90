@@ -2029,7 +2029,7 @@ module ddla
       integer(c_int), value :: ldb
     end function ddla_z_trsm
 
-    function ddla_s_trmm(handle, side, uplo, trans, diag, m, n, alpha, a, lda, b, ldb, c, ldc) &
+    function ddla_s_trmm(handle, side, uplo, trans, diag, m, n, alpha, a, lda, b, ldb) &
         result(status) bind(C, name="ddla_s_trmm")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
@@ -2046,11 +2046,9 @@ module ddla
       integer(c_int), value :: lda
       type(c_ptr), value :: b
       integer(c_int), value :: ldb
-      type(c_ptr), value :: c
-      integer(c_int), value :: ldc
     end function ddla_s_trmm
 
-    function ddla_d_trmm(handle, side, uplo, trans, diag, m, n, alpha, a, lda, b, ldb, c, ldc) &
+    function ddla_d_trmm(handle, side, uplo, trans, diag, m, n, alpha, a, lda, b, ldb) &
         result(status) bind(C, name="ddla_d_trmm")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
@@ -2067,11 +2065,9 @@ module ddla
       integer(c_int), value :: lda
       type(c_ptr), value :: b
       integer(c_int), value :: ldb
-      type(c_ptr), value :: c
-      integer(c_int), value :: ldc
     end function ddla_d_trmm
 
-    function ddla_c_trmm(handle, side, uplo, trans, diag, m, n, alpha, a, lda, b, ldb, c, ldc) &
+    function ddla_c_trmm(handle, side, uplo, trans, diag, m, n, alpha, a, lda, b, ldb) &
         result(status) bind(C, name="ddla_c_trmm")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
@@ -2088,11 +2084,9 @@ module ddla
       integer(c_int), value :: lda
       type(c_ptr), value :: b
       integer(c_int), value :: ldb
-      type(c_ptr), value :: c
-      integer(c_int), value :: ldc
     end function ddla_c_trmm
 
-    function ddla_z_trmm(handle, side, uplo, trans, diag, m, n, alpha, a, lda, b, ldb, c, ldc) &
+    function ddla_z_trmm(handle, side, uplo, trans, diag, m, n, alpha, a, lda, b, ldb) &
         result(status) bind(C, name="ddla_z_trmm")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
@@ -2109,8 +2103,6 @@ module ddla
       integer(c_int), value :: lda
       type(c_ptr), value :: b
       integer(c_int), value :: ldb
-      type(c_ptr), value :: c
-      integer(c_int), value :: ldc
     end function ddla_z_trmm
 
     function ddla_s_syrk(handle, uplo, trans, n, k, alpha, a, lda, beta, c, ldc) &

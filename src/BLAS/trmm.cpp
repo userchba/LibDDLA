@@ -1,6 +1,7 @@
+#include "blas_impl.h"
 // ---------------------------------------------------------------------------
 // Unified backend-templated triangular matrix multiply
-// (C := alpha*op(A)*B or C := alpha*B*op(A), per @p side).
+// (B := alpha*blas_impl::op(A)*B or B := alpha*B*blas_impl::op(A), per @p side).
 //
 // Structure follows src/herk.cpp exactly: one definition covering CPU (Fortran
 // BLAS) and GPU (cuBLAS/hipBLAS), selected with `if constexpr` on the Backend
@@ -16,23 +17,22 @@
 // A CPU-backend call would therefore have reached cublasStrmm with HOST
 // pointers.  Guarding on DDLA_HAS_CPU removes that class of bug.
 //
-// The vendor (cuBLAS/hipBLAS) TRMM has a separate C output while the Fortran
-// BLAS TRMM overwrites B in place; the CPU arm copies B into C and multiplies
-// in place there so both arms deliver C := alpha*op(A)*B with B untouched.
+// The public interface follows BLAS and overwrites B. The GPU arm uses the
+// vendor-supported in-place case by passing B and ldb as both input and output.
 // ---------------------------------------------------------------------------
 #include <ddla/ddla.h>
 #include <ddla/ddla_handle_t.h>
 
 #include <complex>
 #include <cstddef>
-#include <cstring>
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 
 #include "blas_enums.h"
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #if DDLA_HAS_CPU
 extern "C" {
@@ -65,12 +65,11 @@ inline gpublasStatus_t gpublasTrmm(
     int m, int n,
     const float& alpha,
     const float* A, int lda,
-    float* B, int ldb,
-    float* C, int ldc
+    float* B, int ldb
 )
 {
 #if DDLA_GPU_VENDOR
-    return gpublasStrmm(handle, side, uplo, trans, diag, m, n, &alpha, A, lda, B, ldb, C, ldc);
+    return gpublasStrmm(handle, side, uplo, trans, diag, m, n, &alpha, A, lda, B, ldb, B, ldb);
 #else
     // Neither vendor macro: this can only happen if the translation unit was
     // built without a GPU language while DDLA_HAS_GPU is set, which the build
@@ -86,12 +85,11 @@ inline gpublasStatus_t gpublasTrmm(
     int m, int n,
     const double& alpha,
     const double* A, int lda,
-    double* B, int ldb,
-    double* C, int ldc
+    double* B, int ldb
 )
 {
 #if DDLA_GPU_VENDOR
-    return gpublasDtrmm(handle, side, uplo, trans, diag, m, n, &alpha, A, lda, B, ldb, C, ldc);
+    return gpublasDtrmm(handle, side, uplo, trans, diag, m, n, &alpha, A, lda, B, ldb, B, ldb);
 #else
     throw std::runtime_error("gpublasTrmm: no GPU vendor selected at compile time");
 #endif
@@ -103,8 +101,7 @@ inline gpublasStatus_t gpublasTrmm(
     int m, int n,
     const std::complex<float>& alpha,
     const std::complex<float>* A, int lda,
-    std::complex<float>* B, int ldb,
-    std::complex<float>* C, int ldc
+    std::complex<float>* B, int ldb
 )
 {
 #if DDLA_GPU_VENDOR
@@ -112,7 +109,7 @@ inline gpublasStatus_t gpublasTrmm(
                         reinterpret_cast<const gpublasComplex*>(&alpha),
                         reinterpret_cast<const gpublasComplex*>(A), lda,
                         reinterpret_cast<gpublasComplex*>(B), ldb,
-                        reinterpret_cast<gpublasComplex*>(C), ldc);
+                        reinterpret_cast<gpublasComplex*>(B), ldb);
 #else
     throw std::runtime_error("gpublasTrmm: no GPU vendor selected at compile time");
 #endif
@@ -124,8 +121,7 @@ inline gpublasStatus_t gpublasTrmm(
     int m, int n,
     const std::complex<double>& alpha,
     const std::complex<double>* A, int lda,
-    std::complex<double>* B, int ldb,
-    std::complex<double>* C, int ldc
+    std::complex<double>* B, int ldb
 )
 {
 #if DDLA_GPU_VENDOR
@@ -133,7 +129,7 @@ inline gpublasStatus_t gpublasTrmm(
                         reinterpret_cast<const gpublasDoubleComplex*>(&alpha),
                         reinterpret_cast<const gpublasDoubleComplex*>(A), lda,
                         reinterpret_cast<gpublasDoubleComplex*>(B), ldb,
-                        reinterpret_cast<gpublasDoubleComplex*>(C), ldc);
+                        reinterpret_cast<gpublasDoubleComplex*>(B), ldb);
 #else
     throw std::runtime_error("gpublasTrmm: no GPU vendor selected at compile time");
 #endif
@@ -145,15 +141,16 @@ inline gpublasStatus_t gpublasTrmm(
 
 namespace ddla {
 
+namespace blas_impl {
+
 template <DdlaBackend Backend, typename T>
-void trmm(
+void trmm_check(
     const DdlaHandle_t& handle,
     char side, char uplo, char trans, char diag,
     int m, int n,
     const T& alpha,
     const T* A, int lda,
-    const T* B, int ldb,
-    T* C, int ldc)
+    T* B, int ldb)
 {
     static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
                   "CPU trmm is not available in this LibDDLA build");
@@ -172,42 +169,54 @@ void trmm(
             (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
     }
 
+    // Check the BLAS shape even on quick-return paths. Scalar zero must not
+    // read A or the old B, and must leave leading-dimension padding untouched.
+    (void)detail::to_side_mode(side);
+    (void)detail::to_fill_mode(uplo);
+    (void)detail::to_blas_op(trans);
+    (void)detail::to_diag_type(diag);
+    const int order = (side == 'L' || side == 'l') ? m : n;
+    if (m < 0 || n < 0 || lda < std::max(1, order) || ldb < std::max(1, m))
+        throw std::invalid_argument("trmm: invalid dimensions or leading dimension");
+    if (m == 0 || n == 0) return;
+    if (B == nullptr) throw std::invalid_argument("trmm: null B");
+    if (alpha != T(0) && A == nullptr) throw std::invalid_argument("trmm: null A");
+
+}
+
+template <DdlaBackend Backend, typename T>
+void trmm_run(
+    const DdlaHandle_t& handle,
+    char side, char uplo, char trans, char diag,
+    int m, int n,
+    const T& alpha,
+    const T* A, int lda,
+    T* B, int ldb)
+{
+    if (m == 0 || n == 0) return;
+    if (alpha == T(0)) {
+        for (int j = 0; j < n; ++j)
+            DDLA_CHECK(ddlaMemset(handle, B + static_cast<std::size_t>(j) * ldb,
+                                  0, static_cast<std::size_t>(m) * sizeof(T)));
+        return;
+    }
     if constexpr (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
-        // Fortran xTRMM multiplies in place, so stage B into C first and leave
-        // B untouched -- that is the contract the vendor arm also delivers.
-        // The characters go to the Fortran entry points unconverted.
         if constexpr (std::is_same_v<T, float>) {
-            for (int j = 0; j < n; ++j)
-                std::memcpy(C + static_cast<std::ptrdiff_t>(j) * ldc,
-                            B + static_cast<std::ptrdiff_t>(j) * ldb,
-                            sizeof(float) * m);
-            strmm_(&side, &uplo, &trans, &diag, &m, &n, &alpha, A, &lda, C, &ldc);
+            strmm_(&side, &uplo, &trans, &diag, &m, &n, &alpha, A, &lda, B, &ldb);
         } else if constexpr (std::is_same_v<T, double>) {
-            for (int j = 0; j < n; ++j)
-                std::memcpy(C + static_cast<std::ptrdiff_t>(j) * ldc,
-                            B + static_cast<std::ptrdiff_t>(j) * ldb,
-                            sizeof(double) * m);
-            dtrmm_(&side, &uplo, &trans, &diag, &m, &n, &alpha, A, &lda, C, &ldc);
+            dtrmm_(&side, &uplo, &trans, &diag, &m, &n, &alpha, A, &lda, B, &ldb);
         } else if constexpr (std::is_same_v<T, std::complex<float>>) {
-            for (int j = 0; j < n; ++j)
-                std::memcpy(C + static_cast<std::ptrdiff_t>(j) * ldc,
-                            B + static_cast<std::ptrdiff_t>(j) * ldb,
-                            sizeof(std::complex<float>) * m);
-            ctrmm_(&side, &uplo, &trans, &diag, &m, &n, &alpha, A, &lda, C, &ldc);
+            ctrmm_(&side, &uplo, &trans, &diag, &m, &n, &alpha, A, &lda, B, &ldb);
         } else if constexpr (std::is_same_v<T, std::complex<double>>) {
-            for (int j = 0; j < n; ++j)
-                std::memcpy(C + static_cast<std::ptrdiff_t>(j) * ldc,
-                            B + static_cast<std::ptrdiff_t>(j) * ldb,
-                            sizeof(std::complex<double>) * m);
-            ztrmm_(&side, &uplo, &trans, &diag, &m, &n, &alpha, A, &lda, C, &ldc);
+            ztrmm_(&side, &uplo, &trans, &diag, &m, &n, &alpha, A, &lda, B, &ldb);
         } else {
             static_assert(sizeof(T) == 0, "trmm: unsupported scalar type T");
         }
 #else
         (void)handle; (void)side; (void)uplo; (void)trans; (void)diag;
         (void)m; (void)n; (void)alpha; (void)A; (void)lda;
-        (void)B; (void)ldb; (void)C; (void)ldc;
+        (void)B; (void)ldb;
 #endif
     } else {
 #if DDLA_HAS_GPU
@@ -215,32 +224,43 @@ void trmm(
                       std::is_same_v<T, double> ||
                       std::is_same_v<T, std::complex<float>> ||
                       std::is_same_v<T, std::complex<double>>) {
-            // The vendor xTRMM prototypes take a non-const B pointer even
-            // though they only read it, and the real gpublasTrmm overloads keep
-            // that shape; the cast back is confined to this one call.
-            T* B_mutable = const_cast<T*>(B);
-            BLAS_CHECK(gpublasTrmm(handle->blasH,
-                                   detail::to_side_mode(side),
-                                   detail::to_fill_mode(uplo),
-                                   detail::to_blas_op(trans),
-                                   detail::to_diag_type(diag),
+            BLAS_CHECK(gpublasTrmm(static_cast<gpublasHandle_t>(handle->blasH),
+                                   blas_impl::side(side),
+                                   blas_impl::fill(uplo),
+                                   blas_impl::op(trans),
+                                   blas_impl::diag(diag),
                                    m, n, alpha, A, lda,
-                                   B_mutable, ldb, C, ldc));
+                                   B, ldb));
         } else {
             static_assert(sizeof(T) == 0, "trmm: unsupported scalar type T");
         }
 #else
         (void)handle; (void)side; (void)uplo; (void)trans; (void)diag;
         (void)m; (void)n; (void)alpha; (void)A; (void)lda;
-        (void)B; (void)ldb; (void)C; (void)ldc;
+        (void)B; (void)ldb;
 #endif
     }
+}
+
+} // namespace blas_impl
+
+template <DdlaBackend Backend, typename T>
+void trmm(
+    const DdlaHandle_t& handle,
+    char side, char uplo, char trans, char diag,
+    int m, int n,
+    const T& alpha,
+    const T* A, int lda,
+    T* B, int ldb)
+{
+    blas_impl::trmm_check<Backend, T>(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb);
+    blas_impl::trmm_run<Backend, T>(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb);
 }
 
 #define INSTANTIATE_TRMM(BACKEND, TYPE)                                        \
     template void trmm<BACKEND, TYPE>(                                         \
         const DdlaHandle_t&, char, char, char, char, int, int,                 \
-        const TYPE&, const TYPE*, int, const TYPE*, int, TYPE*, int)
+        const TYPE&, const TYPE*, int, TYPE*, int)
 
 #if DDLA_HAS_CPU
 INSTANTIATE_TRMM(DdlaBackend::CPU, float);
@@ -258,4 +278,21 @@ INSTANTIATE_TRMM(DdlaBackend::GPU, std::complex<double>);
 
 #undef INSTANTIATE_TRMM
 
+
+#define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
+    template void blas_impl::trmm_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char side, char uplo, char trans, char diag, int m, int n, const TYPE& alpha, const TYPE* A, int lda, TYPE* B, int ldb); \
+    template void blas_impl::trmm_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char side, char uplo, char trans, char diag, int m, int n, const TYPE& alpha, const TYPE* A, int lda, TYPE* B, int ldb);
+#if DDLA_HAS_CPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
+#endif
+#undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

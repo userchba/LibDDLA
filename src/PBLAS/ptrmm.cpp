@@ -132,7 +132,7 @@ void ptrmm(const DdlaHandle_t& handle, char side, char uplo, char trans, char di
         const int local_k = num_loc(k, nb, coord, source, procs);
         if (coord == indxg2p(k, nb, source, procs) && (left ? nl : ml) > 0) {
             trmm<Backend>(handle, side, uplo, trans, diag, left ? width : ml, left ? nl : width,
-                alpha, diagonal.data(), width, block_B.data(), left ? width : ml,
+                alpha, diagonal.data(), width,
                 B + (left ? std::size_t(local_k) : std::size_t(local_k) * ldb), ldb);
         }
 

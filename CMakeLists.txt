@@ -37,8 +37,8 @@ if ((NOT DDLA_USE_CPU) AND (NOT DDLA_USE_CUDA) AND (NOT DDLA_USE_HIP))
     message(FATAL_ERROR "Must enable at least one backend (CPU, CUDA, or HIP)")
 endif()
 # Dual-build mode: CPU + (CUDA or HIP).
-# The main library target compiles with the selected GPU backend macros;
-# CPU pgemm compiles in a separate object target with DDLA_USE_CPU only.
+# Each library source is compiled once with the selected GPU vendor active;
+# backend templates provide CPU and GPU implementations in the same target.
 set(DDLA_DUAL_BUILD OFF)
 if(DDLA_USE_CPU AND (DDLA_USE_CUDA OR DDLA_USE_HIP))
     set(DDLA_DUAL_BUILD ON)

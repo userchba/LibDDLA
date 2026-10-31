@@ -35,7 +35,7 @@
 #include <string>
 
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "pgeqrf_kernels.h"
 
 #if DDLA_HAS_CPU
@@ -101,7 +101,7 @@ template <typename T>
 void gpu_larft(const DdlaHandle_t& handle, bool backward, int n, int k, T* V, int ldv, const T* tau, T* t, int ldt)
 {
     using rt = typename real_type<T>::type;
-    gpuStream_t stream = handle->stream;
+    gpuStream_t stream = static_cast<gpuStream_t>(handle->stream);
     const int mb = std::max(n, 1);   // one process row: the block size does not enter the index map
 
     // [ head / tail of V (k x k) | V^H V (k x k) ], one stream-ordered allocation

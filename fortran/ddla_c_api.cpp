@@ -1474,44 +1474,44 @@ extern "C" int ddla_z_trsm(void* handle, char side, char uplo, char trans, char 
     });
 }
 
-extern "C" int ddla_s_trmm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const float* alpha, const void* A, int lda, const void* B, int ldb, void* C, int ldc)
+extern "C" int ddla_s_trmm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const float* alpha, const void* A, int lda, void* B, int ldb)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::trmm<BE::value, float>(hh, side, uplo, trans, diag, m, n, *alpha, static_cast<const float*>(A), lda, static_cast<const float*>(B), ldb, static_cast<float*>(C), ldc);
+        ddla::trmm<BE::value, float>(hh, side, uplo, trans, diag, m, n, *alpha, static_cast<const float*>(A), lda, static_cast<float*>(B), ldb);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
-extern "C" int ddla_d_trmm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const double* alpha, const void* A, int lda, const void* B, int ldb, void* C, int ldc)
+extern "C" int ddla_d_trmm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const double* alpha, const void* A, int lda, void* B, int ldb)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::trmm<BE::value, double>(hh, side, uplo, trans, diag, m, n, *alpha, static_cast<const double*>(A), lda, static_cast<const double*>(B), ldb, static_cast<double*>(C), ldc);
+        ddla::trmm<BE::value, double>(hh, side, uplo, trans, diag, m, n, *alpha, static_cast<const double*>(A), lda, static_cast<double*>(B), ldb);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
-extern "C" int ddla_c_trmm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const ddla_c_float_complex* alpha, const void* A, int lda, const void* B, int ldb, void* C, int ldc)
+extern "C" int ddla_c_trmm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const ddla_c_float_complex* alpha, const void* A, int lda, void* B, int ldb)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
-        ddla::trmm<BE::value, std::complex<float>>(hh, side, uplo, trans, diag, m, n, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<const std::complex<float>*>(B), ldb, static_cast<std::complex<float>*>(C), ldc);
+        ddla::trmm<BE::value, std::complex<float>>(hh, side, uplo, trans, diag, m, n, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<std::complex<float>*>(B), ldb);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
-extern "C" int ddla_z_trmm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const ddla_c_double_complex* alpha, const void* A, int lda, const void* B, int ldb, void* C, int ldc)
+extern "C" int ddla_z_trmm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const ddla_c_double_complex* alpha, const void* A, int lda, void* B, int ldb)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
-        ddla::trmm<BE::value, std::complex<double>>(hh, side, uplo, trans, diag, m, n, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<const std::complex<double>*>(B), ldb, static_cast<std::complex<double>*>(C), ldc);
+        ddla::trmm<BE::value, std::complex<double>>(hh, side, uplo, trans, diag, m, n, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<std::complex<double>*>(B), ldb);
         return DDLA_C_STATUS_SUCCESS;
     });
 }

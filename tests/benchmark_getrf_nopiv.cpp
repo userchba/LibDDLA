@@ -8,7 +8,7 @@
 
 #include <ddla/ddla.h>
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #include <iomanip>
 #include <magma_v2.h>

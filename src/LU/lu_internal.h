@@ -27,6 +27,10 @@ namespace ddla {
  * than one subpanel degenerates to the plain per-column factorization.
  * pgetrf uses this schedule for both selectors and retains earlier L columns
  * inside its original selected region when applying later panel pivots.
+ *
+ * pgetf2 is check -> workspace_size -> run (lu_workspace.h): the check validates
+ * collectively and freezes DDLA_LU_PANEL, the query returns local lengths, and
+ * the run borrows caller storage without checks, policy reads or allocation.
  */
 template <DdlaBackend Backend = default_backend_v, typename T>
 void pgetf2(const DdlaHandle_t& handle, int m, int n, int width,

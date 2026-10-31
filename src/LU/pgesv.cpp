@@ -5,7 +5,7 @@
 #include "ddla_connector.h"
 #include <stdexcept>
 #include <string>
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "require_backend.h"
 
 namespace ddla{

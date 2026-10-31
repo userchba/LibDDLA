@@ -5,8 +5,8 @@
 // The other converted families are already covered numerically by
 // test_api_grid_pvector_redist.cpp (gemv, hemv, trmv, nrm2, dotc, her2, herk,
 // hemm, her2k); these four were the gap, so this file is their only evidence.
-// trmm in particular had zero call sites anywhere in the tree, so nothing else
-// would catch a wrong flag mapping in it.
+// TRMM checks its public in-place contract, including poisoned unused input
+// entries and padding, independently of its QR/SVD/product callers.
 //
 // Each check builds a small matrix on the host, computes the expected result
 // with an independent reference loop, runs the routine through the public
@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -31,7 +32,7 @@
 
 #include <ddla/ddla.h>
 
-#include "ddla_stream_impl.h"   // DdlaStream::host_threads (private)
+#include "ddla_stream.h"   // DdlaStream::host_threads (private)
 #include "host_threads.h"       // detail::ScopedBlasThreads (private)
 
 using namespace ddla;
@@ -406,65 +407,85 @@ int check_syrk(const DdlaHandle_t& handle, char uplo, char trans, Scratch<T>& sc
 }
 
 // ---------------------------------------------------------------------------
-// trmm: C := alpha * op(A) * B  (side='L')
-//       C := alpha * B * op(A)  (side='R')
-// ---------------------------------------------------------------------------
+// trmm overwrites B; A and every B entry outside the logical matrix stay intact.
 template <DdlaBackend Backend, typename T>
 int check_trmm(const DdlaHandle_t& handle, char side, char uplo, char trans, char diag,
-               Scratch<T>& sc)
+               Scratch<T>& sc, bool zero_alpha = false)
 {
+    using R = typename real_type<T>::type;
+    const T poison(std::numeric_limits<R>::quiet_NaN());
     const int m = (side == 'L') ? kN : 4;
     const int nn = (side == 'L') ? 4 : kN;
-
-    const std::vector<T> a = make_triangular<T>(kN, kLd, uplo, diag, 1);
-    std::vector<T> b(static_cast<std::size_t>(kLd) * nn, T(0));
+    std::vector<T> a = make_triangular<T>(kN, kLd, uplo, diag, 1);
+    for (int j = 0; j < kN; ++j)
+        for (int i = 0; i < kN; ++i)
+            if ((uplo == 'U' ? i > j : i < j) || (diag == 'U' && i == j))
+                a[i + j * kLd] = poison;
+    std::vector<T> b_up(sc.b_n, T(-3.25));
     for (int j = 0; j < nn; ++j)
         for (int i = 0; i < m; ++i)
-            b[i + j * kLd] = value<T>(i, j, 2);
-
+            b_up[i + j * kLd] = zero_alpha ? poison : value<T>(i, j, 2);
     T alpha = T(0.75);
-    if constexpr (std::is_same_v<T, std::complex<float>> ||
-                  std::is_same_v<T, std::complex<double>>)
-        alpha = T(0.75, -0.125);
-
-    std::vector<T> want(static_cast<std::size_t>(kLd) * nn, T(0));
+    if constexpr (!std::is_arithmetic_v<T>) alpha = T(0.75, -0.125);
+    if (zero_alpha) alpha = T(0);
+    std::vector<T> want = b_up;
     for (int j = 0; j < nn; ++j) {
         for (int i = 0; i < m; ++i) {
-            T sum = T(0);
-            if (side == 'L') {
-                for (int l = 0; l < kN; ++l)
-                    sum += tri_op<T>(a, kLd, uplo, trans, diag, kN, i, l) * b[l + j * kLd];
-            } else {
-                for (int l = 0; l < kN; ++l)
-                    sum += b[i + l * kLd] * tri_op<T>(a, kLd, uplo, trans, diag, kN, l, j);
+            T sum(0);
+            if (!zero_alpha) {
+                if (side == 'L')
+                    for (int l = 0; l < kN; ++l)
+                        sum += tri_op<T>(a, kLd, uplo, trans, diag, kN, i, l) * b_up[l + j * kLd];
+                else
+                    for (int l = 0; l < kN; ++l)
+                        sum += b_up[i + l * kLd] * tri_op<T>(a, kLd, uplo, trans, diag, kN, l, j);
             }
             want[i + j * kLd] = alpha * sum;
         }
     }
-
-    std::vector<T> a_up(a.size(), T(0));
-    for (int j = 0; j < kN; ++j)
-        for (int i = 0; i < kN; ++i) a_up[i + j * kLd] = a[i + j * kLd];
-    std::vector<T> b_up(sc.b_n, T(0));
-    for (int j = 0; j < nn; ++j)
-        for (int i = 0; i < m; ++i) b_up[i + j * kLd] = b[i + j * kLd];
-    const std::vector<T> c_seed(sc.c_n, T(0));
-
-    bool ok = upload(handle, sc.tri, a_up, sc.tri_n) && upload(handle, sc.b, b_up, sc.b_n) &&
-              upload(handle, sc.c, c_seed, sc.c_n);
+    std::vector<T> a_up(sc.tri_n, poison);
+    std::copy(a.begin(), a.end(), a_up.begin());
+    bool ok = upload(handle, sc.tri, a_up, sc.tri_n) && upload(handle, sc.b, b_up, sc.b_n);
     if (ok) {
         trmm<Backend, T>(handle, side, uplo, trans, diag, m, nn, alpha,
-                         sc.tri, kLd, sc.b, kLd, sc.c, kLd);
+                         zero_alpha ? nullptr : sc.tri, kLd, sc.b, kLd);
         ok = ddlaSynchronize(handle) == ddlaStatus_t::DDLA_STATUS_SUCCESS;
     }
-    std::vector<T> got(sc.c_n);
-    if (ok) ok = download(handle, got, sc.c, sc.c_n);
-    if (!ok) return 1;
+    std::vector<T> got(sc.b_n), after_a(sc.tri_n);
+    if (ok) ok = download(handle, got, sc.b, sc.b_n) && download(handle, after_a, sc.tri, sc.tri_n);
+    if (ok) ok = std::memcmp(after_a.data(), a_up.data(), sc.tri_n * sizeof(T)) == 0;
+    for (std::size_t k = 0; ok && k < got.size(); ++k) {
+        const bool active = k / kLd < static_cast<std::size_t>(nn) && k % kLd < static_cast<std::size_t>(m);
+        if (active) ok = std::isfinite(static_cast<double>(std::abs(got[k])));
+        else ok = std::memcmp(&got[k], &b_up[k], sizeof(T)) == 0;
+    }
+    // Every rank still enters the same comparison collectives on a guard failure.
+    const bool numeric = close_enough<T>(got, want);
+    return ok && numeric ? 0 : 1;
+}
 
-    std::vector<T> want_full(sc.c_n, T(0));
-    for (int j = 0; j < nn; ++j)
-        for (int i = 0; i < m; ++i) want_full[i + j * kLd] = want[i + j * kLd];
-    return close_enough<T>(got, want_full) ? 0 : 1;
+template <DdlaBackend Backend, typename T>
+int check_trmm_edges(const DdlaHandle_t& h)
+{
+    trmm<Backend,T>(h,'l','u','n','n',0,2,T(1),nullptr,1,nullptr,1);
+    trmm<Backend,T>(h,'L','U','N','N',3,0,T(1),nullptr,3,nullptr,3);
+    T x(1);int failures = 0;
+    auto reject = [&](auto call) {
+        bool caught = false;
+        try { call(); } catch (const std::exception&) { caught = true; }
+        if (!caught) ++failures;
+    };
+    reject([&] { trmm<Backend,T>(h,'X','U','N','N',1,1,T(1),&x,1,&x,1); });
+    reject([&] { trmm<Backend,T>(h,'L','X','N','N',1,1,T(1),&x,1,&x,1); });
+    reject([&] { trmm<Backend,T>(h,'L','U','X','N',1,1,T(1),&x,1,&x,1); });
+    reject([&] { trmm<Backend,T>(h,'L','U','N','X',1,1,T(1),&x,1,&x,1); });
+    reject([&] { trmm<Backend,T>(h,'L','U','N','N',-1,1,T(1),&x,1,&x,1); });
+    reject([&] { trmm<Backend,T>(h,'L','U','N','N',2,1,T(1),&x,1,&x,2); });
+    reject([&] { trmm<Backend,T>(h,'L','U','N','N',2,1,T(1),&x,2,&x,1); });
+    reject([&] { trmm<Backend,T>(h,'L','U','N','N',1,1,T(1),nullptr,1,&x,1); });
+    reject([&] { trmm<Backend,T>(h,'L','U','N','N',1,1,T(1),&x,1,nullptr,1); });
+    reject([&] { trmm<Backend,T>(nullptr,'L','U','N','N',0,0,T(1),nullptr,1,nullptr,1); });
+    return failures;
 }
 
 // gemmBatched, driven the way the proven probe and src/ppotrf.cpp drive it:
@@ -710,7 +731,9 @@ int run_type(const DdlaHandle_t& handle, char* arena, std::size_t arena_bytes)
         for (char uplo : {'U', 'L'})
             for (char trans : {'N', 'T', 'C'})
                 for (char diag : {'U', 'N'})
-                    f_trmm += check_trmm<Backend, T>(handle, side, uplo, trans, diag, sc);
+                    for (bool zero : {false, true})
+                        f_trmm += check_trmm<Backend, T>(handle, side, uplo, trans, diag, sc, zero);
+    f_trmm += check_trmm_edges<Backend,T>(handle);
     // syrk is real-only by design (complex callers use herk); the public syrk
     // only instantiates float/double, so requesting it with a complex T would
     // be a link error rather than a test failure.
@@ -747,7 +770,7 @@ int run_backend()
     failures += run_type<Backend, std::complex<float>>(handle, base + 2 * slice, slice);
     failures += run_type<Backend, std::complex<double>>(handle, base + 3 * slice, slice);
     // Report the check result BEFORE teardown: an error surfaced by
-    // gpuStreamDestroy (ddla_stream_impl.h) is a teardown condition, and
+    // gpuStreamDestroy (ddla_stream.h) is a teardown condition, and
     // conflating it with a failing check would misattribute the cause.
     ddlaSynchronize(handle);
     {
@@ -791,7 +814,7 @@ int check_rejections()
     expect_throw([&] { trsm<DdlaBackend::CPU>(gpu, 'L', 'U', 'N', 'N', 1, 1, x,
                                               &x, 1, &x, 1); }, "does not match");
     expect_throw([&] { trmm<DdlaBackend::CPU>(gpu, 'L', 'U', 'N', 'N', 1, 1, x,
-                                              &x, 1, &x, 1, &x, 1); }, "does not match");
+                                              &x, 1, &x, 1); }, "does not match");
     expect_throw([&] { syrk<DdlaBackend::CPU>(gpu, 'U', 'N', 1, 1, x, &x, 1, x, &x, 1); },
                  "does not match");
     {

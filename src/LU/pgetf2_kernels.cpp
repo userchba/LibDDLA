@@ -1,5 +1,6 @@
+#include "ddla_connector.h"
 #include "pgetf2_kernels.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #include <climits>
 #include <algorithm>
@@ -191,7 +192,7 @@ void pgetf2_find_local_pivot(const DdlaHandle_t& handle, const T* d_column, int 
                              void* d_workspace,
                              double& metric, int& local_index, T& value)
 {
-    const gpuStream_t stream = handle->stream;
+    const gpuStream_t stream = static_cast<gpuStream_t>(handle->stream);
     using DeviceT = PivotScalarT<T>;
     static_assert(sizeof(DeviceT) == sizeof(T));
 
@@ -216,7 +217,7 @@ void pgetf2_scale_update(const DdlaHandle_t& handle, int length_row, int length_
                          T* d_column, const T* d_pivot_row,
                          T* d_trailing, int lld)
 {
-    const gpuStream_t stream = handle->stream;
+    const gpuStream_t stream = static_cast<gpuStream_t>(handle->stream);
     if(length_row <= 0){
         return;
     }

@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "comm_traits.h"
 
 namespace ddla {

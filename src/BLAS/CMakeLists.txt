@@ -15,6 +15,8 @@ target_sources(ddla_lib PRIVATE
     dot.cpp
     trsm.cpp
     syrk.cpp
+    syr2k.cpp
+    symm.cpp
     trmm.cpp
     trtrm.cpp
     gemmBatched.cpp

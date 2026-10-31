@@ -117,7 +117,7 @@ FUNCS = [
                       ("pm_io","B"),("i","ldb")], {}),
     ("trmm", "all4", [("h","handle"),("c","side"),("c","uplo"),("c","trans"),("c","diag"),
                       ("i","m"),("i","n"),("s","alpha"),("pm_i","A"),("i","lda"),
-                      ("pm_i","B"),("i","ldb"),("pm_io","C"),("i","ldc")], {}),
+                      ("pm_io","B"),("i","ldb")], {}),
     ("syrk", "sd", [("h","handle"),("c","uplo"),("c","trans"),("i","n"),("i","k"),
                     ("s","alpha"),("pm_i","A"),("i","lda"),("s","beta"),("pm_io","C"),
                     ("i","ldc")], {}),

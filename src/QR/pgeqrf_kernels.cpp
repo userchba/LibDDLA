@@ -1,3 +1,4 @@
+#include "ddla_connector.h"
 // ---------------------------------------------------------------------------
 // Device kernels of the pgeqrf panel step on the GPU.  The panel itself is factored by the vendor
 // geqrf (src/geqrf.cpp); what is left here is index and layout work, all of it run once per panel:
@@ -12,7 +13,7 @@
 // scalar types).
 // ---------------------------------------------------------------------------
 #include "pgeqrf_kernels.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #include <algorithm>
 
@@ -238,7 +239,7 @@ template <typename T>
 void qr_reverse(const DdlaHandle_t& handle, int m, int n, const T* src, int ldsrc, T* dst, int lddst)
 {
     if (m <= 0 || n <= 0) return;
-    qr_reverse_kernel<T><<<qr_rowcol_grid(m, n), kQrThreads, 0, handle->stream>>>(m, n, src, ldsrc, dst, lddst);
+    qr_reverse_kernel<T><<<qr_rowcol_grid(m, n), kQrThreads, 0, static_cast<gpuStream_t>(handle->stream)>>>(m, n, src, ldsrc, dst, lddst);
     DDLA_CHECK(ddlaGetLastError(handle));
 }
 
@@ -247,7 +248,7 @@ void qr_build_v(const DdlaHandle_t& handle, bool in_place, int rev, T* v, int ld
                 int lrp, int jb, int j0, int m_w, int lr0, int mb, int myprow,
                 int rsrc, int nprows)
 {
-    const gpuStream_t stream = handle->stream;
+    const gpuStream_t stream = static_cast<gpuStream_t>(handle->stream);
     using rt = typename qr_rt_of<T>::type;
     constexpr bool Cplx = !std::is_same<rt, T>::value;
     if (lrp <= 0 || jb <= 0) return;
@@ -261,7 +262,7 @@ void qr_build_v(const DdlaHandle_t& handle, bool in_place, int rev, T* v, int ld
 template <typename T>
 void qr_adjoint_T(const DdlaHandle_t& handle, T* out, int ldout, const T* in, int jb)
 {
-    const gpuStream_t stream = handle->stream;
+    const gpuStream_t stream = static_cast<gpuStream_t>(handle->stream);
     using rt = typename qr_rt_of<T>::type;
     constexpr bool Cplx = !std::is_same<rt, T>::value;
     if (jb <= 0) return;
@@ -273,7 +274,7 @@ void qr_adjoint_T(const DdlaHandle_t& handle, T* out, int ldout, const T* in, in
 template <typename T>
 void qr_build_T(const DdlaHandle_t& handle, int jb, const T* vv, const T* tau, T* tmat, int ldt, bool backward)
 {
-    const gpuStream_t stream = handle->stream;
+    const gpuStream_t stream = static_cast<gpuStream_t>(handle->stream);
     using rt = typename qr_rt_of<T>::type;
     constexpr bool Cplx = !std::is_same<rt, T>::value;
     if (jb <= 0) return;

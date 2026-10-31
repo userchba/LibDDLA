@@ -22,14 +22,24 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 #include <mpi.h>
 #include <ddla/ddla.h>
 #include "ddla_connector.h"
 #include "ddla_stream.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 using namespace ddla;
+
+static_assert(std::is_same_v<decltype(DdlaStream::stream), void*> &&
+              std::is_same_v<decltype(DdlaStream::stream_data), void*> &&
+              std::is_same_v<decltype(DdlaStream::stream_level), void*> &&
+              std::is_same_v<decltype(DdlaStream::blasH), void*> &&
+              std::is_same_v<decltype(DdlaStream::solverH), void*> &&
+              std::is_same_v<decltype(DdlaStream::nccl_comm), void*> &&
+              std::is_same_v<decltype(DdlaStream::nccl_row_comm), void*> &&
+              std::is_same_v<decltype(DdlaStream::nccl_col_comm), void*>);
 
 static int myid = -1;
 static int nprocs = 0;
@@ -143,6 +153,11 @@ int main(int argc, char** argv)
         void* s = ddlaGetStream(h_cpu);
 #if DDLA_HAS_CPU
         TEST("CPU handle stream is nullptr", s == nullptr);
+        TEST("CPU handle has no native resources",
+             h_cpu->stream == nullptr && h_cpu->stream_data == nullptr &&
+             h_cpu->stream_level == nullptr && h_cpu->blasH == nullptr && h_cpu->solverH == nullptr &&
+             h_cpu->nccl_comm == nullptr && h_cpu->nccl_row_comm == nullptr && h_cpu->nccl_col_comm == nullptr);
+        TEST("CPU level queue stays null", h_cpu->level_queue() == nullptr);
 #else
         // In a GPU-only build, CPU backend shouldn't be available
         (void)s;
@@ -340,6 +355,21 @@ int main(int argc, char** argv)
             DdlaHandle_t h = nullptr;
             ddlaInit(h, be);
             ddlaSet(h, MPI_COMM_WORLD, 'R');
+
+            TEST(std::string(be_name) + " native resource ownership",
+                 be == DdlaBackend::CPU ?
+                    h->stream == nullptr && h->stream_data == nullptr && h->blasH == nullptr && h->solverH == nullptr :
+                    h->stream != nullptr && h->stream_data != nullptr && h->blasH != nullptr && h->solverH != nullptr);
+            TEST(std::string(be_name) + " level queue starts lazy", h->stream_level == nullptr);
+#ifdef DDLA_USE_CCL
+            TEST(std::string(be_name) + " CCL resource ownership",
+                 be == DdlaBackend::CPU ?
+                    h->nccl_comm == nullptr && h->nccl_row_comm == nullptr && h->nccl_col_comm == nullptr :
+                    h->nccl_comm != nullptr && h->nccl_row_comm != nullptr && h->nccl_col_comm != nullptr);
+#else
+            TEST(std::string(be_name) + " CCL resources disabled",
+                 h->nccl_comm == nullptr && h->nccl_row_comm == nullptr && h->nccl_col_comm == nullptr);
+#endif
 
             // 11a. Zero-byte allocation succeeds, returns nullptr
             {
@@ -665,12 +695,12 @@ int main(int argc, char** argv)
             // and an event orders the two.  A CPU handle has no queue: every call is a no-op.
             {
                 const std::size_t n = gpu ? (std::size_t(128) << 20) : (std::size_t(1) << 20);
-                const gpuStream_t q = h->level_queue();
+                void* const q = h->level_queue();
                 ddlaEvent_t ev = nullptr, ev2 = nullptr;
                 bool good = ddlaEventCreate(h, &ev) == ok && ddlaEventCreate(h, &ev2) == ok;
                 TEST(nm + "event create succeeds", good);
                 TEST(nm + "level queue: a GPU handle gets a private queue, a CPU handle none",
-                     gpu == (q != nullptr) && gpu == (ev != nullptr) && (!gpu || q != h->stream));
+                     gpu == (q != nullptr) && gpu == (ev != nullptr) && (!gpu || q != static_cast<gpuStream_t>(h->stream)));
 
                 void* d1 = nullptr;
                 void* d2 = nullptr;
@@ -681,22 +711,22 @@ int main(int argc, char** argv)
                 if (gpu) {
                     // a long copy on the private queue leaves the handle's own queue idle
                     good = good && detail::memcpy_on(h, d2, d1, n, q) == ok;
-                    const bool own_queue_idle = gpuStreamQuery(h->stream) == gpuSuccess;
+                    const bool own_queue_idle = gpuStreamQuery(static_cast<gpuStream_t>(h->stream)) == gpuSuccess;
                     good = good && detail::synchronize_on(h, q) == ok;
-                    const bool q_drained = gpuStreamQuery(q) == gpuSuccess;
+                    const bool q_drained = gpuStreamQuery(static_cast<gpuStream_t>(q)) == gpuSuccess;
                     TEST(nm + "private queue: a copy leaves the handle's own queue idle", good && own_queue_idle);
                     TEST(nm + "synchronize_on drains that queue", good && q_drained);
                     // a long memset on the handle's own queue leaves the private queue idle
                     good = ddlaMemset(h, d1, 0x22, n) == ok;
-                    const bool q_idle = gpuStreamQuery(q) == gpuSuccess;
+                    const bool q_idle = gpuStreamQuery(static_cast<gpuStream_t>(q)) == gpuSuccess;
                     good = good && ddlaDeviceSynchronize(h) == ok;
-                    const bool device_drained = gpuStreamQuery(h->stream) == gpuSuccess;
+                    const bool device_drained = gpuStreamQuery(static_cast<gpuStream_t>(h->stream)) == gpuSuccess;
                     TEST(nm + "own queue: a memset leaves the private queue idle", good && q_idle);
                     TEST(nm + "deviceSynchronize drains the handle's own queue", good && device_drained);
                     // an event recorded on the private queue: the host wait covers the work before it
                     good = detail::memcpy_on(h, d2, d1, n, q) == ok && detail::event_record_on(h, ev, q) == ok;
                     good = good && ddlaEventSynchronize(h, ev) == ok;
-                    const bool event_drained = gpuStreamQuery(q) == gpuSuccess;
+                    const bool event_drained = gpuStreamQuery(static_cast<gpuStream_t>(q)) == gpuSuccess;
                     TEST(nm + "eventSynchronize waits for the work before the event", good && event_drained);
                     (void)ddlaGetLastError(h);
                 }

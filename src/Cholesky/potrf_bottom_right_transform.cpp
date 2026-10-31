@@ -1,5 +1,6 @@
+#include "ddla_connector.h"
 #include "potrf_bottom_right_transform.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #include <cassert>
 #include <cstddef>
@@ -95,7 +96,7 @@ void reverse_upper_to_lower(
         }
     }else{
 #if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
-        const gpuStream_t stream = handle->stream;
+        const gpuStream_t stream = static_cast<gpuStream_t>(handle->stream);
         using DeviceT = DeviceScalarT<T>;
         static_assert(sizeof(DeviceT) == sizeof(T));
         const dim3 threads(kTileSize, kTileSize);
@@ -134,7 +135,7 @@ void reverse_lower_to_upper(
         }
     }else{
 #if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
-        const gpuStream_t stream = handle->stream;
+        const gpuStream_t stream = static_cast<gpuStream_t>(handle->stream);
         using DeviceT = DeviceScalarT<T>;
         static_assert(sizeof(DeviceT) == sizeof(T));
         const dim3 threads(kTileSize, kTileSize);

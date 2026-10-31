@@ -1,7 +1,8 @@
+#include "blas_impl.h"
 // ---------------------------------------------------------------------------
 // Unified backend-templated triangular solve (side):
-//   side='L': B := alpha*op(A)^{-1}*B   (A is m-by-m)
-//   side='R': B := alpha*B*op(A)^{-1}   (A is n-by-n)
+//   side='L': B := alpha*blas_impl::op(A)^{-1}*B   (A is m-by-m)
+//   side='R': B := alpha*B*blas_impl::op(A)^{-1}   (A is n-by-n)
 //
 // Structure follows src/herk.cpp exactly: one definition covering CPU (Fortran
 // BLAS) and GPU (cuBLAS/hipBLAS), selected with `if constexpr` on the Backend
@@ -31,7 +32,7 @@
 
 #include "blas_enums.h"
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #if DDLA_HAS_CPU
 extern "C" {
@@ -131,8 +132,10 @@ inline gpublasStatus_t gpublasTrsm(
 
 namespace ddla {
 
+namespace blas_impl {
+
 template <DdlaBackend Backend, typename T>
-void trsm(
+void trsm_check(
     const DdlaHandle_t& handle,
     char side, char uplo, char trans, char diag,
     int m, int n,
@@ -157,6 +160,23 @@ void trsm(
             (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
     }
 
+    if constexpr (Backend == DdlaBackend::GPU) {
+        (void)detail::to_side_mode(side);
+        (void)detail::to_fill_mode(uplo);
+        (void)detail::to_blas_op(trans);
+        (void)detail::to_diag_type(diag);
+    }
+}
+
+template <DdlaBackend Backend, typename T>
+void trsm_run(
+    const DdlaHandle_t& handle,
+    char side, char uplo, char trans, char diag,
+    int m, int n,
+    const T& alpha,
+    T* A, int lda,
+    T* B, int ldb)
+{
     if constexpr (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         // The Fortran entry points take the LAPACK characters directly, so no
@@ -182,11 +202,11 @@ void trsm(
                       std::is_same_v<T, double> ||
                       std::is_same_v<T, std::complex<float>> ||
                       std::is_same_v<T, std::complex<double>>) {
-            BLAS_CHECK(gpublasTrsm(handle->blasH,
-                                   detail::to_side_mode(side),
-                                   detail::to_fill_mode(uplo),
-                                   detail::to_blas_op(trans),
-                                   detail::to_diag_type(diag),
+            BLAS_CHECK(gpublasTrsm(static_cast<gpublasHandle_t>(handle->blasH),
+                                   blas_impl::side(side),
+                                   blas_impl::fill(uplo),
+                                   blas_impl::op(trans),
+                                   blas_impl::diag(diag),
                                    m, n, alpha, A, lda, B, ldb));
         } else {
             static_assert(sizeof(T) == 0, "trsm: unsupported scalar type T");
@@ -196,6 +216,21 @@ void trsm(
         (void)m; (void)n; (void)alpha; (void)A; (void)lda; (void)B; (void)ldb;
 #endif
     }
+}
+
+} // namespace blas_impl
+
+template <DdlaBackend Backend, typename T>
+void trsm(
+    const DdlaHandle_t& handle,
+    char side, char uplo, char trans, char diag,
+    int m, int n,
+    const T& alpha,
+    T* A, int lda,
+    T* B, int ldb)
+{
+    blas_impl::trsm_check<Backend, T>(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb);
+    blas_impl::trsm_run<Backend, T>(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb);
 }
 
 #define INSTANTIATE_TRSM(BACKEND, TYPE)                                        \
@@ -219,4 +254,21 @@ INSTANTIATE_TRSM(DdlaBackend::GPU, std::complex<double>);
 
 #undef INSTANTIATE_TRSM
 
+
+#define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
+    template void blas_impl::trsm_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char side, char uplo, char trans, char diag, int m, int n, const TYPE& alpha, TYPE* A, int lda, TYPE* B, int ldb); \
+    template void blas_impl::trsm_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char side, char uplo, char trans, char diag, int m, int n, const TYPE& alpha, TYPE* A, int lda, TYPE* B, int ldb);
+#if DDLA_HAS_CPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
+#endif
+#undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

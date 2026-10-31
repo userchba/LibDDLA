@@ -27,7 +27,7 @@
 #include <vector>
 
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "pgeqrf_kernels.h"
 
 #if DDLA_HAS_CPU
@@ -175,7 +175,7 @@ template <typename T>
 void gpu_geqrf_ql(const DdlaHandle_t& handle, int m, int n, T* A, int lda, T* tau)
 {
     gpuStream_t stream;
-    SOLVER_CHECK(gpusolverGetStream(handle->solverH, &stream));
+    SOLVER_CHECK(gpusolverGetStream(static_cast<gpusolverHandle_t>(handle->solverH), &stream));
     const int k = std::min(m, n);
 
     // [ A' (m x n, ld m) | tau' (k) ], one stream-ordered allocation
@@ -186,7 +186,7 @@ void gpu_geqrf_ql(const DdlaHandle_t& handle, int m, int n, T* A, int lda, T* ta
     T* const taur = reinterpret_cast<T*>(buf + a_bytes);
 
     detail::qr_reverse<T>(handle, m, n, A, lda, Ar, m);
-    gpu_geqrf_qr<T>(handle->solverH, m, n, Ar, m, taur);
+    gpu_geqrf_qr<T>(static_cast<gpusolverHandle_t>(handle->solverH), m, n, Ar, m, taur);
     detail::qr_reverse<T>(handle, m, n, Ar, m, A, lda);
     // tau_L(k - 1 - i) = tau'(i): the same reversal on a k x 1 column
     detail::qr_reverse<T>(handle, k, 1, taur, k, tau, k);
@@ -246,7 +246,7 @@ void geqrf(const DdlaHandle_t& handle, char uplo, int m, int n, T* A, int lda, T
     } else {
 #if DDLA_HAS_GPU
         if (u == 'L') gpu_geqrf_ql<T>(handle, m, n, A, lda, tau);
-        else gpu_geqrf_qr<T>(handle->solverH, m, n, A, lda, tau);
+        else gpu_geqrf_qr<T>(static_cast<gpusolverHandle_t>(handle->solverH), m, n, A, lda, tau);
 #endif
     }
 }

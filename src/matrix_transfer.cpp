@@ -1,7 +1,8 @@
 #include "matrix_transfer.h"
 #include "ddla_desc.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "comm_traits.h"
+#include "check_agree.h"
 
 #include <algorithm>
 #include <cassert>
@@ -89,9 +90,9 @@ struct Transfer {
 
     // The other participants' blocks, back to back in the root's packing buffer.
     template <typename T>
-    std::vector<Block<T>> peer_blocks(const DdlaHandle_t& h, T* packed) const
+    void peer_blocks(const DdlaHandle_t& h, T* packed, std::vector<Block<T>>& blocks) const
     {
-        std::vector<Block<T>> blocks;
+        blocks.clear();
         std::size_t offset = 0;
         for (int k = 0; k < peers; ++k) {
             if (k == root_peer()) continue;
@@ -99,7 +100,6 @@ struct Transfer {
             blocks.push_back({packed + offset, p.rows, p});
             offset += block_size(p);
         }
-        return blocks;
     }
 
     // Packing scratch this rank needs: its own block on a participant, the
@@ -172,53 +172,48 @@ void require_device([[maybe_unused]] const void* p, [[maybe_unused]] const char*
 #endif
 }
 
-// Collective argument check: each rank checks what it can see, then all ranks
-// throw if any rank failed. Returns the packing scratch this rank needs.
+// Collective argument check (component 1 of gather/scatter): each rank checks
+// what it can see, then all ranks throw if any rank failed
+// (detail::agree_check).  Whatever a rank finds wrong is reported as
+// std::invalid_argument prefixed with the routine name.  Returns the packing
+// scratch this rank needs.
 template <DdlaBackend B, typename T>
 std::size_t validate(const DdlaHandle_t& h, int m, int n, const T* A, int ia, int ja,
                      const int* d, int root, const T* buffer, int ldb, const char* name)
 {
-    if (!h || h->comm == MPI_COMM_NULL)
-        throw std::invalid_argument(std::string(name) + ": handle has no communicator");
+    return detail::agree_check(h, name, [&](detail::Agree&) -> std::size_t {
+        if (!h || h->comm == MPI_COMM_NULL)
+            throw std::invalid_argument(std::string(name) + ": handle has no communicator");
+        try {
+            std::size_t count = 0;
+            if (ddlaGetBackend(h) != B) throw std::invalid_argument("backend mismatch");
+            check_desc(d, h);
+            if (m < 0 || n < 0 || ia < 1 || ja < 1
+                || std::int64_t(ia) - 1 + m > d[DDLA_M_] || std::int64_t(ja) - 1 + n > d[DDLA_N_])
+                throw std::invalid_argument("invalid submatrix bounds (ia/ja are one-based)");
+            if (root < 0 || root >= h->nprocs) throw std::invalid_argument("invalid root rank");
+            checked_count(m, n, sizeof(T));
 
-    int bad = 0;
-    std::string reason;
-    std::size_t count = 0;
-    try {
-        if (ddlaGetBackend(h) != B) throw std::invalid_argument("backend mismatch");
-        check_desc(d, h);
-        if (m < 0 || n < 0 || ia < 1 || ja < 1
-            || std::int64_t(ia) - 1 + m > d[DDLA_M_] || std::int64_t(ja) - 1 + n > d[DDLA_N_])
-            throw std::invalid_argument("invalid submatrix bounds (ia/ja are one-based)");
-        if (root < 0 || root >= h->nprocs) throw std::invalid_argument("invalid root rank");
-        checked_count(m, n, sizeof(T));
-
-        if (m && n) {
-            if (h->myid == root) {
-                if (buffer) require_device<B>(buffer, "root storage must be device memory");
-                if (!buffer || ldb < m)
-                    throw std::invalid_argument("invalid root buffer or leading dimension");
-                checked_count(ldb, n, sizeof(T));
+            if (m && n) {
+                if (h->myid == root) {
+                    if (buffer) require_device<B>(buffer, "root storage must be device memory");
+                    if (!buffer || ldb < m)
+                        throw std::invalid_argument("invalid root buffer or leading dimension");
+                    checked_count(ldb, n, sizeof(T));
+                }
+                const Transfer t(h, m, n, ia, ja, d, root);
+                if (t.active && block_size(t.self)) {
+                    checked_count(d[DDLA_LLD_], t.self.col0 + t.self.cols, sizeof(T));
+                    if (!A) throw std::invalid_argument("null local matrix data");
+                    require_device<B>(A, "local matrix data must be device memory");
+                }
+                count = t.scratch();
             }
-            const Transfer t(h, m, n, ia, ja, d, root);
-            if (t.active && block_size(t.self)) {
-                checked_count(d[DDLA_LLD_], t.self.col0 + t.self.cols, sizeof(T));
-                if (!A) throw std::invalid_argument("null local matrix data");
-                require_device<B>(A, "local matrix data must be device memory");
-            }
-            count = t.scratch();
+            return count;
+        } catch (const std::exception& e) {
+            throw std::invalid_argument(std::string(name) + ": " + e.what());
         }
-    } catch (const std::exception& e) {
-        bad = 1;
-        reason = e.what();
-    }
-
-    int any = bad;
-    MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &any, 1, MPI_INT, MPI_MAX, h->comm));
-    if (any)
-        throw std::invalid_argument(std::string(name) + ": "
-                                    + (bad ? reason : "invalid argument on another rank"));
-    return count;
+    });
 }
 
 } // namespace
@@ -227,6 +222,15 @@ template <DdlaBackend B, typename T>
 void gather(const DdlaHandle_t& h, int m, int n, const T* A, int ia, int ja,
             const int* d, int root, T* dst, int lddst,
             T* packed, std::size_t capacity)
+{
+    std::vector<Block<T>> blocks;
+    gather<B>(h, m, n, A, ia, ja, d, root, dst, lddst, packed, capacity, blocks);
+}
+
+template <DdlaBackend B, typename T>
+void gather(const DdlaHandle_t& h, int m, int n, const T* A, int ia, int ja,
+            const int* d, int root, T* dst, int lddst,
+            T* packed, std::size_t capacity, std::vector<Block<T>>& blocks)
 {
     if (!m || !n) return;
     const Transfer t(h, m, n, ia, ja, d, root);
@@ -251,7 +255,7 @@ void gather(const DdlaHandle_t& h, int m, int n, const T* A, int ia, int ja,
     // The root's own block is copied before the receives, while the peers
     // are still packing; the received blocks follow in one batch.
     map<B>(h, false, &own, 1, t.g, dst, lddst);
-    const std::vector<Block<T>> blocks = t.peer_blocks(h, packed);
+    t.peer_blocks(h, packed, blocks);
     commGroupStart<B>(h);
     for (const Block<T>& b : blocks) recv<B>(h, t.scope, b.data, block_size(b.p), t.rank_of(h, b.p));
     commGroupEnd<B>(h);
@@ -262,6 +266,15 @@ template <DdlaBackend B, typename T>
 void scatter(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
              const int* d, int root, const T* src, int ldsrc,
              T* packed, std::size_t capacity, bool group_root)
+{
+    std::vector<Block<T>> blocks;
+    scatter<B>(h, m, n, A, ia, ja, d, root, src, ldsrc, packed, capacity, blocks, group_root);
+}
+
+template <DdlaBackend B, typename T>
+void scatter(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
+             const int* d, int root, const T* src, int ldsrc,
+             T* packed, std::size_t capacity, std::vector<Block<T>>& blocks, bool group_root)
 {
     if (!m || !n) return;
     const Transfer t(h, m, n, ia, ja, d, root);
@@ -284,7 +297,7 @@ void scatter(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
     if (own.data == src && own.ld == ldsrc && own.p.rows == m && own.p.cols == n) return;
 
     T* const window = const_cast<T*>(src);  // only read: map copies window -> blocks
-    const std::vector<Block<T>> blocks = t.peer_blocks(h, packed);
+    t.peer_blocks(h, packed, blocks);
     map<B>(h, true, blocks.data(), int(blocks.size()), t.g, window, ldsrc);
     map<B>(h, true, &own, 1, t.g, window, ldsrc);
     if (group_root) commGroupStart<B>(h);
@@ -300,20 +313,30 @@ template <DdlaBackend B, typename T>
 void gather(const DdlaHandle_t& h, int m, int n, const T* A, int ia, int ja,
             const int* d, int root, T* dst, int lddst)
 {
+    // 1. check (collective; returns the packing scratch this rank needs).
     const std::size_t count =
         matrix_impl::validate<B>(h, m, n, A, ia, ja, d, root, dst, lddst, "gather");
+    // 2. temporaries.
     vector<T> packed(h, count);
-    matrix_impl::gather<B>(h, m, n, A, ia, ja, d, root, dst, lddst, packed.data(), count);
+    std::vector<matrix_impl::Block<T>> blocks;
+    blocks.reserve(h->nprocs);
+    // 3. the transfer.
+    matrix_impl::gather<B>(h, m, n, A, ia, ja, d, root, dst, lddst, packed.data(), count, blocks);
 }
 
 template <DdlaBackend B, typename T>
 void scatter(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
              const int* d, int root, const T* src, int ldsrc)
 {
+    // 1. check (collective; returns the packing scratch this rank needs).
     const std::size_t count =
         matrix_impl::validate<B>(h, m, n, A, ia, ja, d, root, src, ldsrc, "scatter");
+    // 2. temporaries.
     vector<T> packed(h, count);
-    matrix_impl::scatter<B>(h, m, n, A, ia, ja, d, root, src, ldsrc, packed.data(), count);
+    std::vector<matrix_impl::Block<T>> blocks;
+    blocks.reserve(h->nprocs);
+    // 3. the transfer.
+    matrix_impl::scatter<B>(h, m, n, A, ia, ja, d, root, src, ldsrc, packed.data(), count, blocks);
 }
 
 #define INST(B, T) \
@@ -324,7 +347,13 @@ void scatter(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
     template void matrix_impl::gather<B, T>(const DdlaHandle_t&, int, int, const T*, int, int, \
                                             const int*, int, T*, int, T*, std::size_t); \
     template void matrix_impl::scatter<B, T>(const DdlaHandle_t&, int, int, T*, int, int, \
-                                             const int*, int, const T*, int, T*, std::size_t, bool)
+                                             const int*, int, const T*, int, T*, std::size_t, bool); \
+    template void matrix_impl::gather<B, T>(const DdlaHandle_t&, int, int, const T*, int, int, \
+                                            const int*, int, T*, int, T*, std::size_t, \
+                                            std::vector<matrix_impl::Block<T>>&); \
+    template void matrix_impl::scatter<B, T>(const DdlaHandle_t&, int, int, T*, int, int, \
+                                             const int*, int, const T*, int, T*, std::size_t, \
+                                             std::vector<matrix_impl::Block<T>>&, bool)
 #define TYPES(B) \
     INST(B, float); \
     INST(B, double); \

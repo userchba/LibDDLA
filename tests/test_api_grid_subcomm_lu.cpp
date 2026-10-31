@@ -1,6 +1,6 @@
 #include "api_grid_test_common.h"
 #include "LU/lu_internal.h"
-#include "ddla_stream_impl.h"   // for set_local_device — internal test only
+#include "ddla_stream.h"   // for set_local_device — internal test only
 
 using namespace api_grid_test;
 

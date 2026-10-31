@@ -1,7 +1,7 @@
 #include <ddla/ddla.h>
 #include "ddla_desc.h"
 #include <cassert>
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "require_backend.h"
 
 namespace ddla {

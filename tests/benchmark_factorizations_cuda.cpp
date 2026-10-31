@@ -30,7 +30,7 @@
 #include "ddla_connector.h"
 #include <ddla/ddla_desc.h>
 #include <ddla/ddla_handle_t.h>
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 namespace {
 
@@ -634,9 +634,9 @@ RunResult run_libddla(Algorithm algorithm, int n,
     if(count > 0){
         BENCH_CUDA_CHECK(cudaMemcpyAsync(
             d_matrix, d_reference, count * sizeof(Complex),
-            cudaMemcpyDeviceToDevice, handle->stream));
+            cudaMemcpyDeviceToDevice, static_cast<ddla::gpuStream_t>(handle->stream)));
     }
-    BENCH_CUDA_CHECK(cudaStreamSynchronize(handle->stream));
+    BENCH_CUDA_CHECK(cudaStreamSynchronize(static_cast<ddla::gpuStream_t>(handle->stream)));
 
     int info = 0;
     bool sign_correction = false;
@@ -648,7 +648,7 @@ RunResult run_libddla(Algorithm algorithm, int n,
     }else{
         abort_with_message("internal error: vendor algorithm sent to LibDDLA");
     }
-    BENCH_CUDA_CHECK(cudaStreamSynchronize(handle->stream));
+    BENCH_CUDA_CHECK(cudaStreamSynchronize(static_cast<ddla::gpuStream_t>(handle->stream)));
     const double local_elapsed = MPI_Wtime() - start;
 
     double max_elapsed = 0.0;
@@ -658,7 +658,7 @@ RunResult run_libddla(Algorithm algorithm, int n,
                                handle->comm, handle->myid);
     const bool cholesky = algorithm == Algorithm::libddla_ppotrf_lower;
     const double logdet_error = compact_logdet_error(
-        d_matrix, handle, desc, cholesky, handle->stream, handle->comm,
+        d_matrix, handle, desc, cholesky, static_cast<ddla::gpuStream_t>(handle->stream), handle->comm,
         handle->myid, algorithm_name(algorithm));
     return {max_elapsed, logdet_error};
 }
@@ -670,10 +670,10 @@ RunResult run_cusolvermp(VendorProblem& problem,
     BENCH_CUDA_CHECK(cudaMemcpyAsync(
         problem.d_matrix, problem.d_reference,
         problem.count * sizeof(Complex), cudaMemcpyDeviceToDevice,
-        handle->stream));
+        static_cast<ddla::gpuStream_t>(handle->stream)));
     BENCH_CUDA_CHECK(cudaMemsetAsync(problem.d_info, 0, sizeof(int),
-                                     handle->stream));
-    BENCH_CAL_CHECK(cal_stream_sync(context.cal_comm, handle->stream));
+                                     static_cast<ddla::gpuStream_t>(handle->stream)));
+    BENCH_CAL_CHECK(cal_stream_sync(context.cal_comm, static_cast<ddla::gpuStream_t>(handle->stream)));
 
     BENCH_MPI_CHECK(MPI_Barrier(handle->comm));
     const double start = MPI_Wtime();
@@ -682,7 +682,7 @@ RunResult run_cusolvermp(VendorProblem& problem,
         1, 1, problem.descriptor, CUDA_C_64F, problem.d_workspace,
         problem.device_workspace_bytes, problem.h_workspace,
         problem.host_workspace_bytes, problem.d_info));
-    BENCH_CAL_CHECK(cal_stream_sync(context.cal_comm, handle->stream));
+    BENCH_CAL_CHECK(cal_stream_sync(context.cal_comm, static_cast<ddla::gpuStream_t>(handle->stream)));
     const double local_elapsed = MPI_Wtime() - start;
 
     double max_elapsed = 0.0;
@@ -690,12 +690,12 @@ RunResult run_cusolvermp(VendorProblem& problem,
                                   MPI_MAX, handle->comm));
     int info = -1;
     BENCH_CUDA_CHECK(cudaMemcpyAsync(&info, problem.d_info, sizeof(info),
-                                     cudaMemcpyDeviceToHost, handle->stream));
-    BENCH_CUDA_CHECK(cudaStreamSynchronize(handle->stream));
+                                     cudaMemcpyDeviceToHost, static_cast<ddla::gpuStream_t>(handle->stream)));
+    BENCH_CUDA_CHECK(cudaStreamSynchronize(static_cast<ddla::gpuStream_t>(handle->stream)));
     check_factorization_status(algorithm_name(Algorithm::cusolvermp_ppotrf_lower),
                                info, false, handle->comm, handle->myid);
     const double logdet_error = padded_logdet_error(
-        problem, true, handle->stream, handle->comm, handle->myid,
+        problem, true, static_cast<ddla::gpuStream_t>(handle->stream), handle->comm, handle->myid,
         algorithm_name(Algorithm::cusolvermp_ppotrf_lower));
     return {max_elapsed, logdet_error};
 }
@@ -742,13 +742,13 @@ void benchmark_dimension(int n, int repetitions, int warmup_size, bool warmup,
             BENCH_CUDA_CHECK(cudaMemcpyAsync(
                 d_compact_reference, host.data(),
                 compact_count * sizeof(Complex), cudaMemcpyHostToDevice,
-                handle->stream));
+                static_cast<ddla::gpuStream_t>(handle->stream)));
         }
-        BENCH_CUDA_CHECK(cudaStreamSynchronize(handle->stream));
+        BENCH_CUDA_CHECK(cudaStreamSynchronize(static_cast<ddla::gpuStream_t>(handle->stream)));
     }
     VendorProblem vendor_problem = create_vendor_problem(
         n, handle->myprow_, handle->mypcol_, handle, desc, d_compact_reference,
-        vendor_context, handle->stream);
+        vendor_context, static_cast<ddla::gpuStream_t>(handle->stream));
 
     const std::vector<Algorithm> algorithms = {
         Algorithm::libddla_ppotrf_lower,
@@ -808,10 +808,10 @@ void benchmark_dimension(int n, int repetitions, int warmup_size, bool warmup,
                   << std::defaultfloat << std::endl;
     }
 
-    destroy_vendor_problem(vendor_problem, handle->stream);
+    destroy_vendor_problem(vendor_problem, static_cast<ddla::gpuStream_t>(handle->stream));
     BENCH_CUDA_CHECK(cudaFree(d_compact_matrix));
     BENCH_CUDA_CHECK(cudaFree(d_compact_reference));
-    BENCH_CUDA_CHECK(cudaStreamSynchronize(handle->stream));
+    BENCH_CUDA_CHECK(cudaStreamSynchronize(static_cast<ddla::gpuStream_t>(handle->stream)));
 }
 
 } // namespace
@@ -860,7 +860,7 @@ int main(int argc, char** argv)
     VendorContext vendor_context;
     BENCH_CAL_CHECK(cal_comm_create(cal_params, &vendor_context.cal_comm));
     BENCH_CUSOLVERMP_CHECK(cusolverMpCreate(
-        &vendor_context.handle, handle->local_device, handle->stream));
+        &vendor_context.handle, handle->local_device, static_cast<ddla::gpuStream_t>(handle->stream)));
     BENCH_CUSOLVERMP_CHECK(cusolverMpCreateDeviceGrid(
         vendor_context.handle, &vendor_context.grid, vendor_context.cal_comm,
         kProcessRows, kProcessCols, CUSOLVERMP_GRID_MAPPING_ROW_MAJOR));
@@ -885,8 +885,8 @@ int main(int argc, char** argv)
                             handle, vendor_context);
     }
 
-    BENCH_CAL_CHECK(cal_comm_barrier(vendor_context.cal_comm, handle->stream));
-    BENCH_CAL_CHECK(cal_stream_sync(vendor_context.cal_comm, handle->stream));
+    BENCH_CAL_CHECK(cal_comm_barrier(vendor_context.cal_comm, static_cast<ddla::gpuStream_t>(handle->stream)));
+    BENCH_CAL_CHECK(cal_stream_sync(vendor_context.cal_comm, static_cast<ddla::gpuStream_t>(handle->stream)));
     BENCH_CUSOLVERMP_CHECK(cusolverMpDestroyGrid(vendor_context.grid));
     BENCH_CUSOLVERMP_CHECK(cusolverMpDestroy(vendor_context.handle));
     BENCH_CAL_CHECK(cal_comm_destroy(vendor_context.cal_comm));

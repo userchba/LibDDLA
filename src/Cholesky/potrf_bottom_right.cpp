@@ -10,7 +10,7 @@
 #include <ddla/ddla.h>
 
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "require_backend.h"
 
 namespace ddla{

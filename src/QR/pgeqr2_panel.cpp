@@ -12,7 +12,7 @@
 
 #include "ddla_connector.h"
 #include "comm_traits.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "ddla_desc.h"
 #include "pgeqrf_kernels.h"
 #include "pgeqrf_impl.h"

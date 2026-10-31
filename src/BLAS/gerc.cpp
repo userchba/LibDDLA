@@ -1,3 +1,4 @@
+#include "blas_impl.h"
 // ---------------------------------------------------------------------------
 // Unified backend-templated conjugate rank-1 update (A := alpha*x*y^H + A).
 //
@@ -29,7 +30,7 @@
 
 #include "blas_enums.h"
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #if DDLA_HAS_CPU
 extern "C" {
@@ -127,8 +128,10 @@ namespace ddla {
 // ---------------------------------------------------------------------------
 // GPU dispatch (single BLAS_CHECK call per scalar type).
 // ---------------------------------------------------------------------------
+namespace blas_impl {
+
 template <DdlaBackend Backend, typename T>
-void gerc(const DdlaHandle_t& handle, int m, int n,
+void gerc_check(const DdlaHandle_t& handle, int m, int n,
           const T& alpha, const T* x, int incx,
           const T* y, int incy, T* A, int lda)
 {
@@ -152,10 +155,19 @@ void gerc(const DdlaHandle_t& handle, int m, int n,
     if (m <= 0 || n <= 0) return;
 
     if constexpr (Backend == DdlaBackend::CPU) {
+        if (incx == 0 || incy == 0) throw std::runtime_error("gerc: incx and incy must be nonzero");
+    }
+}
+
+template <DdlaBackend Backend, typename T>
+void gerc_run(const DdlaHandle_t& handle, int m, int n,
+          const T& alpha, const T* x, int incx,
+          const T* y, int incy, T* A, int lda)
+{
+    if (m <= 0 || n <= 0) return;
+    if constexpr (Backend == DdlaBackend::CPU) {
         #if DDLA_HAS_CPU
-        if (incx == 0 || incy == 0)
-            throw std::runtime_error("gerc: incx and incy must be nonzero");
-        if constexpr (std::is_same_v<T, float>) {
+if constexpr (std::is_same_v<T, float>) {
             sger_(&m, &n, &alpha, x, &incx, y, &incy, A, &lda);
         } else if constexpr (std::is_same_v<T, double>) {
             dger_(&m, &n, &alpha, x, &incx, y, &incy, A, &lda);
@@ -169,9 +181,20 @@ void gerc(const DdlaHandle_t& handle, int m, int n,
         #endif
     } else {
         #if DDLA_HAS_GPU
-        BLAS_CHECK(gpublasGerc(handle->blasH, m, n, alpha, x, incx, y, incy, A, lda));
+        BLAS_CHECK(gpublasGerc(static_cast<gpublasHandle_t>(handle->blasH), m, n, alpha, x, incx, y, incy, A, lda));
         #endif
     }
+}
+
+} // namespace blas_impl
+
+template <DdlaBackend Backend, typename T>
+void gerc(const DdlaHandle_t& handle, int m, int n,
+          const T& alpha, const T* x, int incx,
+          const T* y, int incy, T* A, int lda)
+{
+    blas_impl::gerc_check<Backend, T>(handle, m, n, alpha, x, incx, y, incy, A, lda);
+    blas_impl::gerc_run<Backend, T>(handle, m, n, alpha, x, incx, y, incy, A, lda);
 }
 
 #define INSTANTIATE_GERC(BACKEND, TYPE)                                      \
@@ -195,4 +218,21 @@ INSTANTIATE_GERC(DdlaBackend::GPU, std::complex<double>);
 
 #undef INSTANTIATE_GERC
 
+
+#define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
+    template void blas_impl::gerc_check<BACKEND, TYPE>(const DdlaHandle_t& handle, int m, int n, const TYPE& alpha, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* A, int lda); \
+    template void blas_impl::gerc_run<BACKEND, TYPE>(const DdlaHandle_t& handle, int m, int n, const TYPE& alpha, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* A, int lda);
+#if DDLA_HAS_CPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
+#endif
+#undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

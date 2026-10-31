@@ -66,6 +66,7 @@ target_sources(ddla_lib PRIVATE
     matrix_transfer.cpp
     transport_block.cpp
     ddla_handle_t.cpp
+    ddla_stream.cpp
     ddla_desc.cpp
 )
 if(NOT ddla_cpu_only_build)

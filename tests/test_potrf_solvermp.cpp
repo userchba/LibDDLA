@@ -1,3 +1,4 @@
+#include "ddla_connector.h"
 #include <cassert>
 #include "test_desc_helpers.h"
 #include <cmath>
@@ -11,7 +12,7 @@
 #include <ddla.h>
 #include <ddla_connector.h>
 #include <random>
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include <cusolverMp.h>
 #include "helpers.h"
 using namespace ddla;
@@ -123,7 +124,7 @@ void check_ppotrf(int n, const DdlaHandle_t& ddla_handle)
         calStat = cal_comm_create(params, &cal_comm);
         assert(calStat == CAL_OK);
 
-        SOLVER_CHECK(cusolverMpCreate(&cusolverMpHandle, ddla_handle->local_device, ddla_handle->stream));
+        SOLVER_CHECK(cusolverMpCreate(&cusolverMpHandle, ddla_handle->local_device, static_cast<gpuStream_t>(ddla_handle->stream)));
 
         cusolverMpGrid_t grid = NULL;
         cusolverMpMatrixDescriptor_t descr = NULL;
@@ -161,7 +162,7 @@ void check_ppotrf(int n, const DdlaHandle_t& ddla_handle)
         h_work = (void*)malloc(workspaceInBytesOnHost);
         assert(h_work != NULL);
 
-        calStat = cal_stream_sync(cal_comm, ddla_handle->stream);
+        calStat = cal_stream_sync(cal_comm, static_cast<gpuStream_t>(ddla_handle->stream));
         assert(calStat == CAL_OK);
         DDLA_CHECK(ddlaMemcpy(ddla_handle, d_A, d_A_copy,
                               ddla_test::m_loc(ddla_handle, matrix_desc) * ddla_test::n_loc(ddla_handle, matrix_desc) * sizeof(std::complex<double>)));
@@ -200,7 +201,7 @@ void check_ppotrf(int n, const DdlaHandle_t& ddla_handle)
         SOLVER_CHECK(cusolverMpDestroyMatrixDesc(descr));
         SOLVER_CHECK(cusolverMpDestroyGrid(grid));
 
-        calStat = cal_comm_barrier(cal_comm, ddla_handle->stream);
+        calStat = cal_comm_barrier(cal_comm, static_cast<gpuStream_t>(ddla_handle->stream));
         assert(calStat == CAL_OK);
 
         /* destroy CAL communicator */

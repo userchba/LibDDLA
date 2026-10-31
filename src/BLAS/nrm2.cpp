@@ -1,3 +1,4 @@
+#include "blas_impl.h"
 // ---------------------------------------------------------------------------
 // Unified backend-templated Euclidean norm (result := ||x||_2).
 //
@@ -40,7 +41,7 @@
 #include "blas_enums.h"
 #include "blas_pointer_mode.h"
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #if DDLA_HAS_CPU
 extern "C" {
@@ -135,8 +136,10 @@ inline gpublasStatus_t gpublasNrm2(
 
 namespace ddla {
 
+namespace blas_impl {
+
 template <DdlaBackend Backend, typename T>
-void nrm2(
+void nrm2_check(
     const DdlaHandle_t& handle,
     int n,
     const T* x, int incx,
@@ -159,6 +162,15 @@ void nrm2(
             (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
     }
 
+}
+
+template <DdlaBackend Backend, typename T>
+void nrm2_run(
+    const DdlaHandle_t& handle,
+    int n,
+    const T* x, int incx,
+    typename real_type<T>::type* result)
+{
     if constexpr (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         // HOST result pointer: the Fortran function returns the value and the
@@ -184,7 +196,7 @@ void nrm2(
                       std::is_same_v<T, double> ||
                       std::is_same_v<T, std::complex<float>> ||
                       std::is_same_v<T, std::complex<double>>) {
-            BLAS_CHECK(gpublasNrm2(handle->blasH, n, x, incx, result));
+            BLAS_CHECK(gpublasNrm2(static_cast<gpublasHandle_t>(handle->blasH), n, x, incx, result));
         } else {
             static_assert(sizeof(T) == 0, "nrm2: unsupported scalar type T");
         }
@@ -192,6 +204,19 @@ void nrm2(
         (void)handle; (void)n; (void)x; (void)incx; (void)result;
 #endif
     }
+}
+
+} // namespace blas_impl
+
+template <DdlaBackend Backend, typename T>
+void nrm2(
+    const DdlaHandle_t& handle,
+    int n,
+    const T* x, int incx,
+    typename real_type<T>::type* result)
+{
+    blas_impl::nrm2_check<Backend, T>(handle, n, x, incx, result);
+    blas_impl::nrm2_run<Backend, T>(handle, n, x, incx, result);
 }
 
 #define INSTANTIATE_NRM2(BACKEND, TYPE)                                        \
@@ -215,4 +240,21 @@ INSTANTIATE_NRM2(DdlaBackend::GPU, std::complex<double>);
 
 #undef INSTANTIATE_NRM2
 
+
+#define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
+    template void blas_impl::nrm2_check<BACKEND, TYPE>( const DdlaHandle_t& handle, int n, const TYPE* x, int incx, typename real_type<TYPE>::type* result); \
+    template void blas_impl::nrm2_run<BACKEND, TYPE>( const DdlaHandle_t& handle, int n, const TYPE* x, int incx, typename real_type<TYPE>::type* result);
+#if DDLA_HAS_CPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
+#endif
+#undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

@@ -1,8 +1,10 @@
+#include "BLAS/blas_impl.h"
 #include <ddla/ddla.h>
 #include "lu_internal.h"
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "helpers.h"
+#include "lapack_impl.h"
 #include "require_backend.h"
 #include <algorithm>
 #include <cmath>
@@ -151,7 +153,7 @@ getf2_nopiv_kernel(int m, int n, T* dA, int ldda, int* info, int gbstep)
 template <typename T>
 void launch_getf2_nopiv_kernel(const DdlaHandle_t& ddla_handle, int jb, T* d_block, int lda, int* d_info, int gbstep)
 {
-    const gpuStream_t stream = ddla_handle->stream;
+    const gpuStream_t stream = static_cast<gpuStream_t>(ddla_handle->stream);
     const int threads = std::min(jb, 512);
     const int shmem   = jb * sizeof(T);
 
@@ -183,8 +185,8 @@ void getf2_nopiv_host(const DdlaHandle_t& ddla_handle, int n, T* A, int lda, int
         }
         const int rows = n - col - 1;
         if (rows > 0) {
-            scal<DdlaBackend::CPU, T>(ddla_handle, rows, T(1) / (zero_pivot ? T(1) : column[0]), column + 1, 1);
-            geru<DdlaBackend::CPU, T>(ddla_handle, rows, rows, T(-1),
+            blas_impl::scal_run<DdlaBackend::CPU, T>(ddla_handle, rows, T(1) / (zero_pivot ? T(1) : column[0]), column + 1, 1);
+            blas_impl::geru_run<DdlaBackend::CPU, T>(ddla_handle, rows, rows, T(-1),
                                       column + 1, 1, column + lda, lda, column + 1 + lda, lda);
         }
     }
@@ -210,13 +212,24 @@ void getf2_nopiv_host(const DdlaHandle_t& ddla_handle, int n, T* A, int lda, int
 // which keeps data in registers and uses shared memory for pivot broadcast.
 // The trailing update (step 4) is done by the highly optimized cuBLAS/hipBLAS
 // gemm, which dominates the runtime for large matrices.
+//
+// Two components (src/lapack_impl.h): getrf_nopiv_check is the handle check, getrf_nopiv_run the algorithm; the
+// routine has no temporary of its own, so there is no plan.  The private getrf_nopiv is check -> run.
 // --------------------------------------------------------------------------
 
-template <DdlaBackend Backend, typename T>
-void getrf_nopiv(int m, int n, T* A, int lda, int* info_buffer, const DdlaHandle_t& ddla_handle)
+namespace lapack_impl {
+
+// Check: the only validation the routine has.
+template <DdlaBackend Backend>
+void getrf_nopiv_check(const DdlaHandle_t& ddla_handle)
 {
     detail::require_backend<Backend>(ddla_handle, "getrf_nopiv");
+}
 
+// Execution: no workspace component is needed.
+template <DdlaBackend Backend, typename T>
+void getrf_nopiv_run(const DdlaHandle_t& ddla_handle, int m, int n, T* A, int lda, int* info_buffer)
+{
     // Block size for the blocked algorithm.  Must be <= GETF2_MAX_N
     // because the panel kernel stores one row in registers.
     // GETF2_MAX_N = 32 is chosen to balance register pressure
@@ -258,7 +271,7 @@ void getrf_nopiv(int m, int n, T* A, int lda, int* info_buffer, const DdlaHandle
         if (j + jb < m)
         {
             T one = T(1);
-            trsm<Backend, T>(
+            blas_impl::trsm_run<Backend, T>(
                 ddla_handle,
                 'R', 'U',                   // op(A)*X = B  =>  X = B*inv(A)
                 'N', 'N',                   // no transpose; U has non-unit diagonal
@@ -283,7 +296,7 @@ void getrf_nopiv(int m, int n, T* A, int lda, int* info_buffer, const DdlaHandle
         if (j + jb < n)
         {
             T one = T(1);
-            trsm<Backend, T>(
+            blas_impl::trsm_run<Backend, T>(
                 ddla_handle,
                 'L', 'L',                   // op(A)*X = B  =>  X = inv(A)*B
                 'N', 'U',                   // no transpose; L has unit diagonal
@@ -305,7 +318,7 @@ void getrf_nopiv(int m, int n, T* A, int lda, int* info_buffer, const DdlaHandle
             if (j + jb < m)
             {
                 T neg_one = T(-1);
-                gemm<Backend, T>(
+                blas_impl::gemm_run<Backend, T>(
                     ddla_handle,
                     'N', 'N',
                     mm - jb, nn, jb,
@@ -325,14 +338,27 @@ void getrf_nopiv(int m, int n, T* A, int lda, int* info_buffer, const DdlaHandle
     // for reading it back after stream synchronization.
 }
 
+} // namespace lapack_impl
+
+template <DdlaBackend Backend, typename T>
+void getrf_nopiv(int m, int n, T* A, int lda, int* info_buffer, const DdlaHandle_t& ddla_handle)
+{
+    // 1. handle check.
+    lapack_impl::getrf_nopiv_check<Backend>(ddla_handle);
+    // 2. the factorization.
+    lapack_impl::getrf_nopiv_run<Backend, T>(ddla_handle, m, n, A, lda, info_buffer);
+}
+
 // --------------------------------------------------------------------------
 // Explicit instantiations
 // --------------------------------------------------------------------------
 
 #define INSTANTIATE_GETRF_NOPIV(BACKEND, TYPE) \
-    template void getrf_nopiv<BACKEND, TYPE>(int, int, TYPE*, int, int*, const DdlaHandle_t&)
+    template void getrf_nopiv<BACKEND, TYPE>(int, int, TYPE*, int, int*, const DdlaHandle_t&); \
+    template void lapack_impl::getrf_nopiv_run<BACKEND, TYPE>(const DdlaHandle_t&, int, int, TYPE*, int, int*)
 
 #if DDLA_HAS_CPU
+template void lapack_impl::getrf_nopiv_check<DdlaBackend::CPU>(const DdlaHandle_t&);
 INSTANTIATE_GETRF_NOPIV(DdlaBackend::CPU, float);
 INSTANTIATE_GETRF_NOPIV(DdlaBackend::CPU, double);
 INSTANTIATE_GETRF_NOPIV(DdlaBackend::CPU, std::complex<float>);
@@ -340,6 +366,7 @@ INSTANTIATE_GETRF_NOPIV(DdlaBackend::CPU, std::complex<double>);
 #endif
 
 #if DDLA_HAS_GPU
+template void lapack_impl::getrf_nopiv_check<DdlaBackend::GPU>(const DdlaHandle_t&);
 INSTANTIATE_GETRF_NOPIV(DdlaBackend::GPU, float);
 INSTANTIATE_GETRF_NOPIV(DdlaBackend::GPU, double);
 INSTANTIATE_GETRF_NOPIV(DdlaBackend::GPU, std::complex<float>);

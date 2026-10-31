@@ -24,7 +24,7 @@
 #include <vector>
 
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #if DDLA_HAS_CPU
 // Host LAPACK ?laswp (Fortran ABI; the CPU BLAS library must provide LAPACK -- OpenBLAS and MKL do).
@@ -121,7 +121,7 @@ void gpu_laswp(const DdlaHandle_t& handle, int n, T* A, int lda, int k1, int k2,
 {
 #if DDLA_GPU_VENDOR && GPU_HAS_SOLVER_LASWP
     if (incx == 1) {
-        SOLVER_CHECK(solver_laswp(handle->solverH, n, A, lda, k1, k2, ipiv, incx));
+        SOLVER_CHECK(solver_laswp(static_cast<gpusolverHandle_t>(handle->solverH), n, A, lda, k1, k2, ipiv, incx));
         return;
     }
 #endif

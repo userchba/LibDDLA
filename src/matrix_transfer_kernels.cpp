@@ -1,5 +1,6 @@
+#include "ddla_connector.h"
 #include "matrix_transfer.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -65,7 +66,7 @@ void map_gpu(const DdlaHandle_t& h, bool scatter, const Block<T>* blocks, int co
     int size = 0, rows = 0, cols = 0;  // the largest block of a batch sizes its grid
     auto launch = [&] {
         const dim3 grid(std::min(65535, (rows - 1) / 256 + 1), std::min(65535, cols), size);
-        map_kernel<<<grid, 256, 0, h->stream>>>(scatter, batch, g, reinterpret_cast<Bits<N>*>(window),
+        map_kernel<<<grid, 256, 0, static_cast<gpuStream_t>(h->stream)>>>(scatter, batch, g, reinterpret_cast<Bits<N>*>(window),
                                                 ldw);
         DDLA_CHECK(ddlaGetLastError(h));
         size = rows = cols = 0;

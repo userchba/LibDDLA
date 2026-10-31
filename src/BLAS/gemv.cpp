@@ -1,6 +1,7 @@
+#include "blas_impl.h"
 // ---------------------------------------------------------------------------
 // Unified backend-templated matrix-vector product
-// (y := alpha*op(A)*x + beta*y).
+// (y := alpha*blas_impl::op(A)*x + beta*y).
 //
 // Structure follows src/herk.cpp exactly: one definition covering CPU (Fortran
 // BLAS) and GPU (cuBLAS/hipBLAS), selected with `if constexpr` on the Backend
@@ -26,7 +27,7 @@
 
 #include "blas_enums.h"
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #if DDLA_HAS_CPU
 extern "C" {
@@ -140,8 +141,10 @@ inline gpublasStatus_t gpublasGemv(
 
 namespace ddla {
 
+namespace blas_impl {
+
 template <DdlaBackend Backend, typename T>
-void gemv(
+void gemv_check(
     const DdlaHandle_t& handle,
     char trans, int m, int n,
     const T& alpha,
@@ -167,6 +170,21 @@ void gemv(
             (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
     }
 
+    if constexpr (Backend == DdlaBackend::GPU) {
+        (void)detail::to_blas_op(trans);
+    }
+}
+
+template <DdlaBackend Backend, typename T>
+void gemv_run(
+    const DdlaHandle_t& handle,
+    char trans, int m, int n,
+    const T& alpha,
+    const T* A, int lda,
+    const T* x, int incx,
+    const T& beta,
+    T* y, int incy)
+{
     if constexpr (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         // xGEMV consumes the transpose character directly, so the caller's
@@ -192,8 +210,8 @@ void gemv(
                       std::is_same_v<T, double> ||
                       std::is_same_v<T, std::complex<float>> ||
                       std::is_same_v<T, std::complex<double>>) {
-            BLAS_CHECK(gpublasGemv(handle->blasH,
-                                   detail::to_blas_op(trans),
+            BLAS_CHECK(gpublasGemv(static_cast<gpublasHandle_t>(handle->blasH),
+                                   blas_impl::op(trans),
                                    m, n, alpha, A, lda, x, incx, beta, y, incy));
         } else {
             static_assert(sizeof(T) == 0, "gemv: unsupported scalar type T");
@@ -203,6 +221,22 @@ void gemv(
         (void)x; (void)incx; (void)beta; (void)y; (void)incy;
 #endif
     }
+}
+
+} // namespace blas_impl
+
+template <DdlaBackend Backend, typename T>
+void gemv(
+    const DdlaHandle_t& handle,
+    char trans, int m, int n,
+    const T& alpha,
+    const T* A, int lda,
+    const T* x, int incx,
+    const T& beta,
+    T* y, int incy)
+{
+    blas_impl::gemv_check<Backend, T>(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
+    blas_impl::gemv_run<Backend, T>(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
 }
 
 #define INSTANTIATE_GEMV(BACKEND, TYPE)                                        \
@@ -227,4 +261,21 @@ INSTANTIATE_GEMV(DdlaBackend::GPU, std::complex<double>);
 
 #undef INSTANTIATE_GEMV
 
+
+#define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
+    template void blas_impl::gemv_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char trans, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE* x, int incx, const TYPE& beta, TYPE* y, int incy); \
+    template void blas_impl::gemv_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char trans, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE* x, int incx, const TYPE& beta, TYPE* y, int incy);
+#if DDLA_HAS_CPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
+#endif
+#undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

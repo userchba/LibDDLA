@@ -397,3 +397,14 @@ if((DDLA_USE_CPU OR DDLA_DUAL_BUILD) AND UNIX
     set_tests_properties(test_pstedc_threads PROPERTIES PROCESSORS 4 LABELS cpu SKIP_RETURN_CODE 77 TIMEOUT 180
         ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=4;OMP_DYNAMIC=false;OMP_PROC_BIND=false;OMP_WAIT_POLICY=PASSIVE;OPENBLAS_MAIN_FREE=1")
 endif()
+
+# Exercise the in-place TRMM interface through all typed Fortran bindings.
+if(DDLA_ENABLE_FORTRAN)
+    find_package(MPI REQUIRED COMPONENTS Fortran)
+    add_executable(test_fortran_trmm test_fortran_trmm.f90)
+    target_link_libraries(test_fortran_trmm PRIVATE ddla_fortran MPI::MPI_Fortran)
+    add_test(NAME test_fortran_trmm_mpi
+        COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${DDLA_TEST_NP}
+                ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_fortran_trmm> ${MPIEXEC_POSTFLAGS})
+    set_tests_properties(test_fortran_trmm_mpi PROPERTIES PROCESSORS ${DDLA_TEST_NP})
+endif()

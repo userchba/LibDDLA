@@ -1,6 +1,6 @@
 #include <ddla/ddla.h>
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 #include "helpers.h"
 #include "require_backend.h"
 #include <algorithm>
@@ -220,20 +220,20 @@ void trtrm_impl(const DdlaHandle_t& handle, int n, const T& alpha,
         const D al = detail::to_device_scalar(alpha), be = detail::to_device_scalar(beta);
         if (alpha == T(0)) {
             const dim3 threads(16, 16), blocks((n - 1) / 16 + 1, (n - 1) / 16 + 1);
-            if (beta == T(0)) scale_triangle<Upper, D, false><<<blocks, threads, 0, handle->stream>>>(n, be, c, ldc);
-            else scale_triangle<Upper, D, true><<<blocks, threads, 0, handle->stream>>>(n, be, c, ldc);
+            if (beta == T(0)) scale_triangle<Upper, D, false><<<blocks, threads, 0, static_cast<gpuStream_t>(handle->stream)>>>(n, be, c, ldc);
+            else scale_triangle<Upper, D, true><<<blocks, threads, 0, static_cast<gpuStream_t>(handle->stream)>>>(n, be, c, ldc);
         } else {
             // V100 measurements favor more small tiles before the GPU is full;
             // complex<double> needs the smaller register tile even at large n.
             if (n <= 128 && !std::is_same_v<T, float>)
-                launch<Upper,D,16,8,16,16,false>(handle->stream,n,al,A,lda,B,ldb,be,C,ldc);
+                launch<Upper,D,16,8,16,16,false>(static_cast<gpuStream_t>(handle->stream),n,al,A,lda,B,ldb,be,C,ldc);
             else if (n <= 1024 || std::is_same_v<T, std::complex<double>> ||
                      (std::is_same_v<T, std::complex<float>> && n <= 2048))
-                launch<Upper,D,32,8,16,8,true>(handle->stream,n,al,A,lda,B,ldb,be,C,ldc);
+                launch<Upper,D,32,8,16,8,true>(static_cast<gpuStream_t>(handle->stream),n,al,A,lda,B,ldb,be,C,ldc);
             else if constexpr (std::is_arithmetic_v<T>)
-                launch<Upper,D,64,16,16,8,true>(handle->stream,n,al,A,lda,B,ldb,be,C,ldc);
+                launch<Upper,D,64,16,16,8,true>(static_cast<gpuStream_t>(handle->stream),n,al,A,lda,B,ldb,be,C,ldc);
             else
-                launch<Upper,D,64,16,16,16,true>(handle->stream,n,al,A,lda,B,ldb,be,C,ldc);
+                launch<Upper,D,64,16,16,16,true>(static_cast<gpuStream_t>(handle->stream),n,al,A,lda,B,ldb,be,C,ldc);
         }
         DDLA_CHECK(ddlaGetLastError(handle));
 #endif

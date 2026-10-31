@@ -1,3 +1,4 @@
+#include "blas_impl.h"
 #include <ddla/ddla.h>
 #include <ddla/ddla_handle_t.h>
 
@@ -6,7 +7,7 @@
 #include <string>
 
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #if DDLA_HAS_CPU
 extern "C" {
@@ -90,8 +91,10 @@ inline gpublasStatus_t gpublasIamax(gpublasHandle_t handle, int n, const std::co
 
 } // anonymous namespace
 
+namespace blas_impl {
+
 template <DdlaBackend Backend, typename T>
-void iamax(const DdlaHandle_t& handle, int n, const T* x, int incx, int& result)
+void iamax_check(const DdlaHandle_t& handle, int n, const T* x, int incx, int& result)
 {
     static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
                   "CPU iamax is not available in this LibDDLA build");
@@ -108,19 +111,33 @@ void iamax(const DdlaHandle_t& handle, int n, const T* x, int incx, int& result)
             " does not match handle backend " + iamax_backend_name(actual));
     }
     if (n <= 0) {
-        result = 0;
         return;
     }
 
+}
+
+template <DdlaBackend Backend, typename T>
+void iamax_run(const DdlaHandle_t& handle, int n, const T* x, int incx, int& result)
+{
+    if (n <= 0) { result = 0; return; }
     if constexpr (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
         result = cpu_iamax(n, x, incx);
 #endif
     } else {
 #if DDLA_HAS_GPU
-        BLAS_CHECK(gpublasIamax(handle->blasH, n, x, incx, &result));
+        BLAS_CHECK(gpublasIamax(static_cast<gpublasHandle_t>(handle->blasH), n, x, incx, &result));
 #endif
     }
+}
+
+} // namespace blas_impl
+
+template <DdlaBackend Backend, typename T>
+void iamax(const DdlaHandle_t& handle, int n, const T* x, int incx, int& result)
+{
+    blas_impl::iamax_check<Backend, T>(handle, n, x, incx, result);
+    blas_impl::iamax_run<Backend, T>(handle, n, x, incx, result);
 }
 
 #define INSTANTIATE_IAMAX(BACKEND, TYPE)                                     \
@@ -143,4 +160,21 @@ INSTANTIATE_IAMAX(DdlaBackend::GPU, std::complex<double>);
 
 #undef INSTANTIATE_IAMAX
 
+
+#define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
+    template void blas_impl::iamax_check<BACKEND, TYPE>(const DdlaHandle_t& handle, int n, const TYPE* x, int incx, int& result); \
+    template void blas_impl::iamax_run<BACKEND, TYPE>(const DdlaHandle_t& handle, int n, const TYPE* x, int incx, int& result);
+#if DDLA_HAS_CPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
+DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
+#endif
+#undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

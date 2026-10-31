@@ -1,7 +1,7 @@
 #include <ddla/ddla.h>
 #include <ddla/ddla_handle_t.h>
 #include "ddla_connector.h"
-#include "ddla_stream_impl.h"
+#include "ddla_stream.h"
 
 #include <algorithm>
 #include <cctype>
@@ -221,7 +221,7 @@ void mixed_gpu(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
                const std::complex<R>* B, int ldb, std::complex<R> beta,
                std::complex<R>* C, int ldc, bool product)
 {
-    const gpuStream_t stream=h->stream;
+    const gpuStream_t stream=static_cast<gpuStream_t>(h->stream);
     const R ar=alpha.real(), ai=alpha.imag(), br=beta.real(), bi=beta.imag();
     const R* b=reinterpret_cast<const R*>(B);
     R* c=reinterpret_cast<R*>(C);
