@@ -7,13 +7,8 @@
 // (DDLA_HAS_CPU / DDLA_HAS_GPU).  The vendor calls are private to this translation unit; the public interface is the
 // templated ddla::getrf declared in <ddla/ddla.h>.
 //
-// Three components (src/lapack_impl.h): getrf_check validates, getrf_plan sizes and allocates the vendor workspace,
-// getrf_run factorizes; the public getrf is check -> plan -> run.
-//
-// GPU arm: the vendor routine needs a scratch buffer.  getrf_plan sizes it with the ?getrf_bufferSize query (the
-// maximum over the planned shapes) and allocates it stream-ordered on the handle's stream -- the stream the solver
-// handle is bound to -- and getrf_run re-queries the size of its own shape, so the call stays asynchronous: nothing
-// is synchronized, `info` is valid once the caller synchronizes the stream.
+// Three components (plan_util.h): getrf_check; getrf_workspace_size (backend bytes of the vendor workspace);
+// getrf_run on the caller's scratch.
 // ---------------------------------------------------------------------------
 #include <ddla/ddla.h>
 #include <ddla/ddla_handle_t.h>
@@ -22,14 +17,13 @@
 #include <cassert>
 #include <complex>
 #include <cstddef>
-#include <initializer_list>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 #include "lapack_impl.h"
-#include "plan_util.h"
 
 #if DDLA_HAS_CPU
 // Host LAPACK ?getrf (Fortran ABI; the CPU BLAS library must provide LAPACK -- OpenBLAS and MKL do).
@@ -114,22 +108,20 @@ inline gpusolverStatus_t getrf_call(gpusolverHandle_t h, int m, int n, std::comp
     return gpusolverZgetrf(h, m, n, (gpusolverDoubleComplex*)A, lda, (gpusolverDoubleComplex*)work, lwork, ipiv, info);
 }
 
-// The factorization on the device: query the exact lwork of this shape (a host call), check that the planned
-// workspace holds it, run.  The workspace lives in the workspace, on the stream the solver runs on.
+// Factor on the caller's backend scratch; lwork is what the scratch holds.
 template <typename T>
-gpusolverStatus_t gpu_getrf(const DdlaHandle_t& handle, vector<T>& work, int m, int n, T* A, int lda,
-                            int* ipiv, int* info)
+gpusolverStatus_t gpu_getrf(const DdlaHandle_t& handle, void* work, std::size_t work_bytes, int m, int n, T* A,
+                            int lda, int* ipiv, int* info)
 {
-    int lwork = 0;
-    SOLVER_CHECK(getrf_buffer_size(static_cast<gpusolverHandle_t>(handle->solverH), m, n, A, lda, &lwork));
-    assert(static_cast<std::size_t>(lwork) <= work.capacity());
-    return getrf_call(static_cast<gpusolverHandle_t>(handle->solverH), m, n, A, lda, lwork > 0 ? work.data() : nullptr, lwork, ipiv, info);
+    const int lwork = static_cast<int>(std::min<std::size_t>(work_bytes / sizeof(T), std::numeric_limits<int>::max()));
+    return getrf_call(static_cast<gpusolverHandle_t>(handle->solverH), m, n, A, lda, static_cast<T*>(work), lwork,
+                      ipiv, info);
 }
 
 #else // DDLA_GPU_VENDOR
 
 template <typename T>
-gpusolverStatus_t gpu_getrf(const DdlaHandle_t&, vector<T>&, int, int, T*, int, int*, int*)
+gpusolverStatus_t gpu_getrf(const DdlaHandle_t&, void*, std::size_t, int, int, T*, int, int*, int*)
 {
     throw std::runtime_error("getrf: no GPU vendor selected at compile time");
 }
@@ -169,33 +161,26 @@ void getrf_check(const DdlaHandle_t& handle, int m, int n, const void* A, int ld
     if (lda < std::max(1, m)) throw std::runtime_error("getrf: lda too small");
 }
 
-// Component 2: the vendor workspace.  CPU handles (host LAPACK) need none.
+// Component 2: the vendor workspace of an m x n factorization.  CPU handles (host LAPACK) need none.
 template <typename T>
-vector<T> getrf_plan(const DdlaHandle_t& handle, const Shape* shapes, std::size_t count, T* A, int lda)
+void getrf_workspace_size(const DdlaHandle_t& handle, int m, int n, T* A, int lda, std::size_t* backend_bytes)
 {
-    vector<T> work(handle);
+    *backend_bytes = 0;
 #if DDLA_HAS_GPU && DDLA_GPU_VENDOR
-    if (ddlaGetBackend(handle) == DdlaBackend::GPU) {
+    if (handle->backend == DdlaBackend::GPU && m > 0 && n > 0) {
         int lwork = 0;
-        for (std::size_t i = 0; i < count; ++i) {
-            const Shape& s = shapes[i];
-            if (s.m <= 0 || s.n <= 0) continue;
-            int need = 0;
-            SOLVER_CHECK(getrf_buffer_size(static_cast<gpusolverHandle_t>(handle->solverH), s.m, s.n, A, lda, &need));
-            lwork = std::max(lwork, need);
-        }
-        work.resize(static_cast<std::size_t>(lwork));
+        SOLVER_CHECK(getrf_buffer_size(static_cast<gpusolverHandle_t>(handle->solverH), m, n, A, lda, &lwork));
+        *backend_bytes = static_cast<std::size_t>(lwork) * sizeof(T);
     }
 #else
-    (void)shapes; (void)count; (void)A; (void)lda;
+    (void)handle; (void)m; (void)n; (void)A; (void)lda;
 #endif
-    return work;
 }
 
 // Component 3.
 template <DdlaBackend Backend, typename T>
-void getrf_run(const DdlaHandle_t& handle, [[maybe_unused]] vector<T>& work, int m, int n, T* A, int lda,
-               int* ipiv, int* info)
+void getrf_run(const DdlaHandle_t& handle, int m, int n, T* A, int lda, int* ipiv, int* info,
+               [[maybe_unused]] void* backend_work, [[maybe_unused]] std::size_t backend_bytes)
 {
     if (m <= 0 || n <= 0) {
         // Nothing to factor: success, reported where the caller will look for it.
@@ -213,7 +198,7 @@ void getrf_run(const DdlaHandle_t& handle, [[maybe_unused]] vector<T>& work, int
 #endif
     } else {
 #if DDLA_HAS_GPU
-        SOLVER_CHECK(gpu_getrf(handle, work, m, n, A, lda, ipiv, info));
+        SOLVER_CHECK(gpu_getrf(handle, backend_work, backend_bytes, m, n, A, lda, ipiv, info));
 #endif
     }
 }
@@ -225,20 +210,22 @@ void getrf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, int* ipiv, i
 {
     // 1. parameter check.
     lapack_impl::getrf_check<Backend>(handle, m, n, A, lda, ipiv, info);
-    // 2. the vendor workspace of this one shape (an empty shape plans nothing).
-    vector<T> work = lapack_impl::getrf_plan<T>(handle, {{m, n}}, A, lda);
+    // 2. the vendor workspace of this shape (an empty shape needs none).
+    std::size_t backend_bytes = 0;
+    lapack_impl::getrf_workspace_size<T>(handle, m, n, A, lda, &backend_bytes);
+    vector<char> work(handle, backend_bytes);
     // 3. the factorization (an empty problem only reports info = 0).
-    lapack_impl::getrf_run<Backend, T>(handle, work, m, n, A, lda, ipiv, info);
+    lapack_impl::getrf_run<Backend, T>(handle, m, n, A, lda, ipiv, info, work.data(), backend_bytes);
 }
 
 #define INSTANTIATE_GETRF(BACKEND, TYPE)                                     \
     template void getrf<BACKEND, TYPE>(                                      \
         const DdlaHandle_t&, int, int, TYPE*, int, int*, int*);              \
     template void lapack_impl::getrf_run<BACKEND, TYPE>(                     \
-        const DdlaHandle_t&, vector<TYPE>&, int, int, TYPE*, int, int*, int*)
-#define INSTANTIATE_GETRF_PLAN(TYPE)                                         \
-    template vector<TYPE> lapack_impl::getrf_plan<TYPE>(      \
-        const DdlaHandle_t&, const lapack_impl::Shape*, std::size_t, TYPE*, int)
+        const DdlaHandle_t&, int, int, TYPE*, int, int*, int*, void*, std::size_t)
+#define INSTANTIATE_GETRF_SIZE(TYPE)                                         \
+    template void lapack_impl::getrf_workspace_size<TYPE>(                   \
+        const DdlaHandle_t&, int, int, TYPE*, int, std::size_t*)
 
 #if DDLA_HAS_CPU
 template void lapack_impl::getrf_check<DdlaBackend::CPU>(
@@ -258,12 +245,12 @@ INSTANTIATE_GETRF(DdlaBackend::GPU, std::complex<float>);
 INSTANTIATE_GETRF(DdlaBackend::GPU, std::complex<double>);
 #endif
 
-INSTANTIATE_GETRF_PLAN(float);
-INSTANTIATE_GETRF_PLAN(double);
-INSTANTIATE_GETRF_PLAN(std::complex<float>);
-INSTANTIATE_GETRF_PLAN(std::complex<double>);
+INSTANTIATE_GETRF_SIZE(float);
+INSTANTIATE_GETRF_SIZE(double);
+INSTANTIATE_GETRF_SIZE(std::complex<float>);
+INSTANTIATE_GETRF_SIZE(std::complex<double>);
 
-#undef INSTANTIATE_GETRF_PLAN
+#undef INSTANTIATE_GETRF_SIZE
 #undef INSTANTIATE_GETRF
 
 } // namespace ddla
