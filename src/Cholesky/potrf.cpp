@@ -7,12 +7,8 @@
 // on the Backend template parameter, the arms guarded by DDLA_HAS_CPU / DDLA_HAS_GPU.  The vendor calls are private
 // to this translation unit; the public interface is the templated ddla::potrf declared in <ddla/ddla.h>.
 //
-// Three components (src/lapack_impl.h): potrf_check validates, potrf_plan sizes and allocates the vendor scratch,
-// potrf_run factorizes; the public potrf is check -> plan -> run.
-//
-// GPU arm: scratch sized with ?potrf_bufferSize by potrf_plan (the maximum over the planned orders), allocated
-// stream-ordered on the handle's stream (the stream the solver is bound to); potrf_run re-queries the size of its
-// own order, so the call stays asynchronous; `info` is valid once the caller synchronizes the stream.
+// Three components (plan_util.h): potrf_check; potrf_workspace_size (backend bytes of the vendor workspace);
+// potrf_run on the caller's scratch.
 // ---------------------------------------------------------------------------
 #include <ddla/ddla.h>
 #include <ddla/ddla_handle_t.h>
@@ -21,7 +17,7 @@
 #include <cassert>
 #include <complex>
 #include <cstddef>
-#include <initializer_list>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -29,7 +25,6 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 #include "lapack_impl.h"
-#include "plan_util.h"
 
 #if DDLA_HAS_CPU
 // Host LAPACK ?potrf (Fortran ABI; the CPU BLAS library must provide LAPACK -- OpenBLAS and MKL do).
@@ -117,22 +112,20 @@ inline gpusolverStatus_t potrf_call(gpusolverHandle_t h, gpublasFillMode_t uplo,
                            (gpusolverDoubleComplex*)work, lwork, info);
 }
 
-// The factorization on the device: query the exact lwork of this order (a host call), check that the planned scratch
-// holds it, run.  The scratch lives in the workspace, on the stream the solver runs on.
+// Factor on the caller's backend scratch; lwork is what the scratch holds.
 template <typename T>
-gpusolverStatus_t gpu_potrf(const DdlaHandle_t& handle, vector<T>& work, gpublasFillMode_t uplo, int n,
-                            T* A, int lda, int* info)
+gpusolverStatus_t gpu_potrf(const DdlaHandle_t& handle, void* work, std::size_t work_bytes, gpublasFillMode_t uplo,
+                            int n, T* A, int lda, int* info)
 {
-    int lwork = 0;
-    SOLVER_CHECK(potrf_buffer_size(static_cast<gpusolverHandle_t>(handle->solverH), uplo, n, A, lda, &lwork));
-    assert(static_cast<std::size_t>(lwork) <= work.capacity());
-    return potrf_call(static_cast<gpusolverHandle_t>(handle->solverH), uplo, n, A, lda, lwork > 0 ? work.data() : nullptr, lwork, info);
+    const int lwork = static_cast<int>(std::min<std::size_t>(work_bytes / sizeof(T), std::numeric_limits<int>::max()));
+    return potrf_call(static_cast<gpusolverHandle_t>(handle->solverH), uplo, n, A, lda, static_cast<T*>(work), lwork,
+                      info);
 }
 
 #else // DDLA_GPU_VENDOR
 
 template <typename T>
-gpusolverStatus_t gpu_potrf(const DdlaHandle_t&, vector<T>&, gpublasFillMode_t, int, T*, int, int*)
+gpusolverStatus_t gpu_potrf(const DdlaHandle_t&, void*, std::size_t, gpublasFillMode_t, int, T*, int, int*)
 {
     throw std::runtime_error("potrf: no GPU vendor selected at compile time");
 }
@@ -174,34 +167,28 @@ char potrf_check(const DdlaHandle_t& handle, char uplo, int n, const void* A, in
     return u;
 }
 
-// Component 2: the vendor scratch.  CPU handles (host LAPACK) need none.
+// Component 2: the vendor scratch of an order-n factorization (uplo normalized).  CPU handles (host LAPACK) need
+// none.
 template <typename T>
-vector<T> potrf_plan(const DdlaHandle_t& handle, char uplo, const int* orders, std::size_t count, T* A, int lda)
+void potrf_workspace_size(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda, std::size_t* backend_bytes)
 {
-    vector<T> work(handle);
+    *backend_bytes = 0;
 #if DDLA_HAS_GPU && DDLA_GPU_VENDOR
-    if (ddlaGetBackend(handle) == DdlaBackend::GPU) {
-        const gpublasFillMode_t fill = detail::to_fill_mode(uplo);
+    if (handle->backend == DdlaBackend::GPU && n > 0) {
+        const gpublasFillMode_t fill = uplo == 'U' ? GPUBLAS_FILL_MODE_UPPER : GPUBLAS_FILL_MODE_LOWER;
         int lwork = 0;
-        for (std::size_t i = 0; i < count; ++i) {
-            const int n = orders[i];
-            if (n <= 0) continue;
-            int need = 0;
-            SOLVER_CHECK(potrf_buffer_size(static_cast<gpusolverHandle_t>(handle->solverH), fill, n, A, lda, &need));
-            lwork = std::max(lwork, need);
-        }
-        work.resize(static_cast<std::size_t>(lwork));
+        SOLVER_CHECK(potrf_buffer_size(static_cast<gpusolverHandle_t>(handle->solverH), fill, n, A, lda, &lwork));
+        *backend_bytes = static_cast<std::size_t>(lwork) * sizeof(T);
     }
 #else
-    (void)uplo; (void)orders; (void)count; (void)A; (void)lda;
+    (void)handle; (void)uplo; (void)n; (void)A; (void)lda;
 #endif
-    return work;
 }
 
 // Component 3.
 template <DdlaBackend Backend, typename T>
-void potrf_run(const DdlaHandle_t& handle, [[maybe_unused]] vector<T>& work, char uplo, int n, T* A, int lda,
-               int* info)
+void potrf_run(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda, int* info,
+               [[maybe_unused]] void* backend_work, [[maybe_unused]] std::size_t backend_bytes)
 {
     if (n <= 0) {
         // Nothing to factor: success, reported where the caller will look for it.
@@ -219,7 +206,8 @@ void potrf_run(const DdlaHandle_t& handle, [[maybe_unused]] vector<T>& work, cha
 #endif
     } else {
 #if DDLA_HAS_GPU
-        SOLVER_CHECK(gpu_potrf(handle, work, detail::to_fill_mode(uplo), n, A, lda, info));
+        SOLVER_CHECK(gpu_potrf(handle, backend_work, backend_bytes,
+                               uplo == 'U' ? GPUBLAS_FILL_MODE_UPPER : GPUBLAS_FILL_MODE_LOWER, n, A, lda, info));
 #endif
     }
 }
@@ -231,20 +219,22 @@ void potrf(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda, int* inf
 {
     // 1. parameter check (also normalizes uplo).
     const char u = lapack_impl::potrf_check<Backend>(handle, uplo, n, A, lda, info);
-    // 2. the vendor scratch of this one order (an empty problem plans nothing).
-    vector<T> work = lapack_impl::potrf_plan<T>(handle, u, {n}, A, lda);
+    // 2. the vendor scratch of this order (an empty problem needs none).
+    std::size_t backend_bytes = 0;
+    lapack_impl::potrf_workspace_size<T>(handle, u, n, A, lda, &backend_bytes);
+    vector<char> work(handle, backend_bytes);
     // 3. the factorization (an empty problem only reports info = 0).
-    lapack_impl::potrf_run<Backend, T>(handle, work, u, n, A, lda, info);
+    lapack_impl::potrf_run<Backend, T>(handle, u, n, A, lda, info, work.data(), backend_bytes);
 }
 
 #define INSTANTIATE_POTRF(BACKEND, TYPE)                                     \
     template void potrf<BACKEND, TYPE>(                                      \
         const DdlaHandle_t&, char, int, TYPE*, int, int*);                   \
     template void lapack_impl::potrf_run<BACKEND, TYPE>(                     \
-        const DdlaHandle_t&, vector<TYPE>&, char, int, TYPE*, int, int*)
-#define INSTANTIATE_POTRF_PLAN(TYPE)                                         \
-    template vector<TYPE> lapack_impl::potrf_plan<TYPE>(      \
-        const DdlaHandle_t&, char, const int*, std::size_t, TYPE*, int)
+        const DdlaHandle_t&, char, int, TYPE*, int, int*, void*, std::size_t)
+#define INSTANTIATE_POTRF_SIZE(TYPE)                                         \
+    template void lapack_impl::potrf_workspace_size<TYPE>(                   \
+        const DdlaHandle_t&, char, int, TYPE*, int, std::size_t*)
 
 #if DDLA_HAS_CPU
 template char lapack_impl::potrf_check<DdlaBackend::CPU>(
@@ -264,12 +254,12 @@ INSTANTIATE_POTRF(DdlaBackend::GPU, std::complex<float>);
 INSTANTIATE_POTRF(DdlaBackend::GPU, std::complex<double>);
 #endif
 
-INSTANTIATE_POTRF_PLAN(float);
-INSTANTIATE_POTRF_PLAN(double);
-INSTANTIATE_POTRF_PLAN(std::complex<float>);
-INSTANTIATE_POTRF_PLAN(std::complex<double>);
+INSTANTIATE_POTRF_SIZE(float);
+INSTANTIATE_POTRF_SIZE(double);
+INSTANTIATE_POTRF_SIZE(std::complex<float>);
+INSTANTIATE_POTRF_SIZE(std::complex<double>);
 
-#undef INSTANTIATE_POTRF_PLAN
+#undef INSTANTIATE_POTRF_SIZE
 #undef INSTANTIATE_POTRF
 
 } // namespace ddla

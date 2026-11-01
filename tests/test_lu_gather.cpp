@@ -231,7 +231,9 @@ template<DdlaBackend B> void selector_checks(const DdlaHandle_t& h) {
             require_close(h,"LU selector disagreement rejected",caught?0:1,0);
         }
         setenv("DDLA_LU_PANEL","inplace",1);
-        for(auto offset : {std::pair<int,int>{0,1},{1,0},{2,1},{1,2}}) {
+        for(auto offset : {std::pair<int,int>{0,1},{1,0},{2,1},{1,2},{-1,1},{1,-1},
+                           {std::numeric_limits<int>::min(),1},{1,std::numeric_limits<int>::min()},
+                           {std::numeric_limits<int>::max(),1},{1,std::numeric_limits<int>::max()}}) {
             bool caught=false;int info=-1;
             try{call(routine,4,4,1,info,rank==0?offset.first:1,rank==0?offset.second:1);}
             catch(const std::invalid_argument&){caught=true;}
@@ -262,8 +264,82 @@ template<DdlaBackend B> void selector_checks(const DdlaHandle_t& h) {
     }
     if(had)setenv("DDLA_LU_PANEL",saved.c_str(),1);else unsetenv("DDLA_LU_PANEL");
 }
+// The solve family (pgetrs*, pgesv*) and the no-pivot / block-pivot factorizations validate collectively, before
+// anything is touched: a bad argument on rank 0 only must make EVERY rank throw std::invalid_argument and leave A and
+// B untouched; a DDLA_LU_PANEL that differs between the ranks makes pgesv throw std::runtime_error; empty solves
+// return without work.
+template<DdlaBackend B> void solve_checks(const DdlaHandle_t& h) {
+    if(std::getenv("LU_SKIP_SELECTOR_TEST")) return;
+    const char* v=std::getenv("DDLA_LU_PANEL");bool had=v;std::string saved=v?v:"";
+    int rank,size;MPI_Comm_rank(ddlaGetCommunicator(h),&rank);MPI_Comm_size(ddlaGetCommunicator(h),&size);
+    int dA[DDLA_DLEN_],dB[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(dA,h,4,4,2,2,0,0));DDLA_CHECK(ddlaDescInit(dB,h,4,2,2,2,0,0));
+    auto a0=make_local<double>(h,dA,[](int i,int j){return i==j?4.0:1.0/(1+i+2*j);});
+    auto b0=make_local<double>(h,dB,[](int i,int j){return 1.0+i+j;});
+    DeviceBuffer<double> a(h,a0.size()),b(h,b0.size());
+    const std::size_t npiv=std::size_t(std::max(1,ddla_test::m_loc(h,dA)));
+    std::vector<int> ipiv(npiv,1);
+    DeviceBuffer<int> blockpiv(h,npiv);
+    upload(h,blockpiv.ptr,std::vector<int>(npiv,1));
+    enum {GETRS,GETRS_NOPIV,GETRS_BPIV,GESV,GESV_NOPIV,GESV_BPIV,GETRF_NOPIV,GETRF_BPIV,ROUTINES};
+    const char* names[ROUTINES]={"pgetrs","pgetrs_nopiv","pgetrs_bpiv","pgesv","pgesv_nopiv","pgesv_bpiv","pgetrf_nopiv","pgetrf_bpiv"};
+    auto call=[&](int routine,char side,char trans,int n,int nrhs) {
+        int info=0;
+        switch(routine) {
+        case GETRS: ddla::pgetrs<B,double>(h,side,trans,n,nrhs,a.ptr,dA,ipiv.data(),b.ptr,dB);break;
+        case GETRS_NOPIV: ddla::pgetrs_nopiv<B,double>(h,side,trans,n,nrhs,a.ptr,dA,b.ptr,dB);break;
+        case GETRS_BPIV: ddla::pgetrs_bpiv<B,double>(h,side,trans,n,nrhs,a.ptr,dA,blockpiv.ptr,b.ptr,dB);break;
+        case GESV: ddla::pgesv<B,double>(h,side,trans,n,nrhs,a.ptr,dA,b.ptr,dB);break;
+        case GESV_NOPIV: ddla::pgesv_nopiv<B,double>(h,side,trans,n,nrhs,a.ptr,dA,b.ptr,dB);break;
+        case GESV_BPIV: ddla::pgesv_bpiv<B,double>(h,side,trans,n,nrhs,a.ptr,dA,b.ptr,dB);break;
+        case GETRF_NOPIV: ddla::pgetrf_nopiv<B,double>(h,n,n,a.ptr,dA,info);break;
+        default: ddla::pgetrf_bpiv<B,double>(h,n,n,a.ptr,dA,blockpiv.ptr,info);break;
+        }
+    };
+    auto untouched=[&]() {
+        double changed=0;
+        auto a1=download(h,a.ptr,a0.size()),b1=download(h,b.ptr,b0.size());
+        if(std::memcmp(a1.data(),a0.data(),a0.size()*sizeof(double)) || std::memcmp(b1.data(),b0.data(),b0.size()*sizeof(double))) changed=1;
+        return changed;
+    };
+    upload(h,a.ptr,a0);upload(h,b.ptr,b0);
+    setenv("DDLA_LU_PANEL","inplace",1);
+    for(int routine=0;routine<ROUTINES;++routine) {
+        const bool factor_only=routine==GETRF_NOPIV || routine==GETRF_BPIV;
+        // bad kinds: side, trans, n beyond A's descriptor, nrhs beyond B's descriptor
+        for(int kind=0;kind<4;++kind) {
+            if(factor_only && kind!=2) continue;
+            char side='L',trans='N';int n=4,nrhs=2;
+            if(rank==0) {
+                if(kind==0) side='X'; else if(kind==1) trans='X'; else if(kind==2) n=5; else nrhs=3;
+            }
+            bool caught=false;
+            try{call(routine,side,trans,n,nrhs);}catch(const std::invalid_argument&){caught=true;}
+            require_close(h,std::string(names[routine])+" rank-local bad argument "+std::to_string(kind)+" rejected collectively",caught?0:1,0);
+            require_close(h,std::string(names[routine])+" bad argument leaves A and B untouched",untouched(),0);
+        }
+    }
+    if(size>1) {
+        setenv("DDLA_LU_PANEL",rank==0?"gather":"inplace",1);
+        bool caught=false;
+        try{call(GESV,'L','N',4,2);}catch(const std::runtime_error&){caught=true;}
+        require_close(h,"pgesv selector disagreement rejected",caught?0:1,0);
+        require_close(h,"pgesv selector disagreement leaves A and B untouched",untouched(),0);
+        setenv("DDLA_LU_PANEL","inplace",1);
+    }
+    // Empty solves return without touching B; an empty right-hand side still factors A (pgesv family) -- no throw.
+    for(int routine=0;routine<ROUTINES;++routine) {
+        if(routine==GETRF_NOPIV || routine==GETRF_BPIV) continue;
+        call(routine,'L','N',0,2);
+        call(routine,'L','N',4,0);
+        upload(h,a.ptr,a0);
+    }
+    require_close(h,"empty solves leave B untouched",std::memcmp(download(h,b.ptr,b0.size()).data(),b0.data(),b0.size()*sizeof(double))?1:0,0);
+    if(had)setenv("DDLA_LU_PANEL",saved.c_str(),1);else unsetenv("DDLA_LU_PANEL");
+}
 template<DdlaBackend B> void run(const DdlaHandle_t& h) {
     selector_checks<B>(h);
+    solve_checks<B>(h);
     scalar_cases<B,float>(h); scalar_cases<B,double>(h);
     scalar_cases<B,std::complex<float>>(h); scalar_cases<B,std::complex<double>>(h);
 }

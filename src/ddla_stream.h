@@ -58,13 +58,6 @@ public:
     // {float, double, std::complex<float>, std::complex<double>}.
     std::vector<std::byte> tunnel_host_staging_a;
     std::vector<std::byte> tunnel_host_staging_b;
-    // Borrowed only for the lifetime of a workspace execution scope. Nested
-    // scopes restore the previous binding; these pointers are never freed here.
-    std::byte* tunnel_borrowed_a = nullptr;
-    std::byte* tunnel_borrowed_b = nullptr;
-    std::size_t tunnel_borrowed_a_bytes = 0;
-    std::size_t tunnel_borrowed_b_bytes = 0;
-    bool tunnel_borrowed_active = false;
 
     void* level_queue();
     int getLocalDevice(MPI_Comm local_comm) const;

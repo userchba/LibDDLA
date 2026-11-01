@@ -1,59 +1,21 @@
 #ifndef DDLA_LAPACK_IMPL_H
 #define DDLA_LAPACK_IMPL_H
 
-// ---------------------------------------------------------------------------
-// The single-process LAPACK-level routines (getrf, potrf, laswp, geqrf, larft, the private getrf_nopiv and the
-// bottom-right Cholesky) split into the three components every routine has (see PBLAS/ptrtrm_impl.h):
-//
-//   1. <r>_check -- parameter validation, exactly what the public entry rejects, in the same order, with the
-//                   same exception types and messages.  LOCAL checks: no MPI, no collectives.
-//   2. <r>_plan  -- size and allocate every temporary (device memory on GPU handles, host memory on CPU handles).
-//   3. <r>_run   -- the algorithm: no validation, no environment reads, no allocation.
-//
-// The public routine composes 1 -> (empty / no-op handling) -> 2 -> 3.  Library-internal callers (the panel loops
-// of pgetrf / ppotrf / pgeqrf ...) that already hold valid arguments call 2 once and 3 for every call:
-//
-//   auto work = lapack_impl::getrf_plan<T>(handle, {{m_max, w_max}}, A, lda);   // once
-//   for (...) lapack_impl::getrf_run<Backend, T>(handle, work, m, w, A, lda, ipiv, info);
-//
-// Vendor workspace (cuSOLVER / hipSOLVER ?getrf / ?potrf / ?geqrf, the CPU ?geqrf work array) is sized from a LIST OF
-// SHAPES.  Every plan takes the list either as a braced std::initializer_list or as a runtime array (pointer, count),
-// for a caller that enumerates its panel schedule at run time; the initializer_list forms forward to the array forms,
-// and a count of 0 yields an empty workspace without allocating.  Plan queries the vendor's bufferSize for every listed
-// shape and allocates the maximum; run queries the bufferSize of its exact shape again (a pure host call), asserts it
-// fits the planned capacity (assert) and hands the vendor exactly the lwork it queried.  So every shape a
-// run receives must need no more than the planned maximum; pass the caller's real matrix pointer and leading
-// dimension to plan (the query is made with them).  Backend workspace is bound to one handle (the memory is ordered on that
-// handle's stream, which is also the stream the solver handle runs on) and is released when it goes out of scope.
-// ---------------------------------------------------------------------------
+// Local (single-process) LAPACK routines split into the components of plan_util.h, as cuSOLVERMp splits its
+// routines:
+//   <r>_check          -- argument validation (std::runtime_error; local, no collectives),
+//   <r>_workspace_size -- the scratch in bytes, only the kinds the routine needs; no allocation,
+//   <r>_run            -- the factorization on the caller's scratch; no validation, no allocation.
+// The caller allocates the bytes (ddla::vector<char> for backend memory, std::vector<char> for host memory).  A
+// caller that runs several shapes on one buffer sizes every shape and keeps the largest: a run takes its vendor lwork
+// from the bytes it is given, so a larger buffer serves a smaller shape.  getrf_nopiv needs no scratch: check + run.
 
 #include <ddla/ddla.h>
 #include <ddla/ddla_vector.h>
 
 #include <cstddef>
-#include <initializer_list>
-#include <vector>
 
 namespace ddla { namespace lapack_impl {
-
-// One m x n matrix handed to getrf / geqrf.
-struct Shape {
-    int m;
-    int n;
-};
-
-// One call of larft: V is n x k.
-struct LarftShape {
-    int n;
-    int k;
-};
-
-// One call of laswp: rows k1..k2 (1-based) with pivot stride incx.
-struct LaswpShape {
-    int k1;
-    int k2;
-    int incx;
-};
 
 // ===========================================================================
 // getrf
@@ -66,46 +28,35 @@ template <DdlaBackend Backend>
 void getrf_check(const DdlaHandle_t& handle, int m, int n, const void* A, int lda,
                  const int* ipiv, const int* info);
 
-// Component 2: GPU vendor workspace (empty on CPU handles) for any of the listed shapes. A and lda
-// are what the vendor's bufferSize query is made with.  Empty shapes (m <= 0 or n <= 0) need nothing; count == 0 plans
-// nothing (shapes may then be null).  No validation.
+// Component 2: backend bytes of an m x n factorization -- the vendor workspace on a GPU handle (queried with A and
+// lda), nothing on a CPU handle.  An empty shape needs nothing.
 template <typename T>
-vector<T> getrf_plan(const DdlaHandle_t& handle, const Shape* shapes, std::size_t count, T* A, int lda);
-template <typename T>
-inline vector<T> getrf_plan(const DdlaHandle_t& handle, std::initializer_list<Shape> shapes, T* A, int lda)
-{
-    return getrf_plan<T>(handle, shapes.begin(), shapes.size(), A, lda);
-}
+void getrf_workspace_size(const DdlaHandle_t& handle, int m, int n, T* A, int lda, std::size_t* backend_bytes);
 
 // Component 3: A = P L U.  No validation, no allocation.  m <= 0 or n <= 0 only sets *info = 0 (a host store on a
 // CPU handle, ddlaMemset on a GPU handle) and returns, so loop callers need not pre-filter.
 template <DdlaBackend Backend, typename T>
-void getrf_run(const DdlaHandle_t& handle, vector<T>& work, int m, int n, T* A, int lda,
-               int* ipiv, int* info);
+void getrf_run(const DdlaHandle_t& handle, int m, int n, T* A, int lda, int* ipiv, int* info,
+               void* backend_work, std::size_t backend_bytes);
 
 // ===========================================================================
 // potrf
 // ===========================================================================
 
 // Component 1: null / mismatched handle, invalid uplo ('U'/'L' in either case), negative order, null info; then,
-// for n > 0, null A and lda < max(1, n).  Returns the normalized uplo ('U' or 'L') that plan and run take.
+// for n > 0, null A and lda < max(1, n).  Returns the normalized uplo ('U' or 'L') that the size and run take.
 template <DdlaBackend Backend>
 char potrf_check(const DdlaHandle_t& handle, char uplo, int n, const void* A, int lda, const int* info);
 
-// Component 2: GPU vendor workspace (empty on CPU handles) for any listed order, with normalized uplo
-// and leading dimension lda.
-// Orders <= 0 need nothing; count == 0 plans nothing (orders may then be null).
+// Component 2: backend bytes of an order-n factorization on the normalized uplo -- the vendor workspace on a GPU
+// handle (queried with A and lda), nothing on a CPU handle.
 template <typename T>
-vector<T> potrf_plan(const DdlaHandle_t& handle, char uplo, const int* orders, std::size_t count, T* A, int lda);
-template <typename T>
-inline vector<T> potrf_plan(const DdlaHandle_t& handle, char uplo, std::initializer_list<int> orders, T* A, int lda)
-{
-    return potrf_plan<T>(handle, uplo, orders.begin(), orders.size(), A, lda);
-}
+void potrf_workspace_size(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda, std::size_t* backend_bytes);
 
 // Component 3: A = U^H U / L L^H on the normalized uplo.  n <= 0 only sets *info = 0, as getrf_run does.
 template <DdlaBackend Backend, typename T>
-void potrf_run(const DdlaHandle_t& handle, vector<T>& work, char uplo, int n, T* A, int lda, int* info);
+void potrf_run(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda, int* info,
+               void* backend_work, std::size_t backend_bytes);
 
 // ===========================================================================
 // laswp
@@ -117,19 +68,14 @@ template <DdlaBackend Backend>
 void laswp_check(const DdlaHandle_t& handle, int n, const void* A, int lda, int k1, int k2,
                  const int* ipiv, int incx);
 
-// Component 2: host pivot staging for the largest listed span (k2 - k1) * |incx| + 1. Needs nothing
-// on a CPU handle, nor for the vendor's laswp (incx == 1) on a GPU handle that has one; count == 0 plans
-// nothing (shapes may then be null).
-std::vector<int> laswp_plan(const DdlaHandle_t& handle, const LaswpShape* shapes, std::size_t count);
-inline std::vector<int> laswp_plan(const DdlaHandle_t& handle, std::initializer_list<LaswpShape> shapes)
-{
-    return laswp_plan(handle, shapes.begin(), shapes.size());
-}
+// Component 2: host bytes of the pivot staging, (k2 - k1) * |incx| + 1 ints.  Nothing on a CPU handle, nor for the
+// vendor's laswp (incx == 1) on a GPU handle that has one.
+void laswp_workspace_size(const DdlaHandle_t& handle, int k1, int k2, int incx, std::size_t* host_bytes);
 
 // Component 3: the row interchanges.  No validation, no allocation.  n <= 0 or k1 > k2 returns.
 template <DdlaBackend Backend, typename T>
-void laswp_run(const DdlaHandle_t& handle, std::vector<int>& pivots, int n, T* A, int lda, int k1, int k2,
-               const int* ipiv, int incx);
+void laswp_run(const DdlaHandle_t& handle, int n, T* A, int lda, int k1, int k2, const int* ipiv, int incx,
+               void* host_work, std::size_t host_bytes);
 
 // ===========================================================================
 // geqrf (QR for uplo 'U', QL for uplo 'L')
@@ -177,14 +123,13 @@ void larft_run(const DdlaHandle_t& handle, char direct, int n, int k, T* V, int 
 // ===========================================================================
 // getrf_nopiv (private; src/LU/lu_internal.h)
 // ===========================================================================
-// No temporary of its own (the register kernel and the BLAS calls it makes need no workspace from here), so there is
-// no plan: check + run.
+// No scratch (the register kernel and the BLAS calls it makes need none), so there is no size: check + run.
 
-// Component 1: null / mismatched handle (std::runtime_error).  The routine has no other validation.
+// Check: null / mismatched handle (std::runtime_error). The routine has no other validation.
 template <DdlaBackend Backend>
 void getrf_nopiv_check(const DdlaHandle_t& handle);
 
-// Component 3: A = L U without pivoting, info_buffer in backend memory.  No validation, no allocation.
+// Execution: A = L U without pivoting, info_buffer in backend memory. No validation, no allocation.
 template <DdlaBackend Backend, typename T>
 void getrf_nopiv_run(const DdlaHandle_t& handle, int m, int n, T* A, int lda, int* info_buffer);
 
@@ -192,30 +137,21 @@ void getrf_nopiv_run(const DdlaHandle_t& handle, int m, int n, T* A, int lda, in
 // potrf_bottom_right (single process; src/Cholesky/potrf_bottom_right*.cpp)
 // ===========================================================================
 
-// What potrf_bottom_right_plan allocates: the reverse-packed diagonal block, its info word and the ?potrf workspace
-// of that block.
-template <typename T>
-struct PotrfBottomRightCtx {
-    vector<T> work;         // the reverse-packed diagonal block, nb x nb with nb = min(n, 128)
-    vector<int> info_buffer;// the diagonal block's ?potrf info word, backend memory
-    vector<T> potrf;      // the ?potrf of that block (planned for the opposite triangle)
-
-    explicit PotrfBottomRightCtx(DdlaHandle_t h) : work(h), info_buffer(h), potrf(h) {}
-};
-
 // Component 1 of the public potrf_bottom_right: null / mismatched handle, uplo not exactly 'U' / 'L', negative order;
 // then, for n > 0, null A and lda < n.  Every failure is a std::runtime_error.
 template <DdlaBackend Backend>
 void potrf_bottom_right_check(char uplo, int n, const void* A, int lda, const DdlaHandle_t& handle);
 
-// Component 2: the buffers for an order-n factorization (n <= 0 allocates nothing).
+// Component 2: backend bytes of an order-n factorization: the reverse-packed diagonal block (nb x nb with
+// nb = min(n, 128)), its ?potrf info word and the ?potrf scratch of that block (planned for the opposite triangle,
+// queried with A).  n <= 0 needs nothing.
 template <typename T>
-PotrfBottomRightCtx<T> potrf_bottom_right_plan(const DdlaHandle_t& handle, char uplo, int n);
+void potrf_bottom_right_workspace_size(const DdlaHandle_t& handle, char uplo, int n, T* A, std::size_t* backend_bytes);
 
 // Component 3: the factorization.  No validation, no allocation.  Ends with a synchronize, like the public routine.
 template <DdlaBackend Backend, typename T>
-void potrf_bottom_right_run(const DdlaHandle_t& handle, PotrfBottomRightCtx<T>& ctx, char uplo, int n,
-                            T* A, int lda, int& info);
+void potrf_bottom_right_run(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda, int& info,
+                            void* backend_work, std::size_t backend_bytes);
 
 // Component 1 of detail::potrf_bottom_right_block (src/Cholesky/potrf_bottom_right_internal.h): null / mismatched
 // handle, uplo not exactly 'U' / 'L', negative order or global offset; then, for n > 0, null A / work /
