@@ -10,7 +10,7 @@ target_sources(ddla_lib PRIVATE
 if(NOT ddla_cpu_only_build)
     target_sources(ddla_lib PRIVATE pgeqrf_kernels.cpp)
 endif()
-# pgeqrf_kernels.cpp (index maps and the T recurrence of the QR panel) and
+# pgeqrf_kernels.cpp (index maps) and
 # SVD/pgebrd_kernels.cpp carry the exact LAPACK scalar ports (larfg/dladiv) and
 # the robust norms, and only a contraction-free compile keeps them
 # reassociation-free (the grid tests also compare the GPU scalar path against

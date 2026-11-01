@@ -135,40 +135,23 @@ void laswp_run(const DdlaHandle_t& handle, std::vector<int>& pivots, int n, T* A
 // geqrf (QR for uplo 'U', QL for uplo 'L')
 // ===========================================================================
 
-// What geqrf_plan allocates.  CPU handles: the ?geqrf / ?geqlf work array.  GPU handles: the vendor scratch, and for
-// uplo 'L' the buffers of the reversed copy A' = J A J (cuSOLVER / hipSOLVER have no ?geqlf).
-template <typename T>
-struct GeqrfCtx {
-    vector<T> work;     // CPU: LAPACK work array (elements)
-    vector<char> qr;    // GPU: [ device info slot (256 bytes) | vendor workspace ] (bytes)
-    vector<char> ql;    // GPU, uplo 'L': [ A' (m x n, ld m, padded to 256 bytes) | tau' (k) ] (bytes)
-
-    explicit GeqrfCtx(DdlaHandle_t h) : work(h), qr(h), ql(h) {}
-};
-
 // Component 1: null / mismatched handle, uplo not 'U'/'L' (either case), negative size; then, for a non-empty
 // problem (min(m, n) > 0), null A, null tau, lda < max(1, m).  Returns the normalized uplo.
 template <DdlaBackend Backend>
 char geqrf_check(const DdlaHandle_t& handle, char uplo, int m, int n, const void* A, int lda, const void* tau);
 
-// Component 2: scratch for factorizations of any of the listed shapes (normalized uplo, leading dimension lda; A and
-// tau are what the CPU workspace query is made with, A and lda what the vendor's bufferSize query is made with --
-// for uplo 'L' on a GPU handle the query is made with the context's own reversed copy, as the factorization is).
-// A context planned for 'U' cannot run 'L'.  Empty shapes (min(m, n) <= 0) need nothing; count == 0 plans nothing
-// (shapes may then be null).
+// Component 2: backend bytes of an m x n factorization on the normalized uplo.  CPU handles: the ?geqrf / ?geqlf work
+// array (LAPACK's workspace query, made with A, lda and tau).  GPU handles: a device info word, for uplo 'L' the
+// reversed copy A' = J A J (cuSOLVER / hipSOLVER have no ?geqlf) and tau', and the vendor workspace (queried with A and
+// the leading dimension of the matrix it factors: lda, or m for A').  min(m, n) <= 0 needs nothing.
 template <typename T>
-GeqrfCtx<T> geqrf_plan(const DdlaHandle_t& handle, char uplo, const Shape* shapes, std::size_t count,
-                       T* A, int lda, T* tau);
-template <typename T>
-inline GeqrfCtx<T> geqrf_plan(const DdlaHandle_t& handle, char uplo, std::initializer_list<Shape> shapes,
-                              T* A, int lda, T* tau)
-{
-    return geqrf_plan<T>(handle, uplo, shapes.begin(), shapes.size(), A, lda, tau);
-}
+void geqrf_workspace_size(const DdlaHandle_t& handle, char uplo, int m, int n, T* A, int lda, T* tau,
+                          std::size_t* backend_bytes);
 
 // Component 3: A = Q R / A = Q L on the normalized uplo.  No validation, no allocation.  min(m, n) <= 0 returns.
 template <DdlaBackend Backend, typename T>
-void geqrf_run(const DdlaHandle_t& handle, GeqrfCtx<T>& ctx, char uplo, int m, int n, T* A, int lda, T* tau);
+void geqrf_run(const DdlaHandle_t& handle, char uplo, int m, int n, T* A, int lda, T* tau,
+               void* backend_work, std::size_t backend_bytes);
 
 // ===========================================================================
 // larft (STOREV = 'C')
@@ -180,22 +163,16 @@ template <DdlaBackend Backend>
 char larft_check(const DdlaHandle_t& handle, char direct, char storev, int n, int k,
                  const void* V, int ldv, const void* tau, const void* Tmat, int ldt);
 
-// Component 2: GPU scratch [head / tail (k x k, padded to 256 bytes) | V^H V (k x k)], empty on CPU handles,
-// for any of the listed shapes.  Empty shapes (k <= 0) need nothing; count == 0 plans nothing
-// (shapes may then be null).
+// Component 2: backend bytes of an n x k reflector block -- on a GPU handle [ head / tail of V (k x k) | V^H V
+// (k x k) ], nothing on a CPU handle.  k <= 0 needs nothing.
 template <typename T>
-vector<T> larft_plan(const DdlaHandle_t& handle, const LarftShape* shapes, std::size_t count);
-template <typename T>
-inline vector<T> larft_plan(const DdlaHandle_t& handle, std::initializer_list<LarftShape> shapes)
-{
-    return larft_plan<T>(handle, shapes.begin(), shapes.size());
-}
+void larft_workspace_size(const DdlaHandle_t& handle, int n, int k, std::size_t* backend_bytes);
 
 // Component 3: T of the block reflector.  `direct` is the normalized 'F' / 'B'.  No validation, no allocation.
 // k <= 0 returns.
 template <DdlaBackend Backend, typename T>
-void larft_run(const DdlaHandle_t& handle, vector<T>& work, char direct, int n, int k, T* V, int ldv,
-               const T* tau, T* Tmat, int ldt);
+void larft_run(const DdlaHandle_t& handle, char direct, int n, int k, T* V, int ldv, const T* tau, T* Tmat, int ldt,
+               void* backend_work, std::size_t backend_bytes);
 
 // ===========================================================================
 // getrf_nopiv (private; src/LU/lu_internal.h)

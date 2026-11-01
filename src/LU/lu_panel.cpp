@@ -90,6 +90,7 @@ void Workspace<T>::reserve(bool root, int height, int width, int local_rows, int
     if (root) {
         grow(handle, window, window_cap, std::size_t(height) * width);
         grow(handle, device_meta, meta_cap, std::size_t(width) + 1);
+        blocks.resize(std::size_t(handle->nprocs - 1));
     }
     grow(handle, packed, packed_cap, std::size_t(root ? height : local_rows) * width);
     grow(handle, rows, rows_cap, std::size_t(2) * std::max(1, local_cols));
@@ -117,7 +118,8 @@ void panel_gather(const DdlaHandle_t& h, int m, int n, int width, T* A, int ia, 
     const int lc = num_loc(col0,nb,mypcol,cs,npcols);
     ws.reserve(root,m,width,owner ? local_rows : 0,local_cols);
     const int root_rank = h->rc_to_rank(pr,pc);
-    matrix_impl::gather<Backend,T>(h,m,width,A,ia,ja,desc,root_rank,ws.window,m,ws.packed,ws.packed_cap);
+    matrix_impl::gather_run<Backend,T>(h,m,width,A,ia,ja,desc,root_rank,ws.window,m,
+        ws.packed,ws.packed_cap*sizeof(T),ws.blocks.data(),ws.blocks.size()*sizeof(matrix_impl::Block<T>));
     if (root) {
         getrf<Backend,T>(h,m,width,ws.window,m,ws.device_meta+1,ws.device_meta);
         DDLA_CHECK(ddlaMemcpy(h,ws.meta.data(),ws.device_meta,(std::size_t(width)+1)*sizeof(int)));
@@ -145,7 +147,8 @@ void panel_gather(const DdlaHandle_t& h, int m, int n, int width, T* A, int ia, 
         detail::swap_rows<Backend,T>(h, A, desc, r, right, A, desc, pivot, right,
                                      last_col-right, ws.rows, recv);
     }
-    matrix_impl::scatter<Backend,T>(h,m,width,A,ia,ja,desc,root_rank,ws.window,m,ws.packed,ws.packed_cap);
+    matrix_impl::scatter_run<Backend,T>(h,m,width,A,ia,ja,desc,root_rank,ws.window,m,true,
+        ws.packed,ws.packed_cap*sizeof(T),ws.blocks.data(),ws.blocks.size()*sizeof(matrix_impl::Block<T>));
 }
 
 #define INST(B,T) template void panel_gather<B,T>(const DdlaHandle_t&, int, int, int, T*, int, int, const int*, int*, int&, Workspace<T>&, int)

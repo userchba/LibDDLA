@@ -2,14 +2,14 @@
 // Private implementation bundle of pgeqrf (NOT installed): ONE
 // implementation of the distributed Householder QR (uplo = 'U', A = Q R) and QL
 // (uplo = 'L', A = Q L) factorizations and of the stage-1 panel of the Hermitian
-// eigensolver (phe2hb_factor_panel).
+// eigensolver (phe2hb).
 //
 //   qr_panel_gathered   (pgeqr2_panel.cpp) -- the PANEL step, both uplo, DEFAULT:
 //                       gather the panel rows to the root, factor the whole m_w x jb
-//                       window there with the single-process ddla::geqrf(uplo) (LAPACK
+//                       window there with the single-process geqrf(uplo) (LAPACK
 //                       ?geqrf / ?geqlf on the CPU, cuSOLVER / hipSOLVER on the GPU),
-//                       form T (the LARFT part: ddla::larft, src/larft.cpp: ?larft on the
-//                       CPU, herk + qr_build_T on the GPU), scatter the rows and T back,
+//                       form T (the LARFT part: larft, src/larft.cpp: ?larft on the
+//                       CPU, herk + reflector_build_T on the GPU), scatter the rows and T back,
 //                       build V and tau.
 //   qr_panel_distributed (pgeqr2_panel.cpp) -- the same PANEL step, both uplo, as an
 //                       OPT-IN (DDLA_QR_PANEL=inplace): factor the jb columns IN
@@ -24,13 +24,13 @@
 //                       C := Q_panel^H C = C - V T^H (V^H C) on the local
 //                       trailing columns (ZLARFB with TRANS = 'C'/'T'); T is
 //                       upper triangular for QR, lower for QL.
-//   qr_block_plain      (pgeqrf.cpp)       -- the block DRIVER: the panel loop
-//                       (QR: left to right, trailing columns to the right of the
-//                       panel; QL: right to left, trailing columns to its left),
-//                       and the Row broadcast of [V|T].
-//   qr_make_plan / qr_panels / qr_work_bytes / qr_carve_work / qr_make_ctx
-//                       (pgeqrf.cpp) -- geometry, panel list and workspace layout,
-//                       also used by phe2hb_factor_panel (phe2hb_panel.cpp).
+//   qr_block_workspace_size / qr_block_run (pgeqrf.cpp) -- the block DRIVER: the
+//                       panel loop (QR: left to right, trailing columns to the right
+//                       of the panel; QL: right to left, trailing columns to its
+//                       left), and the Row broadcast of [V|T]; its scratch in bytes.
+//   qr_make_plan / qr_geometry / qr_panels / qr_make_ctx
+//                       (pgeqrf.cpp) -- geometry and panel list, also used by the
+//                       stage-1 panel (phe2hb).
 //
 // Block A(0:m, ja:ja+n), LAPACK conventions.  QR: the reflector of block column
 // jj (0-based) has its unit entry at row jj, V below it, R in the upper
@@ -44,6 +44,7 @@
 
 #include <ddla/ddla.h>
 
+#include <algorithm>
 #include <cctype>
 #include <complex>
 #include <cstddef>
@@ -71,17 +72,22 @@ struct QrCtx {
     char adj;         // 'T' (real) or 'C' (complex): the adjoint flag of the BLAS calls
 };
 
-// Backend buffers shared by the panel and update steps (allocated and freed by
-// the driver).  tau holds the reflector scalars the panels produce: indexed by
-// LOCAL column on the public path, by j - ja for the stage-1 adapter (tau_by_block).
+// Buffers shared by the panel and update steps, carved by qr_block_run from the
+// caller's scratch (see qr_block_workspace_size).  tau holds the reflector scalars the
+// panels produce: indexed by LOCAL column on the public path, by j - ja for the
+// stage-1 adapter (tau_by_block).
 template <typename T>
 struct QrWorkspace {
     using rt = typename real_type<T>::type;
     // Gathered panel (qr_panel_gathered):
     T* Wg = nullptr;     // gathered panel window (natural order) on the root, when nprows > 1
-    T* S = nullptr;      // gather/scatter block staging
+    T* S = nullptr;      // gather/scatter block staging on the root
+    void* lib = nullptr;          // the root's geqrf / larft scratch (backend; W and Wp overlay it)
+    std::size_t lib_bytes = 0;
+    void* blocks = nullptr;       // host: the gather/scatter peer list
+    std::size_t blocks_bytes = 0;
     T* tau = nullptr;    // reflector-scalar prefix in the selected backend
-    // In-place panel only (qr_panel_distributed; QrWorkOpts::inplace): rec is the norm record
+    // In-place panel only (qr_panel_distributed; QrBlockOpts::inplace): rec is the norm record
     // [ar, ai, one T-wide slot per process row], w this rank's partial A_rest^H v (jb), VV
     // the local V^H V, and the receive buffers of the Col allreduces:
     T* VV = nullptr;     // in-place panel: this rank's local V^H V: nb*nb
@@ -90,6 +96,11 @@ struct QrWorkspace {
     T* wr = nullptr;     // w summed over the owner process column: nb
     rt* recr = nullptr;  // the record summed over the owner process column
     rt* rec = nullptr;   // the record sent
+    // ... and its host state: the record as fetched, the panel's taus, V^H V and T.
+    rt* rec_h = nullptr; // 2 + nprows * (sizeof(T) / sizeof(rt))
+    T* tau_h = nullptr;  // nb
+    T* vv_h = nullptr;   // nb*nb
+    T* t_h = nullptr;    // nb*nb
     T* W = nullptr;      // larfb W: nb * max(1, nloc)
     T* Wp = nullptr;     // larfb Wp: nb * max(1, nloc)
     // Stage-1 hook (phe2hb): when set, every panel's T^H -- the upper-triangular T of
@@ -98,11 +109,6 @@ struct QrWorkspace {
     T* tout = nullptr;
     int ld_tout = 0;
 };
-
-// out := T^H (jb x jb; out has leading dimension ldout; entries of out outside the leading
-// jb x jb block are left alone).  Stream-ordered on the GPU, no host synchronization.
-template <DdlaBackend Backend, typename T>
-void qr_store_T_adjoint(const DdlaHandle_t& handle, T* out, int ldout, const T* T_panel, int jb);
 
 // PANEL step on the owner process column: factor the jb panel columns whose
 // window is the rows [g0, g0 + m_w) (QR: g0 = first panel column - ja, m_w = m -
@@ -127,7 +133,7 @@ void qr_panel_gathered(const QrCtx<T>& ctx, QrWorkspace<T>& ws, char uplo,
 // with no gather: QR column jj has its unit entry at window row jj (x below it, the panel
 // columns to its right are updated); QL runs jb - 1 .. 0 with x above the unit entry at
 // window row m_w - jb + jj and updates the columns to its left.  need_T == false skips the T
-// build.  Needs the in-place workspace layout (QrWorkOpts::inplace).
+// build.  Needs the in-place buffers of ws (QrBlockOpts::inplace).
 template <DdlaBackend Backend, typename T>
 void qr_panel_distributed(const QrCtx<T>& ctx, QrWorkspace<T>& ws, char uplo,
                           int g0, int m_w, int jb, int lc0, int lr0_, int lrp_, int ldv,
@@ -167,22 +173,49 @@ struct QrPlan {
     int nprows = 1, npcols = 1, myprow = 0, mypcol = 0;
     int jr_lo = 0, jr_hi = 0;                 // global reflector columns [jr_lo, jr_hi):
                                               // QR [ja, ja+k), QL [ja+n-k, ja+n), k = min(m, n)
-    int nbws = 1;                             // widest panel the workspaces are sized for:
+    int nbws = 1;                             // widest panel the buffers are sized for:
                                               // QR the descriptor nb, QL the widest actual panel
 };
 
 // One panel: global columns [j_lo, j_hi) and its window rows [g0, g0 + m_w).
 struct QrPanel { int j_lo, j_hi, g0, m_w; };
 
+// The panels in execution order, handed to f one by one: QR left to right, QL right to
+// left, each one the intersection of a block column [b*nb, (b+1)*nb) with the reflector
+// range.  The QL window rows [0, m_w): the reflector of the panel's LAST column has its
+// unit entry at row m_w - 1 (= m - n + (j_hi - 1 - ja)).
+template <class F>
+inline void qr_for_each_panel(const QrPlan& p, F&& f)
+{
+    if (p.uplo == 'U') {
+        for (int j = p.jr_lo; j < p.jr_hi;) {
+            const int j_hi = static_cast<int>(std::min<long long>(
+                (static_cast<long long>(j) / p.nb + 1) * p.nb, p.jr_hi));   // end of this block column
+            f(QrPanel{j, j_hi, j - p.ja, p.m - (j - p.ja)});
+            j = j_hi;
+        }
+    } else {
+        for (int j_hi = p.jr_hi; j_hi > p.jr_lo;) {
+            const int j_lo = std::max(p.jr_lo, ((j_hi - 1) / p.nb) * p.nb);
+            f(QrPanel{j_lo, j_hi, 0, p.m - p.n + (j_hi - p.ja)});
+            j_hi = j_lo;
+        }
+    }
+}
+
 // Validate the descriptor against the block and fill the plan (throws on misuse,
 // never communicates, never reads the environment).  Every panel is ONE block column of
 // the descriptor (or the part of it inside the reflector range), so the panel's
 // gather/scatter stays on the owner process column's Col communicator.
+// qr_make_plan = qr_check_args (the throws) + qr_geometry (the plan, no validation).
 QrPlan qr_make_plan(const DdlaHandle_t& handle, const int* descA, char uplo,
                     int m, int n, int ja, const char* who);
+void qr_check_args(const DdlaHandle_t& handle, const int* descA,
+                   int m, int n, int ja, const char* who);
+QrPlan qr_geometry(const DdlaHandle_t& handle, const int* descA, char uplo,
+                   int m, int n, int ja);
 
-// The panels in execution order: QR left to right, QL right to left, each one the
-// intersection of a block column [b*nb, (b+1)*nb) with the reflector range.
+// The panels of qr_for_each_panel as a list.
 std::vector<QrPanel> qr_panels(const QrPlan& p);
 
 // Does panel q have columns to update?  QR: columns right of it inside the block;
@@ -191,30 +224,6 @@ inline bool qr_has_trailing(const QrPlan& p, const QrPanel& q)
 {
     return p.uplo == 'L' ? q.j_lo > p.ja : q.j_hi < p.ja + p.n;
 }
-
-// ---- workspace -------------------------------------------------------------
-
-struct QrWorkOpts {
-    bool tau_by_block = false;  // tau holds the block's taus indexed j - ja (stage-1
-                                // adapter) instead of the LOCAL column index
-    bool upd = false;           // allocate the larfb buffers (any panel has trailing columns)
-    int nloc_blk = 0;           // local columns of the block (an upper bound is fine)
-    bool inplace = false;       // lay out the buffers of qr_panel_distributed instead of
-                                // those of qr_panel_gathered
-};
-
-// Per-rank workspace of a call: every buffer 256-byte aligned inside ONE
-// allocation.  QL layout is monotone in the window rows, the panel width and
-// nloc_blk (phe2hb_panel_work_bytes bounds every panel with one plan).
-template <typename T>
-std::size_t qr_work_bytes(const QrPlan& p, const QrWorkOpts& o);
-
-// Carve ws and the [V|T] slot VT out of `base` (>= qr_work_bytes bytes).
-// ws.tau is a workspace buffer on both backends (the public path copies it out to
-// the caller's tau).
-template <typename T>
-void qr_carve_work(const QrPlan& p, const QrWorkOpts& o, void* base,
-                   QrWorkspace<T>& ws, T*& VT);
 
 // QrCtx of a call.
 template <typename T>
@@ -225,20 +234,58 @@ QrCtx<T> qr_make_ctx(const DdlaHandle_t& handle, T* A, const QrPlan& p, int lld,
 struct QrBlockOpts {
     bool bcast_all = false;     // Row-broadcast every panel's [V|T] even with nothing to update
     bool tau_by_block = false;  // taus at ws.tau + (j_lo - ja) (else + local column)
-    bool inplace = false;       // panel step = qr_panel_distributed (workspace laid out with
-                                // QrWorkOpts::inplace) instead of qr_panel_gathered
+    bool inplace = false;       // panel step = qr_panel_distributed instead of qr_panel_gathered
 };
 
-// Run the supplied panels in execution order: factor on the owner process column, Row-bcast
-// [V|T] (when there are columns to update or bcast_all),
-// optionally copy each panel's V into columns [j_lo - ja, j_hi - ja) of vmr
-// (ld_vmr >= local window rows; may be null) and store T^H into ws.tout (when set),
-// then update the columns to be updated with qr_larfb_left_adj.  VT: the [V|T] slot
-// from qr_carve_work.
+// The scratch of qr_block_run for plan p on this rank.  A (leading dimension lld) and tau
+// are what the LAPACK / vendor workspace queries of the gathered root are made with.  A
+// caller that runs several plans on one scratch (the stage-1 panel loop) sizes every plan
+// and keeps the largest.  An empty plan needs nothing.
+template <typename T>
+void qr_block_workspace_size(const DdlaHandle_t& handle, const QrPlan& p, const QrBlockOpts& o,
+                             T* A, int lld, T* tau,
+                             std::size_t* backend_bytes, std::size_t* host_bytes);
+
+// Run every panel of p in execution order: factor on the owner process column, Row-bcast
+// [V|T] (when there are columns to update or bcast_all), optionally copy each panel's V
+// into columns [j_lo - ja, j_hi - ja) of vmr (ld_vmr >= local window rows; may be null)
+// and store its T^H into the tout slot (ld_tout x ld_tout; may be null), then update the
+// columns to be updated with qr_larfb_left_adj.  Returns where the panels left their taus
+// (backend memory inside backend_work; see QrBlockOpts::tau_by_block).  No validation, no
+// allocation.
 template <DdlaBackend Backend, typename T>
-void qr_block_plain(const QrCtx<T>& ctx, QrWorkspace<T>& ws, T* VT, const QrPlan& p,
-                    const std::vector<QrPanel>& panels, const QrBlockOpts& o,
-                    T* vmr, int ld_vmr);
+T* qr_block_run(const QrCtx<T>& ctx, const QrPlan& p, const QrBlockOpts& o,
+                T* vmr, int ld_vmr, T* tout, int ld_tout,
+                void* backend_work, std::size_t backend_bytes,
+                void* host_work, std::size_t host_bytes);
+
+// ---- pgeqrf = check -> workspace size -> run -------------------------------------
+
+struct PgeqrfOpts {
+    char uplo = 'U';        // normalized 'U' / 'L'
+    bool empty = true;      // min(m, n) == 0: nothing to factor
+    bool inplace = false;   // DDLA_QR_PANEL=inplace (agreed by all ranks)
+};
+
+// Component 1 (collective): the arguments on every rank and the DDLA_QR_PANEL agreement.
+template <DdlaBackend Backend>
+PgeqrfOpts pgeqrf_check(const DdlaHandle_t& handle, char uplo, int m, int n,
+                        const int* descA, const void* tau);
+
+// Component 2: the block driver's scratch for A(0:m, 0:n) (qr_block_workspace_size);
+// nothing for an empty call.
+template <typename T>
+void pgeqrf_workspace_size(const DdlaHandle_t& handle, const PgeqrfOpts& o, int m, int n,
+                           T* A, const int* descA, T* tau,
+                           std::size_t* backend_bytes, std::size_t* host_bytes);
+
+// Component 3: the factorization and the copy of the local taus to tau; ends with a
+// synchronize.  No validation, no allocation.
+template <DdlaBackend Backend, typename T>
+void pgeqrf_run(const DdlaHandle_t& handle, const PgeqrfOpts& o, int m, int n,
+                T* A, const int* descA, T* tau,
+                void* backend_work, std::size_t backend_bytes,
+                void* host_work, std::size_t host_bytes);
 
 } // namespace qr_impl
 } // namespace ddla
