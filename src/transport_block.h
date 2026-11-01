@@ -5,10 +5,8 @@
 // default_backend_v, and every public default argument -- hipcc/clang
 // rejects redeclarations that introduce defaults later.
 #include <ddla/ddla.h>
-#include <ddla/ddla_vector.h>
-#include "workspace.h"
 #include <complex>
-#include <vector>
+#include <cstddef>
 
 namespace ddla{
 
@@ -29,10 +27,10 @@ void transport_block(
     T* block_A
 );
 
-// transport_block split into the three components every routine has (see
-// ptrtrm_impl.h): library-internal callers plan once for the largest panel
-// they will move and call transport_run for every panel, with no argument
-// check and no allocation.
+// transport_block split into the three components every routine has
+// (plan_util.h): library-internal callers size the scratch once for the
+// largest panel they will move and call transport_run for every panel, with
+// no argument check and no allocation.
 namespace transport_impl {
 
 // One rectangular piece of the transposed non-square-grid redistribution.
@@ -46,40 +44,10 @@ struct RectBlock {
     int len;
 };
 
-// What transport_plan allocates.  Only the transposed path on a non-square
-// process grid stages anything: `send` packs the blocks this rank sends, and
-// the three lists are the schedule of the current call (cleared and refilled
-// by transport_run, reserved here).  A context is bound to one handle and
-// serves every call whose extents stay within the planned bounds.
-template <typename T>
-struct TransportCtx {
-    vector<T> send;
-    std::vector<RectBlock> blocks, send_blocks, recv_blocks;
-
-    explicit TransportCtx(DdlaHandle_t h) : send(h) {}
-};
-
 struct TransportOpts {
     char sData;
     char trans;
 };
-
-struct TransportWorkspaceSize {
-    WorkspaceSize size;
-    std::size_t send_count=0, block_count=0;
-    std::size_t send_offset=0, blocks_offset=0, send_blocks_offset=0, recv_blocks_offset=0;
-    std::size_t tunnel_offset=0, tunnel_bytes=0;
-};
-
-// Allocation-free requirements for every offset/owner of panels up to the
-// supplied bounds. sData='B' reserves for both row and column panels.
-template <typename T>
-TransportWorkspaceSize transport_workspace_size(const DdlaHandle_t& handle,
-    char sData,char trans,int m_max,int n_max,const int* array_descA);
-
-template <DdlaBackend Backend,typename T>
-void transport_run(const DdlaHandle_t& handle,const TransportWorkspaceSize& q,Workspace work,
-    char sData,char trans,int m,int n,const T* A,int ia,int ja,const int* array_descA,T* block_A);
 
 // Component 1: validate the arguments exactly like the public entry (a null
 // or mismatched handle throws std::runtime_error, everything else
@@ -90,29 +58,34 @@ template <DdlaBackend Backend>
 TransportOpts transport_check(const DdlaHandle_t& handle, char sData, char trans,
                               int m, int n, const int* array_descA);
 
-// Component 2: size and allocate the staging for panels of at most m_max x
-// n_max (the extents transport_run will receive).  sData is 'R', 'C', or 'B'
-// when the context serves both panel kinds with the same bounds.  No
-// validation, no collectives.
-template <typename T>
-TransportCtx<T> transport_plan(const DdlaHandle_t& handle, char sData, char trans,
-                               int m_max, int n_max, const int* array_descA);
+// Destination layout of a transposed panel.  A negative coordinate keeps the
+// public primitive's crossed source ('R' panels land with CSRC on the process
+// rows, 'C' panels with RSRC on the process columns); a triangular consumer
+// can request its original row/column distribution instead, without changing
+// the descriptor the source is read with.
+struct TargetSources { int row = -1, col = -1; };
 
-// Grow an existing context to also serve panels of another kind or bound
-// (reserve only grows): a caller that moves a transposed A panel and a
-// transposed B panel through one context reserves for both.
+// Component 2: the scratch of panels of at most m_max x n_max (the extents
+// transport_run will receive), wherever they start.  Only the transposed path
+// on a non-square process grid stages anything: backend bytes of the send
+// staging, host bytes of the schedule (every block that moves, the ones this
+// rank sends, the ones it receives); so does a square grid whose target
+// differs from the crossed source.  sData is 'R', 'C', or 'B' for scratch
+// that serves both panel kinds with the same bounds.  No validation, no
+// collectives.
 template <typename T>
-void transport_reserve(TransportCtx<T>& ctx, const DdlaHandle_t& handle, char sData, char trans,
-                       int m_max, int n_max, const int* array_descA);
+void transport_workspace_size(const DdlaHandle_t& handle, char sData, char trans,
+                              int m_max, int n_max, const int* array_descA,
+                              std::size_t* backend_bytes, std::size_t* host_bytes,
+                              TargetSources target = {});
 
-// Transitional owning-context execution. Its metadata stays within reserved
-// capacity, but legacy tunnel staging may allocate. Use the Workspace overload
-// for fully borrowed execution.
+// Component 3: the transport.  No validation, no allocation.
 template <DdlaBackend Backend, typename T>
-void transport_run(const DdlaHandle_t& handle, TransportCtx<T>& ctx,
-                   char sData, char trans, int m, int n,
-                   const T* A, int ia, int ja, const int* array_descA,
-                   T* block_A);
+void transport_run(const DdlaHandle_t& handle, char sData, char trans, int m, int n,
+                   const T* A, int ia, int ja, const int* array_descA, T* block_A,
+                   void* backend_work, std::size_t backend_bytes,
+                   void* host_work, std::size_t host_bytes,
+                   TargetSources target = {});
 
 } // namespace transport_impl
 

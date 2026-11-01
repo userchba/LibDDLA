@@ -2,6 +2,7 @@
 #define DDLA_LU_PANEL_H
 
 #include "lu_internal.h"
+#include "matrix_transfer.h"
 #include <cstddef>
 #include <vector>
 
@@ -23,6 +24,7 @@ struct Workspace {
     int* device_meta = nullptr;
     std::size_t window_cap = 0, packed_cap = 0, rows_cap = 0, meta_cap = 0;
     std::vector<int> meta;
+    std::vector<matrix_impl::Block<T>> blocks;
 };
 
 // Entry validation is collective; internal panel calls do no grid validation.

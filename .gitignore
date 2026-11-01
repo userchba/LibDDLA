@@ -43,6 +43,7 @@ CODE_REVIEW.md
 # Local deep-work progress state
 .slim/deepwork/
 .claude_jobs/
+.codex_jobs/
 
 # Tool, runtime and test outputs
 .ignore

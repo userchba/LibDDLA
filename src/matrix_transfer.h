@@ -4,7 +4,6 @@
 #include <ddla/ddla.h>
 
 #include <cstddef>
-#include <vector>
 
 namespace ddla::matrix_impl {
 
@@ -31,35 +30,36 @@ struct Block {
     Peer p;
 };
 
+template <DdlaBackend B, typename T>
+void gather_check(const DdlaHandle_t& h, int m, int n, const T* A, int ia, int ja,
+    const int* desc, int root, T* dst, int lddst);
+template <DdlaBackend B, typename T>
+void scatter_check(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
+    const int* desc, int root, const T* src, int ldsrc);
+
+// The scratch of gather_run / scatter_run for one window, on this rank.
+// Backend: the packing buffer (its own block on a participant, the rest of the
+// window on the root).  Host: the root's list of peer blocks (one Block per
+// other participant).  Index math only: no communication, no data access.  A
+// caller that moves many windows through one scratch sizes it for all of them:
+// m * n entries and h->nprocs - 1 blocks bound every m x n window.
+template <typename T>
+void transfer_workspace_size(const DdlaHandle_t& h, int m, int n, int ia, int ja,
+    const int* desc, int root, std::size_t* backend_bytes, std::size_t* host_bytes);
+
 // Gather A(ia:ia+m-1, ja:ja+n-1) into dst on root, or scatter src on root into
-// it. The caller owns the packing scratch: these entry points neither allocate
-// nor run a grid collective. All members of the selected communication scope
-// participate. With group_root = false, scatter leaves grouping the root's
-// sends to the caller.
+// it, on the caller's scratch: no validation, no allocation, no grid
+// collective.  All members of the selected communication scope participate.
+// With group_root = false, scatter leaves grouping the root's sends to the
+// caller.
 template <DdlaBackend B, typename T>
-void gather(const DdlaHandle_t& h, int m, int n, const T* A, int ia, int ja,
-            const int* desc, int root, T* dst, int lddst,
-            T* packed, std::size_t capacity);
-
+void gather_run(const DdlaHandle_t& h, int m, int n, const T* A, int ia, int ja,
+    const int* desc, int root, T* dst, int lddst,
+    void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes);
 template <DdlaBackend B, typename T>
-void scatter(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
-             const int* desc, int root, const T* src, int ldsrc,
-             T* packed, std::size_t capacity, bool group_root = true);
-
-// The same, with the root's list of peer blocks in a caller-owned vector (the
-// versions above build one per call).  A caller that moves many windows
-// reserves `blocks` for the handle's rank count once (blocks.reserve(h->nprocs)),
-// and then neither entry point allocates.
-template <DdlaBackend B, typename T>
-void gather(const DdlaHandle_t& h, int m, int n, const T* A, int ia, int ja,
-            const int* desc, int root, T* dst, int lddst,
-            T* packed, std::size_t capacity, std::vector<Block<T>>& blocks);
-
-template <DdlaBackend B, typename T>
-void scatter(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
-             const int* desc, int root, const T* src, int ldsrc,
-             T* packed, std::size_t capacity, std::vector<Block<T>>& blocks,
-             bool group_root = true);
+void scatter_run(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
+    const int* desc, int root, const T* src, int ldsrc, bool group_root,
+    void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes);
 
 // GPU copy between count blocks and their entries of the window
 // (matrix_transfer_kernels.cpp), one launch per batch of blocks. scatter
@@ -68,6 +68,6 @@ template <typename T>
 void map_gpu(const DdlaHandle_t& h, bool scatter, const Block<T>* blocks, int count,
              const Region& g, T* window, int ldw);
 
-} // namespace ddla::matrix_impl
+ } // namespace ddla::matrix_impl
 
 #endif

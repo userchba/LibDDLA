@@ -10,6 +10,8 @@
 #include <limits>
 #include <type_traits>
 
+#include <ddla/ddla.h>
+
 #include "ddla_connector.h"
 
 // ---------------------------------------------------------------------------
@@ -39,8 +41,6 @@
 namespace ddla {
 namespace detail {
 
-template <typename T> struct qr_rt_of { using type = T; };
-template <typename U> struct qr_rt_of<std::complex<U>> { using type = U; };
 
 #if defined(__CUDACC__) || defined(__HIP__)
 #define DDLA_QR_HD __host__ __device__
@@ -395,18 +395,6 @@ void qr_build_v(const DdlaHandle_t& handle, bool in_place, int rev, T* v, int ld
 // T of phe2hb, into its tmat slot).  Index-only, one block.
 template <typename T>
 void qr_adjoint_T(const DdlaHandle_t& handle, T* out, int ldout, const T* in, int jb);
-
-// One T row per block from the reduced V^H V (only its upper triangle is read) and the
-// device-resident tau.  backward == false (QR): T upper triangular, T(i,i) = tau_i,
-// T(r,i) = -tau_i * sum_{p=r}^{i-1} T(r,p) * VV(p,i) (ZLARFT 'F').  backward == true (QL): T
-// lower triangular, T(r,i) = -tau_i * sum_{p=i+1}^{r} T(r,p) * conj(VV(i,p)) (ZLARFT 'B').
-// The full row (zeros in the other triangle included) is written; T has leading dimension ldt >= jb
-// (the rows beyond jb of a padded T are not touched).  tau is
-// preloaded into shared memory when twice the row fits under the device
-// shared-memory limit, and read from global memory step by step otherwise
-// (huge nb keeps the launch legal).
-template <typename T>
-void qr_build_T(const DdlaHandle_t& handle, int jb, const T* vv, const T* tau, T* tmat, int ldt, bool backward);
 
 } // namespace detail
 } // namespace ddla

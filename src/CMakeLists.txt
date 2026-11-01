@@ -68,6 +68,7 @@ target_sources(ddla_lib PRIVATE
     ddla_handle_t.cpp
     ddla_stream.cpp
     ddla_desc.cpp
+    reflector_build_T.cpp
 )
 if(NOT ddla_cpu_only_build)
     # GPU copy kernels of ddla::matrix_transfer (matrix_transfer.cpp keeps the
@@ -81,6 +82,19 @@ endif()
 if(DDLA_USE_HIP)
     set_source_files_properties(matrix_transfer_kernels.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES LANGUAGE HIP)
+endif()
+
+# Shared Gram-to-T recurrence: one translation unit for every enabled backend.
+# Preserve the original QR GPU kernel's contraction settings.
+if(DDLA_USE_CUDA)
+    set_source_files_properties(reflector_build_T.cpp TARGET_DIRECTORY ddla_lib
+        PROPERTIES LANGUAGE CUDA
+        COMPILE_OPTIONS "$<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-fmad=false>")
+endif()
+if(DDLA_USE_HIP)
+    set_source_files_properties(reflector_build_T.cpp TARGET_DIRECTORY ddla_lib
+        PROPERTIES LANGUAGE HIP
+        COMPILE_OPTIONS "$<$<COMPILE_LANG_AND_ID:HIP,Clang>:-ffp-contract=off>")
 endif()
 
 add_subdirectory(BLAS)

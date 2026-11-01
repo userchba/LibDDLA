@@ -1,4 +1,3 @@
-#include "BLAS/blas_impl.h"
 // ---------------------------------------------------------------------------
 // BLAS-3 update step of pgeqrf (moved out of pgeqrf.cpp, 2026-10-11): see pgeqrf_impl.h.
 // ---------------------------------------------------------------------------
@@ -6,6 +5,7 @@
 
 #include "ddla_connector.h"
 #include "comm_traits.h"
+#include "BLAS/blas_impl.h"
 #include "pgeqrf_impl.h"
 
 #include <cstddef>
