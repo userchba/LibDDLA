@@ -1316,40 +1316,42 @@ void trmm(
     T* B, int ldb);
 
 /**
- * @brief Triangular times triangular in the selected triangle: C := alpha*A*B + beta*C.
+ * @brief Single-process triangular-by-triangular multiply with per-operand
+ *        triangle and transpose flags:
+ *        C := alpha*op(A)*op(B) + beta*C, op(X) in {X, X**T, X**H}.
  *
- * Single-process operation on column-major n-by-n matrices. For uplo='U',
- * update i <= j with sum over i <= k <= j. For uplo='L', update i >= j
- * with sum over j <= k <= i. Both input diagonals
- * are explicit (non-unit), and neither operand is transposed or conjugated.
- * Opposite triangles and leading-dimension padding are neither read nor written.
+ * Each operand reads only the triangle of its stored matrix named by uplo_a
+ * / uplo_b; a transpose flag flips that operand's EFFECTIVE triangle.
+ * Matching effective triangles give a triangular result: upper x upper
+ * writes the upper triangle of C, lower x lower the lower triangle, and in
+ * both cases the opposite triangle of C is preserved.  An upper x lower or
+ * lower x upper product fills a FULL C, and beta then applies to all of it.
+ * transa/transb accept N/T/C (case insensitive); C conjugates complex
+ * operands and equals T for real ones.
+ *
+ * Matrices are column-major n-by-n with explicit (non-unit) diagonals.
+ * Unused input triangles and leading-dimension padding are never accessed.
  * A and B may coincide; C must not overlap either input, including padding.
  * CPU handles take host pointers; GPU handles take device pointers and enqueue
- * work on the handle stream without allocation, synchronization or collectives.
+ * work on the handle stream. No process-grid collectives are performed.
  *
  * With alpha=0, A and B are not referenced and may be null. With beta=0,
- * the selected triangle of C need not be initialized. n=0, or alpha=0 and beta=1,
+ * the written region of C need not be initialized. n=0, or alpha=0 and beta=1,
  * is a no-op and all matrix pointers may be null. Leading dimensions must
- * still be >= max(1,n). Invalid uplo, dimensions, pointers or overlap throw
+ * still be >= max(1,n). Invalid flags, dimensions, pointers or overlap throw
  * std::invalid_argument; a null/mismatched handle throws std::runtime_error.
  *
  * @tparam Backend CPU or GPU; must match the handle.
  * @tparam T float, double, std::complex<float> or std::complex<double>.
- * @param handle Handle owning the backend and stream.
- * @param uplo 'U' or 'L' (case-insensitive), applied to A, B and C.
- * @param n Matrix order, >= 0.
- * @param alpha Product multiplier.
- * @param A First triangular factor (unmodified).
- * @param lda Leading dimension of A.
- * @param B Second triangular factor (unmodified).
- * @param ldb Leading dimension of B.
- * @param beta Multiplier of the previous selected triangle of C.
- * @param C Output selected triangle; the opposite triangle is preserved.
- * @param ldc Leading dimension of C.
+ *
+ * @param uplo_a 'U' or 'L' (case insensitive): triangle of stored A read.
+ * @param transa 'N', 'T' or 'C' (case insensitive): op applied to A.
+ * @param uplo_b 'U' or 'L' (case insensitive): triangle of stored B read.
+ * @param transb 'N', 'T' or 'C' (case insensitive): op applied to B.
  */
 template <DdlaBackend Backend = default_backend_v, typename T>
-void trtrm(const DdlaHandle_t& handle, char uplo, int n, const T& alpha,
-           const T* A, int lda, const T* B, int ldb,
+void trtrm(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, char transb,
+           int n, const T& alpha, const T* A, int lda, const T* B, int ldb,
            const T& beta, T* C, int ldc);
 
 /**

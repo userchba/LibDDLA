@@ -1,3 +1,6 @@
+#include "cholesky_workspace.h"
+#include "BLAS/blas_impl.h"
+#include "check_agree.h"
 #include "potrf_bottom_right_internal.h"
 
 #include <algorithm>
@@ -8,9 +11,11 @@
 #include <vector>
 
 #include <ddla/ddla.h>
+#include <ddla/ddla_vector.h>
 #include "ddla_desc.h"
 #include "ddla_connector.h"
 #include "ddla_stream.h"
+#include "plan_util.h"
 #include "require_backend.h"
 #include "comm_traits.h"
 
@@ -31,7 +36,7 @@ void update_diagonal_tile(
     if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>){
         const T minus_one = T(-1);
         const T one = T(1);
-        syrk<Backend, T>(
+        blas_impl::syrk_run<Backend, T>(
             handle,
             uplo, upper ? 'N' : 'T',
             nb, panel_width,
@@ -43,7 +48,7 @@ void update_diagonal_tile(
             std::is_same_v<T, std::complex<float>>, float, double>;
         const Real minus_one = Real(-1);
         const Real one = Real(1);
-        herk<Backend, T>(
+        blas_impl::herk_run<Backend, T>(
             handle,
             uplo, upper ? 'N' : 'C',
             nb, panel_width,
@@ -55,35 +60,27 @@ void update_diagonal_tile(
 
 } // namespace
 
-template <DdlaBackend Backend, typename T>
-void ppotrf_bottom_right(
+namespace cholesky_impl {
+template<DdlaBackend Backend>
+void ppotrf_bottom_right_check(const DdlaHandle_t& h,char uplo,int n,const void* A,const int* d)
+{
+    detail::agree_check(h,"ppotrf_bottom_right",[&](detail::Agree&){check_desc(d,h);detail::require_backend<Backend>(h,"ppotrf_bottom_right");
+        if((uplo!='L' && uplo!='U') || n<0 || n>d[DDLA_M_] || n>d[DDLA_N_] || d[DDLA_MB_]!=d[DDLA_NB_] || h->nprows_!=h->npcols_)
+            throw std::invalid_argument("ppotrf_bottom_right: invalid triangle, dimensions, blocks or grid");
+        const int ml=num_loc(n,d[DDLA_MB_],h->myprow_,d[DDLA_RSRC_],h->nprows_),nl=num_loc(n,d[DDLA_NB_],h->mypcol_,d[DDLA_CSRC_],h->npcols_);
+        if(n && ml && nl && !A)throw std::invalid_argument("ppotrf_bottom_right: null local matrix");});
+}
+template<DdlaBackend Backend,class T>
+void ppotrf_bottom_right_run(
     const DdlaHandle_t& handle, char uplo, int n,
-    T* A, const int* descA, int& info
+    T* A, const int* descA, int& info,
+    void* backend_work, std::size_t backend_bytes, void* host_work, [[maybe_unused]] std::size_t host_bytes
 )
 {
-    check_desc(descA, handle);
-    int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
-    ddlaGetGridDims(handle, nprows, npcols);
-    ddlaGetGridCoords(handle, myprow, mypcol);
-
-
-    assert(uplo == 'U' || uplo == 'L');
-    assert(n >= 0);
-    assert(descA[DDLA_DTYPE_] == DDLA_BLOCK_CYCLIC_2D);
-    assert(n <= descA[DDLA_M_] && n <= descA[DDLA_N_]);
-    assert(descA[DDLA_MB_] == descA[DDLA_NB_]);
-    assert(nprows == npcols);
-
-    detail::require_backend<Backend>(handle, "ppotrf_bottom_right");
-    assert(handle != nullptr);
-
-    info = 0;
-    if(n == 0){
-        return;
-    }
-
+    if(n==0){info=0;return;}
+    int nprows=handle->nprows_,npcols=handle->npcols_,myprow=handle->myprow_,mypcol=handle->mypcol_;
+    info=0;
     const int nb = descA[DDLA_NB_];
-    assert(nb > 0);
 
     const int nprocs_dim = nprows;
     const int lld = descA[DDLA_LLD_];
@@ -95,48 +92,33 @@ void ppotrf_bottom_right(
         n, nb, mypcol, descA[DDLA_CSRC_], nprocs_dim);
     assert(A != nullptr || max_local_rows == 0 || max_local_cols == 0);
 
-    T* diag = nullptr;
-    T* row_panel = nullptr;
-    T* col_panel = nullptr;
-    int* info_buffer = nullptr;
-    T** left_array = nullptr;
-    T** right_array = nullptr;
-    T** target_array = nullptr;
-
-    const int max_row_blocks = max_local_rows / nb;
-    const int max_col_blocks = max_local_cols / nb;
-    const std::size_t max_batch_count =
-        static_cast<std::size_t>(max_row_blocks) * max_col_blocks;
-
-    DDLA_CHECK(ddlaMalloc(handle, reinterpret_cast<void**>(&diag), static_cast<std::size_t>(nb) * nb * sizeof(T)));
-    DDLA_CHECK(ddlaMalloc(handle, reinterpret_cast<void**>(&row_panel),
-                          static_cast<std::size_t>(max_local_rows) * nb * sizeof(T)));
-    DDLA_CHECK(ddlaMalloc(handle, reinterpret_cast<void**>(&col_panel),
-                          static_cast<std::size_t>(max_local_cols) * nb * sizeof(T)));
-    DDLA_CHECK(ddlaMalloc(handle, reinterpret_cast<void**>(&info_buffer), sizeof(int)));
-
-    const std::size_t pointer_buffer_bytes =
-        max_batch_count * sizeof(T*);
-    DDLA_CHECK(ddlaMalloc(handle, reinterpret_cast<void**>(&left_array), pointer_buffer_bytes));
-    DDLA_CHECK(ddlaMalloc(handle, reinterpret_cast<void**>(&right_array), pointer_buffer_bytes));
-    DDLA_CHECK(ddlaMalloc(handle, reinterpret_cast<void**>(&target_array), pointer_buffer_bytes));
-
-    std::vector<T*> h_left_array(max_batch_count);
-    std::vector<T*> h_right_array(max_batch_count);
-    std::vector<T*> h_target_array(max_batch_count);
-
-    auto cleanup = [&]()
-    {
-        DDLA_CHECK(ddlaFree(handle, left_array));
-        DDLA_CHECK(ddlaFree(handle, right_array));
-        DDLA_CHECK(ddlaFree(handle, target_array));
-        DDLA_CHECK(ddlaFree(handle, diag));
-        DDLA_CHECK(ddlaFree(handle, row_panel));
-        DDLA_CHECK(ddlaFree(handle, col_panel));
-        DDLA_CHECK(ddlaFree(handle, info_buffer));
-        DDLA_CHECK(ddlaSynchronize(handle));
-    };
-
+    // The scratch, in the order ppotrf_bottom_right_workspace_size counts it (cholesky_workspace.h).  The diagonal
+    // block and the first panel are carved from the same place; the ?potrf scratch is the rest of the buffer after
+    // them, over the second panel.
+    const std::size_t max_batch_count = batch_capacity(handle, n, descA);
+    std::size_t count[3];
+    panel_counts(handle, uplo, n, descA, true, count);
+    char* const base = static_cast<char*>(backend_work);
+    char* w = base;
+    T** const left_array = detail::take<T*>(w, max_batch_count);
+    T** const right_array = detail::take<T*>(w, max_batch_count);
+    T** const target_array = detail::take<T*>(w, max_batch_count);
+    int* const info_buffer = detail::take<int>(w, 1);
+    char* front = w;
+    T* const diag = detail::take<T>(front, count[0]);
+    T* const first = detail::take<T>(w, count[1]);
+    w = std::max(w, front);
+    void* const solver = w;
+    const std::size_t solver_bytes = backend_bytes - static_cast<std::size_t>(w - base);
+    T* const second = detail::take<T>(w, count[2]);
+    assert(static_cast<std::size_t>(w - base) <= backend_bytes);
+    T* const row_panel = uplo == 'U' ? first : second;
+    T* const col_panel = uplo == 'U' ? second : first;
+    char* hw = static_cast<char*>(host_work);
+    T** const h_left_array = detail::take<T*>(hw, max_batch_count);
+    T** const h_right_array = detail::take<T*>(hw, max_batch_count);
+    T** const h_target_array = detail::take<T*>(hw, max_batch_count);
+    assert(static_cast<std::size_t>(hw - static_cast<char*>(host_work)) <= host_bytes);
     const int last_block_start = ((n - 1) / nb) * nb;
     // block_start is always a block boundary.  The first diagonal block may be
     // partial, but every leading tile updated below is therefore nb-by-nb.
@@ -162,7 +144,7 @@ void ppotrf_bottom_right(
                                   + static_cast<std::size_t>(local_col_prefix) * lld;
             detail::potrf_bottom_right_block<Backend>(
                 uplo, block_width, local_diag, lld,
-                block_start, diag, info_buffer, block_info, handle
+                block_start, diag, info_buffer, block_info, handle, solver, solver_bytes
             );
         }
 
@@ -171,7 +153,7 @@ void ppotrf_bottom_right(
             handle->rc_to_rank(owner_row, owner_col), handle->comm));
         info = block_info;
         if(info != 0){
-            cleanup();
+            DDLA_CHECK(ddlaSynchronize(handle));
             return;
         }
 
@@ -196,7 +178,7 @@ void ppotrf_bottom_right(
                 const T one = T(1);
                 T* const local_panel = A
                                        + static_cast<std::size_t>(local_col_prefix) * lld;
-                trsm<Backend, T>(
+                blas_impl::trsm_run<Backend, T>(
                     handle,
                     'R',
                     'U',
@@ -243,7 +225,7 @@ void ppotrf_bottom_right(
                             || std::is_same_v<T, double>
                         ? 'T'
                         : 'C';
-                    trsm<Backend, T>(
+                    blas_impl::trsm_run<Backend, T>(
                         handle,
                         'L',
                         'L',
@@ -336,13 +318,13 @@ void ppotrf_bottom_right(
         if(batch_count > 0){
             const std::size_t active_pointer_bytes =
                 static_cast<std::size_t>(batch_count) * sizeof(T*);
-            DDLA_CHECK(ddlaMemcpy(handle, left_array, h_left_array.data(), active_pointer_bytes));
-            DDLA_CHECK(ddlaMemcpy(handle, right_array, h_right_array.data(), active_pointer_bytes));
-            DDLA_CHECK(ddlaMemcpy(handle, target_array, h_target_array.data(), active_pointer_bytes));
+            DDLA_CHECK(ddlaMemcpy(handle, left_array, h_left_array, active_pointer_bytes));
+            DDLA_CHECK(ddlaMemcpy(handle, right_array, h_right_array, active_pointer_bytes));
+            DDLA_CHECK(ddlaMemcpy(handle, target_array, h_target_array, active_pointer_bytes));
 
             const T minus_one = T(-1);
             const T one = T(1);
-            gemmBatched<Backend, T>(
+            blas_impl::gemmBatched_run<Backend, T>(
                 handle,
                 uplo == 'U' ? 'N' : 'C',
                 uplo == 'U' ? 'C' : 'N',
@@ -357,9 +339,26 @@ void ppotrf_bottom_right(
                 batch_count
             );
         }
+        DDLA_CHECK(ddlaSynchronize(handle));
     }
 
-    cleanup();
+    DDLA_CHECK(ddlaSynchronize(handle));
+}
+} // namespace cholesky_impl
+template <DdlaBackend Backend, typename T>
+void ppotrf_bottom_right(
+    const DdlaHandle_t& handle, char uplo, int n,
+    T* A, const int* descA, int& info
+)
+{
+    cholesky_impl::ppotrf_bottom_right_check<Backend>(handle,uplo,n,A,descA);
+    info=0;if(n==0)return;
+    std::size_t backend_bytes=0,host_bytes=0;
+    cholesky_impl::ppotrf_bottom_right_workspace_size<T>(handle,uplo,n,A,descA,&backend_bytes,&host_bytes);
+    vector<char> backend_work(handle,backend_bytes);
+    std::vector<char> host_work(host_bytes);
+    cholesky_impl::ppotrf_bottom_right_run<Backend,T>(handle,uplo,n,A,descA,info,
+                                                      backend_work.data(),backend_bytes,host_work.data(),host_bytes);
 }
 
 #define INSTANTIATE_PPOTRF_BOTTOM_RIGHT(BACKEND, TYPE)                                   \
@@ -382,4 +381,21 @@ INSTANTIATE_PPOTRF_BOTTOM_RIGHT(DdlaBackend::GPU, std::complex<double>);
 #undef INSTANTIATE_PPOTRF_BOTTOM_RIGHT
 
 
+
+#define DDLA_CHOLESKY_RUN(BACKEND,TYPE) template void cholesky_impl::ppotrf_bottom_right_run<BACKEND,TYPE>( const DdlaHandle_t& handle, char uplo, int n, TYPE* A, const int* descA, int& info, void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes );
+#if DDLA_HAS_CPU
+template void cholesky_impl::ppotrf_bottom_right_check<DdlaBackend::CPU>(const DdlaHandle_t&,char,int,const void*,const int*);
+DDLA_CHOLESKY_RUN(DdlaBackend::CPU,float)
+DDLA_CHOLESKY_RUN(DdlaBackend::CPU,double)
+DDLA_CHOLESKY_RUN(DdlaBackend::CPU,std::complex<float>)
+DDLA_CHOLESKY_RUN(DdlaBackend::CPU,std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+template void cholesky_impl::ppotrf_bottom_right_check<DdlaBackend::GPU>(const DdlaHandle_t&,char,int,const void*,const int*);
+DDLA_CHOLESKY_RUN(DdlaBackend::GPU,float)
+DDLA_CHOLESKY_RUN(DdlaBackend::GPU,double)
+DDLA_CHOLESKY_RUN(DdlaBackend::GPU,std::complex<float>)
+DDLA_CHOLESKY_RUN(DdlaBackend::GPU,std::complex<double>)
+#endif
+#undef DDLA_CHOLESKY_RUN
 } // namespace ddla

@@ -1435,9 +1435,9 @@ except AttributeError:
 try:
     _fn = getattr(lib, "ddla_s_trtrm")
     _fn.restype = ctypes.c_int
-    _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+    _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_char, ctypes.c_char, ctypes.c_char, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
     _TYPED_ROUTINES[("trtrm", "s")] = _fn
-    _ROUTINE_ARGS[("trtrm", "s")] = [('h', 'handle'), ('c', 'uplo'), ('i', 'n'), ('s', 'alpha'), ('pm_i', 'A'), ('i', 'lda'), ('pm_i', 'B'), ('i', 'ldb'), ('s', 'beta'), ('pm_io', 'C'), ('i', 'ldc')]
+    _ROUTINE_ARGS[("trtrm", "s")] = [('h', 'handle'), ('c', 'uplo_a'), ('c', 'transa'), ('c', 'uplo_b'), ('c', 'transb'), ('i', 'n'), ('s', 'alpha'), ('pm_i', 'A'), ('i', 'lda'), ('pm_i', 'B'), ('i', 'ldb'), ('s', 'beta'), ('pm_io', 'C'), ('i', 'ldc')]
 except AttributeError:
     pass
 
@@ -1445,9 +1445,9 @@ except AttributeError:
 try:
     _fn = getattr(lib, "ddla_d_trtrm")
     _fn.restype = ctypes.c_int
-    _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+    _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_char, ctypes.c_char, ctypes.c_char, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
     _TYPED_ROUTINES[("trtrm", "d")] = _fn
-    _ROUTINE_ARGS[("trtrm", "d")] = [('h', 'handle'), ('c', 'uplo'), ('i', 'n'), ('s', 'alpha'), ('pm_i', 'A'), ('i', 'lda'), ('pm_i', 'B'), ('i', 'ldb'), ('s', 'beta'), ('pm_io', 'C'), ('i', 'ldc')]
+    _ROUTINE_ARGS[("trtrm", "d")] = [('h', 'handle'), ('c', 'uplo_a'), ('c', 'transa'), ('c', 'uplo_b'), ('c', 'transb'), ('i', 'n'), ('s', 'alpha'), ('pm_i', 'A'), ('i', 'lda'), ('pm_i', 'B'), ('i', 'ldb'), ('s', 'beta'), ('pm_io', 'C'), ('i', 'ldc')]
 except AttributeError:
     pass
 
@@ -1455,9 +1455,9 @@ except AttributeError:
 try:
     _fn = getattr(lib, "ddla_c_trtrm")
     _fn.restype = ctypes.c_int
-    _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+    _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_char, ctypes.c_char, ctypes.c_char, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
     _TYPED_ROUTINES[("trtrm", "c")] = _fn
-    _ROUTINE_ARGS[("trtrm", "c")] = [('h', 'handle'), ('c', 'uplo'), ('i', 'n'), ('s', 'alpha'), ('pm_i', 'A'), ('i', 'lda'), ('pm_i', 'B'), ('i', 'ldb'), ('s', 'beta'), ('pm_io', 'C'), ('i', 'ldc')]
+    _ROUTINE_ARGS[("trtrm", "c")] = [('h', 'handle'), ('c', 'uplo_a'), ('c', 'transa'), ('c', 'uplo_b'), ('c', 'transb'), ('i', 'n'), ('s', 'alpha'), ('pm_i', 'A'), ('i', 'lda'), ('pm_i', 'B'), ('i', 'ldb'), ('s', 'beta'), ('pm_io', 'C'), ('i', 'ldc')]
 except AttributeError:
     pass
 
@@ -1465,9 +1465,9 @@ except AttributeError:
 try:
     _fn = getattr(lib, "ddla_z_trtrm")
     _fn.restype = ctypes.c_int
-    _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+    _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_char, ctypes.c_char, ctypes.c_char, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
     _TYPED_ROUTINES[("trtrm", "z")] = _fn
-    _ROUTINE_ARGS[("trtrm", "z")] = [('h', 'handle'), ('c', 'uplo'), ('i', 'n'), ('s', 'alpha'), ('pm_i', 'A'), ('i', 'lda'), ('pm_i', 'B'), ('i', 'ldb'), ('s', 'beta'), ('pm_io', 'C'), ('i', 'ldc')]
+    _ROUTINE_ARGS[("trtrm", "z")] = [('h', 'handle'), ('c', 'uplo_a'), ('c', 'transa'), ('c', 'uplo_b'), ('c', 'transb'), ('i', 'n'), ('s', 'alpha'), ('pm_i', 'A'), ('i', 'lda'), ('pm_i', 'B'), ('i', 'ldb'), ('s', 'beta'), ('pm_io', 'C'), ('i', 'ldc')]
 except AttributeError:
     pass
 

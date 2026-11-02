@@ -82,6 +82,14 @@ endfunction()
 
 enable_testing()
 
+# Reusable workspace checks for the local BLAS and Cholesky/utility components.
+add_test_executable(test_workspace_core 1)
+add_test_executable(test_workspace_write_matrix 1)
+add_test_executable(test_workspace_factorizations)
+foreach(_workspace_test test_workspace_core test_workspace_write_matrix test_workspace_factorizations)
+    target_link_libraries(${_workspace_test} PRIVATE ${CMAKE_DL_LIBS})
+endforeach()
+
 add_test_executable(test_backend_gemm)
 add_test_executable(test_backend_gemm_mixed 1)
 add_bench_executable(benchmark_gemm_mixed)
@@ -410,6 +418,12 @@ if(DDLA_ENABLE_FORTRAN)
         COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${DDLA_TEST_NP}
                 ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_fortran_trmm> ${MPIEXEC_POSTFLAGS})
     set_tests_properties(test_fortran_trmm_mpi PROPERTIES PROCESSORS ${DDLA_TEST_NP})
+    add_executable(test_fortran_trtrm test_fortran_trtrm.f90)
+    target_link_libraries(test_fortran_trtrm PRIVATE ddla_fortran MPI::MPI_Fortran)
+    add_test(NAME test_fortran_trtrm_mpi
+        COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1
+                ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_fortran_trtrm> ${MPIEXEC_POSTFLAGS})
+    set_tests_properties(test_fortran_trtrm_mpi PROPERTIES PROCESSORS 1)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/workspace_trace.cpp")

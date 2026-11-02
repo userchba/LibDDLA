@@ -121,7 +121,7 @@ FUNCS = [
     ("syrk", "sd", [("h","handle"),("c","uplo"),("c","trans"),("i","n"),("i","k"),
                     ("s","alpha"),("pm_i","A"),("i","lda"),("s","beta"),("pm_io","C"),
                     ("i","ldc")], {}),
-    ("trtrm", "all4", [("h","handle"),("c","uplo"),("i","n"),("s","alpha"),("pm_i","A"),
+    ("trtrm", "all4", [("h","handle"),("c","uplo_a"),("c","transa"),("c","uplo_b"),("c","transb"),("i","n"),("s","alpha"),("pm_i","A"),
                        ("i","lda"),("pm_i","B"),("i","ldb"),("s","beta"),("pm_io","C"),
                        ("i","ldc")], {}),
     ("geam", "all4", [("h","handle"),("c","transa"),("c","transb"),("i","m"),("i","n"),

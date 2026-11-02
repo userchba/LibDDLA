@@ -1,10 +1,11 @@
 #include "write_matrix.h"
 
+#include <cassert>
 #include <cmath>
 #include <complex>
 #include <fstream>
 #include <type_traits>
-#include <memory>
+#include <vector>
 
 namespace ddla {
 
@@ -39,17 +40,21 @@ void write_host_matrix(const T* A, int m, int n, std::ostream& outfile)
 
 namespace matrix_io_impl {
 template<DdlaBackend Backend,class T>
-void write_matrix_run(const T* A,int m,int n,std::ostream& output,BufferView<T> host_staging)
+void write_matrix_run(const T* A,int m,int n,std::ostream& output,
+                      [[maybe_unused]] void* host_work,[[maybe_unused]] std::size_t host_bytes)
 {
     if constexpr(Backend==DdlaBackend::CPU) {
         write_host_matrix(A,m,n,output);
     } else {
 #if DDLA_HAS_GPU
         // This utility has no handle/stream. Finish the D2H read before the
-        // formatter accesses staging and before the caller can reuse it.
+        // formatter accesses the host copy and before the caller can reuse it.
         const auto count=std::size_t(m)*std::size_t(n);
-        GPU_CHECK(gpuMemcpy(host_staging.data(),A,count*sizeof(T),gpuMemcpyDeviceToHost));
-        write_host_matrix(host_staging.data(),m,n,output);
+        char* w=static_cast<char*>(host_work);
+        T* host=detail::take<T>(w,count);
+        assert(std::size_t(w-static_cast<char*>(host_work))<=host_bytes);
+        GPU_CHECK(gpuMemcpy(host,A,count*sizeof(T),gpuMemcpyDeviceToHost));
+        write_host_matrix(host,m,n,output);
 #endif
     }
 }
@@ -63,20 +68,19 @@ void write_matrix(const T* A, int m, int n, const char* filename)
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU write_matrix is not available in this LibDDLA build");
     if(!matrix_io_impl::write_matrix_check(A,m,n,filename))return;
-    const auto query=matrix_io_impl::write_matrix_workspace_size<Backend,T>(m,n);
-    const auto count=query.host_bytes/sizeof(T);
-    std::unique_ptr<T[]> host;
-    if(count)host.reset(new T[count]);
+    std::size_t host_bytes=0;
+    matrix_io_impl::write_matrix_workspace_size<Backend,T>(m,n,&host_bytes);
+    std::vector<char> host_work(host_bytes);
     std::ofstream output(filename,std::ios::out|std::ios::trunc);
     if(!output)return;
-    matrix_io_impl::write_matrix_run<Backend,T>(A,m,n,output,{host.get(),count});
+    matrix_io_impl::write_matrix_run<Backend,T>(A,m,n,output,host_work.data(),host_bytes);
 }
 
 #define INSTANTIATE_WRITE_MATRIX(BACKEND, TYPE)                              \
     template void write_matrix<BACKEND, TYPE>(                               \
         const TYPE*, int, int, const char*);                            \
     template void matrix_io_impl::write_matrix_run<BACKEND, TYPE>(             \
-        const TYPE*, int, int, std::ostream&, BufferView<TYPE>)
+        const TYPE*, int, int, std::ostream&, void*, std::size_t)
 
 #if DDLA_HAS_CPU
 INSTANTIATE_WRITE_MATRIX(DdlaBackend::CPU, float);

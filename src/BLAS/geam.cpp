@@ -138,25 +138,11 @@ inline std::complex<R> maybe_conj(const std::complex<R>& x, bool c)
     return c ? std::conj(x) : x;
 }
 
-template <typename T>
-struct GeamCpuArgs {
-    bool ta, ca, tb, cb;     // operand transposed / conjugated
-    bool has_a, has_b;       // alpha != 0, beta != 0: the operand is referenced
-    bool a_one;              // alpha == 1: no multiply, bits of A unchanged
-    T alpha, beta;
-    const T* A; std::size_t lda;
-    const T* B; std::size_t ldb;
-    T* C; std::size_t ldc;
-};
-
 // Single operand (beta == 0): C(i,j) := alpha * blas_impl::op(A)(i,j), the copy / transpose-copy path.
 template <typename T, bool TA, bool CA, bool ONE>
-void copy_tile(const GeamCpuArgs<T>& g, int i0, int i1, int j0, int j1)
+void copy_tile(T alpha, const T* A, std::size_t lda, T* C, std::size_t ldc,
+               int i0, int i1, int j0, int j1)
 {
-    const T* const A = g.A;
-    T* const C = g.C;
-    const std::size_t lda = g.lda, ldc = g.ldc;
-    const T alpha = g.alpha;
     for (int j = j0; j < j1; ++j) {
         T* const c = C + static_cast<std::size_t>(j) * ldc;
         for (int i = i0; i < i1; ++i) {
@@ -177,14 +163,10 @@ inline T load_op(const T* X, std::size_t ldx, bool trans, bool conj, int i, int 
 
 // General case (two operands, or alpha == 0).
 template <typename T>
-void general_tile(const GeamCpuArgs<T>& g, int i0, int i1, int j0, int j1)
+void general_tile(bool ta, bool ca, bool tb, bool cb, bool has_a, bool has_b,
+                  T alpha, const T* A, std::size_t lda, T beta, const T* B, std::size_t ldb,
+                  T* C, std::size_t ldc, int i0, int i1, int j0, int j1)
 {
-    const bool ta = g.ta, ca = g.ca, tb = g.tb, cb = g.cb, has_a = g.has_a, has_b = g.has_b;
-    const T alpha = g.alpha, beta = g.beta;
-    const T* const A = g.A;
-    const T* const B = g.B;
-    T* const C = g.C;
-    const std::size_t lda = g.lda, ldb = g.ldb, ldc = g.ldc;
     for (int j = j0; j < j1; ++j) {
         T* const c = C + static_cast<std::size_t>(j) * ldc;
         for (int i = i0; i < i1; ++i) {
@@ -201,28 +183,33 @@ void general_tile(const GeamCpuArgs<T>& g, int i0, int i1, int j0, int j1)
 }
 
 template <typename T>
-void run_copy_tile(const GeamCpuArgs<T>& g, int i0, int i1, int j0, int j1)
+void run_copy_tile(bool ta, bool ca, bool a_one, T alpha, const T* A, std::size_t lda,
+                   T* C, std::size_t ldc, int i0, int i1, int j0, int j1)
 {
-    if (!g.ta) {
-        if (g.a_one) copy_tile<T, false, false, true>(g, i0, i1, j0, j1);
-        else         copy_tile<T, false, false, false>(g, i0, i1, j0, j1);
-    } else if (!g.ca) {
-        if (g.a_one) copy_tile<T, true, false, true>(g, i0, i1, j0, j1);
-        else         copy_tile<T, true, false, false>(g, i0, i1, j0, j1);
+    if (!ta) {
+        if (a_one) copy_tile<T, false, false, true>(alpha, A, lda, C, ldc, i0, i1, j0, j1);
+        else         copy_tile<T, false, false, false>(alpha, A, lda, C, ldc, i0, i1, j0, j1);
+    } else if (!ca) {
+        if (a_one) copy_tile<T, true, false, true>(alpha, A, lda, C, ldc, i0, i1, j0, j1);
+        else         copy_tile<T, true, false, false>(alpha, A, lda, C, ldc, i0, i1, j0, j1);
     } else {
-        if (g.a_one) copy_tile<T, true, true, true>(g, i0, i1, j0, j1);
-        else         copy_tile<T, true, true, false>(g, i0, i1, j0, j1);
+        if (a_one) copy_tile<T, true, true, true>(alpha, A, lda, C, ldc, i0, i1, j0, j1);
+        else         copy_tile<T, true, true, false>(alpha, A, lda, C, ldc, i0, i1, j0, j1);
     }
 }
 
 template <typename T>
-void cpu_geam(const GeamCpuArgs<T>& g, int m, int n, int nthreads)
+void cpu_geam(bool ta, bool ca, bool tb, bool cb, T alpha, const T* A, std::size_t lda,
+              T beta, const T* B, std::size_t ldb, T* C, std::size_t ldc,
+              int m, int n, int nthreads)
 {
-    const bool single = g.has_a && !g.has_b;
+    const bool has_a = !(alpha == T(0)), has_b = !(beta == T(0));
+    const bool a_one = alpha == T(1);
+    const bool single = has_a && !has_b;
     // An operand read transposed wants square-ish tiles (reads and writes both stay within a few cache lines per
     // tile row).  With no transposition the tile is a strip of whole columns -- contiguous in memory, so the
     // loops stream and vectorize -- of about kStripElems elements (taller than that: a piece of one column).
-    const bool strided = g.ta || (g.has_b && g.tb);
+    const bool strided = ta || (has_b && tb);
     const int tm = strided ? kTile : std::min(m, kStripElems);
     const int tn = strided ? kTile : std::max(1, kStripElems / tm);
     const int tiles_i = (m + tm - 1) / tm;
@@ -233,8 +220,8 @@ void cpu_geam(const GeamCpuArgs<T>& g, int m, int n, int nthreads)
         const int bj = static_cast<int>(t / tiles_i);
         const int i0 = bi * tm, i1 = std::min(m, i0 + tm);
         const int j0 = bj * tn, j1 = std::min(n, j0 + tn);
-        if (single) run_copy_tile(g, i0, i1, j0, j1);
-        else        general_tile(g, i0, i1, j0, j1);
+        if (single) run_copy_tile(ta, ca, a_one, alpha, A, lda, C, ldc, i0, i1, j0, j1);
+        else        general_tile(ta, ca, tb, cb, has_a, has_b, alpha, A, lda, beta, B, ldb, C, ldc, i0, i1, j0, j1);
     };
     const int nt = (static_cast<long long>(m) * n < kParallelMinElems)
                        ? 1
@@ -322,20 +309,9 @@ void geam_run(const DdlaHandle_t& handle, char transa, char transb, int m, int n
     const bool zero_beta = (beta == T(0));
     if constexpr (Backend == DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
-        GeamCpuArgs<T> g;
-        g.ta = (ta != 'N');
-        g.ca = (ta == 'C');
-        g.tb = (tb != 'N');
-        g.cb = (tb == 'C');
-        g.has_a = !(alpha == T(0));
-        g.has_b = !zero_beta;
-        g.a_one = (alpha == T(1));
-        g.alpha = alpha;
-        g.beta = beta;
-        g.A = A; g.lda = static_cast<std::size_t>(lda);
-        g.B = B; g.ldb = static_cast<std::size_t>(ldb);
-        g.C = C; g.ldc = static_cast<std::size_t>(ldc);
-        cpu_geam(g, m, n, handle->host_threads);
+        cpu_geam(ta != 'N', ta == 'C', tb != 'N', tb == 'C', alpha, A, static_cast<std::size_t>(lda),
+                 beta, B, static_cast<std::size_t>(ldb), C, static_cast<std::size_t>(ldc),
+                 m, n, handle->host_threads);
 #endif
     } else {
 #if DDLA_HAS_GPU

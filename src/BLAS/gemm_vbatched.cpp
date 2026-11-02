@@ -1,3 +1,5 @@
+#include "vbatched_impl.h"
+#include "blas_impl.h"
 #include <ddla/ddla.h>
 #include <ddla/ddla_handle_t.h>
 
@@ -7,7 +9,9 @@
 #include "vbatched/gemm_vbatched_compat.h"
 
 #include <array>
+#include <cassert>
 #include <complex>
+#include <cstddef>
 #include <string>
 #include <stdexcept>
 #include <type_traits>
@@ -65,12 +69,6 @@ DECLARE_VBATCHED_CORE(z, DdlaDoubleComplex);
 namespace
 {
 
-struct MaxDimensions
-{
-    int m;
-    int n;
-    int k;
-};
 
 __global__ void validate_and_max_dimensions(
     ddla::gpublasOperation_t transA, ddla::gpublasOperation_t transB,
@@ -131,22 +129,20 @@ ddla::gpublasOperation_t to_deblas_operation(char operation)
                                                   : ddla::GPUBLAS_OP_C;
 }
 
-MaxDimensions validate_dimensions(
+void validate_dimensions(
     const ddla::DdlaHandle_t& handle, ddla::gpublasOperation_t transA, ddla::gpublasOperation_t transB,
     int* d_m, int* d_n, int* d_k,
     int* d_lda, int* d_ldb, int* d_ldc,
-    int batch_count)
+    int batch_count, int* d_summary, int& maximum_m, int& maximum_n, int& maximum_k)
 {
     if (d_m == nullptr || d_n == nullptr || d_k == nullptr
         || d_lda == nullptr || d_ldb == nullptr || d_ldc == nullptr)
         throw std::invalid_argument("gemmVbatched: null dimension array");
 
-    int* d_summary = nullptr;
-    ddla::DDLA_CHECK(ddla::ddlaMalloc(handle, &d_summary, 4 * sizeof(int)));
     ddla::DDLA_CHECK(ddla::ddlaMemset(handle, d_summary, 0, 4 * sizeof(int)));
 
     constexpr int block_size = 256;
-    const int grid_size = (batch_count + block_size - 1) / block_size;
+    const int grid_size = (batch_count - 1) / block_size + 1;
     DDLA_LAUNCH_KERNEL(
         handle, (validate_and_max_dimensions), dim3(grid_size), dim3(block_size), 0, transA, transB, d_m, d_n, d_k, d_lda, d_ldb, d_ldc,
         batch_count, d_summary);
@@ -154,19 +150,18 @@ MaxDimensions validate_dimensions(
     std::array<int, 4> summary{};
     ddla::DDLA_CHECK(ddla::ddlaMemcpy(handle, summary.data(), d_summary, 4 * sizeof(int)));
     ddla::DDLA_CHECK(ddla::ddlaSynchronize(handle));
-    ddla::DDLA_CHECK(ddla::ddlaFree(handle, d_summary));
 
     if (summary[3] != 0)
         throw std::invalid_argument(
             "gemmVbatched: invalid dimensions at batch "
             + std::to_string(summary[3] - 1));
-    return {summary[0], summary[1], summary[2]};
+    maximum_m=summary[0]; maximum_n=summary[1]; maximum_k=summary[2];
 }
 
 template <typename T>
 void launch_core(
     const ddla::DdlaHandle_t& handle, ddla::gpublasOperation_t transA, ddla::gpublasOperation_t transB,
-    const MaxDimensions& maximum,
+    int maximum_m, int maximum_n, int maximum_k,
     int* d_m, int* d_n, int* d_k,
     T alpha, const T* const* d_A_array, int* d_lda,
     const T* const* d_B_array, int* d_ldb,
@@ -176,7 +171,7 @@ void launch_core(
     if constexpr (std::is_same_v<T, float>)
     {
         ddla_internal_sgemm_vbatched_core(
-            handle, transA, transB, maximum.m, maximum.n, maximum.k,
+            handle, transA, transB, maximum_m, maximum_n, maximum_k,
             d_m, d_n, d_k, alpha, d_A_array, 0, 0, d_lda,
             d_B_array, 0, 0, d_ldb, beta, d_C_array, 0, 0, d_ldc,
             batch_count);
@@ -184,7 +179,7 @@ void launch_core(
     else if constexpr (std::is_same_v<T, double>)
     {
         ddla_internal_dgemm_vbatched_core(
-            handle, transA, transB, maximum.m, maximum.n, maximum.k,
+            handle, transA, transB, maximum_m, maximum_n, maximum_k,
             d_m, d_n, d_k, alpha, d_A_array, 0, 0, d_lda,
             d_B_array, 0, 0, d_ldb, beta, d_C_array, 0, 0, d_ldc,
             batch_count);
@@ -196,7 +191,7 @@ void launch_core(
         const DdlaFloatComplex beta_internal =
             DDLA_C_MAKE(beta.real(), beta.imag());
         ddla_internal_cgemm_vbatched_core(
-            handle, transA, transB, maximum.m, maximum.n, maximum.k,
+            handle, transA, transB, maximum_m, maximum_n, maximum_k,
             d_m, d_n, d_k, alpha_internal,
             reinterpret_cast<const DdlaFloatComplex* const*>(d_A_array),
             0, 0, d_lda,
@@ -212,7 +207,7 @@ void launch_core(
         const DdlaDoubleComplex beta_internal =
             DDLA_Z_MAKE(beta.real(), beta.imag());
         ddla_internal_zgemm_vbatched_core(
-            handle, transA, transB, maximum.m, maximum.n, maximum.k,
+            handle, transA, transB, maximum_m, maximum_n, maximum_k,
             d_m, d_n, d_k, alpha_internal,
             reinterpret_cast<const DdlaDoubleComplex* const*>(d_A_array),
             0, 0, d_lda,
@@ -226,13 +221,13 @@ void launch_core(
 template <typename T>
 void launch_core_2s(
     const ddla::DdlaHandle_t& handle, ddla::gpublasOperation_t transA_0, ddla::gpublasOperation_t transB_0,
-    const MaxDimensions& maximum_0,
+    int maximum_m_0, int maximum_n_0, int maximum_k_0,
     int* d_m_0, int* d_n_0, int* d_k_0,
     T alpha_0, const T* const* d_A_array_0, int* d_lda_0,
     const T* const* d_B_array_0, int* d_ldb_0,
     T beta_0, T** d_C_array_0, int* d_ldc_0,
     ddla::gpublasOperation_t transA_1, ddla::gpublasOperation_t transB_1,
-    const MaxDimensions& maximum_1,
+    int maximum_m_1, int maximum_n_1, int maximum_k_1,
     int* d_m_1, int* d_n_1, int* d_k_1,
     T alpha_1, const T* const* d_AB_array_1,
     int* d_lda_1, int* d_ldb_1,
@@ -242,11 +237,11 @@ void launch_core_2s(
     if constexpr (std::is_same_v<T, float>)
     {
         ddla_internal_sgemm_vbatched_core_2s(
-            handle, transA_0, transB_0, maximum_0.m, maximum_0.n, maximum_0.k,
+            handle, transA_0, transB_0, maximum_m_0, maximum_n_0, maximum_k_0,
             d_m_0, d_n_0, d_k_0, alpha_0,
             d_A_array_0, 0, 0, d_lda_0, d_B_array_0, 0, 0, d_ldb_0,
             beta_0, d_C_array_0, 0, 0, d_ldc_0,
-            transA_1, transB_1, maximum_1.m, maximum_1.n, maximum_1.k,
+            transA_1, transB_1, maximum_m_1, maximum_n_1, maximum_k_1,
             d_m_1, d_n_1, d_k_1, alpha_1,
             d_AB_array_1, 0, 0, d_lda_1, 0, 0, d_ldb_1,
             beta_1, d_C_array_1, 0, 0, d_ldc_1, C0_left,
@@ -255,11 +250,11 @@ void launch_core_2s(
     else if constexpr (std::is_same_v<T, double>)
     {
         ddla_internal_dgemm_vbatched_core_2s(
-            handle, transA_0, transB_0, maximum_0.m, maximum_0.n, maximum_0.k,
+            handle, transA_0, transB_0, maximum_m_0, maximum_n_0, maximum_k_0,
             d_m_0, d_n_0, d_k_0, alpha_0,
             d_A_array_0, 0, 0, d_lda_0, d_B_array_0, 0, 0, d_ldb_0,
             beta_0, d_C_array_0, 0, 0, d_ldc_0,
-            transA_1, transB_1, maximum_1.m, maximum_1.n, maximum_1.k,
+            transA_1, transB_1, maximum_m_1, maximum_n_1, maximum_k_1,
             d_m_1, d_n_1, d_k_1, alpha_1,
             d_AB_array_1, 0, 0, d_lda_1, 0, 0, d_ldb_1,
             beta_1, d_C_array_1, 0, 0, d_ldc_1, C0_left,
@@ -268,7 +263,7 @@ void launch_core_2s(
     else if constexpr (std::is_same_v<T, std::complex<float>>)
     {
         ddla_internal_cgemm_vbatched_core_2s(
-            handle, transA_0, transB_0, maximum_0.m, maximum_0.n, maximum_0.k,
+            handle, transA_0, transB_0, maximum_m_0, maximum_n_0, maximum_k_0,
             d_m_0, d_n_0, d_k_0,
             DDLA_C_MAKE(alpha_0.real(), alpha_0.imag()),
             reinterpret_cast<const DdlaFloatComplex* const*>(d_A_array_0),
@@ -278,7 +273,7 @@ void launch_core_2s(
             DDLA_C_MAKE(beta_0.real(), beta_0.imag()),
             reinterpret_cast<DdlaFloatComplex**>(d_C_array_0),
             0, 0, d_ldc_0,
-            transA_1, transB_1, maximum_1.m, maximum_1.n, maximum_1.k,
+            transA_1, transB_1, maximum_m_1, maximum_n_1, maximum_k_1,
             d_m_1, d_n_1, d_k_1,
             DDLA_C_MAKE(alpha_1.real(), alpha_1.imag()),
             reinterpret_cast<const DdlaFloatComplex* const*>(d_AB_array_1),
@@ -290,7 +285,7 @@ void launch_core_2s(
     else if constexpr (std::is_same_v<T, std::complex<double>>)
     {
         ddla_internal_zgemm_vbatched_core_2s(
-            handle, transA_0, transB_0, maximum_0.m, maximum_0.n, maximum_0.k,
+            handle, transA_0, transB_0, maximum_m_0, maximum_n_0, maximum_k_0,
             d_m_0, d_n_0, d_k_0,
             DDLA_Z_MAKE(alpha_0.real(), alpha_0.imag()),
             reinterpret_cast<const DdlaDoubleComplex* const*>(d_A_array_0),
@@ -300,7 +295,7 @@ void launch_core_2s(
             DDLA_Z_MAKE(beta_0.real(), beta_0.imag()),
             reinterpret_cast<DdlaDoubleComplex**>(d_C_array_0),
             0, 0, d_ldc_0,
-            transA_1, transB_1, maximum_1.m, maximum_1.n, maximum_1.k,
+            transA_1, transB_1, maximum_m_1, maximum_n_1, maximum_k_1,
             d_m_1, d_n_1, d_k_1,
             DDLA_Z_MAKE(alpha_1.real(), alpha_1.imag()),
             reinterpret_cast<const DdlaDoubleComplex* const*>(d_AB_array_1),
@@ -336,8 +331,23 @@ void validate_handle(const DdlaHandle_t& handle, const char* who)
 
 } // namespace
 
+namespace blas_impl {
+void vbatched_dimensions_check(const DdlaHandle_t& h, char ta, char tb,
+    int* m, int* n, int* k, int* lda, int* ldb, int* ldc, int count,
+    void* backend_work, [[maybe_unused]] std::size_t backend_bytes, int& maximum_m, int& maximum_n, int& maximum_k)
+{
+    if (count <= 0) {maximum_m=maximum_n=maximum_k=0; return;}
+    // [ device summary (4 ints) ]
+    char* w = static_cast<char*>(backend_work);
+    int* const summary = detail::take<int>(w, 4);
+    assert(static_cast<std::size_t>(w - static_cast<char*>(backend_work)) <= backend_bytes);
+    validate_dimensions(h,to_deblas_operation(ta),to_deblas_operation(tb),m,n,k,lda,ldb,ldc,count,summary,maximum_m,maximum_n,maximum_k);
+}
+} // namespace blas_impl
+
+namespace blas_impl {
 template <DdlaBackend Backend, typename T>
-void gemmVbatched(
+void gemmVbatched_check(
     const DdlaHandle_t& handle,
     char transA, char transB,
     int* d_m, int* d_n, int* d_k,
@@ -360,20 +370,66 @@ void gemmVbatched(
     if (d_A_array == nullptr || d_B_array == nullptr || d_C_array == nullptr)
         throw std::invalid_argument("gemmVbatched: null matrix pointer array");
 
-    const gpublasOperation_t op_a = to_deblas_operation(transA);
-    const gpublasOperation_t op_b = to_deblas_operation(transB);
-    const MaxDimensions maximum = validate_dimensions(
-        handle, op_a, op_b, d_m, d_n, d_k, d_lda, d_ldb, d_ldc,
-        batch_count);
+    (void)to_deblas_operation(transA); (void)to_deblas_operation(transB);
+}
+template <DdlaBackend Backend, typename T>
+void gemmVbatched_run(
+    const DdlaHandle_t& handle, int maximum_m, int maximum_n, int maximum_k,
+    char transA, char transB,
+    int* d_m, int* d_n, int* d_k,
+    T alpha, const T* const* d_A_array, int* d_lda,
+    const T* const* d_B_array, int* d_ldb,
+    T beta, T** d_C_array, int* d_ldc,
+    int batch_count)
+{
+    if (batch_count <= 0) return;
+    const auto op_a=blas_impl::op(transA), op_b=blas_impl::op(transB);
     launch_core(
-        handle, op_a, op_b, maximum, d_m, d_n, d_k,
+        handle, op_a, op_b, maximum_m, maximum_n, maximum_k, d_m, d_n, d_k,
         alpha, d_A_array, d_lda, d_B_array, d_ldb,
         beta, d_C_array, d_ldc, batch_count);
     DDLA_CHECK(ddlaGetLastError(handle));
 }
-
+} // namespace blas_impl
 template <DdlaBackend Backend, typename T>
-void gemmVbatched2s(
+void gemmVbatched(
+    const DdlaHandle_t& handle,
+    char transA, char transB,
+    int* d_m, int* d_n, int* d_k,
+    T alpha, const T* const* d_A_array, int* d_lda,
+    const T* const* d_B_array, int* d_ldb,
+    T beta, T** d_C_array, int* d_ldc,
+    int batch_count)
+{
+    blas_impl::gemmVbatched_check<Backend,T>(handle,transA,transB,d_m,d_n,d_k,alpha,d_A_array,d_lda,d_B_array,d_ldb,beta,d_C_array,d_ldc,batch_count);
+    if (batch_count==0) return;
+    std::size_t backend_bytes=0;
+    blas_impl::gemmVbatched_workspace_size(handle,batch_count,&backend_bytes);
+    vector<char> work(handle,backend_bytes);
+    int maximum_m, maximum_n, maximum_k;blas_impl::vbatched_dimensions_check(handle,transA,transB,d_m,d_n,d_k,d_lda,d_ldb,d_ldc,batch_count,work.data(),backend_bytes,maximum_m,maximum_n,maximum_k);
+    blas_impl::gemmVbatched_run<Backend,T>(handle, maximum_m, maximum_n, maximum_k,transA,transB,d_m,d_n,d_k,alpha,d_A_array,d_lda,d_B_array,d_ldb,beta,d_C_array,d_ldc,batch_count);
+}
+#define DDLA_VBATCHED_PHASES(BACKEND,TYPE) \
+    template void blas_impl::gemmVbatched_check<BACKEND,TYPE>( const DdlaHandle_t& handle, char transA, char transB, int* d_m, int* d_n, int* d_k, TYPE alpha, const TYPE* const* d_A_array, int* d_lda, const TYPE* const* d_B_array, int* d_ldb, TYPE beta, TYPE** d_C_array, int* d_ldc, int batch_count); \
+    template void blas_impl::gemmVbatched_run<BACKEND,TYPE>( const DdlaHandle_t& handle, int maximum_m, int maximum_n, int maximum_k, char transA, char transB, int* d_m, int* d_n, int* d_k, TYPE alpha, const TYPE* const* d_A_array, int* d_lda, const TYPE* const* d_B_array, int* d_ldb, TYPE beta, TYPE** d_C_array, int* d_ldc, int batch_count);
+#if DDLA_HAS_CPU
+DDLA_VBATCHED_PHASES(DdlaBackend::CPU,float)
+DDLA_VBATCHED_PHASES(DdlaBackend::CPU,double)
+DDLA_VBATCHED_PHASES(DdlaBackend::CPU,std::complex<float>)
+DDLA_VBATCHED_PHASES(DdlaBackend::CPU,std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_VBATCHED_PHASES(DdlaBackend::GPU,float)
+DDLA_VBATCHED_PHASES(DdlaBackend::GPU,double)
+DDLA_VBATCHED_PHASES(DdlaBackend::GPU,std::complex<float>)
+DDLA_VBATCHED_PHASES(DdlaBackend::GPU,std::complex<double>)
+#endif
+#undef DDLA_VBATCHED_PHASES
+
+
+namespace blas_impl {
+template <DdlaBackend Backend, typename T>
+void gemmVbatched2s_check(
     const DdlaHandle_t& handle,
     char transA_0, char transB_0,
     int* d_m_0, int* d_n_0, int* d_k_0,
@@ -414,29 +470,84 @@ void gemmVbatched2s(
         || d_C_array_1 == nullptr)
         throw std::invalid_argument("gemmVbatched2s: null matrix pointer array");
 
-    const gpublasOperation_t op_a_0 = to_deblas_operation(transA_0);
-    const gpublasOperation_t op_b_0 = to_deblas_operation(transB_0);
-    const MaxDimensions maximum_0 = validate_dimensions(
-        handle, op_a_0, op_b_0, d_m_0, d_n_0, d_k_0,
-        d_lda_0, d_ldb_0, d_ldc_0, batch_count);
-    const gpublasOperation_t op_a_1 = to_deblas_operation(transA_1);
-    const gpublasOperation_t op_b_1 = to_deblas_operation(transB_1);
-    const MaxDimensions maximum_1 = validate_dimensions(
-        handle, op_a_1, op_b_1, d_m_1, d_n_1, d_k_1,
-        d_lda_1, d_ldb_1, d_ldc_1, batch_count);
-
+    (void)to_deblas_operation(transA_0); (void)to_deblas_operation(transB_0);
+    (void)to_deblas_operation(transA_1); (void)to_deblas_operation(transB_1);
+}
+template <DdlaBackend Backend, typename T>
+void gemmVbatched2s_run(
+    const DdlaHandle_t& handle, int maximum_m_0, int maximum_n_0, int maximum_k_0, int maximum_m_1, int maximum_n_1, int maximum_k_1,
+    char transA_0, char transB_0,
+    int* d_m_0, int* d_n_0, int* d_k_0,
+    T alpha_0, const T* const* d_A_array_0, int* d_lda_0,
+    const T* const* d_B_array_0, int* d_ldb_0,
+    T beta_0, T** d_C_array_0, int* d_ldc_0,
+    char transA_1, char transB_1,
+    int* d_m_1, int* d_n_1, int* d_k_1,
+    T alpha_1, const T* const* d_AB_array_1,
+    int* d_lda_1, int* d_ldb_1,
+    T beta_1, T** d_C_array_1, int* d_ldc_1,
+    bool C0_left, int batch_count,
+    const int* segment_sizes, int segment_count)
+{
+    if (batch_count <= 0) return;
+    const auto op_a_0=blas_impl::op(transA_0), op_b_0=blas_impl::op(transB_0);
+    const auto op_a_1=blas_impl::op(transA_1), op_b_1=blas_impl::op(transB_1);
     launch_core_2s(
-        handle, op_a_0, op_b_0, maximum_0,
+        handle, op_a_0, op_b_0, maximum_m_0, maximum_n_0, maximum_k_0,
         d_m_0, d_n_0, d_k_0, alpha_0,
         d_A_array_0, d_lda_0, d_B_array_0, d_ldb_0,
         beta_0, d_C_array_0, d_ldc_0,
-        op_a_1, op_b_1, maximum_1,
+        op_a_1, op_b_1, maximum_m_1, maximum_n_1, maximum_k_1,
         d_m_1, d_n_1, d_k_1, alpha_1,
         d_AB_array_1, d_lda_1, d_ldb_1,
         beta_1, d_C_array_1, d_ldc_1,
         C0_left, batch_count, segment_sizes);
     DDLA_CHECK(ddlaGetLastError(handle));
 }
+} // namespace blas_impl
+template <DdlaBackend Backend, typename T>
+void gemmVbatched2s(
+    const DdlaHandle_t& handle,
+    char transA_0, char transB_0,
+    int* d_m_0, int* d_n_0, int* d_k_0,
+    T alpha_0, const T* const* d_A_array_0, int* d_lda_0,
+    const T* const* d_B_array_0, int* d_ldb_0,
+    T beta_0, T** d_C_array_0, int* d_ldc_0,
+    char transA_1, char transB_1,
+    int* d_m_1, int* d_n_1, int* d_k_1,
+    T alpha_1, const T* const* d_AB_array_1,
+    int* d_lda_1, int* d_ldb_1,
+    T beta_1, T** d_C_array_1, int* d_ldc_1,
+    bool C0_left, int batch_count,
+    const int* segment_sizes, int segment_count)
+{
+    blas_impl::gemmVbatched2s_check<Backend,T>(handle,transA_0,transB_0,d_m_0,d_n_0,d_k_0,alpha_0,d_A_array_0,d_lda_0,d_B_array_0,d_ldb_0,beta_0,d_C_array_0,d_ldc_0,transA_1,transB_1,d_m_1,d_n_1,d_k_1,alpha_1,d_AB_array_1,d_lda_1,d_ldb_1,beta_1,d_C_array_1,d_ldc_1,C0_left,batch_count,segment_sizes,segment_count);
+    if (batch_count==0) return;
+    // Both stages are checked on the same summary, one after the other.
+    std::size_t backend_bytes=0;
+    blas_impl::gemmVbatched_workspace_size(handle,batch_count,&backend_bytes);
+    vector<char> work(handle,backend_bytes);
+    int maximum_m_0, maximum_n_0, maximum_k_0;blas_impl::vbatched_dimensions_check(handle,transA_0,transB_0,d_m_0,d_n_0,d_k_0,d_lda_0,d_ldb_0,d_ldc_0,batch_count,work.data(),backend_bytes,maximum_m_0,maximum_n_0,maximum_k_0);
+    int maximum_m_1, maximum_n_1, maximum_k_1;blas_impl::vbatched_dimensions_check(handle,transA_1,transB_1,d_m_1,d_n_1,d_k_1,d_lda_1,d_ldb_1,d_ldc_1,batch_count,work.data(),backend_bytes,maximum_m_1,maximum_n_1,maximum_k_1);
+    blas_impl::gemmVbatched2s_run<Backend,T>(handle, maximum_m_0, maximum_n_0, maximum_k_0, maximum_m_1, maximum_n_1, maximum_k_1,transA_0,transB_0,d_m_0,d_n_0,d_k_0,alpha_0,d_A_array_0,d_lda_0,d_B_array_0,d_ldb_0,beta_0,d_C_array_0,d_ldc_0,transA_1,transB_1,d_m_1,d_n_1,d_k_1,alpha_1,d_AB_array_1,d_lda_1,d_ldb_1,beta_1,d_C_array_1,d_ldc_1,C0_left,batch_count,segment_sizes,segment_count);
+}
+#define DDLA_VBATCHED_PHASES(BACKEND,TYPE) \
+    template void blas_impl::gemmVbatched2s_check<BACKEND,TYPE>( const DdlaHandle_t& handle, char transA_0, char transB_0, int* d_m_0, int* d_n_0, int* d_k_0, TYPE alpha_0, const TYPE* const* d_A_array_0, int* d_lda_0, const TYPE* const* d_B_array_0, int* d_ldb_0, TYPE beta_0, TYPE** d_C_array_0, int* d_ldc_0, char transA_1, char transB_1, int* d_m_1, int* d_n_1, int* d_k_1, TYPE alpha_1, const TYPE* const* d_AB_array_1, int* d_lda_1, int* d_ldb_1, TYPE beta_1, TYPE** d_C_array_1, int* d_ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count); \
+    template void blas_impl::gemmVbatched2s_run<BACKEND,TYPE>( const DdlaHandle_t& handle, int maximum_m_0, int maximum_n_0, int maximum_k_0, int maximum_m_1, int maximum_n_1, int maximum_k_1, char transA_0, char transB_0, int* d_m_0, int* d_n_0, int* d_k_0, TYPE alpha_0, const TYPE* const* d_A_array_0, int* d_lda_0, const TYPE* const* d_B_array_0, int* d_ldb_0, TYPE beta_0, TYPE** d_C_array_0, int* d_ldc_0, char transA_1, char transB_1, int* d_m_1, int* d_n_1, int* d_k_1, TYPE alpha_1, const TYPE* const* d_AB_array_1, int* d_lda_1, int* d_ldb_1, TYPE beta_1, TYPE** d_C_array_1, int* d_ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+#if DDLA_HAS_CPU
+DDLA_VBATCHED_PHASES(DdlaBackend::CPU,float)
+DDLA_VBATCHED_PHASES(DdlaBackend::CPU,double)
+DDLA_VBATCHED_PHASES(DdlaBackend::CPU,std::complex<float>)
+DDLA_VBATCHED_PHASES(DdlaBackend::CPU,std::complex<double>)
+#endif
+#if DDLA_HAS_GPU
+DDLA_VBATCHED_PHASES(DdlaBackend::GPU,float)
+DDLA_VBATCHED_PHASES(DdlaBackend::GPU,double)
+DDLA_VBATCHED_PHASES(DdlaBackend::GPU,std::complex<float>)
+DDLA_VBATCHED_PHASES(DdlaBackend::GPU,std::complex<double>)
+#endif
+#undef DDLA_VBATCHED_PHASES
+
 
 #define INSTANTIATE_VBATCHED(backend, type)                                     \
 template void gemmVbatched<backend, type>(                                     \
