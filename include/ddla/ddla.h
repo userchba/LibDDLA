@@ -1643,6 +1643,52 @@ template <DdlaBackend Backend = default_backend_v, typename T>
 void larft(const DdlaHandle_t& handle, char direct, char storev, int n, int k, T* V, int ldv, const T* tau, T* Tmat,
            int ldt);
 
+// Interfaces for the registered reflector and mixed-domain operations.
+template <DdlaBackend Backend = default_backend_v, typename R>
+void pgemm(const DdlaHandle_t& handle, char transa, char transb,
+           int m, int n, int k, const std::complex<R>& alpha,
+           const R* A, const int* descA,
+           const std::complex<R>* B, const int* descB,
+           const std::complex<R>& beta, std::complex<R>* C, const int* descC);
+
+template <DdlaBackend Backend = default_backend_v, typename R>
+void pgemm(const DdlaHandle_t& handle, char transa, char transb,
+           int m, int n, int k, const std::complex<R>& alpha,
+           const std::complex<R>* A, const int* descA,
+           const R* B, const int* descB,
+           const std::complex<R>& beta, std::complex<R>* C, const int* descC);
+
+template <DdlaBackend Backend = default_backend_v, typename T>
+void pherm_complete(
+    const DdlaHandle_t& handle,
+    char uplo, int n,
+    T* A, const int* descA
+);
+
+template <DdlaBackend Backend = default_backend_v, typename T>
+void phetrd(const DdlaHandle_t& handle, char uplo, int n, T* A, const int* descA,
+    typename real_type<T>::type* d, typename real_type<T>::type* e, T* tau, int& info);
+
+template <DdlaBackend Backend = default_backend_v, typename T>
+void punmtr(const DdlaHandle_t& handle, char side, char uplo, char trans, int m, int n,
+    const T* A, const int* descA, const T* tau, T* C, const int* descC);
+
+template <DdlaBackend Backend = default_backend_v, typename T>
+void punmtr(const DdlaHandle_t& handle, char side, char uplo, char trans,
+    int m, int n, int k, const T* V, int ldv, const T* Tmat, int ldt,
+    T* C, const int* descC);
+
+template <DdlaBackend Backend = default_backend_v, typename R>
+void gemm(
+    const DdlaHandle_t& handle,
+    char transa, char transb,
+    int m, int n, int k,
+    const std::complex<R>& alpha,
+    const std::complex<R>* A, int lda,
+    const R* B, int ldb,
+    const std::complex<R>& beta,
+    std::complex<R>* C, int ldc);
+
 } // namespace ddla
 
 #endif // DDLA_H

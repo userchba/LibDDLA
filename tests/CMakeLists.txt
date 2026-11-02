@@ -421,3 +421,16 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/workspace_trace.cpp")
     target_include_directories(workspace_trace PRIVATE $<TARGET_PROPERTY:ddla_lib,INTERFACE_INCLUDE_DIRECTORIES>)
     target_link_libraries(workspace_trace PRIVATE MPI::MPI_CXX ${CMAKE_DL_LIBS})
 endif()
+
+# Standalone reflector and Hermitian routines registered by this change.
+foreach(_test test_api_grid_pherm_complete test_api_grid_phetrd
+              test_api_grid_punmtr test_api_grid_pvector_redist
+              test_pgemm_mixed)
+    if(NOT TARGET ${_test})
+        add_test_executable(${_test})
+    endif()
+    if(TARGET ${_test})
+        target_include_directories(${_test} PRIVATE ${CMAKE_SOURCE_DIR}/src)
+        target_link_libraries(${_test} PRIVATE ${CMAKE_DL_LIBS})
+    endif()
+endforeach()

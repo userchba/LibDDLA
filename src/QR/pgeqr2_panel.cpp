@@ -68,14 +68,12 @@ void qr_tau_from_T(const DdlaHandle_t& handle, T* taup, const T* T_panel, int jb
 // boundary): the gather/scatter stays on the owner process column's Col communicator.
 // ---------------------------------------------------------------------------
 template <DdlaBackend Backend, typename T>
-void qr_panel_gathered(const QrCtx<T>& ctx, QrWorkspace<T>& ws, char uplo,
+void qr_panel_gathered(const DdlaHandle_t& handle, T* A, const int* descA, QrWorkspace<T>& ws, char uplo,
                        int g0, int m_w, int jb, int j0, int lc0, int lr0_, int lrp_, int ldv,
                        T* V, T* T_panel, T* taup, bool need_T)
 {
-    const DdlaHandle_t& handle = ctx.handle;
-    T* const A = ctx.A;
-    const int mb = ctx.mb, rsrc = ctx.rsrc, lld = ctx.lld;
-    const int nprows = ctx.nprows, myprow = ctx.myprow;
+    const int mb = descA[DDLA_MB_], rsrc = descA[DDLA_RSRC_], lld = descA[DDLA_LLD_];
+    const int nprows = handle->nprows_, myprow = handle->myprow_;
     T* const Wg = ws.Wg;
     T* const S = ws.S;
     const bool ql = (uplo == 'L');
@@ -88,13 +86,13 @@ void qr_panel_gathered(const QrCtx<T>& ctx, QrWorkspace<T>& ws, char uplo,
     T* const W = inplace ? Apan : Wg;
     const int ldw = inplace ? lld : m_w;
     const bool root = (myprow == pr0);
-    const int pc = indxg2p(j0, ctx.descA[DDLA_NB_], ctx.descA[DDLA_CSRC_], handle->npcols_);
+    const int pc = indxg2p(j0, descA[DDLA_NB_], descA[DDLA_CSRC_], handle->npcols_);
     const int root_rank = handle->rc_to_rank(pr0, pc);
     // Packing: the root stages its peers' blocks in S, a peer packs its own block in its V slot.
     T* const packed = root ? S : V;
     const std::size_t packed_bytes = (root ? (nprows > 1 ? std::size_t(m_w) * jb : 0)
                                            : std::size_t(ldv) * jb) * sizeof(T);
-    matrix_impl::gather_run<Backend, T>(handle, m_w, jb, A, g0+1, j0+1, ctx.descA, root_rank, W, ldw,
+    matrix_impl::gather_run<Backend, T>(handle, m_w, jb, A, g0+1, j0+1, descA, root_rank, W, ldw,
                                         packed, packed_bytes, ws.blocks, ws.blocks_bytes);
 
     // ---- factor the window on the root (every rank of a single-process-row grid): the library
@@ -114,7 +112,7 @@ void qr_panel_gathered(const QrCtx<T>& ctx, QrWorkspace<T>& ws, char uplo,
     // root's per-peer send loop and the peers' matching receives.
     if (nprows > 1) {
         if (root) commGroupStart<Backend>(handle);
-        matrix_impl::scatter_run<Backend, T>(handle, m_w, jb, A, g0+1, j0+1, ctx.descA, root_rank, W, ldw, false,
+        matrix_impl::scatter_run<Backend, T>(handle, m_w, jb, A, g0+1, j0+1, descA, root_rank, W, ldw, false,
                                              packed, packed_bytes, ws.blocks, ws.blocks_bytes);
         if (root) commGroupEnd<Backend>(handle);
         commBcast<Backend>(handle, CommScope::Col, T_panel, std::size_t(jb)*jb, pr0);
@@ -192,7 +190,7 @@ void qr_panel_gathered(const QrCtx<T>& ctx, QrWorkspace<T>& ws, char uplo,
 // unit row, 0 beyond it), V^H V by herk on the local V and ONE Col allreduce, and T (LARFT) by the
 // textbook recurrence on the host from that jb x jb matrix and the taus -- the same bits on every
 // rank of the owner column; T and the taus are copied back to the device.  The Row broadcast of
-// [V | T] to the other process columns and the trailing update are the driver's and qr_larfb.cpp's.
+// [V | T] to the other process columns and the trailing update are the driver's and the shared punmtr_run's.
 //
 // QL (A = Q L, ?GEQLF): the column jj of the panel has its unit entry at window row m_w - jb + jj,
 // x ABOVE it, and the columns are processed from jb - 1 down to 0, each updating the panel
@@ -206,18 +204,16 @@ void qr_panel_gathered(const QrCtx<T>& ctx, QrWorkspace<T>& ws, char uplo,
 // qr_panel_distributed: see the header comment of this file and pgeqrf_impl.h.
 // ---------------------------------------------------------------------------
 template <DdlaBackend Backend, typename T>
-void qr_panel_distributed(const QrCtx<T>& ctx, QrWorkspace<T>& ws, char uplo,
+void qr_panel_distributed(const DdlaHandle_t& handle, T* A, const int* descA, QrWorkspace<T>& ws, char uplo,
                           int g0, int m_w, int jb, int lc0, int lr0, int lrp, int ldv,
                           T* V, T* T_panel, T* taup, bool need_T)
 {
     using rt = typename real_type<T>::type;
     constexpr bool CPLX = !std::is_same<rt, T>::value;
     constexpr int NR = CPLX ? 2 : 1;   // rt entries per T
-    const DdlaHandle_t& handle = ctx.handle;
-    T* const A = ctx.A;
-    const int mb = ctx.mb, rsrc = ctx.rsrc, lld = ctx.lld;
-    const int nprows = ctx.nprows, myprow = ctx.myprow;
-    const char adj = ctx.adj;
+    const int mb = descA[DDLA_MB_], rsrc = descA[DDLA_RSRC_], lld = descA[DDLA_LLD_];
+    const int nprows = handle->nprows_, myprow = handle->myprow_;
+    const char adj = (std::is_same<T, typename real_type<T>::type>::value ? 'T' : 'C');
     const bool ql = (uplo == 'L');
     assert(uplo == 'U' || uplo == 'L');
     assert(!ql || g0 == 0);
@@ -408,12 +404,12 @@ void qr_panel_distributed(const QrCtx<T>& ctx, QrWorkspace<T>& ws, char uplo,
 
 #define INSTANTIATE_QR_PANEL_DIST(BACKEND, TYPE)                                    \
     template void qr_panel_distributed<BACKEND, TYPE>(                              \
-        const QrCtx<TYPE>&, QrWorkspace<TYPE>&, char, int, int, int, int, int, int, \
+        const DdlaHandle_t&, TYPE*, const int*, QrWorkspace<TYPE>&, char, int, int, int, int, int, int, \
         int, TYPE*, TYPE*, TYPE*, bool)
 
 #define INSTANTIATE_QR_PANEL(BACKEND, TYPE)                                         \
     template void qr_panel_gathered<BACKEND, TYPE>(                                 \
-        const QrCtx<TYPE>&, QrWorkspace<TYPE>&, char, int, int, int, int, int, int, int, \
+        const DdlaHandle_t&, TYPE*, const int*, QrWorkspace<TYPE>&, char, int, int, int, int, int, int, int, \
         int, TYPE*, TYPE*, TYPE*, bool);
 
 #if DDLA_HAS_CPU

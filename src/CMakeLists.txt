@@ -168,3 +168,23 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     PATTERN "*.h.in" EXCLUDE
 )
+
+# Shared reflectors and the standalone Hermitian reduction/application routines.
+target_sources(ddla_lib PRIVATE
+    host_parallel.cpp
+    punmtr.cpp
+    Eigensolver/pherm_complete.cpp
+    Eigensolver/one_stage/phetrd.cpp
+    Eigensolver/one_stage/punmtr_trd.cpp
+    Eigensolver/pvector_redist.cpp
+)
+set_source_files_properties(host_parallel.cpp TARGET_DIRECTORY ddla_lib
+    PROPERTIES COMPILE_OPTIONS "${_ddla_cpu_kernel_opts}")
+if(DDLA_USE_CUDA)
+    set_source_files_properties(Eigensolver/pherm_complete.cpp Eigensolver/one_stage/phetrd.cpp
+        Eigensolver/one_stage/punmtr_trd.cpp Eigensolver/pvector_redist.cpp TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE CUDA)
+endif()
+if(DDLA_USE_HIP)
+    set_source_files_properties(Eigensolver/pherm_complete.cpp Eigensolver/one_stage/phetrd.cpp
+        Eigensolver/one_stage/punmtr_trd.cpp Eigensolver/pvector_redist.cpp TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE HIP)
+endif()

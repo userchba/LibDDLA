@@ -790,7 +790,7 @@ void check_pgeqrf(const ddla::DdlaHandle_t& handle)
 // ---------------------------------------------------------------------------
 // Wide panels on a 1x1 grid.  The panel is one block column of the descriptor, so a wide panel is a wide
 // descriptor nb: several wide panels (the last one partial), m < n, and nb = 2048, which pins the
-// qr_build_T tau-shared->global fallback on a z handle (2*2048*16 B = 64 KiB > every device's 48 KiB
+// reflector_build_T tau-shared->global fallback on a z handle (2*2048*16 B = 64 KiB > every device's 48 KiB
 // default cap).  Each case runs the full run_case checks.
 // ---------------------------------------------------------------------------
 template <typename T>

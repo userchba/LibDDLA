@@ -201,11 +201,13 @@ if(DDLA_USE_CUDA)
     message(STATUS "Looking for CUDA math libraries in: ${_math_lib_dir}")
 
     find_library(CUBLAS_LIBRARY NAMES cublas PATHS ${_math_lib_dir} NO_DEFAULT_PATH REQUIRED)
+    find_library(CUBLASLT_LIBRARY NAMES cublasLt PATHS ${_math_lib_dir} NO_DEFAULT_PATH REQUIRED)
     find_library(CURAND_LIBRARY NAMES curand PATHS ${_math_lib_dir} NO_DEFAULT_PATH REQUIRED)
     find_library(CUSOLVER_LIBRARY NAMES cusolver PATHS ${_math_lib_dir} NO_DEFAULT_PATH REQUIRED)
 
     list(APPEND math_libs
         ${CUBLAS_LIBRARY}
+        ${CUBLASLT_LIBRARY}
         ${CURAND_LIBRARY}
         ${CUSOLVER_LIBRARY}
         ${CUDAToolkit_LIBRARY_DIR}/libcudart.so

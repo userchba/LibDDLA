@@ -44,18 +44,13 @@ struct RectBlock {
     int len;
 };
 
-struct TransportOpts {
-    char sData;
-    char trans;
-};
-
 // Component 1: validate the arguments exactly like the public entry (a null
 // or mismatched handle throws std::runtime_error, everything else
 // std::invalid_argument).  Collective: every rank throws if any rank does.
 // Callers handle the empty case (m == 0 or n == 0) before the check, as the
 // public entry does.
 template <DdlaBackend Backend>
-TransportOpts transport_check(const DdlaHandle_t& handle, char sData, char trans,
+void transport_check(const DdlaHandle_t& handle, char sData, char trans,
                               int m, int n, const int* array_descA);
 
 // Destination layout of a transposed panel.  A negative coordinate keeps the
@@ -63,7 +58,6 @@ TransportOpts transport_check(const DdlaHandle_t& handle, char sData, char trans
 // rows, 'C' panels with RSRC on the process columns); a triangular consumer
 // can request its original row/column distribution instead, without changing
 // the descriptor the source is read with.
-struct TargetSources { int row = -1, col = -1; };
 
 // Component 2: the scratch of panels of at most m_max x n_max (the extents
 // transport_run will receive), wherever they start.  Only the transposed path
@@ -77,7 +71,7 @@ template <typename T>
 void transport_workspace_size(const DdlaHandle_t& handle, char sData, char trans,
                               int m_max, int n_max, const int* array_descA,
                               std::size_t* backend_bytes, std::size_t* host_bytes,
-                              TargetSources target = {});
+                              int target_row = -1, int target_col = -1);
 
 // Component 3: the transport.  No validation, no allocation.
 template <DdlaBackend Backend, typename T>
@@ -85,7 +79,7 @@ void transport_run(const DdlaHandle_t& handle, char sData, char trans, int m, in
                    const T* A, int ia, int ja, const int* array_descA, T* block_A,
                    void* backend_work, std::size_t backend_bytes,
                    void* host_work, std::size_t host_bytes,
-                   TargetSources target = {});
+                   int target_row = -1, int target_col = -1);
 
 } // namespace transport_impl
 

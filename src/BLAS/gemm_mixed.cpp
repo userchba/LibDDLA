@@ -1,16 +1,22 @@
+#include "blas_impl.h"
 #include <ddla/ddla.h>
 #include <ddla/ddla_handle_t.h>
 #include "ddla_connector.h"
 #include "ddla_stream.h"
+#include "plan_util.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cctype>
 #include <cmath>
 #include <complex>
-#include <limits>
+#include <cstddef>
 #include <stdexcept>
 #include <type_traits>
-#include <vector>
+
+#if DDLA_HAS_CPU
+#include "gemm_mixed_cpu.h"
+#endif
 
 namespace ddla {
 namespace {
@@ -27,56 +33,6 @@ char mixed_trans(char c)
 // is materialized. This follows BLIS's mixed-domain use of real GEMM, without
 // requiring BLIS or changing the configured BLAS provider.
 constexpr int mixed_panel = 512;
-template <typename R>
-std::size_t mixed_workspace(int m, int k, int nb)
-{
-    const std::size_t rows = std::size_t(m) + k;
-    if (rows > std::numeric_limits<std::size_t>::max() / (2 * sizeof(R) * nb))
-        throw std::overflow_error("gemm(real,complex): workspace size overflow");
-    return 2 * rows * nb;
-}
-
-#if DDLA_HAS_CPU
-template <typename R>
-void mixed_cpu(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
-               std::complex<R> alpha, const R* A, int lda,
-               const std::complex<R>* B, int ldb, std::complex<R> beta,
-               std::complex<R>* C, int ldc, bool product)
-{
-    if (!product) {
-        for (int j = 0; j < n; ++j)
-            for (int i = 0; i < m; ++i) {
-                auto& c = C[i + std::size_t(j)*ldc];
-                c = beta == R(0) ? std::complex<R>(0) : beta*c;
-            }
-        return;
-    }
-    const int nb = std::min(n, mixed_panel);
-    std::vector<R> work(mixed_workspace<R>(m, k, nb));
-    R* const packed = work.data();
-    R* const result = packed + std::size_t(2)*k*nb;
-    for (int j0 = 0; j0 < n;) {
-        const int nj = std::min(nb, n-j0);
-        for (int j = 0; j < nj; ++j)
-            for (int l = 0; l < k; ++l) {
-                const auto b = tb == 'N' ? B[l + std::size_t(j0+j)*ldb]
-                                        : B[j0+j + std::size_t(l)*ldb];
-                packed[l + std::size_t(2*j)*k] = b.real();
-                packed[l + std::size_t(2*j+1)*k] = tb == 'C' ? -b.imag() : b.imag();
-            }
-        gemm<DdlaBackend::CPU, R>(h, ta, 'N', m, 2*nj, k,
-                                   R(1), A, lda, packed, k, R(0), result, m);
-        for (int j = 0; j < nj; ++j)
-            for (int i = 0; i < m; ++i) {
-                auto& c = C[i + std::size_t(j0+j)*ldc];
-                const auto z = alpha * std::complex<R>(result[i + std::size_t(2*j)*m],
-                                                       result[i + std::size_t(2*j+1)*m]);
-                c = beta == R(0) ? z : z + beta*c;
-            }
-        j0 += nj;
-    }
-}
-#endif
 
 #if DDLA_HAS_GPU
 // std::complex<R> arrays are specified to expose interleaved real/imaginary R
@@ -219,7 +175,7 @@ template <typename R>
 void mixed_gpu(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
                std::complex<R> alpha, const R* A, int lda,
                const std::complex<R>* B, int ldb, std::complex<R> beta,
-               std::complex<R>* C, int ldc, bool product)
+               std::complex<R>* C, int ldc, bool product, void* scratch, [[maybe_unused]] std::size_t bytes)
 {
     const gpuStream_t stream=static_cast<gpuStream_t>(h->stream);
     const R ar=alpha.real(), ai=alpha.imag(), br=beta.real(), bi=beta.imag();
@@ -249,34 +205,121 @@ void mixed_gpu(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
         return;
     }
     const int nb=std::min(n,mixed_panel);
-    R* work=nullptr;
-    GPU_CHECK(gpuMallocAsync(reinterpret_cast<void**>(&work),
-                             mixed_workspace<R>(m,k,nb)*sizeof(R),stream));
-    // One owner and one release on success or failure; frees are ordered after
-    // the last queued use. The catch preserves the original launch/BLAS error.
-    try {
-        R* result=work+std::size_t(2)*k*nb;
-        for (int j0=0; j0<n;) {
-            const int nj=std::min(nb,n-j0);
-            mixed_pack<<<mixed_blocks(std::size_t(k)*nj),256,0,stream>>>(tb,k,nj,j0,b,ldb,work);
-            GPU_CHECK(gpuGetLastError());
-            gemm<DdlaBackend::GPU,R>(h,ta,'N',m,2*nj,k,R(1),A,lda,work,k,R(0),result,m);
-            mixed_combine<<<mixed_blocks(std::size_t(m)*nj),256,0,stream>>>(
-                m,nj,result,ar,ai,br,bi,c+std::size_t(2)*j0*ldc,ldc);
-            GPU_CHECK(gpuGetLastError());
-            j0+=nj;
-        }
-    } catch (...) {
-        (void)gpuFreeAsync(work,stream);
-        throw;
+    // [ packed panel of B (k x 2nb) | real product (m x 2nb) ], one region; the caller's storage remains live
+    // through the queued operations.
+    char* w=static_cast<char*>(scratch);
+    R* const work=detail::take<R>(w,std::size_t(2)*k*nb+std::size_t(2)*m*nb);
+    assert(static_cast<std::size_t>(w-static_cast<char*>(scratch))<=bytes);
+    R* result=work+std::size_t(2)*k*nb;
+    for (int j0=0; j0<n;) {
+        const int nj=std::min(nb,n-j0);
+        mixed_pack<<<mixed_blocks(std::size_t(k)*nj),256,0,stream>>>(tb,k,nj,j0,b,ldb,work);
+        GPU_CHECK(gpuGetLastError());
+        blas_impl::gemm_run<DdlaBackend::GPU,R>(h,ta,'N',m,2*nj,k,R(1),A,lda,work,k,R(0),result,m);
+        mixed_combine<<<mixed_blocks(std::size_t(m)*nj),256,0,stream>>>(
+            m,nj,result,ar,ai,br,bi,c+std::size_t(2)*j0*ldc,ldc);
+        GPU_CHECK(gpuGetLastError());
+        j0+=nj;
     }
-    GPU_CHECK(gpuFreeAsync(work,stream));
+}
+
+// Complex-by-real products pack [Re op(A); Im op(A)] into one real 2m x k
+// matrix (alpha and the ta=='C' conjugation folded in) and drive one real
+// GEMM per column panel; D = P2 * op(B) has the real block on rows [0,m) and
+// the imaginary block on [m,2m).
+template <typename R>
+__global__ void mixed_pack_cr(char ta, int m, int k, const R* A, int lda,
+                              R ar, R ai, R* P2)
+{
+    for (std::size_t p = std::size_t(blockIdx.x)*blockDim.x + threadIdx.x;
+         p < std::size_t(m)*k; p += std::size_t(blockDim.x)*gridDim.x) {
+        const std::size_t i = p%std::size_t(m), l = p/std::size_t(m);
+        const std::size_t a = ta == 'N' ? i + l*std::size_t(lda) : l + i*std::size_t(lda);
+        const R br = A[2*a];
+        const R bi = ta == 'C' ? -A[2*a+1] : A[2*a+1];
+        P2[i + l*std::size_t(2*m)] = ar*br - ai*bi;
+        P2[m + i + l*std::size_t(2*m)] = ar*bi + ai*br;
+    }
+}
+
+template <typename R>
+__global__ void mixed_combine_cr(int m, int nj, const R* D, R br, R bi,
+                                 R* C, int ldc)
+{
+    for (std::size_t p = std::size_t(blockIdx.x)*blockDim.x + threadIdx.x;
+         p < std::size_t(m)*nj; p += std::size_t(blockDim.x)*gridDim.x) {
+        const std::size_t i = p%std::size_t(m), j = p/std::size_t(m);
+        mixed_store(C, i + j*std::size_t(ldc),
+                    D[i + j*std::size_t(2*m)], D[m + i + j*std::size_t(2*m)],
+                    R(1), R(0), br, bi);
+    }
+}
+
+template <typename R>
+void mixed_gpu_cr(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
+                  std::complex<R> alpha, const std::complex<R>* A, int lda,
+                  const R* B, int ldb, std::complex<R> beta,
+                  std::complex<R>* C, int ldc, bool product, void* scratch, [[maybe_unused]] std::size_t bytes)
+{
+    const gpuStream_t stream=static_cast<gpuStream_t>(h->stream);
+    const R ar=alpha.real(), ai=alpha.imag(), br=beta.real(), bi=beta.imag();
+    const R* const a=reinterpret_cast<const R*>(A);
+    R* const c=reinterpret_cast<R*>(C);
+    if (!product) {
+        mixed_scale<<<mixed_blocks(std::size_t(m)*n),256,0,stream>>>(m,n,br,bi,c,ldc);
+        GPU_CHECK(gpuGetLastError());
+        return;
+    }
+    const int nb=std::min(n,mixed_panel);
+    const std::size_t pack_elems=2*std::size_t(m)*k, res_elems=2*std::size_t(m)*nb;
+    // [ packed P2 (2m x k) | real product D (2m x nb) ], one region; the caller's storage remains live through the
+    // queued operations.
+    char* w=static_cast<char*>(scratch);
+    R* const p2=detail::take<R>(w,pack_elems+res_elems);
+    assert(static_cast<std::size_t>(w-static_cast<char*>(scratch))<=bytes);
+    R* const d=p2+pack_elems;
+    mixed_pack_cr<<<mixed_blocks(std::size_t(m)*k),256,0,stream>>>(
+        ta,m,k,a,lda,ar,ai,p2);
+    GPU_CHECK(gpuGetLastError());
+    for (int j0=0; j0<n;) {
+        const int nj=std::min(nb,n-j0);
+        const R* const bj = B + (tb == 'N' ? std::size_t(j0)*ldb : std::size_t(j0));
+        blas_impl::gemm_run<DdlaBackend::GPU,R>(h,'N',tb,2*m,nj,k,R(1),p2,2*m,bj,ldb,R(0),d,2*m);
+        mixed_combine_cr<<<mixed_blocks(std::size_t(m)*nj),256,0,stream>>>(
+            m,nj,d,br,bi,c+std::size_t(2)*j0*ldc,ldc);
+        GPU_CHECK(gpuGetLastError());
+        j0+=nj;
+    }
 }
 #endif
 } // namespace
 
+namespace blas_impl {
+// CPU handles: the worker slots of gemm_mixed_cpu.cpp.  GPU handles: one region [ packed operand | real product ] --
+// real-by-complex [ B panel (k x 2nb) | m x 2nb ], complex-by-real [ P2 (2m x k) | 2m x nb ], nb = min(n, 512) --
+// and nothing for the fused small real-by-complex kernel (m, n, k <= 256).
+template <typename R>
+void mixed_gemm_workspace_size(const DdlaHandle_t& h, int m, int n, int k, bool complex_left,
+                               std::size_t* backend_bytes)
+{
+    *backend_bytes = 0;
+    if (m <= 0 || n <= 0 || k <= 0) return;
+#if DDLA_HAS_CPU
+    if (h->backend == DdlaBackend::CPU) {
+        detail::mixed_gemm_cpu_workspace_size<R>(h, m, n, k, complex_left, backend_bytes);
+        return;
+    }
+#endif
+    if (!complex_left && m <= 256 && n <= 256 && k <= 256) return;
+    const std::size_t nb = std::min(n, mixed_panel);
+    const std::size_t pack = complex_left ? 2 * std::size_t(m) * k : 2 * std::size_t(k) * nb;
+    *backend_bytes = detail::padded_bytes<R>(pack + 2 * std::size_t(m) * nb);
+}
+} // namespace blas_impl
+
+namespace blas_impl {
 template <DdlaBackend Backend, typename R>
-void gemm(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
+void gemm_check(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
           const std::complex<R>& alpha, const R* A, int lda,
           const std::complex<R>* B, int ldb, const std::complex<R>& beta,
           std::complex<R>* C, int ldc)
@@ -297,16 +340,62 @@ void gemm(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
     if (!C || (product && (!A || !B)))
         throw std::invalid_argument("gemm(real,complex): null matrix pointer");
     if (ta=='C') ta='T';
+}
+template <DdlaBackend Backend, typename R>
+void gemm_run(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
+          const std::complex<R>& alpha, const R* A, int lda,
+          const std::complex<R>* B, int ldb, const std::complex<R>& beta,
+          std::complex<R>* C, int ldc, void* backend_work, std::size_t backend_bytes)
+{
+    ta=upper(ta); tb=upper(tb);
+    if (m==0 || n==0) return;
+    const bool product=k!=0 && alpha!=R(0);
+    if (!product && beta==R(1)) return;
+    if (ta=='C') ta='T';
     if constexpr (Backend==DdlaBackend::CPU) {
 #if DDLA_HAS_CPU
-        mixed_cpu(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,product);
+        detail::mixed_gemm_cpu(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,product,backend_work,backend_bytes);
 #endif
     } else {
 #if DDLA_HAS_GPU
-        mixed_gpu(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,product);
+        mixed_gpu(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,product,backend_work,backend_bytes);
 #endif
     }
 }
+} // namespace blas_impl
+template <DdlaBackend Backend, typename R>
+void gemm(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
+          const std::complex<R>& alpha, const R* A, int lda,
+          const std::complex<R>* B, int ldb, const std::complex<R>& beta,
+          std::complex<R>* C, int ldc)
+{
+    blas_impl::gemm_check<Backend,R>(h, ta, tb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
+    std::size_t backend_bytes = 0;
+    if (alpha != R(0)) blas_impl::mixed_gemm_workspace_size<R>(h, m, n, k, false, &backend_bytes);
+    if constexpr (Backend==DdlaBackend::CPU) {
+#if DDLA_HAS_CPU
+        // The caller thread's cached scratch, reused across calls (gemm_mixed_cpu.h).
+        char* const work=detail::mixed_gemm_cpu_cached_workspace(backend_bytes);
+        blas_impl::gemm_run<Backend,R>(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,work,backend_bytes);
+#endif
+    } else {
+        vector<char> work(h, backend_bytes);
+        blas_impl::gemm_run<Backend,R>(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,work.data(),backend_bytes);
+    }
+}
+#define DDLA_MIXED_PHASES(BACKEND,R) \
+    template void blas_impl::gemm_check<BACKEND,R>(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k, const std::complex<R>& alpha, const R* A, int lda, const std::complex<R>* B, int ldb, const std::complex<R>& beta, std::complex<R>* C, int ldc); \
+    template void blas_impl::gemm_run<BACKEND,R>(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k, const std::complex<R>& alpha, const R* A, int lda, const std::complex<R>* B, int ldb, const std::complex<R>& beta, std::complex<R>* C, int ldc, void* backend_work, std::size_t backend_bytes);
+#if DDLA_HAS_CPU
+DDLA_MIXED_PHASES(DdlaBackend::CPU,float)
+DDLA_MIXED_PHASES(DdlaBackend::CPU,double)
+#endif
+#if DDLA_HAS_GPU
+DDLA_MIXED_PHASES(DdlaBackend::GPU,float)
+DDLA_MIXED_PHASES(DdlaBackend::GPU,double)
+#endif
+#undef DDLA_MIXED_PHASES
+
 
 #define MIXED_INST(B,R) template void gemm<B,R>(const DdlaHandle_t&,char,char,int,int,int, \
     const std::complex<R>&,const R*,int,const std::complex<R>*,int, \
@@ -320,4 +409,100 @@ MIXED_INST(DdlaBackend::GPU,float);
 MIXED_INST(DdlaBackend::GPU,double);
 #endif
 #undef MIXED_INST
+
+namespace blas_impl {
+template <DdlaBackend Backend, typename R>
+void gemm_check(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
+          const std::complex<R>& alpha, const std::complex<R>* A, int lda,
+          const R* B, int ldb, const std::complex<R>& beta,
+          std::complex<R>* C, int ldc)
+{
+    static_assert(std::is_same_v<R,float> || std::is_same_v<R,double>);
+    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU);
+    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU);
+    if (!h) throw std::runtime_error("gemm(complex,real): null handle");
+    if (ddlaGetBackend(h) != Backend)
+        throw std::runtime_error("gemm(complex,real): template backend does not match handle backend");
+    ta=mixed_trans(ta); tb=mixed_trans(tb);
+    if (m<0 || n<0 || k<0 || lda<std::max(1,ta=='N'?m:k) ||
+        ldb<std::max(1,tb=='N'?k:n) || ldc<std::max(1,m))
+        throw std::invalid_argument("gemm(complex,real): invalid dimensions or leading dimension");
+    if (m==0 || n==0) return;
+    const bool product=k!=0 && alpha!=R(0);
+    if (!product && beta==R(1)) return;
+    if (!C || (product && (!A || !B)))
+        throw std::invalid_argument("gemm(complex,real): null matrix pointer");
+    if (tb=='C') tb='T';
+}
+template <DdlaBackend Backend, typename R>
+void gemm_run(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
+          const std::complex<R>& alpha, const std::complex<R>* A, int lda,
+          const R* B, int ldb, const std::complex<R>& beta,
+          std::complex<R>* C, int ldc, void* backend_work, std::size_t backend_bytes)
+{
+    ta=upper(ta); tb=upper(tb);
+    if (m==0 || n==0) return;
+    const bool product=k!=0 && alpha!=R(0);
+    if (!product && beta==R(1)) return;
+    if (tb=='C') tb='T';
+    if constexpr (Backend==DdlaBackend::CPU) {
+#if DDLA_HAS_CPU
+        detail::mixed_gemm_cpu(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,product,backend_work,backend_bytes);
+#endif
+    } else {
+#if DDLA_HAS_GPU
+        mixed_gpu_cr(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,product,backend_work,backend_bytes);
+#endif
+    }
+}
+} // namespace blas_impl
+template <DdlaBackend Backend, typename R>
+void gemm(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
+          const std::complex<R>& alpha, const std::complex<R>* A, int lda,
+          const R* B, int ldb, const std::complex<R>& beta,
+          std::complex<R>* C, int ldc)
+{
+    blas_impl::gemm_check<Backend,R>(h, ta, tb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
+    std::size_t backend_bytes = 0;
+    if (alpha != R(0)) blas_impl::mixed_gemm_workspace_size<R>(h, m, n, k, true, &backend_bytes);
+    if constexpr (Backend==DdlaBackend::CPU) {
+#if DDLA_HAS_CPU
+        // The caller thread's cached scratch, reused across calls (gemm_mixed_cpu.h).
+        char* const work=detail::mixed_gemm_cpu_cached_workspace(backend_bytes);
+        blas_impl::gemm_run<Backend,R>(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,work,backend_bytes);
+#endif
+    } else {
+        vector<char> work(h, backend_bytes);
+        blas_impl::gemm_run<Backend,R>(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,work.data(),backend_bytes);
+    }
+}
+#define DDLA_MIXED_PHASES(BACKEND,R) \
+    template void blas_impl::gemm_check<BACKEND,R>(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k, const std::complex<R>& alpha, const std::complex<R>* A, int lda, const R* B, int ldb, const std::complex<R>& beta, std::complex<R>* C, int ldc); \
+    template void blas_impl::gemm_run<BACKEND,R>(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k, const std::complex<R>& alpha, const std::complex<R>* A, int lda, const R* B, int ldb, const std::complex<R>& beta, std::complex<R>* C, int ldc, void* backend_work, std::size_t backend_bytes);
+#if DDLA_HAS_CPU
+DDLA_MIXED_PHASES(DdlaBackend::CPU,float)
+DDLA_MIXED_PHASES(DdlaBackend::CPU,double)
+#endif
+#if DDLA_HAS_GPU
+DDLA_MIXED_PHASES(DdlaBackend::GPU,float)
+DDLA_MIXED_PHASES(DdlaBackend::GPU,double)
+#endif
+#undef DDLA_MIXED_PHASES
+
+
+#define MIXED_CR_INST(B,R) template void gemm<B,R>(const DdlaHandle_t&,char,char,int,int,int, \
+    const std::complex<R>&,const std::complex<R>*,int,const R*,int, \
+    const std::complex<R>&,std::complex<R>*,int)
+#if DDLA_HAS_CPU
+MIXED_CR_INST(DdlaBackend::CPU,float);
+MIXED_CR_INST(DdlaBackend::CPU,double);
+#endif
+#if DDLA_HAS_GPU
+MIXED_CR_INST(DdlaBackend::GPU,float);
+MIXED_CR_INST(DdlaBackend::GPU,double);
+#endif
+#undef MIXED_CR_INST
+
+template void blas_impl::mixed_gemm_workspace_size<float>(const DdlaHandle_t&,int,int,int,bool,std::size_t*);
+template void blas_impl::mixed_gemm_workspace_size<double>(const DdlaHandle_t&,int,int,int,bool,std::size_t*);
 } // namespace ddla
