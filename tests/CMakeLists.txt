@@ -448,3 +448,14 @@ foreach(_test test_api_grid_pherm_complete test_api_grid_phetrd
         target_link_libraries(${_test} PRIVATE ${CMAKE_DL_LIBS})
     endif()
 endforeach()
+
+# Matrix-transfer conversion and reusable-workspace regression checks.
+add_test_executable(test_workspace_transfer)
+if(TARGET test_workspace_transfer)
+    target_link_libraries(test_workspace_transfer PRIVATE ${CMAKE_DL_LIBS})
+    if(TARGET workspace_trace)
+        add_dependencies(test_workspace_transfer workspace_trace)
+        set_tests_properties(test_workspace_transfer_mpi PROPERTIES ENVIRONMENT
+            "LD_PRELOAD=$<TARGET_FILE:workspace_trace>;DDLA_WORKSPACE_TRACE_REQUIRED=1;OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+    endif()
+endif()
