@@ -310,22 +310,30 @@ void gemm_check(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
           const std::complex<R>* B, int ldb, const std::complex<R>& beta,
           std::complex<R>* C, int ldc);
 template <DdlaBackend Backend, typename R>
-void gemm_run(const DdlaHandle_t& h, Workspace workspace, const detail::MixedGemmWorkspaceSize& query, char ta, char tb, int m, int n, int k,
+void gemm_run(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
           const std::complex<R>& alpha, const R* A, int lda,
           const std::complex<R>* B, int ldb, const std::complex<R>& beta,
-          std::complex<R>* C, int ldc);
+          std::complex<R>* C, int ldc, void* backend_work, std::size_t backend_bytes);
 template <DdlaBackend Backend, typename R>
 void gemm_check(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
           const std::complex<R>& alpha, const std::complex<R>* A, int lda,
           const R* B, int ldb, const std::complex<R>& beta,
           std::complex<R>* C, int ldc);
 template <DdlaBackend Backend, typename R>
-void gemm_run(const DdlaHandle_t& h, Workspace workspace, const detail::MixedGemmWorkspaceSize& query, char ta, char tb, int m, int n, int k,
+void gemm_run(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
           const std::complex<R>& alpha, const std::complex<R>* A, int lda,
           const R* B, int ldb, const std::complex<R>& beta,
-          std::complex<R>* C, int ldc);
-template <DdlaBackend Backend, typename R>
-detail::MixedGemmWorkspaceSize mixed_gemm_workspace_size(const DdlaHandle_t&,int,int,int,bool,bool);
+          std::complex<R>* C, int ldc, void* backend_work, std::size_t backend_bytes);
+// Backend bytes of an m x n x k mixed product (complex_left: complex op(A) times
+// real op(B)), for either gemm_run above. CPU handles: per-worker slots
+// [ packed operand | real result ] of the tiling for h->host_threads (the run
+// re-derives it, so size and run under the same thread budget); GPU handles:
+// one [ packed operand | real product ] region of a <= 512-column panel, nothing
+// for the fused small real-by-complex kernel. m, n or k <= 0 needs nothing; a
+// caller that runs several shapes on one buffer keeps the largest.
+template <typename R>
+void mixed_gemm_workspace_size(const DdlaHandle_t& h, int m, int n, int k, bool complex_left,
+                               std::size_t* backend_bytes);
 template <DdlaBackend Backend, typename T>
 void symm_check(const DdlaHandle_t& h, char side, char uplo, int m, int n,
     const T& alpha, const T* A, int lda, const T* B, int ldb, const T& beta, T* C, int ldc);

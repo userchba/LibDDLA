@@ -27,10 +27,10 @@ namespace transport_impl {
 
 // Component 1.
 template <DdlaBackend Backend>
-TransportOpts transport_check(const DdlaHandle_t& handle, char sData, char trans,
+void transport_check(const DdlaHandle_t& handle, char sData, char trans,
                               int m, int n, const int* array_descA)
 {
-    return detail::agree_check(handle, "transport_block", [&](detail::Agree&) {
+    detail::agree_check(handle, "transport_block", [&](detail::Agree&) {
         if (handle == nullptr) {
             throw std::runtime_error("transport_block: null handle");
         }
@@ -49,7 +49,6 @@ TransportOpts transport_check(const DdlaHandle_t& handle, char sData, char trans
         if (m < 0 || n < 0)
             throw std::invalid_argument("transport_block: negative panel extent");
         check_desc(array_descA, handle);
-        return TransportOpts{sData, trans};
     });
 }
 
@@ -64,15 +63,15 @@ template <typename T>
 void transport_workspace_size(const DdlaHandle_t& handle, char sData, char trans,
                               int m_max, int n_max, const int* array_descA,
                               std::size_t* backend_bytes, std::size_t* host_bytes,
-                              TargetSources target)
+                              int target_row, int target_col)
 {
     *backend_bytes = *host_bytes = 0;
     int nprows = 0, npcols = 0;
     ddlaGetGridDims(handle, nprows, npcols);
     if (trans == 'N') return;
     // A square grid redistributes only when its target differs from the crossed source.
-    const bool row_moves = nprows != npcols || (target.row >= 0 && target.row != array_descA[DDLA_CSRC_]);
-    const bool col_moves = nprows != npcols || (target.col >= 0 && target.col != array_descA[DDLA_RSRC_]);
+    const bool row_moves = nprows != npcols || (target_row >= 0 && target_row != array_descA[DDLA_CSRC_]);
+    const bool col_moves = nprows != npcols || (target_col >= 0 && target_col != array_descA[DDLA_RSRC_]);
 
     std::size_t send = 0;
     int blocks = 0;
@@ -117,7 +116,7 @@ void transport_run(
     T* block_A,
     void* backend_work, [[maybe_unused]] std::size_t backend_bytes,
     void* host_work, [[maybe_unused]] std::size_t host_bytes,
-    TargetSources target)
+    int target_row, int target_col)
 {
     try {
         if (m == 0 || n == 0) return;
@@ -149,8 +148,8 @@ void transport_run(
         int n_loc = num_loc(ja + n, array_descA[DDLA_NB_], mypcol, array_descA[DDLA_CSRC_], npcols);
         int owner_row = indxg2p(ia, array_descA[DDLA_MB_], array_descA[DDLA_RSRC_], nprows);
         int owner_col = indxg2p(ja, array_descA[DDLA_NB_], array_descA[DDLA_CSRC_], npcols);
-        const int target_row = target.row < 0 ? array_descA[DDLA_CSRC_] : target.row;
-        const int target_col = target.col < 0 ? array_descA[DDLA_RSRC_] : target.col;
+        target_row = target_row < 0 ? array_descA[DDLA_CSRC_] : target_row;
+        target_col = target_col < 0 ? array_descA[DDLA_RSRC_] : target_col;
 
         if (trans == 'N') {
             if (sData == 'R' && n_loc > j_loc) {
@@ -392,17 +391,17 @@ void transport_block(
         const TYPE*, int, int, const int*, TYPE*);                          \
     template void transport_impl::transport_run<BACKEND, TYPE>(             \
         const DdlaHandle_t&, char, char, int, int, const TYPE*, int, int,   \
-        const int*, TYPE*, void*, std::size_t, void*, std::size_t, transport_impl::TargetSources)
+        const int*, TYPE*, void*, std::size_t, void*, std::size_t, int, int)
 
 #define INSTANTIATE_TRANSPORT_CHECK(BACKEND)                                \
-    template transport_impl::TransportOpts                                  \
+    template void                                  \
     transport_impl::transport_check<BACKEND>(const DdlaHandle_t&,           \
         char, char, int, int, const int*)
 
 #define INSTANTIATE_TRANSPORT_SIZE(TYPE)                                    \
     template void transport_impl::transport_workspace_size<TYPE>(           \
         const DdlaHandle_t&, char, char, int, int, const int*,              \
-        std::size_t*, std::size_t*, transport_impl::TargetSources)
+        std::size_t*, std::size_t*, int, int)
 
 #if DDLA_HAS_CPU
 INSTANTIATE_TRANSPORT_CHECK(DdlaBackend::CPU);

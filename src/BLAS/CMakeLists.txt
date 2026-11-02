@@ -49,3 +49,10 @@ if(DDLA_USE_HIP)
     set_source_files_properties(trtrm.cpp gemm_mixed.cpp gemm_vbatched.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES LANGUAGE HIP)
 endif()
+
+# The mixed-domain CPU path must retain host OpenMP/SIMD in dual builds.
+if(DDLA_USE_CPU)
+    target_sources(ddla_lib PRIVATE gemm_mixed_cpu.cpp)
+    set_source_files_properties(gemm_mixed_cpu.cpp TARGET_DIRECTORY ddla_lib
+        PROPERTIES COMPILE_OPTIONS "${_ddla_cpu_kernel_opts}")
+endif()

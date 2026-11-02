@@ -16,6 +16,8 @@
 #include <hipblas/hipblas.h>
 #include <hipsolver/hipsolver.h>
 #include <hiprand/hiprand.h>
+// This vendor cache workaround has no HIP counterpart.
+#define DDLA_GPUBLAS_HAS_HEURISTICS_CACHE 0
 
 namespace ddla {
 
@@ -188,6 +190,7 @@ constexpr auto gpucclSum = ncclSum;
 #define gpublasDtrsm hipblasDtrsm
 #define gpublasDznrm2 hipblasDznrm2
 #define gpublasGetPointerMode hipblasGetPointerMode
+#define gpublasGetVersion hipblasGetVersion
 #define gpublasIcamax hipblasIcamax
 #define gpublasIdamax hipblasIdamax
 #define gpublasIsamax hipblasIsamax
@@ -274,6 +277,7 @@ constexpr auto gpucclSum = ncclSum;
 // collective communication (NCCL / RCCL)
 #ifdef DDLA_USE_CCL
 #define gpucclAllReduce ncclAllReduce
+#define gpucclAllGather ncclAllGather
 #define gpucclReduce ncclReduce
 #define gpucclBcast ncclBcast
 #define gpucclCommDestroy ncclCommDestroy
@@ -336,5 +340,4 @@ __device__ __forceinline__ T gpuShflDown32(T v, int off)
 #define gpublasZsymm hipblasZsymm
 #define gpublasZsyrk hipblasZsyrk
 #define gpublasZsyr2k hipblasZsyr2k
-
 #endif // DDLA_GPU_HIP_H

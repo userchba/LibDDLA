@@ -7,6 +7,8 @@
 #include <complex>
 #include <cstddef>
 #include <vector>
+#include <array>
+#include <cstring>
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 #include "require_backend.h"
@@ -73,13 +75,6 @@ void scale_update(const DdlaHandle_t& handle, int length_row, int length_col, co
     }
 }
 
-template <typename T>
-struct PivotBroadcast {
-    int max_row = 0;
-    int max_prow = 0;
-    T max_value = T{};
-};
-
 } // namespace
 
 // Size of the in-place method (lu_panel.h): [ temp | peer ], then the pivot search's result slot on a GPU handle.
@@ -126,7 +121,9 @@ void lu_impl::factor_inplace(const DdlaHandle_t& h, int m, int n, int width, T* 
         const int owner_row = indxg2p(row0+k,nb,desc[DDLA_RSRC_],nprows);
         const int i = num_loc(row0+k,nb,myprow,desc[DDLA_RSRC_],nprows);
         const int j = jl >= 0 ? jl+k : 0;
-        PivotBroadcast<T> pivot;
+        int max_row = 0;
+        T max_value{};
+        std::array<unsigned char, sizeof(int) + sizeof(T)> pivot_message{};
         if (jl >= 0) {
             MaxLoc local{-1.0,-1}, global{-1.0,-1};
             T local_value{};
@@ -137,18 +134,22 @@ void lu_impl::factor_inplace(const DdlaHandle_t& h, int m, int n, int width, T* 
                 local.index = indx_l2g_r(desc,h,i+index);
             }
             MPI_CHECK(MPI_Allreduce(&local,&global,1,MPI_DOUBLE_INT,MPI_MAXLOC,h->col_comm));
-            pivot.max_row = global.index;
-            pivot.max_prow = indxg2p(global.index,nb,desc[DDLA_RSRC_],nprows);
-            if (myprow == pivot.max_prow) pivot.max_value = local_value;
-            MPI_CHECK(MPI_Bcast(&pivot.max_value,static_cast<int>(sizeof(T)),MPI_BYTE,pivot.max_prow,h->col_comm));
+            max_row = global.index;
+            const int max_prow = indxg2p(global.index,nb,desc[DDLA_RSRC_],nprows);
+            if (myprow == max_prow) max_value = local_value;
+            MPI_CHECK(MPI_Bcast(&max_value,static_cast<int>(sizeof(T)),MPI_BYTE,max_prow,h->col_comm));
+            std::memcpy(pivot_message.data(), &max_row, sizeof(max_row));
+            std::memcpy(pivot_message.data() + sizeof(max_row), &max_value, sizeof(max_value));
         }
-        MPI_CHECK(MPI_Bcast(&pivot,static_cast<int>(sizeof(pivot)),MPI_BYTE,owner_col,h->row_comm));
-        if (myprow == owner_row) ipiv[i] = pivot.max_row+1;
+        MPI_CHECK(MPI_Bcast(pivot_message.data(),static_cast<int>(pivot_message.size()),MPI_BYTE,owner_col,h->row_comm));
+        std::memcpy(&max_row, pivot_message.data(), sizeof(max_row));
+        std::memcpy(&max_value, pivot_message.data() + sizeof(max_row), sizeof(max_value));
+        if (myprow == owner_row) ipiv[i] = max_row+1;
         if (swap_count > 0)
             detail::swap_rows<Backend,T>(h, A, desc, row0+k, swap_begin,
-                                         A, desc, pivot.max_row, swap_begin,
+                                         A, desc, max_row, swap_begin,
                                          swap_count, temp, peer);
-        if (std::abs(pivot.max_value) == 0.0) { info=k+1; break; }
+        if (std::abs(max_value) == 0.0) { info=k+1; break; }
         if (jl >= 0) {
             const int columns = width-k-1;
             if (myprow == owner_row && columns > 0)
@@ -158,7 +159,7 @@ void lu_impl::factor_inplace(const DdlaHandle_t& h, int m, int n, int width, T* 
             const int row_after = myprow == owner_row ? i+1 : i;
             if (row_after < row_end) {
                 T* column = A+row_after+std::size_t(j)*ld;
-                scale_update<Backend,T>(h,row_end-row_after,columns,T(1.0)/pivot.max_value,
+                scale_update<Backend,T>(h,row_end-row_after,columns,T(1.0)/max_value,
                     column,temp,columns > 0 ? column+ld : column,ld);
             }
         }

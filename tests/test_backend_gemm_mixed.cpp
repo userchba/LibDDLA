@@ -85,6 +85,57 @@ int one(DdlaHandle_t h,char ta,char tb,int m,int n,int k,
     if (failures) std::cerr<<"case failed "<<int(BE)<<" "<<sizeof(R)<<" "<<ta<<tb<<" "<<m<<","<<n<<","<<k<<" alpha="<<alpha<<" beta="<<beta<<" count="<<failures<<"\n";
     return failures?1:0;
 }
+
+template <DdlaBackend BE,typename R>
+int one_cr(DdlaHandle_t h,char ta,char tb,int m,int n,int k,
+           std::complex<R> alpha,std::complex<R> beta,bool poison=false)
+{
+    using Z=std::complex<R>;
+    const bool an=ta=='N'||ta=='n', bn=tb=='N'||tb=='n', ac=ta=='C'||ta=='c';
+    const int lda=std::max(1,an?m:k)+3, ldb=std::max(1,bn?k:n)+5, ldc=std::max(1,m)+7;
+    constexpr int guard=3;
+    const Z sentinel(271,-193);
+    const R rsent(197);
+    std::vector<Z> a(2*guard+std::size_t(lda)*std::max(1,an?k:m),sentinel);
+    std::vector<R> b(2*guard+std::size_t(ldb)*std::max(1,bn?n:k),rsent);
+    std::vector<Z> c(2*guard+std::size_t(ldc)*std::max(1,n),sentinel);
+    for (int j=0;j<(an?k:m);++j) for (int i=0;i<(an?m:k);++i)
+        a[guard+i+std::size_t(j)*lda]=Z(value<R>(i+std::size_t(j)*lda,1),value<R>(i+std::size_t(j)*lda,6));
+    for (int j=0;j<(bn?n:k);++j) for (int i=0;i<(bn?k:n);++i)
+        b[guard+i+std::size_t(j)*ldb]=value<R>(i+std::size_t(j)*ldb,2);
+    for (int j=0;j<n;++j) for (int i=0;i<m;++i)
+        c[guard+i+std::size_t(j)*ldc]=poison?Z(std::numeric_limits<R>::quiet_NaN(),0):Z(value<R>(i+j*ldc,4),value<R>(i+j*ldc,5));
+    Buffer<Z> da(h,a),dc(h,c); Buffer<R> db(h,b);
+    const bool product=k>0 && alpha!=R(0);
+    const Z* ap=product?da.p+guard:nullptr;
+    const R* bp=product?db.p+guard:nullptr;
+    gemm<BE,R>(h,ta,tb,m,n,k,alpha,ap,lda,bp,ldb,beta,dc.p+guard,ldc);
+    const auto out=dc.read(c.size());
+    int failures=0;
+    for (std::size_t p=0;p<c.size();++p) {
+        const bool active=p>=guard && p<std::size_t(guard)+std::size_t(ldc)*n && (p-guard)%ldc<std::size_t(m);
+        if (!active) { if (out[p]!=c[p]) ++failures; continue; }
+        const int i=(p-guard)%ldc,j=(p-guard)/ldc;
+        std::complex<long double> sum=0;
+        long double scale=0;
+        if (product) for (int l=0;l<k;++l) {
+            auto av=wide(a[guard+(an?i+std::size_t(l)*lda:l+std::size_t(i)*lda)]);
+            if (ac) av=std::conj(av);
+            const long double bv=b[guard+(bn?l+std::size_t(j)*ldb:j+std::size_t(l)*ldb)];
+            sum+=av*bv;
+            scale+=std::abs(av)*std::abs(bv);
+        }
+        auto ref=product?wide(alpha)*sum:std::complex<long double>(0);
+        scale*=std::abs(wide(alpha));
+        if (beta!=R(0)) { ref+=wide(beta)*wide(c[p]); scale+=std::abs(wide(beta)*wide(c[p])); }
+        const long double err=std::abs(wide(out[p])-ref);
+        const long double tol=32*std::numeric_limits<R>::epsilon()*std::max(1.L,scale);
+        if (!std::isfinite(err)||err>tol) ++failures;
+    }
+    if (da.read(a.size())!=a || db.read(b.size())!=b) ++failures;
+    if (failures) std::cerr<<"cr case failed "<<int(BE)<<" "<<sizeof(R)<<" "<<ta<<tb<<" "<<m<<","<<n<<","<<k<<" alpha="<<alpha<<" beta="<<beta<<" count="<<failures<<"\n";
+    return failures?1:0;
+}
 template <DdlaBackend BE,typename R> int run_type(DdlaHandle_t h) {
     using Z=std::complex<R>; int fails=0,cases=0;
     const int shapes[][3]={{1,1,1},{7,5,9},{65,35,17},{129,67,33},{257,33,67},{17,513,19},{31,23,257}};
@@ -101,11 +152,38 @@ template <DdlaBackend BE,typename R> int run_type(DdlaHandle_t h) {
         fails+=one<BE,R>(h,'N','N',0,s[1],s[2],Z(1),Z(0));
         fails+=one<BE,R>(h,'N','N',s[0],0,s[2],Z(1),Z(0)); cases+=6;
     }
+    // Complex x real: full flag matrix, tails, and edge semantics.
+    for (char a: {'N','T','C'}) for (char b: {'N','T','C'})
+        for (auto& s:shapes) { fails+=one_cr<BE,R>(h,a,b,s[0],s[1],s[2],Z(.7,-.3),Z(-.2,.4));++cases; }
+    for (auto& s:shapes) {
+        fails+=one_cr<BE,R>(h,'N','N',s[0],s[1],s[2],Z(1),Z(0),true); ++cases;
+        fails+=one_cr<BE,R>(h,'C','C',s[0],s[1],s[2],Z(1),Z(0),true); ++cases;
+        fails+=one_cr<BE,R>(h,'T','N',s[0],s[1],s[2],Z(0),Z(0),true); ++cases;
+        fails+=one_cr<BE,R>(h,'C','N',s[0],s[1],0,Z(1),Z(.2,-.3)); ++cases;
+        fails+=one_cr<BE,R>(h,'N','C',s[0],s[1],0,Z(std::numeric_limits<R>::quiet_NaN(),0),Z(0),true); ++cases;
+        fails+=one_cr<BE,R>(h,'N','N',0,s[1],s[2],Z(1),Z(0)); ++cases;
+        fails+=one_cr<BE,R>(h,'N','N',s[0],0,s[2],Z(1),Z(0)); ++cases;
+        fails+=one_cr<BE,R>(h,'c','n',9,11,5,Z(1),Z(0),true); ++cases;
+    }
+    // Straddle the packed CPU m-slab and GPU column-panel boundaries.
+    fails+=one<BE,R>(h,'N','N',std::is_same_v<R,float>?4105:2065,65,3,Z(.7,-.3),Z(-.2,.4)); ++cases;
+    fails+=one_cr<BE,R>(h,'C','T',17,1025,3,Z(.7,-.3),Z(-.2,.4)); ++cases;
+    if constexpr (BE==DdlaBackend::CPU) {
+        // Cross both output-tile boundaries and multiple reduction panels.
+        fails+=one<BE,R>(h,'T','C',259,263,517,Z(.7,-.3),Z(-.2,.4)); ++cases;
+        fails+=one_cr<BE,R>(h,'C','T',259,263,517,Z(.7,-.3),Z(-.2,.4)); ++cases;
+        fails+=one<BE,R>(h,'N','N',37,521,519,Z(1),Z(0),true); ++cases;
+        fails+=one_cr<BE,R>(h,'N','N',521,37,519,Z(1),Z(0),true); ++cases;
+    }
     if constexpr (BE==default_backend_v) { fails+=one<BE,R>(h,'n','c',9,11,5,Z(1),Z(0),true,true);++cases; }
     // Quick return permits null matrices; invalid metadata is still rejected.
-    gemm<BE,R>(h,'N','N',2,3,0,Z(1),nullptr,2,nullptr,1,Z(1),nullptr,2);
+    gemm<BE,R>(h,'N','N',2,3,0,Z(1),static_cast<const R*>(nullptr),2,
+               static_cast<const Z*>(nullptr),1,Z(1),static_cast<Z*>(nullptr),2);
+    gemm<BE,R>(h,'N','N',2,3,0,Z(1),static_cast<const Z*>(nullptr),2,
+               static_cast<const R*>(nullptr),1,Z(1),static_cast<Z*>(nullptr),2);
     auto reject=[&](DdlaHandle_t handle,char a,char b,int m,int n,int k,int la,int lb,int lc) {
-        try { gemm<BE,R>(handle,a,b,m,n,k,Z(1),nullptr,la,nullptr,lb,Z(0),nullptr,lc); }
+        try { gemm<BE,R>(handle,a,b,m,n,k,Z(1),static_cast<const R*>(nullptr),la,
+                       static_cast<const Z*>(nullptr),lb,Z(0),static_cast<Z*>(nullptr),lc); }
         catch(const std::exception&) { return 0; } return 1;
     };
     fails+=reject(nullptr,'N','N',1,1,1,1,1,1);
@@ -118,10 +196,22 @@ template <DdlaBackend BE,typename R> int run_type(DdlaHandle_t h) {
     fails+=reject(h,'N','N',1,1,2,1,1,1);
     fails+=reject(h,'N','N',2,1,1,2,1,1);
     fails+=reject(h,'N','N',1,1,1,1,1,1);
+    auto reject_cr=[&](DdlaHandle_t handle,char a,char b,int m,int n,int k,int la,int lb,int lc) {
+        try { gemm<BE,R>(handle,a,b,m,n,k,Z(1),static_cast<const Z*>(nullptr),la,
+                       static_cast<const R*>(nullptr),lb,Z(0),static_cast<Z*>(nullptr),lc); }
+        catch(const std::exception&) { return 0; } return 1;
+    };
+    fails+=reject_cr(nullptr,'N','N',1,1,1,1,1,1);
+    fails+=reject_cr(h,'X','N',0,0,0,1,1,1);
+    fails+=reject_cr(h,'N','X',0,0,0,1,1,1);
+    fails+=reject_cr(h,'N','N',-1,1,1,1,1,1);
+    fails+=reject_cr(h,'N','N',2,1,1,1,1,2);
+    fails+=reject_cr(h,'N','N',1,1,2,1,1,1);
 #if DDLA_HAS_CPU && DDLA_HAS_GPU
     constexpr auto other=BE==DdlaBackend::CPU?DdlaBackend::GPU:DdlaBackend::CPU;
     bool rejected=false;
-    try { gemm<other,R>(h,'N','N',0,0,0,Z(1),nullptr,1,nullptr,1,Z(0),nullptr,1); }
+    try { gemm<other,R>(h,'N','N',0,0,0,Z(1),static_cast<const R*>(nullptr),1,
+                       static_cast<const Z*>(nullptr),1,Z(0),static_cast<Z*>(nullptr),1); }
     catch (const std::runtime_error&) { rejected=true; }
     if (!rejected) ++fails;
 #endif

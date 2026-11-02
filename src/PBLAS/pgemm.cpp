@@ -1,16 +1,20 @@
 #include <ddla/ddla.h>
 #include "ddla_desc.h"
 #include <algorithm>
+#include <initializer_list>
 #include <cassert>
 #include <stdexcept>
 #include <string>
 #include "ddla_connector.h"
 #include <ddla/ddla_config.h>
 #include <ddla/ddla_desc.h>
+#include <ddla/ddla_vector.h>
 #include "ddla_stream.h"
 #include <vector>
 #include "transport_block.h"
 #include "pgemm_impl.h"
+#include "check_agree.h"
+#include "plan_util.h"
 
 // CPU-only includes (no GPU vendor headers pulled in by these; safe in any
 // build -- DDLA_HAS_CPU below still gates whether the CPU pgemm/transport
@@ -29,85 +33,155 @@ inline const char* pgemm_backend_name(DdlaBackend backend)
 
 namespace pgemm_impl {
 
-template <DdlaBackend Backend, typename T>
-void ab(
+namespace {
+
+// ---- k-panel blocking: one local gemm per run of consecutive k-blocks ---
+// A local gemm is cheaper per flop when it covers a run of k-blocks instead
+// of a single one: with nb = 128 and a 1024-wide k panel that is 8 panel
+// transports (8 broadcasts) feeding ONE local gemm of k = 1024. The target
+// panel width defaults to DDLA_PGEMM_KPANEL (1024); a value below nb
+// degenerates to the classic one-block-per-gemm pipeline. The transposed
+// transport path has no multi-block gather yet, so any transposed operand
+// stays one block per gemm.
+constexpr int kDefaultPanelWidth = 1024;
+
+int kpanel_width()
+{
+    int panel_width = kDefaultPanelWidth;
+    const char* s = std::getenv("DDLA_PGEMM_KPANEL");
+    if (s != nullptr && *s != '\0') {
+        const int v = std::atoi(s);
+        if (v > 0) panel_width = v;
+    }
+    return panel_width;
+}
+
+// The k block of the SUMMA branch: A's column (or, transposed, row) block.
+int ab_block(char transa, const int* descA)
+{
+    return transa == 'N' ? descA[DDLA_NB_] : descA[DDLA_MB_];
+}
+
+// The k-blocks one local gemm covers.  The transposed transport path
+// (trans != 'N') has no multi-block gather yet -- it would move only the
+// first block of a run and leave the rest of the panel uninitialized -- so
+// those operands stay one block per gemm.
+int ab_blocks_per_gemm(char transa, char transb, int nb, int panel_width)
+{
+    return transa != 'N' || transb != 'N' ? 1 : std::max(1, panel_width / nb);
+}
+
+// The k slices of the SUMMA branch: runs of bpg whole k-blocks, then the
+// partial tail block.  ab_stages counts them, ab_stage(s) is slice s.
+int ab_stages(int k, int nb, int bpg)
+{
+    const int kfull = k / nb;
+    return (kfull + bpg - 1) / bpg + (k % nb > 0 ? 1 : 0);
+}
+
+KStage ab_stage(int s, int k, int nb, int bpg)
+{
+    const int kfull = k / nb;
+    if (s < (kfull + bpg - 1) / bpg) {
+        const int cnt = std::min(bpg, kfull - s * bpg);
+        return KStage{s * bpg * nb, cnt, cnt * nb};
+    }
+    return KStage{kfull * nb, 1, k - kfull * nb};
+}
+
+// Element counts of the SUMMA branch's staging, in carving order: the A panel
+// (TA) and the B panel (TB) of one k slice, and the one-block B tile (TB).
+// The B panel is stored as (kk x n_loc) with ld = kk so one gemm sees the
+// whole run, but transport_block writes a (w x n_loc) tile with ld = w; every
+// block of a multi-block run is staged in the tile and copied into the panel
+// with the panel pitch.  Each is a real allocation (>= 1 element) even at
+// zero local extent.
+void ab_counts(const DdlaHandle_t& h, char transa, char transb, int m, int n, int k,
+               const int* descA, const int* descB, const int* descC, int panel_width,
+               std::size_t (&count)[3])
+{
+    const int nprows = h->nprows_, npcols = h->npcols_, myprow = h->myprow_, mypcol = h->mypcol_;
+    const int nb = ab_block(transa, descA);
+    const std::size_t panel_max = std::size_t(ab_blocks_per_gemm(transa, transb, nb, panel_width)) * nb;
+    const int m_loc_C = num_loc(m, descC[DDLA_MB_], myprow, descC[DDLA_RSRC_], nprows);
+    const int n_loc_C = num_loc(n, descC[DDLA_NB_], mypcol, descC[DDLA_CSRC_], npcols);
+    const int m_loc_A = num_loc((transa == 'N') ? m : k, descA[DDLA_MB_], myprow, descA[DDLA_RSRC_], nprows);
+    const int n_loc_A = num_loc((transa == 'N') ? k : m, descA[DDLA_NB_], mypcol, descA[DDLA_CSRC_], npcols);
+    const int m_loc_B = num_loc((transb == 'N') ? k : n, descB[DDLA_MB_], myprow, descB[DDLA_RSRC_], nprows);
+    const int n_loc_B = num_loc((transb == 'N') ? n : k, descB[DDLA_NB_], mypcol, descB[DDLA_CSRC_], npcols);
+    const std::size_t rows_a = (transa == 'N') ? std::max(m_loc_A, m_loc_C) : std::max(n_loc_A, m_loc_C);
+    const std::size_t cols_b = (transb == 'N') ? std::max(n_loc_B, n_loc_C) : std::max(m_loc_B, n_loc_C);
+    count[0] = std::max(std::size_t(1), rows_a * panel_max);
+    count[1] = std::max(std::size_t(1), panel_max * cols_b);
+    count[2] = std::max(std::size_t(1), std::size_t(nb) * cols_b);
+}
+
+// The (backend, host) bytes of the transport of a transposed operand's panel,
+// gathered through transport_block's transposed path: A as a w x m row panel,
+// B as an n x w column panel.  An untransposed operand stages nothing.
+template <typename TA, typename TB>
+void ab_transport_bytes(const DdlaHandle_t& h, char transa, char transb, int m, int n, int nb,
+                        const int* descA, const int* descB,
+                        std::size_t (&transport_a)[2], std::size_t (&transport_b)[2])
+{
+    transport_a[0] = transport_a[1] = transport_b[0] = transport_b[1] = 0;
+    if (transa != 'N')
+        transport_impl::transport_workspace_size<TA>(h, 'R', transa, nb, m, descA,
+                                                     &transport_a[0], &transport_a[1]);
+    if (transb != 'N')
+        transport_impl::transport_workspace_size<TB>(h, 'C', transb, n, nb, descB,
+                                                     &transport_b[0], &transport_b[1]);
+}
+
+template <DdlaBackend Backend, typename T, typename TA, typename TB>
+void ab_run(
     const DdlaHandle_t& handle, char transa, char transb,
     int m, int n, int k,
     const T& alpha,
-    const T* A, const int* descA,
-    const T* B, const int* descB,
+    const TA* A, const int* descA,
+    const TB* B, const int* descB,
     const T& beta,
-    T* C, const int* descC)
+    T* C, const int* descC, int panel_width,
+    void* backend_work, [[maybe_unused]] std::size_t backend_bytes,
+    void* host_work, [[maybe_unused]] std::size_t host_bytes)
 {
     const DdlaHandle_t h = handle;
     int nprows, npcols, myprow, mypcol;
     ddlaGetGridDims(h, nprows, npcols);
     ddlaGetGridCoords(h, myprow, mypcol);
-    const int nb = transa == 'N' ? descA[DDLA_NB_] : descA[DDLA_MB_];
+    const int nb = ab_block(transa, descA);
     const int m_loc_C = num_loc(m, descC[DDLA_MB_], myprow, descC[DDLA_RSRC_], nprows);
     const int n_loc_C = num_loc(n, descC[DDLA_NB_], mypcol, descC[DDLA_CSRC_], npcols);
     const int lldC = descC[DDLA_LLD_];
-    // Buffer sizing
     const int m_loc_A = num_loc((transa == 'N') ? m : k, descA[DDLA_MB_], myprow, descA[DDLA_RSRC_], nprows);
-    const int n_loc_A = num_loc((transa == 'N') ? k : m, descA[DDLA_NB_], mypcol, descA[DDLA_CSRC_], npcols);
-    const int m_loc_B = num_loc((transb == 'N') ? k : n, descB[DDLA_MB_], myprow, descB[DDLA_RSRC_], nprows);
     const int n_loc_B = num_loc((transb == 'N') ? n : k, descB[DDLA_NB_], mypcol, descB[DDLA_CSRC_], npcols);
+    const int bpg = ab_blocks_per_gemm(transa, transb, nb, panel_width);
+    const int stages = ab_stages(k, nb, bpg);
 
-    // ---- k-panel blocking: one local gemm per run of consecutive k-blocks ---
-    // A local gemm is cheaper per flop when it covers a run of k-blocks instead
-    // of a single one: with nb = 128 and a 1024-wide k panel that is 8 panel
-    // transports (8 broadcasts) feeding ONE local gemm of k = 1024. The target
-    // panel width defaults to DDLA_PGEMM_KPANEL (1024); a value below nb
-    // degenerates to the classic one-block-per-gemm pipeline. The transposed
-    // transport path has no multi-block gather yet, so any transposed operand
-    // stays one block per gemm.
-    constexpr int kDefaultPanelWidth = 1024;
-    const int kfull = k / nb;
-    const int ktail = k - kfull * nb;
-    const int nb_eff = (nb > 0) ? nb : 1;
-    int panel_width = kDefaultPanelWidth;
-    {
-        const char* s = std::getenv("DDLA_PGEMM_KPANEL");
-        if (s != nullptr && *s != '\0') {
-            const int v = std::atoi(s);
-            if (v > 0) panel_width = v;
-        }
+    // The scratch, in the order pgemm_workspace_size counts it.
+    std::size_t count[3], transport_a[2], transport_b[2];
+    ab_counts(h, transa, transb, m, n, k, descA, descB, descC, panel_width, count);
+    ab_transport_bytes<TA, TB>(h, transa, transb, m, n, nb, descA, descB, transport_a, transport_b);
+    char* bw = static_cast<char*>(backend_work);
+    char* hw = static_cast<char*>(host_work);
+    TA* A_temp[2];
+    TB* B_temp[2];
+    for (int i = 0; i < 2; ++i) {
+        A_temp[i] = detail::take<TA>(bw, count[0]);
+        B_temp[i] = detail::take<TB>(bw, count[1]);
     }
-    int blocks_per_gemm = std::max(1, panel_width / nb_eff);
-    // The transposed transport path (trans != 'N') has no multi-block gather
-    // yet -- it would move only the first block of a run and leave the rest of
-    // the panel uninitialized -- so those operands stay one block per gemm.
-    if (transa != 'N' || transb != 'N') blocks_per_gemm = 1;
-
-    struct KStage { int start; int cnt; int kk; };  // [start, start+kk) slice of k
-    std::vector<KStage> stages;
-    stages.reserve(static_cast<std::size_t>(kfull / blocks_per_gemm + 2));
-    for (int b = 0; b < kfull; b += blocks_per_gemm) {
-        const int cnt = std::min(blocks_per_gemm, kfull - b);
-        stages.push_back(KStage{b * nb, cnt, cnt * nb});
-    }
-    if (ktail > 0) stages.push_back(KStage{kfull * nb, 1, ktail});
-    const int panel_max = blocks_per_gemm * nb;  // widest stage (>= nb)
-
-    // The handle selects host/device storage and orders release after queued work.
-    const int buffer_max = 2;
-    vector<T> A_temp[buffer_max] = {vector<T>(h), vector<T>(h)};
-    vector<T> B_temp[buffer_max] = {vector<T>(h), vector<T>(h)};
-    int count_a = ((transa == 'N') ? std::max(m_loc_A, m_loc_C) : std::max(n_loc_A, m_loc_C)) * panel_max;
-    int count_b = panel_max * ((transb == 'N') ? std::max(n_loc_B, n_loc_C) : std::max(m_loc_B, n_loc_C));
-    count_a = std::max(1, count_a);
-    count_b = std::max(1, count_b);
-    // One-block staging tile. The B panel is stored as (kk x n_loc) with
-    // ld = kk so one gemm sees the whole run, but transport_block writes a
-    // (w x n_loc) tile with ld = w; every block is staged here and copied
-    // into the panel with the panel pitch.
-    int count_blk = nb * ((transb == 'N') ? std::max(n_loc_B, n_loc_C) : std::max(m_loc_B, n_loc_C));
-    count_blk = std::max(1, count_blk);  // keep B_blk a real allocation even at zero local extent
-    vector<T> B_blk(h, count_blk);
-    for (int i = 0; i < buffer_max; i++) {
-        A_temp[i].resize(count_a);
-        B_temp[i].resize(count_b);
-    }
+    TB* const B_blk = detail::take<TB>(bw, count[2]);
+    char* const tr_a = detail::take<char>(bw, transport_a[0]);
+    char* const tr_b = detail::take<char>(bw, transport_b[0]);
+    char* const tr_a_host = detail::take<char>(hw, transport_a[1]);
+    char* const tr_b_host = detail::take<char>(hw, transport_b[1]);
+    const std::size_t used = static_cast<std::size_t>(bw - static_cast<char*>(backend_work));
+    assert(used <= backend_bytes);
+    assert(static_cast<std::size_t>(hw - static_cast<char*>(host_work)) <= host_bytes);
+    // The rest is the local gemm's (a mixed product's) scratch.
+    void* const gemm_work = bw;
+    const std::size_t gemm_bytes = backend_bytes - used;
+    constexpr int buffer_max = 2;
 
     // Wait out the in-flight panel transport before the local gemm reads it
     // (GPU only: CPU BLAS is synchronous and every MPI call in
@@ -122,199 +196,306 @@ void ab(
     int temp_buffer = 0;
 
     auto get_data = [&](int s) {
-        if (s < 0 || s >= static_cast<int>(stages.size())) return;
-        const int ks = stages[s].start;
-        const int cnt = stages[s].cnt;
-        const int kk = stages[s].kk;
+        if (s < 0 || s >= stages) return;
+        const KStage stage = ab_stage(s, k, nb, bpg);
+        const int ks = stage.start;
+        const int cnt = stage.cnt;
+        const int kk = stage.kk;
 
         // Gather the stage's blocks one transport_block call each. The A tile
         // (sData 'C', transa 'N') is (rows x w) with ld = rows, so it lands
         // straight in the panel at column offset b * w; the B tile (sData 'R',
         // transb 'N') is (w x cols) with ld = w, which only matches the panel
         // pitch kk when the stage is one block wide -- otherwise it is staged
-        // in B_blk.data() and copied in with the panel pitch. w = nb for every full
+        // in B_blk and copied in with the panel pitch. w = nb for every full
         // block; the tail stage has w = ktail.
         for (int b = 0; b < cnt; ++b) {
             const int g = ks + b * nb;
             const int w = std::min(nb, k - g);
 
             if (transa == 'N') {
-                ddla::transport_block<Backend, T>(handle,
+                transport_impl::transport_run<Backend, TA>(handle,
                     'C', transa,
                     m, w,
                     A, 0, g, descA,
-                    A_temp[temp_buffer].data() + (std::size_t)b * w * m_loc_A);
+                    A_temp[temp_buffer] + (std::size_t)b * w * m_loc_A,
+                    tr_a, transport_a[0], tr_a_host, transport_a[1]);
             } else {
-                ddla::transport_block<Backend, T>(handle,
+                transport_impl::transport_run<Backend, TA>(handle,
                     'R', transa,
                     w, m,
                     A, g, 0, descA,
-                    A_temp[temp_buffer].data());
+                    A_temp[temp_buffer],
+                    tr_a, transport_a[0], tr_a_host, transport_a[1]);
             }
 
             if (transb == 'N') {
                 if (cnt != 1) {  // multi-block: tile ld w != panel ld kk, stage + repack
-                    ddla::transport_block<Backend, T>(handle,
+                    transport_impl::transport_run<Backend, TB>(handle,
                         'R', transb,
                         w, n,
                         B, g, 0, descB,
-                        B_blk.data());
+                        B_blk,
+                        tr_b, transport_b[0], tr_b_host, transport_b[1]);
                     DDLA_CHECK(ddlaMemcpy2D(h,
-                        B_temp[temp_buffer].data() + (std::size_t)b * w, (std::size_t)kk * sizeof(T),
-                        B_blk.data(), (std::size_t)w * sizeof(T),
-                        (std::size_t)w * sizeof(T), (std::size_t)n_loc_B));
+                        B_temp[temp_buffer] + (std::size_t)b * w, (std::size_t)kk * sizeof(TB),
+                        B_blk, (std::size_t)w * sizeof(TB),
+                        (std::size_t)w * sizeof(TB), (std::size_t)n_loc_B));
                 } else {
-                    ddla::transport_block<Backend, T>(handle,
+                    transport_impl::transport_run<Backend, TB>(handle,
                         'R', transb,
                         w, n,
                         B, g, 0, descB,
-                        B_temp[temp_buffer].data());
+                        B_temp[temp_buffer],
+                        tr_b, transport_b[0], tr_b_host, transport_b[1]);
                 }
             } else {
-                ddla::transport_block<Backend, T>(handle,
+                transport_impl::transport_run<Backend, TB>(handle,
                     'C', transb,
                     n, w,
                     B, 0, g, descB,
-                    B_temp[temp_buffer].data());
+                    B_temp[temp_buffer],
+                    tr_b, transport_b[0], tr_b_host, transport_b[1]);
             }
         }
     };
 
     get_data(0);
     bool first_gemm = true;
-    for (std::size_t s = 0; s < stages.size(); ++s) {
-        const int kb = stages[s].kk;
+    for (int s = 0; s < stages; ++s) {
+        const int kb = ab_stage(s, k, nb, bpg).kk;
         sync_panel();
         if (m_loc_C > 0 && n_loc_C > 0) {
             const T gemm_beta = first_gemm ? beta : static_cast<T>(1.0);
-            ddla::gemm<Backend>(
+            local_gemm_run<Backend, T, TA, TB>(
                 h, transa, 'N',
                 m_loc_C, n_loc_C, kb,
                 alpha,
-                A_temp[temp_buffer].data(), transa == 'N' ? static_cast<int>(m_loc_C) : kb,
-                B_temp[temp_buffer].data(), kb,
+                A_temp[temp_buffer], transa == 'N' ? static_cast<int>(m_loc_C) : kb,
+                B_temp[temp_buffer], kb,
                 gemm_beta,
-                C, lldC);
+                C, lldC, gemm_work, gemm_bytes);
             first_gemm = false;
         }
         temp_buffer = (temp_buffer + 1) % buffer_max;
-        get_data(static_cast<int>(s) + 1);
+        get_data(s + 1);
     }
     sync_panel();
-    for (int i = 0; i < buffer_max; i++) {
-        A_temp[i].reset();
-        B_temp[i].reset();
-    }
-    B_blk.reset();
 }
 
-template <DdlaBackend Backend, typename T>
-void run(
-    const DdlaHandle_t& handle, char transa, char transb,
-    int m, int n, int k,
-    const T& alpha,
-    const T* A, const int* descA,
-    const T* B, const int* descB,
-    const T& beta,
-    T* C, const int* descC, Algorithm algorithm)
+} // namespace
+
+// Component 1.
+template <DdlaBackend Backend>
+Algorithm pgemm_check(
+    const DdlaHandle_t& h, char transa, char transb, int m, int n, int k,
+    bool alpha_is_zero, const int* descA, const int* descB, const int* descC,
+    Algorithm algorithm, int& panel_width)
 {
     static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
                   "CPU pgemm is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU pgemm is not available in this LibDDLA build");
 
-    DdlaHandle_t h = handle;
-
-    if (h == nullptr) {
-        throw std::runtime_error("pgemm: null handle");
-    }
-    // Each descriptor is validated against this handle's process grid
-    // (dense block-cyclic type, slot ranges, LLD vs LOCr); a descriptor
-    // built against a different process grid is rejected there.
-    check_desc(descA, handle);
-    check_desc(descB, handle);
-    check_desc(descC, handle);
-    int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
-    ddlaGetGridDims(handle, nprows, npcols);
-    ddlaGetGridCoords(handle, myprow, mypcol);
-
-    const DdlaBackend actual_backend = ddlaGetBackend(h);
-    if (actual_backend != Backend) {
-        throw std::runtime_error(
-            std::string("pgemm: template backend ") + pgemm_backend_name(Backend) +
-            " does not match descriptor handle backend " +
-            pgemm_backend_name(actual_backend));
-    }
-
-    // Shared validation for every algorithm.
-    assert(transa == 'N' || transa == 'T' || transa == 'C');
-    assert(transb == 'N' || transb == 'T' || transb == 'C');
-    assert(m >= 0 && n >= 0 && k >= 0);
-
-    const int opA_m = (transa == 'N') ? descA[DDLA_M_] : descA[DDLA_N_];
-    const int opA_n = (transa == 'N') ? descA[DDLA_N_] : descA[DDLA_M_];
-    const int opB_m = (transb == 'N') ? descB[DDLA_M_] : descB[DDLA_N_];
-    const int opB_n = (transb == 'N') ? descB[DDLA_N_] : descB[DDLA_M_];
-    assert(m <= opA_m);
-    assert(k <= opA_n);
-    assert(k <= opB_m);
-    assert(n <= opB_n);
-    assert(m <= descC[DDLA_M_] && n <= descC[DDLA_N_]);
-    {
-        int mbA, kbA, kbB, nbB, mbC, nbC;
-        mbC = descC[DDLA_MB_];
-        nbC = descC[DDLA_NB_];
-        if (transa == 'N') {
-            mbA = descA[DDLA_MB_];
-            kbA = descA[DDLA_NB_];
-        } else {
-            mbA = descA[DDLA_NB_];
-            kbA = descA[DDLA_MB_];
+    return detail::agree_check(h, "pgemm", [&](detail::Agree& agree) {
+        if (h == nullptr) {
+            throw std::runtime_error("pgemm: null handle");
         }
-        if (transb == 'N') {
-            kbB = descB[DDLA_MB_];
-            nbB = descB[DDLA_NB_];
-        } else {
-            kbB = descB[DDLA_NB_];
-            nbB = descB[DDLA_MB_];
+        // Each descriptor is validated against this handle's process grid
+        // (dense block-cyclic type, slot ranges, LLD vs LOCr); a descriptor
+        // built against a different process grid is rejected there.
+        check_desc(descA, h);
+        check_desc(descB, h);
+        check_desc(descC, h);
+        int nprows = 0, npcols = 0;
+        ddlaGetGridDims(h, nprows, npcols);
+
+        const DdlaBackend actual_backend = ddlaGetBackend(h);
+        if (actual_backend != Backend) {
+            throw std::runtime_error(
+                std::string("pgemm: template backend ") + pgemm_backend_name(Backend) +
+                " does not match descriptor handle backend " +
+                pgemm_backend_name(actual_backend));
         }
-        assert(mbA == mbC);
-        assert(kbA == kbB);
-        assert(nbB == nbC);
-    }
 
-    const int m_loc_C = num_loc(m, descC[DDLA_MB_], myprow, descC[DDLA_RSRC_], nprows);
-    const int n_loc_C = num_loc(n, descC[DDLA_NB_], mypcol, descC[DDLA_CSRC_], npcols);
-    const int lldC = descC[DDLA_LLD_];
+        // Shared validation for every algorithm.
+        if (transa != 'N' && transa != 'T' && transa != 'C')
+            throw std::invalid_argument("pgemm: transa must be 'N', 'T' or 'C'");
+        if (transb != 'N' && transb != 'T' && transb != 'C')
+            throw std::invalid_argument("pgemm: transb must be 'N', 'T' or 'C'");
+        if (m < 0 || n < 0 || k < 0)
+            throw std::invalid_argument("pgemm: negative dimension");
 
-    // ---- Degenerate-size fast paths (F2) -----------------------------------
-    // Empty outputs are untouched. A zero product must not read A or B,
-    // and beta == 0 must not read the previous (possibly uninitialized) C.
-    if (m == 0 || n == 0) {
+        const int opA_m = (transa == 'N') ? descA[DDLA_M_] : descA[DDLA_N_];
+        const int opA_n = (transa == 'N') ? descA[DDLA_N_] : descA[DDLA_M_];
+        const int opB_m = (transb == 'N') ? descB[DDLA_M_] : descB[DDLA_N_];
+        const int opB_n = (transb == 'N') ? descB[DDLA_N_] : descB[DDLA_M_];
+        if (m > opA_m || k > opA_n || k > opB_m || n > opB_n ||
+            m > descC[DDLA_M_] || n > descC[DDLA_N_])
+            throw std::invalid_argument("pgemm: m x n x k exceeds the descriptors");
+        {
+            const int mbC = descC[DDLA_MB_];
+            const int nbC = descC[DDLA_NB_];
+            const int mbA = (transa == 'N') ? descA[DDLA_MB_] : descA[DDLA_NB_];
+            const int kbA = (transa == 'N') ? descA[DDLA_NB_] : descA[DDLA_MB_];
+            const int kbB = (transb == 'N') ? descB[DDLA_MB_] : descB[DDLA_NB_];
+            const int nbB = (transb == 'N') ? descB[DDLA_NB_] : descB[DDLA_MB_];
+            if (mbA != mbC || kbA != kbB || nbB != nbC)
+                throw std::invalid_argument("pgemm: block sizes of A, B and C do not match");
+        }
+
+        panel_width = kDefaultPanelWidth;
+        if (m == 0 || n == 0 || k == 0 || alpha_is_zero) return Algorithm::AB;
+
+        Algorithm chosen = algorithm;
+        if (chosen == Algorithm::Auto)
+            chosen = select(transa, transb, m, n, k, descA, descB, descC, nprows, npcols);
+        if (chosen != Algorithm::AB &&
+            !stationary_aligned(chosen == Algorithm::BC, transa, transb, descA, descB, descC))
+            throw std::invalid_argument("pgemm: stationary branch requires aligned non-transposed panel owners");
+        panel_width = kpanel_width();
+        agree.mode("DDLA_PGEMM_KPANEL", panel_width);
+        return chosen;
+    });
+}
+
+
+// Component 2.  The SUMMA branch (AB): backend [ A panel (TA) | B panel (TB) ]
+// twice (double-buffered) | B tile (TB) | transport of a transposed A | of a
+// transposed B | the local gemm's scratch for the largest of its shapes (a
+// mixed product only) ], host [ transport of a transposed A | of a transposed
+// B ].  The stationary branches: stationary_workspace_size.
+template <typename T, typename TA, typename TB>
+void pgemm_workspace_size(
+    const DdlaHandle_t& h, Algorithm algorithm, int panel_width, bool alpha_is_zero, char transa, char transb,
+    int m, int n, int k, bool beta_is_nonzero,
+    const int* descA, const int* descB, const int* descC,
+    std::size_t* backend_bytes, std::size_t* host_bytes)
+{
+    *backend_bytes = 0;
+    *host_bytes = 0;
+    if (alpha_is_zero || m == 0 || n == 0 || k == 0) return;
+    if (algorithm != Algorithm::AB) {
+        stationary_workspace_size<T, TA, TB>(h, algorithm == Algorithm::BC, transa, transb,
+                                             m, n, k, beta_is_nonzero, descA, descB, descC,
+                                             backend_bytes, host_bytes);
         return;
     }
-    if (k == 0 || alpha == T(0)) {
-        if (m_loc_C > 0 && n_loc_C > 0) {
-            for (int j = 0; j < n_loc_C; ++j) {
-                T* col = C + static_cast<std::size_t>(j) * lldC;
-                if (beta == T(0)) {
-                    DDLA_CHECK(ddlaMemset(h, col, 0, sizeof(T) * m_loc_C));
-                } else if (beta != T(1)) {
-                    ddla::scal<Backend, T>(h, m_loc_C, beta, col, 1);
+
+    const int nb = ab_block(transa, descA);
+    const int bpg = ab_blocks_per_gemm(transa, transb, nb, panel_width);
+    std::size_t count[3], transport_a[2], transport_b[2];
+    ab_counts(h, transa, transb, m, n, k, descA, descB, descC, panel_width, count);
+    ab_transport_bytes<TA, TB>(h, transa, transb, m, n, nb, descA, descB, transport_a, transport_b);
+    // The local gemm runs a full stage, a shorter last run of whole blocks and the tail block.
+    const int m_loc_C = num_loc(m, descC[DDLA_MB_], h->myprow_, descC[DDLA_RSRC_], h->nprows_);
+    const int n_loc_C = num_loc(n, descC[DDLA_NB_], h->mypcol_, descC[DDLA_CSRC_], h->npcols_);
+    const int kfull = k / nb;
+    std::size_t gemm_bytes = 0;
+    for (const int kb : {std::min(bpg, kfull) * nb, (kfull % bpg) * nb, k % nb}) {
+        std::size_t bytes = 0;
+        local_gemm_workspace_size<T, TA, TB>(h, m_loc_C, n_loc_C, kb, &bytes);
+        gemm_bytes = std::max(gemm_bytes, bytes);
+    }
+    *backend_bytes = 2 * (detail::padded_bytes<TA>(count[0]) + detail::padded_bytes<TB>(count[1]))
+                   + detail::padded_bytes<TB>(count[2])
+                   + detail::padded_bytes<char>(transport_a[0]) + detail::padded_bytes<char>(transport_b[0])
+                   + gemm_bytes;
+    *host_bytes = detail::padded_bytes<char>(transport_a[1]) + detail::padded_bytes<char>(transport_b[1]);
+}
+
+// Component 3.
+template <DdlaBackend Backend, typename T, typename TA, typename TB>
+void pgemm_run(
+    const DdlaHandle_t& h, Algorithm algorithm, int panel_width, char transa, char transb,
+    int m, int n, int k, const T& alpha,
+    const TA* A, const int* descA, const TB* B, const int* descB,
+    const T& beta, T* C, const int* descC,
+    void* backend_work, std::size_t backend_bytes,
+    void* host_work, std::size_t host_bytes)
+{
+    try {
+        if (m == 0 || n == 0) {
+            return;
+        }
+        // Empty outputs are untouched. A zero product must not read A or B,
+        // and beta == 0 must not read the previous (possibly uninitialized) C.
+        if (k == 0 || alpha == T(0)) {
+            if (beta == T(1)) return;
+            int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
+            ddlaGetGridDims(h, nprows, npcols);
+            ddlaGetGridCoords(h, myprow, mypcol);
+            const int m_loc_C = num_loc(m, descC[DDLA_MB_], myprow, descC[DDLA_RSRC_], nprows);
+            const int n_loc_C = num_loc(n, descC[DDLA_NB_], mypcol, descC[DDLA_CSRC_], npcols);
+            const int lldC = descC[DDLA_LLD_];
+            if (m_loc_C > 0 && n_loc_C > 0) {
+                for (int j = 0; j < n_loc_C; ++j) {
+                    T* col = C + static_cast<std::size_t>(j) * lldC;
+                    if (beta == T(0)) {
+                        DDLA_CHECK(ddlaMemset(h, col, 0, sizeof(T) * m_loc_C));
+                    } else if (beta != T(1)) {
+                        blas_impl::scal_run<Backend, T>(h, m_loc_C, beta, col, 1);
+                    }
                 }
             }
+            return;
         }
-        return;
-    }
 
-    if (algorithm == Algorithm::Auto)
-        algorithm = select(transa, transb, m, n, k, descA, descB, descC, nprows, npcols);
-    if (algorithm == Algorithm::AB) {
-        ab<Backend>(handle, transa, transb, m, n, k, alpha, A, descA, B, descB, beta, C, descC);
-    } else {
-        stationary<Backend>(handle, algorithm == Algorithm::BC, transa, transb,
-                            m, n, k, alpha, A, descA, B, descB, beta, C, descC);
+        if (algorithm == Algorithm::AB) {
+            ab_run<Backend, T, TA, TB>(h, transa, transb, m, n, k, alpha, A, descA, B, descB, beta, C, descC,
+                                       panel_width, backend_work, backend_bytes, host_work, host_bytes);
+        } else {
+            stationary_run<Backend, T, TA, TB>(h, algorithm == Algorithm::BC, transa, transb,
+                                       m, n, k, alpha, A, descA, B, descB, beta, C, descC,
+                                       backend_work, backend_bytes, host_work, host_bytes);
+        }
+    } catch (...) {
+        // Retire queued host reads before the caller reuses or releases scratch.
+        if (ddlaGetBackend(h) == DdlaBackend::GPU)
+            try { (void)ddlaSynchronize(h); } catch (...) {}
+        throw;
     }
+}
+
+template <DdlaBackend Backend, typename T, typename TA, typename TB>
+void run(
+    const DdlaHandle_t& handle, char transa, char transb,
+    int m, int n, int k,
+    const T& alpha,
+    const TA* A, const int* descA,
+    const TB* B, const int* descB,
+    const T& beta,
+    T* C, const int* descC, Algorithm algorithm)
+{
+    int panel_width = kDefaultPanelWidth;
+    algorithm = pgemm_check<Backend>(handle, transa, transb, m, n, k, alpha == T(0),
+                                    descA, descB, descC, algorithm, panel_width);
+    if (m == 0 || n == 0) return;
+    const bool scale_only = k == 0 || alpha == T(0);
+    if constexpr (!std::is_same_v<T, TA> || !std::is_same_v<T, TB>) {
+        detail::agree_check(handle, "pgemm(mixed)", [&](detail::Agree&) {
+            int pr, pc, r, c;
+            ddlaGetGridDims(handle, pr, pc); ddlaGetGridCoords(handle, r, c);
+            auto owns = [&](int rows, int cols, const int* d) {
+                return num_loc(rows,d[DDLA_MB_],r,d[DDLA_RSRC_],pr)>0 &&
+                       num_loc(cols,d[DDLA_NB_],c,d[DDLA_CSRC_],pc)>0;
+            };
+            if (!(scale_only && beta == T(1)) && owns(m,n,descC) && C==nullptr)
+                throw std::invalid_argument("pgemm(mixed): null local C");
+            if (!scale_only &&
+                ((owns(transa=='N'?m:k,transa=='N'?k:m,descA) && A==nullptr) ||
+                 (owns(transb=='N'?k:n,transb=='N'?n:k,descB) && B==nullptr)))
+                throw std::invalid_argument("pgemm(mixed): null local input");
+        });
+    }
+    std::size_t backend_bytes = 0, host_bytes = 0;
+    pgemm_workspace_size<T, TA, TB>(handle, algorithm, panel_width, alpha == T(0), transa, transb, m, n, k, beta != T(0),
+                                    descA, descB, descC, &backend_bytes, &host_bytes);
+    vector<char> backend_work(handle, backend_bytes);
+    std::vector<char> host_work(host_bytes);
+    pgemm_run<Backend, T, TA, TB>(handle, algorithm, panel_width, transa, transb, m, n, k, alpha,
+                          A, descA, B, descB, beta, C, descC,
+                          backend_work.data(), backend_bytes, host_work.data(), host_bytes);
 }
 
 } // namespace pgemm_impl
@@ -333,6 +514,24 @@ void pgemm(
                             A, descA, B, descB, beta, C, descC, pgemm_impl::Algorithm::Auto);
 }
 
+template <DdlaBackend Backend, typename R>
+void pgemm(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
+           const std::complex<R>& alpha, const R* a, const int* da,
+           const std::complex<R>* b, const int* db, const std::complex<R>& beta,
+           std::complex<R>* c, const int* dc)
+{
+    pgemm_impl::run<Backend>(h,ta,tb,m,n,k,alpha,a,da,b,db,beta,c,dc,pgemm_impl::Algorithm::Auto);
+}
+
+template <DdlaBackend Backend, typename R>
+void pgemm(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
+           const std::complex<R>& alpha, const std::complex<R>* a, const int* da,
+           const R* b, const int* db, const std::complex<R>& beta,
+           std::complex<R>* c, const int* dc)
+{
+    pgemm_impl::run<Backend>(h,ta,tb,m,n,k,alpha,a,da,b,db,beta,c,dc,pgemm_impl::Algorithm::Auto);
+}
+
 // ---------------------------------------------------------------------------
 // Explicit instantiations
 // ---------------------------------------------------------------------------
@@ -345,22 +544,71 @@ void pgemm(
     template void pgemm_impl::run<BACKEND, TYPE>(const DdlaHandle_t&, \
         char, char, int, int, int, \
         const TYPE&, const TYPE*, const int*, const TYPE*, const int*, \
-        const TYPE&, TYPE*, const int*, pgemm_impl::Algorithm)
+        const TYPE&, TYPE*, const int*, pgemm_impl::Algorithm); \
+    template void pgemm_impl::pgemm_run<BACKEND, TYPE>(const DdlaHandle_t&, \
+        pgemm_impl::Algorithm, int, char, char, int, int, int, \
+        const TYPE&, const TYPE*, const int*, const TYPE*, const int*, \
+        const TYPE&, TYPE*, const int*, void*, std::size_t, void*, std::size_t)
+
+#define INSTANTIATE_PGEMM_CHECK(BACKEND) \
+    template pgemm_impl::Algorithm pgemm_impl::pgemm_check<BACKEND>(const DdlaHandle_t&, \
+        char, char, int, int, int, bool, const int*, const int*, const int*, pgemm_impl::Algorithm, int&)
+
+#define INSTANTIATE_PGEMM_SIZE(TYPE, TA, TB) \
+    template void pgemm_impl::pgemm_workspace_size<TYPE, TA, TB>(const DdlaHandle_t&, \
+        pgemm_impl::Algorithm, int, bool, char, char, int, int, int, bool, \
+        const int*, const int*, const int*, std::size_t*, std::size_t*)
+
+// Mixed-domain instantiations retain real input storage and complex output.
+#define INSTANTIATE_PGEMM_MIXED(BACKEND, R, TA, TB) \
+    template void pgemm<BACKEND, R>(const DdlaHandle_t&, char, char, int, int, int, \
+        const std::complex<R>&, const TA*, const int*, const TB*, const int*, \
+        const std::complex<R>&, std::complex<R>*, const int*); \
+    template void pgemm_impl::run<BACKEND, std::complex<R>, TA, TB>(const DdlaHandle_t&, \
+        char, char, int, int, int, const std::complex<R>&, const TA*, const int*, const TB*, const int*, \
+        const std::complex<R>&, std::complex<R>*, const int*, pgemm_impl::Algorithm); \
+    template void pgemm_impl::pgemm_run<BACKEND, std::complex<R>, TA, TB>(const DdlaHandle_t&, \
+        pgemm_impl::Algorithm, int, char, char, int, int, int, \
+        const std::complex<R>&, const TA*, const int*, const TB*, const int*, \
+        const std::complex<R>&, std::complex<R>*, const int*, void*, std::size_t, void*, std::size_t)
+
+#define INSTANTIATE_PGEMM_MIXED_BACKEND(BACKEND) \
+    INSTANTIATE_PGEMM_MIXED(BACKEND, float, float, std::complex<float>); \
+    INSTANTIATE_PGEMM_MIXED(BACKEND, float, std::complex<float>, float); \
+    INSTANTIATE_PGEMM_MIXED(BACKEND, double, double, std::complex<double>); \
+    INSTANTIATE_PGEMM_MIXED(BACKEND, double, std::complex<double>, double)
 
 #if DDLA_HAS_CPU
+INSTANTIATE_PGEMM_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PGEMM(DdlaBackend::CPU, float);
 INSTANTIATE_PGEMM(DdlaBackend::CPU, double);
 INSTANTIATE_PGEMM(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PGEMM(DdlaBackend::CPU, std::complex<double>);
+INSTANTIATE_PGEMM_MIXED_BACKEND(DdlaBackend::CPU);
 #endif
 
 #if DDLA_HAS_GPU
+INSTANTIATE_PGEMM_CHECK(DdlaBackend::GPU);
 INSTANTIATE_PGEMM(DdlaBackend::GPU, float);
 INSTANTIATE_PGEMM(DdlaBackend::GPU, double);
 INSTANTIATE_PGEMM(DdlaBackend::GPU, std::complex<float>);
 INSTANTIATE_PGEMM(DdlaBackend::GPU, std::complex<double>);
+INSTANTIATE_PGEMM_MIXED_BACKEND(DdlaBackend::GPU);
 #endif
 
+INSTANTIATE_PGEMM_SIZE(float, float, float);
+INSTANTIATE_PGEMM_SIZE(double, double, double);
+INSTANTIATE_PGEMM_SIZE(std::complex<float>, std::complex<float>, std::complex<float>);
+INSTANTIATE_PGEMM_SIZE(std::complex<double>, std::complex<double>, std::complex<double>);
+INSTANTIATE_PGEMM_SIZE(std::complex<float>, float, std::complex<float>);
+INSTANTIATE_PGEMM_SIZE(std::complex<float>, std::complex<float>, float);
+INSTANTIATE_PGEMM_SIZE(std::complex<double>, double, std::complex<double>);
+INSTANTIATE_PGEMM_SIZE(std::complex<double>, std::complex<double>, double);
+
+#undef INSTANTIATE_PGEMM_MIXED_BACKEND
+#undef INSTANTIATE_PGEMM_MIXED
+#undef INSTANTIATE_PGEMM_SIZE
+#undef INSTANTIATE_PGEMM_CHECK
 #undef INSTANTIATE_PGEMM
 
 } // namespace ddla

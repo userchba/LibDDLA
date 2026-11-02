@@ -64,7 +64,7 @@
 // reflector range.  Its gather/scatter stays on the owner column's communicator;
 // a wider panel on a 1x1 grid is obtained by passing a larger descriptor nb.
 // The panel implementations live in pgeqr2_panel.cpp and the BLAS-3 trailing
-// update in qr_larfb.cpp; both use QrCtx / QrWorkspace from pgeqrf_impl.h.
+// shared update in punmtr.cpp; both use matrix arguments and QrWorkspace from pgeqrf_impl.h.
 //
 // QL: A(0:m, ja:ja+n) = Q L, LAPACK ?GEQLF storage: the reflector of block column jj
 // has its unit entry at row m - n + jj, V above it, L lower triangular in the bottom
@@ -83,6 +83,7 @@
 #include "comm_traits.h"
 #include "ddla_desc.h"
 #include "pgeqrf_impl.h"
+#include "punmtr_impl.h"
 #if DDLA_HAS_GPU
 #include "pgeqrf_kernels.h"
 #endif
@@ -186,17 +187,17 @@ inline std::size_t qr_slot_elems(const QrPlan& p)
 // window when the gathered panel runs on more than one process row.  A single process row
 // factors A in place (QR and QL alike, no gathered window); the in-place panel gathers
 // nothing.
-inline std::size_t qr_window_elems(const QrPlan& p, const QrBlockOpts& o)
+inline std::size_t qr_window_elems(const QrPlan& p, bool inplace)
 {
-    return !o.inplace && p.nprows > 1
+    return !inplace && p.nprows > 1
         ? static_cast<std::size_t>(std::max(p.m, 1)) * static_cast<std::size_t>(p.nbws) : 0;
 }
 
 // Elements of tau: the block's taus indexed j - ja (tau_by_block), else this rank's local
 // columns up to the last reflector column.
-inline std::size_t qr_tau_elems(const QrPlan& p, const QrBlockOpts& o)
+inline std::size_t qr_tau_elems(const QrPlan& p, bool tau_by_block)
 {
-    return o.tau_by_block
+    return tau_by_block
         ? static_cast<std::size_t>(std::max(1, p.n))
         : static_cast<std::size_t>(std::max(1, num_loc(p.jr_hi, p.nb, p.mypcol, p.csrc, p.npcols)));
 }
@@ -230,7 +231,7 @@ inline std::size_t qr_update_elems(const QrPlan& p)
 // W | Wp.  Host: the gather/scatter peer list (h->nprocs - 1 blocks bound every window), or
 // the in-place panel's record, taus, V^H V and T.
 template <typename T>
-void qr_block_workspace_size(const DdlaHandle_t& handle, const QrPlan& p, const QrBlockOpts& o,
+void qr_block_workspace_size(const DdlaHandle_t& handle, const QrPlan& p, bool bcast_all, bool tau_by_block, bool inplace,
                              T* A, int lld, T* tau,
                              std::size_t* backend_bytes, std::size_t* host_bytes)
 {
@@ -238,17 +239,17 @@ void qr_block_workspace_size(const DdlaHandle_t& handle, const QrPlan& p, const 
     *backend_bytes = *host_bytes = 0;
     if (p.jr_lo == p.jr_hi) return;
     const std::size_t jb = static_cast<std::size_t>(p.nbws);
-    std::size_t bytes = detail::padded_bytes<T>(qr_window_elems(p, o))
-                      + detail::padded_bytes<T>(qr_window_elems(p, o))
+    std::size_t bytes = detail::padded_bytes<T>(qr_window_elems(p, inplace))
+                      + detail::padded_bytes<T>(qr_window_elems(p, inplace))
                       + detail::padded_bytes<T>(qr_slot_elems(p))
-                      + detail::padded_bytes<T>(qr_tau_elems(p, o));
-    if (o.inplace)
+                      + detail::padded_bytes<T>(qr_tau_elems(p, tau_by_block));
+    if (inplace)
         bytes += detail::padded_bytes<T>(jb * jb) + detail::padded_bytes<rt>(qr_record_elems<T>(p))
                + detail::padded_bytes<T>(jb)
                + detail::padded_bytes<T>(jb * jb) + detail::padded_bytes<rt>(qr_record_elems<T>(p))
                + detail::padded_bytes<T>(jb);
     std::size_t shared = 2 * detail::padded_bytes<T>(qr_update_elems(p));
-    if (!o.inplace) {
+    if (!inplace) {
         // The root of a gathered panel: the rank of the owner process column holding the
         // window's anchor row (QR its first row, QL its last); it factors an m_w x jb window
         // with leading dimension m_w (Wg) or, on one process row, lld (A itself).
@@ -265,115 +266,15 @@ void qr_block_workspace_size(const DdlaHandle_t& handle, const QrPlan& p, const 
         });
     }
     *backend_bytes = bytes + shared;
-    if (o.inplace)
+    if (inplace)
         *host_bytes = detail::padded_bytes<rt>(qr_record_elems<T>(p)) + detail::padded_bytes<T>(jb)
                     + detail::padded_bytes<T>(jb * jb) + detail::padded_bytes<T>(jb * jb);
     else
         *host_bytes = detail::padded_bytes<matrix_impl::Block<T>>(static_cast<std::size_t>(handle->nprocs - 1));
 }
 
-template <typename T>
-QrCtx<T> qr_make_ctx(const DdlaHandle_t& handle, T* A, const QrPlan& p, int lld, const int* descA)
-{
-    using rt = typename real_type<T>::type;
-    const char adj = std::is_same<rt, T>::value ? 'T' : 'C';
-    return QrCtx<T>{handle, A, p.mb, p.rsrc, lld, p.nprows, p.myprow, descA, adj};
-}
-
-// ---- the block driver: per-panel steps and the loop ------------------------------
 
 namespace {
-
-// Geometry of one panel on this rank (identical formulas on every rank).
-template <typename T>
-struct QrPanelGeo {
-    int jb;           // panel width
-    int pc, lc0;      // owner process column, local index of the panel's first column
-    int lr0, lrp;     // this rank's first local window row and number of window rows
-    int ldv;          // max(1, lrp)
-    T *V, *T_panel;     // the [V | T] slot of the panel: V (ldv x jb), then T (jb x jb)
-    T* taup;        // the panel's taus inside ws.tau
-    bool trailing;    // the panel has columns to update (QR right of it, QL left of it)
-    bool need_T;      // the panel step builds T
-};
-
-template <typename T>
-QrPanelGeo<T> qr_panel_geo(const QrPlan& p, const QrPanel& q, const QrWorkspace<T>& ws,
-                           const QrBlockOpts& o, T* slot)
-{
-    QrPanelGeo<T> g;
-    g.jb = q.j_hi - q.j_lo;
-    // One block column per panel: the owner process column below is then the owner of
-    // EVERY column of the panel, and its columns are contiguous locally.
-    assert(q.j_lo / p.nb == (q.j_hi - 1) / p.nb);
-    g.pc = indxg2p(q.j_lo, p.nb, p.csrc, p.npcols);
-    g.lc0 = indxg2l(q.j_lo, p.nb, p.npcols);
-    g.lr0 = num_loc(q.g0, p.mb, p.myprow, p.rsrc, p.nprows);
-    g.lrp = num_loc(q.g0 + q.m_w, p.mb, p.myprow, p.rsrc, p.nprows) - g.lr0;
-    g.ldv = std::max(1, g.lrp);
-    g.V = slot;
-    g.T_panel = g.V + static_cast<std::size_t>(g.ldv) * g.jb;
-    g.taup = ws.tau + (o.tau_by_block ? q.j_lo - p.ja : g.lc0);
-    g.trailing = qr_has_trailing(p, q);   // global: all ranks agree
-    // T is consumed by the trailing larfb, by the Row bcast (npcols > 1), by the peers
-    // (they take tau from diag(T), so nprows > 1) and by the stage-1 T^H hook (tout); a
-    // panel where none of these applies (a 1x1 grid's last panel) skips the T build.
-    g.need_T = g.trailing || p.nprows > 1 || p.npcols > 1 || ws.tout != nullptr;
-    return g;
-}
-
-// Step 1, the PANEL (the GEQR2 + LARFT part): the gathered panel (gather, factor on the root,
-// scatter) or, with `inplace`, the in-place column algorithm; leaves V, T and tau on every rank
-// of the owner process column.
-template <DdlaBackend Backend, typename T>
-void qr_block_factor(const QrCtx<T>& ctx, QrWorkspace<T>& ws, const QrPlan& p,
-                     const QrPanel& q, const QrPanelGeo<T>& g, bool inplace)
-{
-    if (inplace)
-        qr_panel_distributed<Backend, T>(ctx, ws, p.uplo, q.g0, q.m_w, g.jb, g.lc0, g.lr0, g.lrp,
-                                         g.ldv, g.V, g.T_panel, g.taup, g.need_T);
-    else
-        qr_panel_gathered<Backend, T>(ctx, ws, p.uplo, q.g0, q.m_w, g.jb, q.j_lo, g.lc0, g.lr0, g.lrp,
-                                      g.ldv, g.V, g.T_panel, g.taup, g.need_T);
-}
-
-// Step 2, SHARE the panel: Row-broadcast [V | T] from the owner process column when
-// another process column has columns to update (or bcast_all), plus the phe2hb hooks
-// (V copied out into vmr, T^H stored into the caller's T slot ws.tout).
-template <DdlaBackend Backend, typename T>
-void qr_block_share(const QrCtx<T>& ctx, const QrWorkspace<T>& ws, const QrPlan& p, const QrPanel& q,
-                    const QrPanelGeo<T>& g, const QrBlockOpts& o, T* vmr, int ld_vmr)
-{
-    const DdlaHandle_t& handle = ctx.handle;
-    const bool bc = p.npcols > 1 && (g.trailing || o.bcast_all);
-    if (bc) {
-        // V and T travel together (contiguous in the slot); the count is
-        // uniform on every rank of the row communicator (same myprow).
-        commBcast<Backend>(handle, CommScope::Row, g.V,
-                           static_cast<std::size_t>(g.ldv) * g.jb
-                             + static_cast<std::size_t>(g.jb) * g.jb, g.pc);
-    }
-    if (ws.tout != nullptr) {
-        DDLA_CHECK(ddlaMemset(handle, ws.tout, 0,
-                              static_cast<std::size_t>(ws.ld_tout) * ws.ld_tout * sizeof(T)));
-        if constexpr (Backend == DdlaBackend::CPU) {
-            geam<Backend, T>(handle, 'C', 'N', g.jb, g.jb,
-                             T(1), g.T_panel, g.jb, T(0), nullptr, g.jb,
-                             ws.tout, ws.ld_tout);
-        } else {
-#if DDLA_HAS_GPU
-            // Vendor GEAM changes signed zeros/nonfinite complex components;
-            // T^H is an exact copy, so retain the existing GPU primitive.
-            detail::qr_adjoint_T<T>(handle, ws.tout, ws.ld_tout, g.T_panel, g.jb);
-#endif
-        }
-    }
-    if (vmr != nullptr && g.lrp > 0 && g.jb > 0)
-        DDLA_CHECK(ddlaMemcpy2D(handle, vmr + static_cast<std::size_t>(q.j_lo - p.ja) * ld_vmr,
-                                static_cast<std::size_t>(ld_vmr) * sizeof(T), g.V,
-                                static_cast<std::size_t>(g.ldv) * sizeof(T),
-                                static_cast<std::size_t>(g.lrp) * sizeof(T), static_cast<std::size_t>(g.jb)));
-}
 
 // Step 3's column range: this rank's local columns that panel q updates -- QR right
 // of the panel, QL left of it (rows of the panel's window either way).  Returns false
@@ -396,7 +297,7 @@ inline bool qr_block_trailing(const QrPlan& p, const QrPanel& q, int& lct, int& 
 // multi-rank grid the update's Col allreduce must not be split).  The buffers are carved in
 // the order qr_block_workspace_size counts them.
 template <DdlaBackend Backend, typename T>
-T* qr_block_run(const QrCtx<T>& ctx, const QrPlan& p, const QrBlockOpts& o,
+T* qr_block_run(const DdlaHandle_t& handle, T* A, const int* descA, const QrPlan& p, bool bcast_all, bool tau_by_block, bool inplace,
                 T* vmr, int ld_vmr, T* tout, int ld_tout,
                 void* backend_work, std::size_t backend_bytes,
                 void* host_work, std::size_t host_bytes)
@@ -407,11 +308,11 @@ T* qr_block_run(const QrCtx<T>& ctx, const QrPlan& p, const QrBlockOpts& o,
     QrWorkspace<T> ws;
     char* const base = static_cast<char*>(backend_work);
     char* w = base;
-    ws.Wg = detail::take<T>(w, qr_window_elems(p, o));
-    ws.S = detail::take<T>(w, qr_window_elems(p, o));
+    ws.Wg = detail::take<T>(w, qr_window_elems(p, inplace));
+    ws.S = detail::take<T>(w, qr_window_elems(p, inplace));
     T* const VT = detail::take<T>(w, qr_slot_elems(p));
-    ws.tau = detail::take<T>(w, qr_tau_elems(p, o));
-    if (o.inplace) {
+    ws.tau = detail::take<T>(w, qr_tau_elems(p, tau_by_block));
+    if (inplace) {
         ws.VV = detail::take<T>(w, jb * jb);
         ws.rec = detail::take<rt>(w, qr_record_elems<T>(p));
         ws.w = detail::take<T>(w, jb);
@@ -428,13 +329,13 @@ T* qr_block_run(const QrCtx<T>& ctx, const QrPlan& p, const QrBlockOpts& o,
 
     char* const hbase = static_cast<char*>(host_work);
     char* hw = hbase;
-    if (o.inplace) {
+    if (inplace) {
         ws.rec_h = detail::take<rt>(hw, qr_record_elems<T>(p));
         ws.tau_h = detail::take<T>(hw, jb);
         ws.vv_h = detail::take<T>(hw, jb * jb);
         ws.t_h = detail::take<T>(hw, jb * jb);
     } else {
-        ws.blocks = detail::take<matrix_impl::Block<T>>(hw, static_cast<std::size_t>(ctx.handle->nprocs - 1));
+        ws.blocks = detail::take<matrix_impl::Block<T>>(hw, static_cast<std::size_t>(handle->nprocs - 1));
         ws.blocks_bytes = host_bytes;
     }
     assert(static_cast<std::size_t>(hw - hbase) <= host_bytes);
@@ -442,23 +343,73 @@ T* qr_block_run(const QrCtx<T>& ctx, const QrPlan& p, const QrBlockOpts& o,
     ws.ld_tout = ld_tout;
 
     qr_for_each_panel(p, [&](const QrPanel& q) {
-        const QrPanelGeo<T> g = qr_panel_geo(p, q, ws, o, VT);
-        if (p.mypcol == g.pc)
-            qr_block_factor<Backend, T>(ctx, ws, p, q, g, o.inplace);   // 1) panel
-        qr_block_share<Backend, T>(ctx, ws, p, q, g, o, vmr, ld_vmr); // 2) [V | T] along the row
+        const int jb = q.j_hi - q.j_lo;
+        // One block column per panel: the owner process column below is then the owner of
+        // EVERY column of the panel, and its columns are contiguous locally.
+        assert(q.j_lo / p.nb == (q.j_hi - 1) / p.nb);
+        const int pc = indxg2p(q.j_lo, p.nb, p.csrc, p.npcols);
+        const int lc0 = indxg2l(q.j_lo, p.nb, p.npcols);
+        const int lr0 = num_loc(q.g0, p.mb, p.myprow, p.rsrc, p.nprows);
+        const int lrp = num_loc(q.g0 + q.m_w, p.mb, p.myprow, p.rsrc, p.nprows) - lr0;
+        const int ldv = std::max(1, lrp);
+        T* const V = VT;
+        T* const T_panel = V + static_cast<std::size_t>(ldv) * jb;
+        T* const taup = ws.tau + (tau_by_block ? q.j_lo - p.ja : lc0);
+        const bool trailing = qr_has_trailing(p, q);   // global: all ranks agree
+        // T is consumed by the trailing larfb, by the Row bcast (npcols > 1), by the peers
+        // (they take tau from diag(T), so nprows > 1) and by the stage-1 T^H hook (tout); a
+        // panel where none of these applies (a 1x1 grid's last panel) skips the T build.
+        const bool need_T = trailing || p.nprows > 1 || p.npcols > 1 || ws.tout != nullptr;
+        if (p.mypcol == pc) {
+            if (inplace)
+                qr_panel_distributed<Backend, T>(handle, A, descA, ws, p.uplo, q.g0, q.m_w, jb, lc0, lr0, lrp,
+                                                 ldv, V, T_panel, taup, need_T);
+            else
+                qr_panel_gathered<Backend, T>(handle, A, descA, ws, p.uplo, q.g0, q.m_w, jb, q.j_lo, lc0, lr0, lrp,
+                                              ldv, V, T_panel, taup, need_T);
+        }
+        const bool bc = p.npcols > 1 && (trailing || bcast_all);
+        if (bc) {
+            // V and T travel together (contiguous in the slot); the count is
+            // uniform on every rank of the row communicator (same myprow).
+            commBcast<Backend>(handle, CommScope::Row, V,
+                               static_cast<std::size_t>(ldv) * jb
+                                 + static_cast<std::size_t>(jb) * jb, pc);
+        }
+        if (ws.tout != nullptr) {
+            DDLA_CHECK(ddlaMemset(handle, ws.tout, 0,
+                                  static_cast<std::size_t>(ws.ld_tout) * ws.ld_tout * sizeof(T)));
+            if constexpr (Backend == DdlaBackend::CPU) {
+                geam<Backend, T>(handle, 'C', 'N', jb, jb,
+                                 T(1), T_panel, jb, T(0), nullptr, jb,
+                                 ws.tout, ws.ld_tout);
+            } else {
+    #if DDLA_HAS_GPU
+                // Vendor GEAM changes signed zeros/nonfinite complex components;
+                // T^H is an exact copy, so retain the existing GPU primitive.
+                detail::qr_adjoint_T<T>(handle, ws.tout, ws.ld_tout, T_panel, jb);
+    #endif
+            }
+        }
+        if (vmr != nullptr && lrp > 0 && jb > 0)
+            DDLA_CHECK(ddlaMemcpy2D(handle, vmr + static_cast<std::size_t>(q.j_lo - p.ja) * ld_vmr,
+                                    static_cast<std::size_t>(ld_vmr) * sizeof(T), V,
+                                    static_cast<std::size_t>(ldv) * sizeof(T),
+                                    static_cast<std::size_t>(lrp) * sizeof(T), static_cast<std::size_t>(jb)));
         int lct = 0, nct = 0;
-        if (qr_block_trailing(p, q, lct, nct))                          // 3) BLAS-3 update
-            qr_larfb_left_adj<Backend, T>(ctx, ws, g.jb, g.lr0, g.lrp, g.ldv, lct, nct,
-                                          g.V, g.T_panel, p.uplo);
+        if (qr_block_trailing(p, q, lct, nct)) {                        // 3) BLAS-3 update
+            T* block = A;
+            if (lrp > 0) block += static_cast<std::size_t>(lr0) + static_cast<std::size_t>(lct) * descA[DDLA_LLD_];
+
+            detail::punmtr_run<Backend,T>(handle,'L',p.uplo,(std::is_same<T, typename real_type<T>::type>::value ? 'T' : 'C'),lrp,nct,jb,ldv,jb,descA[DDLA_LLD_],jb,('L'=='L'?handle->nprows_:handle->npcols_)>1, V, T_panel, block, ws.W, ws.Wp);
+        }
     });
     return ws.tau;
 }
 
 #define INSTANTIATE_QR_SETUP(TYPE)                                                    \
     template void qr_block_workspace_size<TYPE>(const DdlaHandle_t&, const QrPlan&,   \
-        const QrBlockOpts&, TYPE*, int, TYPE*, std::size_t*, std::size_t*);           \
-    template QrCtx<TYPE> qr_make_ctx<TYPE>(const DdlaHandle_t&, TYPE*,                \
-                                          const QrPlan&, int, const int*)
+        bool, bool, bool, TYPE*, int, TYPE*, std::size_t*, std::size_t*)
 
 INSTANTIATE_QR_SETUP(float);
 INSTANTIATE_QR_SETUP(double);
@@ -468,8 +419,8 @@ INSTANTIATE_QR_SETUP(std::complex<double>);
 #undef INSTANTIATE_QR_SETUP
 
 #define INSTANTIATE_QR_BLOCK(BACKEND, TYPE)                                           \
-    template TYPE* qr_block_run<BACKEND, TYPE>(const QrCtx<TYPE>&, const QrPlan&,     \
-        const QrBlockOpts&, TYPE*, int, TYPE*, int, void*, std::size_t, void*, std::size_t)
+    template TYPE* qr_block_run<BACKEND, TYPE>(const DdlaHandle_t&, TYPE*, const int*, const QrPlan&,     \
+        bool, bool, bool, TYPE*, int, TYPE*, int, void*, std::size_t, void*, std::size_t)
 
 #if DDLA_HAS_CPU
 INSTANTIATE_QR_BLOCK(DdlaBackend::CPU, float);
@@ -498,7 +449,7 @@ namespace qr_impl {
 // Component 1.  Collective: a bad argument on any rank (a null tau on a rank that owns reflector columns, say)
 // makes every rank throw, and DDLA_QR_PANEL -- which selects different collectives -- must agree across ranks.
 template <DdlaBackend Backend>
-PgeqrfOpts pgeqrf_check(const DdlaHandle_t& handle, char uplo, int m, int n, const int* descA, const void* tau)
+bool pgeqrf_check(const DdlaHandle_t& handle, char uplo, int m, int n, const int* descA, const void* tau)
 {
     static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
                   "CPU pgeqrf is not available in this LibDDLA build");
@@ -507,12 +458,11 @@ PgeqrfOpts pgeqrf_check(const DdlaHandle_t& handle, char uplo, int m, int n, con
     return detail::agree_check(handle, "pgeqrf", [&](detail::Agree& agree) {
         if (handle == nullptr)
             throw std::runtime_error("pgeqrf: null handle");
-        PgeqrfOpts o;
-        o.uplo = normalize_uplo(uplo, "pgeqrf");
+        uplo = normalize_uplo(uplo, "pgeqrf");
         if (ddlaGetBackend(handle) != Backend)
             throw std::runtime_error("pgeqrf: template backend does not match handle backend");
         qr_check_args(handle, descA, m, n, /*ja=*/0, "pgeqrf");
-        const QrPlan p = qr_geometry(handle, descA, o.uplo, m, n, /*ja=*/0);
+        const QrPlan p = qr_geometry(handle, descA, uplo, m, n, /*ja=*/0);
         const int k = p.jr_hi - p.jr_lo;   // min(m, n) reflectors
         // Ranks that own no reflector column never write tau, so a caller sizing tau as
         // exactly the owned columns may hand them a null pointer.
@@ -520,14 +470,13 @@ PgeqrfOpts pgeqrf_check(const DdlaHandle_t& handle, char uplo, int m, int n, con
         const int hi = num_loc(p.jr_hi, p.nb, p.mypcol, p.csrc, p.npcols);
         if (k > 0 && tau == nullptr && hi > lo)
             throw std::runtime_error("pgeqrf: null tau array");
-        o.empty = (k == 0);
-        o.inplace = false;
-        if (!o.empty) {
+        bool inplace = false;
+        if (k != 0) {
             // The panel variant (DDLA_QR_PANEL).  Every rank must run the same collectives.
-            o.inplace = qr_panel_inplace_env();
-            agree.mode("DDLA_QR_PANEL", o.inplace ? 1 : 0);
+            inplace = qr_panel_inplace_env();
+            agree.mode("DDLA_QR_PANEL", inplace ? 1 : 0);
         }
-        return o;
+        return inplace;
     });
 }
 
@@ -538,32 +487,28 @@ PgeqrfOpts pgeqrf_check(const DdlaHandle_t& handle, char uplo, int m, int n, con
 // descriptor nb for a wider panel).  The LAPACK / vendor queries of the gathered root are made
 // with A (leading dimension LLD) and tau.
 template <typename T>
-void pgeqrf_workspace_size(const DdlaHandle_t& handle, const PgeqrfOpts& o, int m, int n,
+void pgeqrf_workspace_size(const DdlaHandle_t& handle, char uplo, bool inplace, int m, int n,
                            T* A, const int* descA, T* tau,
                            std::size_t* backend_bytes, std::size_t* host_bytes)
 {
     *backend_bytes = *host_bytes = 0;
-    if (o.empty) return;
-    QrBlockOpts bo;
-    bo.inplace = o.inplace;
-    qr_block_workspace_size<T>(handle, qr_geometry(handle, descA, o.uplo, m, n, /*ja=*/0), bo,
+    if (m == 0 || n == 0) return;
+    qr_block_workspace_size<T>(handle, qr_geometry(handle, descA, uplo, m, n, /*ja=*/0), false, false, inplace,
                                A, descA[DDLA_LLD_], tau, backend_bytes, host_bytes);
 }
 
 // Component 3.
 template <DdlaBackend Backend, typename T>
-void pgeqrf_run(const DdlaHandle_t& handle, const PgeqrfOpts& o, int m, int n,
+void pgeqrf_run(const DdlaHandle_t& handle, char uplo, bool inplace, int m, int n,
                 T* A, const int* descA, T* tau,
                 void* backend_work, std::size_t backend_bytes,
                 void* host_work, std::size_t host_bytes)
 {
     try {
-        if (o.empty) return;
-        const QrPlan p = qr_geometry(handle, descA, o.uplo, m, n, /*ja=*/0);
-        const QrCtx<T> ctx = qr_make_ctx<T>(handle, A, p, descA[DDLA_LLD_], descA);
-        QrBlockOpts bo;
-        bo.inplace = o.inplace;
-        const T* const taus = qr_block_run<Backend, T>(ctx, p, bo, nullptr, 0, nullptr, 0,
+        if (m == 0 || n == 0) return;
+        const QrPlan p = qr_geometry(handle, descA, uplo, m, n, /*ja=*/0);
+
+        const T* const taus = qr_block_run<Backend, T>(handle, A, descA, p, false, false, inplace, nullptr, 0, nullptr, 0,
                                                        backend_work, backend_bytes, host_work, host_bytes);
 
         // Host tau: one copy of the local reflector-column range (local columns [lo, hi) are
@@ -593,13 +538,14 @@ void pgeqrf(
     int& info)
 {
     info = 0;
-    const qr_impl::PgeqrfOpts opts = qr_impl::pgeqrf_check<Backend>(handle, uplo, m, n, descA, tau);
-    if (opts.empty) return;
+    const bool inplace = qr_impl::pgeqrf_check<Backend>(handle, uplo, m, n, descA, tau);
+    if (m == 0 || n == 0) return;
+    uplo = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo)));
     std::size_t backend_bytes = 0, host_bytes = 0;
-    qr_impl::pgeqrf_workspace_size<T>(handle, opts, m, n, A, descA, tau, &backend_bytes, &host_bytes);
+    qr_impl::pgeqrf_workspace_size<T>(handle, uplo, inplace, m, n, A, descA, tau, &backend_bytes, &host_bytes);
     vector<char> backend_work(handle, backend_bytes);
     std::vector<char> host_work(host_bytes);
-    qr_impl::pgeqrf_run<Backend, T>(handle, opts, m, n, A, descA, tau,
+    qr_impl::pgeqrf_run<Backend, T>(handle, uplo, inplace, m, n, A, descA, tau,
                                     backend_work.data(), backend_bytes, host_work.data(), host_bytes);
 }
 
@@ -608,15 +554,15 @@ void pgeqrf(
         const DdlaHandle_t&, char, int, int, TYPE*,           \
         const int*, TYPE*, int&);                                                  \
     template void qr_impl::pgeqrf_run<BACKEND, TYPE>(                              \
-        const DdlaHandle_t&, const qr_impl::PgeqrfOpts&, int, int, TYPE*,          \
+        const DdlaHandle_t&, char, bool, int, int, TYPE*,          \
         const int*, TYPE*, void*, std::size_t, void*, std::size_t)
 #define INSTANTIATE_PGEQRF_SIZE(TYPE)                                              \
     template void qr_impl::pgeqrf_workspace_size<TYPE>(                            \
-        const DdlaHandle_t&, const qr_impl::PgeqrfOpts&, int, int, TYPE*,          \
+        const DdlaHandle_t&, char, bool, int, int, TYPE*,          \
         const int*, TYPE*, std::size_t*, std::size_t*)
 
 #if DDLA_HAS_CPU
-template qr_impl::PgeqrfOpts qr_impl::pgeqrf_check<DdlaBackend::CPU>(
+template bool qr_impl::pgeqrf_check<DdlaBackend::CPU>(
     const DdlaHandle_t&, char, int, int, const int*, const void*);
 INSTANTIATE_PGEQRF(DdlaBackend::CPU, float);
 INSTANTIATE_PGEQRF(DdlaBackend::CPU, double);
@@ -625,7 +571,7 @@ INSTANTIATE_PGEQRF(DdlaBackend::CPU, std::complex<double>);
 #endif
 
 #if DDLA_HAS_GPU
-template qr_impl::PgeqrfOpts qr_impl::pgeqrf_check<DdlaBackend::GPU>(
+template bool qr_impl::pgeqrf_check<DdlaBackend::GPU>(
     const DdlaHandle_t&, char, int, int, const int*, const void*);
 INSTANTIATE_PGEQRF(DdlaBackend::GPU, float);
 INSTANTIATE_PGEQRF(DdlaBackend::GPU, double);

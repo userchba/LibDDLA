@@ -87,7 +87,7 @@ void ptrtrs_workspace_size(const DdlaHandle_t& handle, char side, char trans, in
     // transport's crossed sources.
     transport_impl::transport_workspace_size<T>(handle, side == 'L' ? 'R' : 'C', trans,
         side == 'L' ? nb : order, side == 'L' ? order : nb, array_descA, &transport_bytes, host_bytes,
-        {array_descA[DDLA_RSRC_], array_descA[DDLA_CSRC_]});
+        array_descA[DDLA_RSRC_], array_descA[DDLA_CSRC_]);
     for (const std::size_t c : count) *backend_bytes += detail::padded_bytes<T>(c);
     *backend_bytes += transport_bytes;
 }
@@ -237,7 +237,7 @@ void ptrtrs_run(const DdlaHandle_t& handle,
                     A, g_ia, g_ja, array_descA,
                     block_A,
                     transport_work, transport_bytes, host_work, host_bytes,
-                    {array_descA[DDLA_RSRC_], array_descA[DDLA_CSRC_]}
+                    array_descA[DDLA_RSRC_], array_descA[DDLA_CSRC_]
                 );
                 if(solve_backward){
                     length_block_A = mm_row_start;
@@ -363,7 +363,7 @@ void ptrtrs_run(const DdlaHandle_t& handle,
                     A, g_ia, g_ja, array_descA,
                     block_A,
                     transport_work, transport_bytes, host_work, host_bytes,
-                    {array_descA[DDLA_RSRC_], array_descA[DDLA_CSRC_]}
+                    array_descA[DDLA_RSRC_], array_descA[DDLA_CSRC_]
                 );
                 DDLA_CHECK(ddlaSynchronize(ddla_handle));
                 if(length_block_A > 0 && m_loc_B > 0){

@@ -12,6 +12,12 @@
 #include <cuda_runtime.h>
 #include <cusolverDn.h>
 #include <cublas_v2.h>
+#if CUBLAS_VERSION >= 111103
+#include <cublasLt.h>
+#define DDLA_GPUBLAS_HAS_HEURISTICS_CACHE 1
+#else
+#define DDLA_GPUBLAS_HAS_HEURISTICS_CACHE 0
+#endif
 #include <curand.h>
 #ifdef DDLA_USE_CCL
 #include <nccl.h>
@@ -179,6 +185,11 @@ constexpr auto gpucclSum = ncclSum;
 #define gpublasDtrsm cublasDtrsm
 #define gpublasDznrm2 cublasDznrm2
 #define gpublasGetPointerMode cublasGetPointerMode
+#define gpublasGetVersion cublasGetVersion
+#if DDLA_GPUBLAS_HAS_HEURISTICS_CACHE
+#define gpublasHeuristicsCacheGetCapacity cublasLtHeuristicsCacheGetCapacity
+#define gpublasHeuristicsCacheSetCapacity cublasLtHeuristicsCacheSetCapacity
+#endif
 #define gpublasIcamax cublasIcamax
 #define gpublasIdamax cublasIdamax
 #define gpublasIsamax cublasIsamax
@@ -275,6 +286,7 @@ constexpr auto gpucclSum = ncclSum;
 // collective communication (NCCL / RCCL)
 #ifdef DDLA_USE_CCL
 #define gpucclAllReduce ncclAllReduce
+#define gpucclAllGather ncclAllGather
 #define gpucclReduce ncclReduce
 #define gpucclBcast ncclBcast
 #define gpucclCommDestroy ncclCommDestroy
@@ -332,5 +344,4 @@ __device__ __forceinline__ T gpuShflDown32(T v, int off)
 #define gpublasZsymm cublasZsymm
 #define gpublasZsyrk cublasZsyrk
 #define gpublasZsyr2k cublasZsyr2k
-
 #endif // DDLA_GPU_CUDA_H
