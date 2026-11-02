@@ -1691,6 +1691,34 @@ void gemm(
     const std::complex<R>& beta,
     std::complex<R>* C, int ldc);
 
+/**
+ * @brief Diagonalize a replicated real symmetric tridiagonal matrix collectively.
+ * @tparam T float or double. d, e and w are host vectors on every rank.
+ * @param jobz 'N': eigenvalues only; 'V': eigenvalues and 2D block-cyclic vectors.
+ * @param diag_in Length n diagonal, destroyed on exit.
+ * @param e_in Length max(0,n-1) off-diagonal, destroyed on exit.
+ * @param w Length n eigenvalues in ascending order, replicated on every rank.
+ * @param z Local backend-memory part of the n-by-n eigenvector matrix.
+ * Column j corresponds to w[j]. May be null on ranks without active entries.
+ * @param descZ Descriptor of z. The leading n-by-n region is written; parent
+ * entries and local leading-dimension padding are preserved. Ignored for 'N'.
+ * @param info Zero on success. Invalid arguments or numerical failure throw.
+ * The divide-and-conquer tree distributes contiguous eigenvector rows, then
+ * transfers bounded panels into the output descriptor.
+ * For multiple ranks and n > 1, no full eigenvector or secular-factor
+ * matrix is gathered or replicated.
+ */
+template <typename T>
+void pstedc(
+    const DdlaHandle_t& handle,
+    char jobz, int n,
+    typename real_type<T>::type* diag_in,
+    typename real_type<T>::type* e_in,
+    typename real_type<T>::type* w,
+    typename real_type<T>::type* z, const int* descZ,
+    int& info
+);
+
 } // namespace ddla
 
 #endif // DDLA_H
