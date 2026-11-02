@@ -188,3 +188,12 @@ if(DDLA_USE_HIP)
     set_source_files_properties(Eigensolver/pherm_complete.cpp Eigensolver/one_stage/phetrd.cpp
         Eigensolver/one_stage/punmtr_trd.cpp Eigensolver/pvector_redist.cpp TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE HIP)
 endif()
+
+# Standalone row-distributed tridiagonal divide-and-conquer solver.
+target_sources(ddla_lib PRIVATE Eigensolver/pstedc.cpp Eigensolver/eig_params.cpp)
+if(DDLA_USE_CUDA)
+    set_source_files_properties(Eigensolver/pstedc.cpp TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE CUDA)
+endif()
+if(DDLA_USE_HIP)
+    set_source_files_properties(Eigensolver/pstedc.cpp TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE HIP)
+endif()

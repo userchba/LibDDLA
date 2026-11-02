@@ -556,3 +556,16 @@ major version.
 ## License
 
 LGPL v3.  See [LICENSE](./LICENSE).
+
+`pstedc<T>(handle, 'V', n, d, e, w, z, descZ, info)` returns eigenvectors
+in the descriptor's 2D block-cyclic layout in backend memory. The leading
+`n × n` region contains the eigenvectors in ascending eigenvalue order;
+parent-matrix entries and local leading-dimension padding remain untouched.
+The replicated host vectors `d` and `e` are destroyed, and `w` receives the
+eigenvalues on every rank. `'N'` keeps only the boundary rows needed by its
+eigenvalue-only tree and accepts null `z` and `descZ`.
+
+`pstedc` uses one row-distributed divide-and-conquer implementation. Each
+rank owns contiguous eigenvector rows and all columns throughout the tree;
+secular factors are generated in bounded strips. The descriptor interface
+transfers bounded panels to the requested 2D output after the solve.
