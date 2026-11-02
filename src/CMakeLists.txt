@@ -103,6 +103,7 @@ add_subdirectory(LU)
 add_subdirectory(PBLAS)
 add_subdirectory(QR)
 add_subdirectory(vbatched)
+add_subdirectory(Eigensolver/one_stage)
 
 # ---------------------------------------------------------------------------
 # Per-target compile definitions (moved from directory-global)
@@ -174,19 +175,15 @@ target_sources(ddla_lib PRIVATE
     host_parallel.cpp
     punmtr.cpp
     Eigensolver/pherm_complete.cpp
-    Eigensolver/one_stage/phetrd.cpp
-    Eigensolver/one_stage/punmtr_trd.cpp
     Eigensolver/pvector_redist.cpp
 )
 set_source_files_properties(host_parallel.cpp TARGET_DIRECTORY ddla_lib
     PROPERTIES COMPILE_OPTIONS "${_ddla_cpu_kernel_opts}")
 if(DDLA_USE_CUDA)
-    set_source_files_properties(Eigensolver/pherm_complete.cpp Eigensolver/one_stage/phetrd.cpp
-        Eigensolver/one_stage/punmtr_trd.cpp Eigensolver/pvector_redist.cpp TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE CUDA)
+    set_source_files_properties(Eigensolver/pherm_complete.cpp Eigensolver/pvector_redist.cpp TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE CUDA)
 endif()
 if(DDLA_USE_HIP)
-    set_source_files_properties(Eigensolver/pherm_complete.cpp Eigensolver/one_stage/phetrd.cpp
-        Eigensolver/one_stage/punmtr_trd.cpp Eigensolver/pvector_redist.cpp TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE HIP)
+    set_source_files_properties(Eigensolver/pherm_complete.cpp Eigensolver/pvector_redist.cpp TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE HIP)
 endif()
 
 # Standalone row-distributed tridiagonal divide-and-conquer solver.

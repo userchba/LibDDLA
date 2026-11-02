@@ -476,3 +476,13 @@ if(TARGET benchmark_pstedc_compare)
     find_package(Threads REQUIRED)
     target_link_libraries(benchmark_pstedc_compare PRIVATE Threads::Threads)
 endif()
+
+# Direct Hermitian eigensolver: both storage methods and reusable workspace.
+add_test_executable(test_pheevd_one_stage)
+add_test_executable(test_workspace_one_stage)
+target_link_libraries(test_workspace_one_stage PRIVATE ${CMAKE_DL_LIBS})
+if(TARGET workspace_trace)
+    add_dependencies(test_workspace_one_stage workspace_trace)
+    set_tests_properties(test_workspace_one_stage_mpi PROPERTIES ENVIRONMENT
+        "LD_PRELOAD=$<TARGET_FILE:workspace_trace>;DDLA_WORKSPACE_TRACE_REQUIRED=1;OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+endif()

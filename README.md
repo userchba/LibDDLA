@@ -569,3 +569,19 @@ eigenvalue-only tree and accepts null `z` and `descZ`.
 rank owns contiguous eigenvector rows and all columns throughout the tree;
 secular factors are generated in bounded strips. The descriptor interface
 transfers bounded panels to the requested 2D output after the solve.
+
+The explicit `pheevd_one_stage(handle, jobz, uplo, n, A, descA, w, Z, descZ, info)`
+entry solves real symmetric or complex Hermitian eigenproblems on CPU and GPU
+handles. It combines direct Householder tridiagonalization, row-distributed
+`pstedc`, bounded eigenvector redistribution, and a blocked reflector
+back-transform. `jobz` selects eigenvalues (`N`) or all eigenvectors (`V`);
+`uplo` selects the input triangle. The eigenvalues `w` are replicated host
+values, and `Z` uses the caller's distributed output descriptor. Input blocks
+are square with zero source coordinates; output rows must match the input.
+
+`pheevd_one_stage` uses both triangles as workspace after reading the selected
+input triangle. `pheevd_one_stage_uplo` preserves the unused triangle except
+where it overlaps active eigenvector output. Padding is preserved unless it overlaps active eigenvector output; overlapping
+input/output uses a reflector backup. Internal callers can reuse workspace
+across the reduction, solve, redistribution, and back-transform through check,
+byte-query, and no-check run components.
