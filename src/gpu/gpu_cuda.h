@@ -339,9 +339,15 @@ __device__ __forceinline__ T gpuShflDown32(T v, int off)
 } // namespace ddla
 
 #define gpublasCsymm cublasCsymm
+
 #define gpublasCsyrk cublasCsyrk
+
 #define gpublasCsyr2k cublasCsyr2k
+
 #define gpublasZsymm cublasZsymm
+
 #define gpublasZsyrk cublasZsyrk
+
 #define gpublasZsyr2k cublasZsyr2k
+
 #endif // DDLA_GPU_CUDA_H

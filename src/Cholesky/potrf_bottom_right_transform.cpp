@@ -1,38 +1,17 @@
 #include "ddla_connector.h"
 #include "potrf_bottom_right_transform.h"
 #include "ddla_stream.h"
+#include "helpers.h"
 
 #include <cassert>
 #include <cstddef>
 #include <complex>
-
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
-#include <thrust/complex.h>
-#endif
 
 namespace ddla::detail {
 
 #if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
 
 namespace {
-
-template <typename T>
-struct DeviceScalar {
-    using type = T;
-};
-
-template <>
-struct DeviceScalar<std::complex<float>> {
-    using type = thrust::complex<float>;
-};
-
-template <>
-struct DeviceScalar<std::complex<double>> {
-    using type = thrust::complex<double>;
-};
-
-template <typename T>
-using DeviceScalarT = typename DeviceScalar<T>::type;
 
 template <typename T>
 __global__ void reverse_upper_to_lower_kernel(

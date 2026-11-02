@@ -2141,13 +2141,16 @@ module ddla
       integer(c_int), value :: ldc
     end function ddla_d_syrk
 
-    function ddla_s_trtrm(handle, uplo, n, alpha, a, lda, b, ldb, beta, c, ldc) &
+    function ddla_s_trtrm(handle, uplo_a, transa, uplo_b, transb, n, alpha, a, lda, b, ldb, beta, c, ldc) &
         result(status) bind(C, name="ddla_s_trtrm")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
       integer(c_int) :: status
       type(c_ptr), value :: handle
-      character(kind=c_char), value :: uplo
+      character(kind=c_char), value :: uplo_a
+      character(kind=c_char), value :: transa
+      character(kind=c_char), value :: uplo_b
+      character(kind=c_char), value :: transb
       integer(c_int), value :: n
       real(c_float), intent(in) :: alpha
       type(c_ptr), value :: a
@@ -2159,13 +2162,16 @@ module ddla
       integer(c_int), value :: ldc
     end function ddla_s_trtrm
 
-    function ddla_d_trtrm(handle, uplo, n, alpha, a, lda, b, ldb, beta, c, ldc) &
+    function ddla_d_trtrm(handle, uplo_a, transa, uplo_b, transb, n, alpha, a, lda, b, ldb, beta, c, ldc) &
         result(status) bind(C, name="ddla_d_trtrm")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
       integer(c_int) :: status
       type(c_ptr), value :: handle
-      character(kind=c_char), value :: uplo
+      character(kind=c_char), value :: uplo_a
+      character(kind=c_char), value :: transa
+      character(kind=c_char), value :: uplo_b
+      character(kind=c_char), value :: transb
       integer(c_int), value :: n
       real(c_double), intent(in) :: alpha
       type(c_ptr), value :: a
@@ -2177,13 +2183,16 @@ module ddla
       integer(c_int), value :: ldc
     end function ddla_d_trtrm
 
-    function ddla_c_trtrm(handle, uplo, n, alpha, a, lda, b, ldb, beta, c, ldc) &
+    function ddla_c_trtrm(handle, uplo_a, transa, uplo_b, transb, n, alpha, a, lda, b, ldb, beta, c, ldc) &
         result(status) bind(C, name="ddla_c_trtrm")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
       integer(c_int) :: status
       type(c_ptr), value :: handle
-      character(kind=c_char), value :: uplo
+      character(kind=c_char), value :: uplo_a
+      character(kind=c_char), value :: transa
+      character(kind=c_char), value :: uplo_b
+      character(kind=c_char), value :: transb
       integer(c_int), value :: n
       type(ddla_complex_float), intent(in) :: alpha
       type(c_ptr), value :: a
@@ -2195,13 +2204,16 @@ module ddla
       integer(c_int), value :: ldc
     end function ddla_c_trtrm
 
-    function ddla_z_trtrm(handle, uplo, n, alpha, a, lda, b, ldb, beta, c, ldc) &
+    function ddla_z_trtrm(handle, uplo_a, transa, uplo_b, transb, n, alpha, a, lda, b, ldb, beta, c, ldc) &
         result(status) bind(C, name="ddla_z_trtrm")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
       integer(c_int) :: status
       type(c_ptr), value :: handle
-      character(kind=c_char), value :: uplo
+      character(kind=c_char), value :: uplo_a
+      character(kind=c_char), value :: transa
+      character(kind=c_char), value :: uplo_b
+      character(kind=c_char), value :: transb
       integer(c_int), value :: n
       type(ddla_complex_double), intent(in) :: alpha
       type(c_ptr), value :: a

@@ -1536,46 +1536,46 @@ extern "C" int ddla_d_syrk(void* handle, char uplo, char trans, int n, int k, co
     });
 }
 
-extern "C" int ddla_s_trtrm(void* handle, char uplo, int n, const float* alpha, const void* A, int lda, const void* B, int ldb, const float* beta, void* C, int ldc)
+extern "C" int ddla_s_trtrm(void* handle, char uplo_a, char transa, char uplo_b, char transb, int n, const float* alpha, const void* A, int lda, const void* B, int ldb, const float* beta, void* C, int ldc)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::trtrm<BE::value, float>(hh, uplo, n, *alpha, static_cast<const float*>(A), lda, static_cast<const float*>(B), ldb, *beta, static_cast<float*>(C), ldc);
+        ddla::trtrm<BE::value, float>(hh, uplo_a, transa, uplo_b, transb, n, *alpha, static_cast<const float*>(A), lda, static_cast<const float*>(B), ldb, *beta, static_cast<float*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
-extern "C" int ddla_d_trtrm(void* handle, char uplo, int n, const double* alpha, const void* A, int lda, const void* B, int ldb, const double* beta, void* C, int ldc)
+extern "C" int ddla_d_trtrm(void* handle, char uplo_a, char transa, char uplo_b, char transb, int n, const double* alpha, const void* A, int lda, const void* B, int ldb, const double* beta, void* C, int ldc)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::trtrm<BE::value, double>(hh, uplo, n, *alpha, static_cast<const double*>(A), lda, static_cast<const double*>(B), ldb, *beta, static_cast<double*>(C), ldc);
+        ddla::trtrm<BE::value, double>(hh, uplo_a, transa, uplo_b, transb, n, *alpha, static_cast<const double*>(A), lda, static_cast<const double*>(B), ldb, *beta, static_cast<double*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
-extern "C" int ddla_c_trtrm(void* handle, char uplo, int n, const ddla_c_float_complex* alpha, const void* A, int lda, const void* B, int ldb, const ddla_c_float_complex* beta, void* C, int ldc)
+extern "C" int ddla_c_trtrm(void* handle, char uplo_a, char transa, char uplo_b, char transb, int n, const ddla_c_float_complex* alpha, const void* A, int lda, const void* B, int ldb, const ddla_c_float_complex* beta, void* C, int ldc)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
         const std::complex<float> beta_v(beta->re, beta->im);
-        ddla::trtrm<BE::value, std::complex<float>>(hh, uplo, n, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<const std::complex<float>*>(B), ldb, beta_v, static_cast<std::complex<float>*>(C), ldc);
+        ddla::trtrm<BE::value, std::complex<float>>(hh, uplo_a, transa, uplo_b, transb, n, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<const std::complex<float>*>(B), ldb, beta_v, static_cast<std::complex<float>*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
-extern "C" int ddla_z_trtrm(void* handle, char uplo, int n, const ddla_c_double_complex* alpha, const void* A, int lda, const void* B, int ldb, const ddla_c_double_complex* beta, void* C, int ldc)
+extern "C" int ddla_z_trtrm(void* handle, char uplo_a, char transa, char uplo_b, char transb, int n, const ddla_c_double_complex* alpha, const void* A, int lda, const void* B, int ldb, const ddla_c_double_complex* beta, void* C, int ldc)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
         const std::complex<double> beta_v(beta->re, beta->im);
-        ddla::trtrm<BE::value, std::complex<double>>(hh, uplo, n, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<const std::complex<double>*>(B), ldb, beta_v, static_cast<std::complex<double>*>(C), ldc);
+        ddla::trtrm<BE::value, std::complex<double>>(hh, uplo_a, transa, uplo_b, transb, n, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<const std::complex<double>*>(B), ldb, beta_v, static_cast<std::complex<double>*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }

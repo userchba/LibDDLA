@@ -1,13 +1,13 @@
 #ifndef DDLA_BLAS_IMPL_H
 #define DDLA_BLAS_IMPL_H
 #include <ddla/ddla.h>
-#include "workspace.h"
-#include "gemm_mixed_cpu.h"
 #include "ddla_connector.h"
 #include <cctype>
+#include <complex>
+#include <cstddef>
 namespace ddla { namespace blas_impl {
-// Scratch-free operations expose check/run only. Size queries below belong
-// only to mixed GEMM and TRTRM, whose supported paths require temporary memory.
+// Scratch-free operations expose check/run only. Only mixed GEMM and TRTRM
+// need scratch: a size function (backend bytes) and a run that takes them.
 // These conversions assume the caller has already checked the flags.
 inline char upper(char c) noexcept { return static_cast<char>(std::toupper(static_cast<unsigned char>(c))); }
 inline gpublasOperation_t op(char c) noexcept { c=upper(c); return c=='N' ? GPUBLAS_OP_N : c=='T' ? GPUBLAS_OP_T : GPUBLAS_OP_C; }
@@ -352,26 +352,18 @@ void syr2k_check(const DdlaHandle_t& h, char uplo, char trans, int n, int k,
 template <DdlaBackend Backend, typename T>
 void syr2k_run(const DdlaHandle_t& h, char uplo, char trans, int n, int k,
     const T& alpha, const T* A, int lda, const T* B, int ldb, const T& beta, T* C, int ldc);
-// Start disposable host scratch lifetimes once, outside repeated execution.
-template <typename T> inline void trtrm_prepare_workspace(Workspace work) noexcept
-{ detail::workspace_start_objects(detail::workspace_at<T>(work.host,0,work.host.size()/sizeof(T))); }
-template <DdlaBackend Backend, typename T> WorkspaceSize trtrm_workspace_size(int,const T&);
-template <DdlaBackend Backend, typename T>
-void trtrm_check(const DdlaHandle_t& handle, char uplo, int n, const T& alpha,
-           const T* A, int lda, const T* B, int ldb,
-           const T& beta, T* C, int ldc);
+// Backend bytes of an order-n trtrm: on a CPU handle the product panel
+// (n x min(n, 256) elements of T); a GPU handle needs none. The run below
+// uses the panel only when alpha != 0.
+template <typename T> void trtrm_workspace_size(const DdlaHandle_t& handle, int n, std::size_t* backend_bytes);
 template <DdlaBackend Backend, typename T>
 void trtrm_check(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, char transb,
            int n, const T& alpha, const T* A, int lda, const T* B, int ldb,
            const T& beta, T* C, int ldc);
 template <DdlaBackend Backend, typename T>
-void trtrm_run(const DdlaHandle_t& handle, Workspace workspace, char uplo, int n, const T& alpha,
-           const T* A, int lda, const T* B, int ldb,
-           const T& beta, T* C, int ldc);
-template <DdlaBackend Backend, typename T>
-void trtrm_run(const DdlaHandle_t& handle, Workspace workspace, char uplo_a, char transa, char uplo_b, char transb,
+void trtrm_run(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, char transb,
            int n, const T& alpha, const T* A, int lda, const T* B, int ldb,
-           const T& beta, T* C, int ldc);
+           const T& beta, T* C, int ldc, void* backend_work, std::size_t backend_bytes);
 template <DdlaBackend Backend, typename T>
 void gemm_sym_check(const DdlaHandle_t& h, char symmetry, char uplo, char ta, char tb,
     int n, int k, const T& alpha, const T* a, int lda, const T* b, int ldb,

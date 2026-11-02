@@ -376,7 +376,7 @@ must live in the handle's memory space, and GPU work uses the handle's stream.
 |----------|-------------|
 | `gemm` | `C = α·op(A)·op(B) + β·C`; also has a real-A × complex-B overload with complex C, α and β |
 | `trmm` | Overwrite B with `α·op(A)·B` or `α·B·op(A)` |
-| `trtrm` | `C = α·A·B + β·C` in the selected upper or lower triangle; both inputs use that same triangle |
+| `trtrm` | `C = α·op(A)·op(B) + β·C` with independent triangle and transpose flags for A and B |
 | `symm` / `hemm` | Symmetric / Hermitian matrix multiplication |
 | `syrk` / `syr2k` / `herk` / `her2k` | Symmetric / Hermitian rank-k and rank-2k updates |
 | `gemmBatched` | Fixed-size GEMMs over arrays of pointers; arrays and matrices use the handle's memory space |
@@ -394,11 +394,13 @@ Fortran module and generated Python ctypes signatures use the same in-place
 form; rebuild bindings and update old calls. Distributed `ptrmm` already
 overwrites B and retains its existing signature.
 
-`trtrm(handle, uplo, n, alpha, A, lda, B, ldb, beta, C, ldc)` supports
-`uplo='U'` for upper × upper and `'L'` for lower × lower. Both diagonals are
-explicit; neither operand is transposed or conjugated. The opposite triangle
-of C and leading-dimension padding are preserved. A and B may coincide,
-but C must not overlap either input.
+`trtrm(handle, uplo_a, transa, uplo_b, transb, n, alpha, A, lda, B, ldb, beta, C, ldc)`
+reads the `U` or `L` stored triangle of each operand; `transa` and `transb` select
+`N`, `T` or `C`. Both diagonals are explicit. Matching effective triangles update
+only that triangle of C; mixed effective triangles update all of C. The unused
+triangle of C and leading-dimension padding are preserved. A and B may coincide,
+but C must not overlap either input. The previous single-`uplo` interface is
+replaced by passing `uplo, 'N', uplo, 'N'`.
 
 ### LU factorization, solve, and drivers
 
