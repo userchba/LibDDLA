@@ -4,6 +4,7 @@
 #include "comm_traits.h"
 #include "check_agree.h"
 #include "plan_util.h"
+#include "row_share.h"
 
 #include <algorithm>
 #include <cassert>
@@ -17,6 +18,12 @@
 #include <vector>
 
 namespace ddla::matrix_impl {
+#if DDLA_HAS_GPU
+// GPU implementation detail; callers use convert_rows<B,T> from the header.
+template <typename T>
+void convert_rows_gpu(const DdlaHandle_t& h, const typename real_type<T>::type* src,
+                      int lds, T* dst, int ldd, int rows, int cols, bool transpose);
+#endif
 namespace {
 
 // rows * cols elements, rejecting a size whose byte count overflows size_t.
@@ -33,87 +40,51 @@ std::size_t block_size(const Peer& p)
     return std::size_t(p.rows) * p.cols;
 }
 
-// Who takes part in one transfer. A window inside one block column whose
-// process column holds the root involves only that column (Col scope, where
-// ranks are process rows); any other window involves the whole grid. Either
-// way the participants own the whole window between them.
-struct Transfer {
-    Region g;
-    int root, root_row, root_col;
-    bool column;      // only the root's process column takes part
-    bool active;      // this rank takes part
-    CommScope scope;
-    int rank;         // this rank within scope
-    int peers;        // number of ranks within scope
-    Peer self;        // the part of the window this rank owns
+// A one-block-column transfer involves only the root's process column.
+// Otherwise every rank participates. Origins are zero-based here.
+bool transfer_scope(const DdlaHandle_t& h, int n, int ja, const int* d, int root,
+                    int& root_peer, int& root_col, CommScope& scope, int& rank, int& peers)
+{
+    int root_row;
+    h->rank_to_rc(root, root_row, root_col);
+    const int nb = d[DDLA_NB_];
+    const bool column = (h->npcols_ == 1 || ja / nb == (ja + n - 1) / nb)
+                        && root_col == indxg2p(ja, nb, d[DDLA_CSRC_], h->npcols_);
+    scope = column ? CommScope::Col : CommScope::Grid;
+    rank = column ? h->myprow_ : h->myid;
+    peers = column ? h->nprows_ : h->nprocs;
+    root_peer = column ? root_row : root;
+    return !column || h->mypcol_ == root_col;
+}
 
-    Transfer(const DdlaHandle_t& h, int m, int n, int ia, int ja, const int* d, int target)
-        : g{ia - 1, ja - 1, m, n, d[DDLA_MB_], d[DDLA_NB_], d[DDLA_RSRC_], d[DDLA_CSRC_],
-            h->nprows_, h->npcols_},
-          root(target)
-    {
-        h->rank_to_rc(root, root_row, root_col);
-        const bool one_block_column = g.j / g.nb == (g.j + g.n - 1) / g.nb;
-        column = (g.npcols == 1 || one_block_column)
-                 && root_col == indxg2p(g.j, g.nb, g.csrc, g.npcols);
-        active = !column || h->mypcol_ == root_col;
-        scope = column ? CommScope::Col : CommScope::Grid;
-        rank = column ? h->myprow_ : h->myid;
-        peers = column ? g.nprows : h->nprocs;
-        self = peer(h, rank);
+Peer transfer_peer(const DdlaHandle_t& h, int m, int n, int ia, int ja, const int* d,
+                   CommScope scope, int root_col, int rank)
+{
+    int pr = rank, pc = root_col;
+    if (scope != CommScope::Col) h->rank_to_rc(rank, pr, pc);
+    const int r0 = num_loc(ia, d[DDLA_MB_], pr, d[DDLA_RSRC_], h->nprows_);
+    const int c0 = num_loc(ja, d[DDLA_NB_], pc, d[DDLA_CSRC_], h->npcols_);
+    const int r1 = num_loc(ia + m, d[DDLA_MB_], pr, d[DDLA_RSRC_], h->nprows_);
+    const int c1 = num_loc(ja + n, d[DDLA_NB_], pc, d[DDLA_CSRC_], h->npcols_);
+    return {r0, c0, r1 - r0, c1 - c0, pr, pc};
+}
+
+// The root stores the other participants' blocks back to back in its pack.
+template <typename T>
+int transfer_peer_blocks(const DdlaHandle_t& h, int m, int n, int ia, int ja, const int* d,
+                         CommScope scope, int root_col, int root_peer, int peers,
+                         T* packed, Block<T>* blocks)
+{
+    int count = 0;
+    std::size_t offset = 0;
+    for (int k = 0; k < peers; ++k) {
+        if (k == root_peer) continue;
+        const Peer p = transfer_peer(h, m, n, ia, ja, d, scope, root_col, k);
+        ::new (static_cast<void*>(blocks + count++)) Block<T>{packed ? packed + offset : nullptr, p.rows, p};
+        offset += block_size(p);
     }
-
-    int root_peer() const { return column ? root_row : root; }
-    bool is_root() const { return rank == root_peer(); }
-
-    Peer peer(const DdlaHandle_t& h, int k) const
-    {
-        int pr = k, pc = root_col;
-        if (!column) h->rank_to_rc(k, pr, pc);
-        const int r0 = num_loc(g.i, g.mb, pr, g.rsrc, g.nprows);
-        const int c0 = num_loc(g.j, g.nb, pc, g.csrc, g.npcols);
-        const int r1 = num_loc(g.i + g.m, g.mb, pr, g.rsrc, g.nprows);
-        const int c1 = num_loc(g.j + g.n, g.nb, pc, g.csrc, g.npcols);
-        return {r0, c0, r1 - r0, c1 - c0, pr, pc};
-    }
-
-    // The rank within scope of the process holding p.
-    int rank_of(const DdlaHandle_t& h, const Peer& p) const
-    {
-        return column ? p.prow : h->rc_to_rank(p.prow, p.pcol);
-    }
-
-    // This rank's block inside its local storage A (null data when it owns none).
-    template <typename T>
-    Block<T> own_block(T* A, int ld) const
-    {
-        return {block_size(self) ? A + self.row0 + std::size_t(self.col0) * ld : nullptr, ld, self};
-    }
-
-    // The other participants' blocks, back to back in the root's packing
-    // buffer; returns their number (peers - 1).
-    template <typename T>
-    int peer_blocks(const DdlaHandle_t& h, T* packed, Block<T>* blocks) const
-    {
-        int count = 0;
-        std::size_t offset = 0;
-        for (int k = 0; k < peers; ++k) {
-            if (k == root_peer()) continue;
-            const Peer p = peer(h, k);
-            ::new (static_cast<void*>(blocks + count++)) Block<T>{packed ? packed + offset : nullptr, p.rows, p};
-            offset += block_size(p);
-        }
-        return count;
-    }
-
-    // Packing scratch this rank needs: its own block on a participant, the
-    // rest of the window on the root.
-    std::size_t scratch() const
-    {
-        if (!active) return 0;
-        return is_root() ? std::size_t(g.m) * g.n - block_size(self) : block_size(self);
-    }
-};
+    return count;
+}
 
 // Copies between blocks and their entries of the root's window: scatter copies
 // window -> blocks, gather blocks -> window. Local rows inside one distribution
@@ -123,22 +94,22 @@ struct Transfer {
 // the data it moves, so one kernel maps whole blocks.
 template <DdlaBackend B, typename T>
 void map(const DdlaHandle_t& h, bool scatter, const Block<T>* blocks, int count,
-         const Region& g, T* window, int ldw)
+         const int* d, int ia, int ja, int m, int n, T* window, int ldw)
 {
     if constexpr (B == DdlaBackend::GPU) {
-        map_gpu(h, scatter, blocks, count, g, window, ldw);
+        map_gpu(h, scatter, blocks, count, d, ia, ja, m, n, window, ldw);
     } else {
         for (int k = 0; k < count; ++k) {
             const Block<T>& b = blocks[k];
             if (!b.p.rows || !b.p.cols) continue;
             for (int c = 0; c < b.p.cols; ++c) {
-                const int wc = indxl2g(b.p.col0 + c, g.nb, b.p.pcol, g.csrc, g.npcols) - g.j;
+                const int wc = indxl2g(b.p.col0 + c, d[DDLA_NB_], b.p.pcol, d[DDLA_CSRC_], h->npcols_) - ja;
                 T* const column = b.data + std::size_t(c) * b.ld;
                 T* const wcolumn = window + std::size_t(wc) * ldw;
                 for (int r = 0; r < b.p.rows;) {
                     const int lr = b.p.row0 + r;
-                    const int rows = std::min(b.p.rows - r, g.mb - lr % g.mb);
-                    T* const w = wcolumn + indxl2g(lr, g.mb, b.p.prow, g.rsrc, g.nprows) - g.i;
+                    const int rows = std::min(b.p.rows - r, d[DDLA_MB_] - lr % d[DDLA_MB_]);
+                    T* const w = wcolumn + indxl2g(lr, d[DDLA_MB_], b.p.prow, d[DDLA_RSRC_], h->nprows_) - ia;
                     if (scatter) std::memcpy(column + r, w, rows * sizeof(T));
                     else std::memcpy(w, column + r, rows * sizeof(T));
                     r += rows;
@@ -206,13 +177,20 @@ std::size_t validate(const DdlaHandle_t& h, int m, int n, const T* A, int ia, in
                         throw std::invalid_argument("invalid root buffer or leading dimension");
                     checked_count(ldb, n, sizeof(T));
                 }
-                const Transfer t(h, m, n, ia, ja, d, root);
-                if (t.active && block_size(t.self)) {
-                    checked_count(d[DDLA_LLD_], t.self.col0 + t.self.cols, sizeof(T));
-                    if (!A) throw std::invalid_argument("null local matrix data");
-                    require_device<B>(A, "local matrix data must be device memory");
+                ia--;
+                ja--;
+                int root_peer, root_col, rank, peers;
+                CommScope scope;
+                const bool active = transfer_scope(h, n, ja, d, root, root_peer, root_col, scope, rank, peers);
+                if (active) {
+                    const Peer self = transfer_peer(h, m, n, ia, ja, d, scope, root_col, rank);
+                    if (block_size(self)) {
+                        checked_count(d[DDLA_LLD_], self.col0 + self.cols, sizeof(T));
+                        if (!A) throw std::invalid_argument("null local matrix data");
+                        require_device<B>(A, "local matrix data must be device memory");
+                    }
+                    count = rank == root_peer ? std::size_t(m) * n - block_size(self) : block_size(self);
                 }
-                count = t.scratch();
             }
             return count;
         } catch (const std::exception& e) {
@@ -223,7 +201,7 @@ std::size_t validate(const DdlaHandle_t& h, int m, int n, const T* A, int ia, in
 
 } // namespace
 
-// Component 2: backend bytes of the packing buffer (Transfer::scratch()), host
+// Component 2: backend bytes of the packing buffer (the packing buffers), host
 // bytes of the root's peer list (peers - 1 blocks).  An empty window needs
 // nothing.
 template <typename T>
@@ -233,9 +211,14 @@ void transfer_workspace_size(const DdlaHandle_t& h, int m, int n, int ia, int ja
 {
     *backend_bytes = *host_bytes = 0;
     if (!m || !n) return;
-    const Transfer t(h, m, n, ia, ja, desc, root);
-    *backend_bytes = t.scratch() * sizeof(T);
-    if (t.active && t.is_root()) *host_bytes = std::size_t(t.peers - 1) * sizeof(Block<T>);
+    ia--;
+    ja--;
+    int root_peer, root_col, rank, peers;
+    CommScope scope;
+    if (!transfer_scope(h, n, ja, desc, root, root_peer, root_col, scope, rank, peers)) return;
+    const Peer self = transfer_peer(h, m, n, ia, ja, desc, scope, root_col, rank);
+    *backend_bytes = (rank == root_peer ? std::size_t(m) * n - block_size(self) : block_size(self)) * sizeof(T);
+    if (rank == root_peer) *host_bytes = std::size_t(peers - 1) * sizeof(Block<T>);
 }
 
 template <DdlaBackend B,typename T>
@@ -257,19 +240,23 @@ void gather_run(const DdlaHandle_t& h, int m, int n, const T* A, int ia, int ja,
                 void* host_work, [[maybe_unused]] std::size_t host_bytes)
 {
     if (!m || !n) return;
-    const Transfer t(h, m, n, ia, ja, d, root);
-    if (!t.active) return;
-    assert(t.scratch() * sizeof(T) <= backend_bytes);
+    ia--;
+    ja--;
+    int root_peer, root_col, rank, peers;
+    CommScope scope;
+    if (!transfer_scope(h, n, ja, d, root, root_peer, root_col, scope, rank, peers)) return;
+    const Peer self = transfer_peer(h, m, n, ia, ja, d, scope, root_col, rank);
+    assert((rank == root_peer ? std::size_t(m) * n - block_size(self) : block_size(self)) * sizeof(T) <= backend_bytes);
     T* const packed = static_cast<T*>(backend_work);
-    const Block<T> own = t.own_block(const_cast<T*>(A), d[DDLA_LLD_]);
+    const Block<T> own{block_size(self) ? const_cast<T*>(A) + self.row0 + std::size_t(self.col0) * d[DDLA_LLD_] : nullptr, d[DDLA_LLD_], self};
 
     // A participant packs its block and sends it to the root.
-    if (!t.is_root()) {
+    if (rank != root_peer) {
         if (!block_size(own.p)) return;
         const std::size_t width = own.p.rows * sizeof(T);
         DDLA_CHECK(ddlaMemcpy2D(h, packed, width, own.data, own.ld * sizeof(T), width, own.p.cols));
         commGroupStart<B>(h);
-        send<B>(h, t.scope, packed, block_size(own.p), t.root_peer());
+        send<B>(h, scope, packed, block_size(own.p), root_peer);
         commGroupEnd<B>(h);
         return;
     }
@@ -279,17 +266,17 @@ void gather_run(const DdlaHandle_t& h, int m, int n, const T* A, int ia, int ja,
 
     // The root's own block is copied before the receives, while the peers
     // are still packing; the received blocks follow in one batch.
-    map<B>(h, false, &own, 1, t.g, dst, lddst);
-    assert(std::size_t(t.peers - 1) * sizeof(Block<T>) <= host_bytes);
+    map<B>(h, false, &own, 1, d, ia, ja, m, n, dst, lddst);
+    assert(std::size_t(peers - 1) * sizeof(Block<T>) <= host_bytes);
     Block<T>* const blocks = static_cast<Block<T>*>(host_work);
-    const int count = t.peer_blocks(h, packed, blocks);
+    const int count = transfer_peer_blocks(h, m, n, ia, ja, d, scope, root_col, root_peer, peers, packed, blocks);
     commGroupStart<B>(h);
     for (int k = 0; k < count; ++k) {
         const Block<T>& b = blocks[k];
-        recv<B>(h, t.scope, b.data, block_size(b.p), t.rank_of(h, b.p));
+        recv<B>(h, scope, b.data, block_size(b.p), scope == CommScope::Col ? b.p.prow : h->rc_to_rank(b.p.prow, b.p.pcol));
     }
     commGroupEnd<B>(h);
-    map<B>(h, false, blocks, count, t.g, dst, lddst);
+    map<B>(h, false, blocks, count, d, ia, ja, m, n, dst, lddst);
 }
 
 // Component 3, with the scratch of gather_run.
@@ -300,17 +287,21 @@ void scatter_run(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
                  void* host_work, [[maybe_unused]] std::size_t host_bytes)
 {
     if (!m || !n) return;
-    const Transfer t(h, m, n, ia, ja, d, root);
-    if (!t.active) return;
-    assert(t.scratch() * sizeof(T) <= backend_bytes);
+    ia--;
+    ja--;
+    int root_peer, root_col, rank, peers;
+    CommScope scope;
+    if (!transfer_scope(h, n, ja, d, root, root_peer, root_col, scope, rank, peers)) return;
+    const Peer self = transfer_peer(h, m, n, ia, ja, d, scope, root_col, rank);
+    assert((rank == root_peer ? std::size_t(m) * n - block_size(self) : block_size(self)) * sizeof(T) <= backend_bytes);
     T* const packed = static_cast<T*>(backend_work);
-    const Block<T> own = t.own_block(A, d[DDLA_LLD_]);
+    const Block<T> own{block_size(self) ? A + self.row0 + std::size_t(self.col0) * d[DDLA_LLD_] : nullptr, d[DDLA_LLD_], self};
 
     // A participant receives its packed block from the root and unpacks it.
-    if (!t.is_root()) {
+    if (rank != root_peer) {
         if (!block_size(own.p)) return;
         commGroupStart<B>(h);
-        recv<B>(h, t.scope, packed, block_size(own.p), t.root_peer());
+        recv<B>(h, scope, packed, block_size(own.p), root_peer);
         commGroupEnd<B>(h);
         const std::size_t width = own.p.rows * sizeof(T);
         DDLA_CHECK(ddlaMemcpy2D(h, own.data, own.ld * sizeof(T), packed, width, width, own.p.cols));
@@ -321,18 +312,181 @@ void scatter_run(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
     if (own.data == src && own.ld == ldsrc && own.p.rows == m && own.p.cols == n) return;
 
     T* const window = const_cast<T*>(src);  // only read: map copies window -> blocks
-    assert(std::size_t(t.peers - 1) * sizeof(Block<T>) <= host_bytes);
+    assert(std::size_t(peers - 1) * sizeof(Block<T>) <= host_bytes);
     Block<T>* const blocks = static_cast<Block<T>*>(host_work);
-    const int count = t.peer_blocks(h, packed, blocks);
-    map<B>(h, true, blocks, count, t.g, window, ldsrc);
-    map<B>(h, true, &own, 1, t.g, window, ldsrc);
+    const int count = transfer_peer_blocks(h, m, n, ia, ja, d, scope, root_col, root_peer, peers, packed, blocks);
+    map<B>(h, true, blocks, count, d, ia, ja, m, n, window, ldsrc);
+    map<B>(h, true, &own, 1, d, ia, ja, m, n, window, ldsrc);
     if (group_root) commGroupStart<B>(h);
     for (int k = 0; k < count; ++k) {
         const Block<T>& b = blocks[k];
-        send<B>(h, t.scope, b.data, block_size(b.p), t.rank_of(h, b.p));
+        send<B>(h, scope, b.data, block_size(b.p), scope == CommScope::Col ? b.p.prow : h->rc_to_rank(b.p.prow, b.p.pcol));
     }
     if (group_root) commGroupEnd<B>(h);
 }
+
+template <DdlaBackend B, typename T>
+void convert_rows(const DdlaHandle_t& h, const typename real_type<T>::type* src,
+                  int lds, T* dst, int ldd, int rows, int cols, bool transpose)
+{
+    if (!rows || !cols) return;
+    if constexpr (B==DdlaBackend::CPU) {
+        for (int c=0;c<cols;++c) for (int r=0;r<rows;++r)
+            dst[r+std::size_t(c)*ldd]=src?T(transpose?src[c+std::size_t(r)*lds]
+                                                  :src[r+std::size_t(c)*lds]):T(0);
+    } else {
+#if DDLA_HAS_GPU
+        convert_rows_gpu<T>(h,src,lds,dst,ldd,rows,cols,transpose);
+#endif
+    }
+}
+
+namespace {
+// Rows of one scatter_rows panel (k > 0, more than one rank): bounds both the
+// conversion and the packing even for very large orders.
+template <typename T>
+int rows_panel(const DdlaHandle_t& h, int k)
+{
+    constexpr std::size_t panel_bytes=std::size_t(32)<<20;
+    const detail::RowShare share(k,h->nprocs);
+    return std::min({share.count(0),512,int(std::max<std::size_t>(1,panel_bytes/(std::size_t(k)*sizeof(T))))});
+}
+}
+
+// Component 2: [ converted panel | the scatter's packing ] in backend memory,
+// the scatter's peer list in host memory.  Every panel window has at most
+// panel_rows x k entries and nprocs - 1 peers (transfer_workspace_size).
+template <typename T>
+void scatter_rows_workspace_size(const DdlaHandle_t& h,int k,std::size_t* backend_bytes,std::size_t* host_bytes)
+{
+    *backend_bytes=*host_bytes=0;
+    if (h->nprocs<=1 || k==0) return;
+    const std::size_t panel=std::size_t(rows_panel<T>(h,k))*k;
+    *backend_bytes=detail::padded_bytes<T>(panel)+panel*sizeof(T);
+    *host_bytes=std::size_t(h->nprocs-1)*sizeof(Block<T>);
+}
+
+template <DdlaBackend B,typename T>
+void scatter_rows_check(const DdlaHandle_t& h,int k,const typename real_type<T>::type* src,
+    int lds,bool transpose,int m,int n,T* dst,const int* desc)
+{
+    ddla::detail::agree_check(h,"scatter_rows",[&](ddla::detail::Agree& agreement) {
+        if (!h) throw std::invalid_argument("scatter_rows: null handle");
+        if (ddlaGetBackend(h)!=B || k<0 || m<k || n<k)
+            throw std::invalid_argument("scatter_rows: incompatible backend or extents");
+        check_desc(desc,h);
+        if (m>desc[DDLA_M_] || n>desc[DDLA_N_])
+            throw std::invalid_argument("scatter_rows: output exceeds descriptor");
+        const detail::RowShare share(k,h->nprocs);
+        if (lds<std::max(1,share.count(h->myid)) || (k && share.count(h->myid)>0 && !src))
+            throw std::invalid_argument("scatter_rows: missing source rows");
+        const int mloc=num_loc(m,desc[DDLA_MB_],h->myprow_,desc[DDLA_RSRC_],h->nprows_);
+        const int nloc=num_loc(n,desc[DDLA_NB_],h->mypcol_,desc[DDLA_CSRC_],h->npcols_);
+        if (mloc>0 && nloc>0 && !dst)throw std::invalid_argument("scatter_rows: missing output");
+        agreement.mode("row-slab order",k);agreement.mode("row-slab output rows",m);
+        agreement.mode("row-slab output columns",n);agreement.mode("row-slab transpose",transpose);
+        checked_count(desc[DDLA_LLD_],nloc,sizeof(T));
+        checked_count(lds,k,sizeof(typename real_type<T>::type));
+    });
+}
+
+// Component 3.  Carves the converted panel and hands the rest of the scratch
+// to scatter_run.
+template <DdlaBackend B,typename T>
+void scatter_rows_run(const DdlaHandle_t& h,int k,const typename real_type<T>::type* src,int lds,
+    bool transpose,int m,int n,T* dst,const int* desc,
+    void* backend_work,std::size_t backend_bytes,void* host_work,std::size_t host_bytes)
+{
+    try {
+        const int panel_rows=h->nprocs>1 && k>0 ? rows_panel<T>(h,k) : 0;
+        const std::size_t panel=std::size_t(panel_rows)*k;
+        char* w=static_cast<char*>(backend_work);
+        T* const converted=detail::take<T>(w,panel);
+        const std::size_t used=w-static_cast<char*>(backend_work);
+        assert(used<=backend_bytes);
+        const int mloc=num_loc(m,desc[DDLA_MB_],h->myprow_,desc[DDLA_RSRC_],h->nprows_);
+        const int nloc=num_loc(n,desc[DDLA_NB_],h->mypcol_,desc[DDLA_CSRC_],h->npcols_);
+        const int factor_rows=num_loc(k,desc[DDLA_MB_],h->myprow_,desc[DDLA_RSRC_],h->nprows_);
+        const int factor_cols=num_loc(k,desc[DDLA_NB_],h->mypcol_,desc[DDLA_CSRC_],h->npcols_);
+        // Operational failure agreement only: all argument checking is complete.
+        detail::agree_check(h,"scatter_rows preparation",[&](detail::Agree&) {
+#if defined(DDLA_USE_GPU_CPU_TUNNEL)
+            // The panel transfers stage through the handle's host buffer (one
+            // slot, comm_traits.h): grow it here, once, with failures agreed.
+            if constexpr(B==DdlaBackend::GPU)
+                if (panel) detail::tunnel_staging<T>(h,0,std::min(panel,std::size_t(INT_MAX)/sizeof(T)));
+#endif
+            if (mloc>factor_rows && nloc>0)
+                convert_rows<B,T>(h,nullptr,1,dst+factor_rows,desc[DDLA_LLD_],mloc-factor_rows,nloc,false);
+            if (nloc>factor_cols && factor_rows>0)
+                convert_rows<B,T>(h,nullptr,1,dst+std::size_t(factor_cols)*desc[DDLA_LLD_],
+                                  desc[DDLA_LLD_],factor_rows,nloc-factor_cols,false);
+            if (h->nprocs==1)convert_rows<B,T>(h,src,lds,dst,desc[DDLA_LLD_],k,k,transpose);
+        });
+        const detail::RowShare share(k,h->nprocs);
+        if (h->nprocs>1) for(int root=0;root<h->nprocs;++root) {
+            for(int first=0;first<share.count(root);first+=panel_rows) {
+                const int rows=std::min(panel_rows,share.count(root)-first);
+                const int nr=transpose?k:rows,nc=transpose?rows:k;
+                if constexpr(B==DdlaBackend::CPU) {
+                    if(h->myid==root)convert_rows<B,T>(h,src+first,lds,converted,nr,nr,nc,transpose);
+                } else {
+                    ddla::detail::agree_check(h,"scatter_rows conversion",[&](ddla::detail::Agree&) {
+                        if(h->myid==root)convert_rows<B,T>(h,src+first,lds,converted,nr,nr,nc,transpose);
+                    });
+                }
+                const int global=share.lo(root)+first+1;
+                scatter_run<B,T>(h,nr,nc,dst,transpose?1:global,transpose?global:1,desc,
+                                root,converted,nr,true,w,backend_bytes-used,host_work,host_bytes);
+            }
+        }
+        ddla::detail::agree_check(h,"scatter_rows completion",[&](ddla::detail::Agree&) {
+            DDLA_CHECK(ddlaSynchronize(h));
+        });
+    } catch (...) {
+        // Retire queued host reads before the caller reuses or releases scratch.
+        if (ddlaGetBackend(h) == DdlaBackend::GPU)
+            try { (void)ddlaSynchronize(h); } catch (...) {}
+        throw;
+    }
+}
+
+template <DdlaBackend B, typename T>
+void scatter_rows(const DdlaHandle_t& h,int k,const typename real_type<T>::type* src,
+                  int lds,bool transpose,int m,int n,T* dst,const int* desc)
+{
+    scatter_rows_check<B,T>(h,k,src,lds,transpose,m,n,dst,desc);
+    std::size_t backend_bytes=0,host_bytes=0;
+    scatter_rows_workspace_size<T>(h,k,&backend_bytes,&host_bytes);
+    vector<char> backend_work(h);
+    std::vector<char> host_work;
+    // Keep allocation failures coordinated before any output or transfer.
+    detail::agree_check(h,"scatter_rows workspace",[&](detail::Agree&){
+        backend_work.resize(backend_bytes);host_work.resize(host_bytes);});
+    scatter_rows_run<B,T>(h,k,src,lds,transpose,m,n,dst,desc,
+                          backend_work.data(),backend_bytes,host_work.data(),host_bytes);
+}
+
+#define INST_ROWS(B,T) \
+ template void convert_rows<B,T>(const DdlaHandle_t&,const real_type<T>::type*,int,T*,int,int,int,bool); \
+ template void scatter_rows<B,T>(const DdlaHandle_t&,int,const real_type<T>::type*,int,bool,int,int,T*,const int*); \
+ template void scatter_rows_check<B,T>(const DdlaHandle_t&,int,const real_type<T>::type*,int,bool,int,int,T*,const int*); \
+ template void scatter_rows_run<B,T>(const DdlaHandle_t&,int,const real_type<T>::type*,int,bool,int,int,T*,const int*,void*,std::size_t,void*,std::size_t)
+#define INST_ROWS_BACKEND(B) \
+ INST_ROWS(B,float); INST_ROWS(B,double); \
+ INST_ROWS(B,std::complex<float>); INST_ROWS(B,std::complex<double>)
+#if DDLA_HAS_CPU
+INST_ROWS_BACKEND(DdlaBackend::CPU);
+#endif
+#if DDLA_HAS_GPU
+INST_ROWS_BACKEND(DdlaBackend::GPU);
+#endif
+#undef INST_ROWS_BACKEND
+#undef INST_ROWS
+
+#define INST_ROW_SIZE(T) template void scatter_rows_workspace_size<T>(const DdlaHandle_t&,int,std::size_t*,std::size_t*)
+INST_ROW_SIZE(float); INST_ROW_SIZE(double); INST_ROW_SIZE(std::complex<float>); INST_ROW_SIZE(std::complex<double>);
+#undef INST_ROW_SIZE
 
 } // namespace ddla::matrix_impl
 
