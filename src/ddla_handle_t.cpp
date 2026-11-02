@@ -1,6 +1,8 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 #include "host_threads.h"
+#include "host_parallel.h"
+#include <algorithm>
 #include <stdexcept>
 #include <cstdlib>
 #include <cstring>
@@ -216,16 +218,25 @@ inline gpuEvent_t vendor_event(ddlaEvent_t e) { return static_cast<gpuEvent_t>(e
 
 // Host rectangle copy (the CPU-handle path and the host-to-host path of a GPU handle).
 ddlaStatus_t host_memcpy2d(void* dst, std::size_t dpitch, const void* src, std::size_t spitch,
-                           std::size_t width, std::size_t height)
+                           std::size_t width, std::size_t height, int threads)
 {
-    // Contiguous fast path: when both row pitches equal the row width the whole region is one block, so a
-    // single memcpy avoids the per-row call overhead (stride-1 vectors can have a huge height).
-    if (spitch == width && dpitch == width) {
-        std::memcpy(dst, src, width * height);
-        return kOk;
-    }
-    for (std::size_t i = 0; i < height; ++i)
-        std::memcpy(static_cast<char*>(dst) + i * dpitch, static_cast<const char*>(src) + i * spitch, width);
+    // Amortize worker startup over about 1 MiB per chunk. The synchronous
+    // host helper joins before either buffer can be reused by the caller.
+    const auto grain = static_cast<long long>(std::max<std::size_t>(1, (1 << 20) / width));
+    const auto copy = [&](long long lo, long long hi) {
+        auto* d = static_cast<char*>(dst) + static_cast<std::size_t>(lo) * dpitch;
+        const auto* s = static_cast<const char*>(src) + static_cast<std::size_t>(lo) * spitch;
+        if (spitch == width && dpitch == width) {
+            std::memcpy(d, s, static_cast<std::size_t>(hi - lo) * width);
+        } else {
+            for (std::size_t i = 0; i < static_cast<std::size_t>(hi - lo); ++i)
+                std::memcpy(d + i * dpitch, s + i * spitch, width);
+        }
+    };
+    if (threads <= 1 || height <= static_cast<std::size_t>(grain))
+        copy(0, static_cast<long long>(height));
+    else
+        detail::host_parallel_for(static_cast<long long>(height), grain, threads, copy);
     return kOk;
 }
 
@@ -374,7 +385,7 @@ ddlaStatus_t ddlaMemcpy2D(const DdlaHandle_t& handle, void* dst, std::size_t dpi
 
     const CopyRoute route = route_copy(handle, dst, src);
     if (route == CopyRoute::Unknown) return kInternal;
-    if (route == CopyRoute::Host) return host_memcpy2d(dst, dpitch, src, spitch, width, height);
+    if (route == CopyRoute::Host) return host_memcpy2d(dst, dpitch, src, spitch, width, height, handle->host_threads);
 #if DDLA_GPU_VENDOR
     return to_status(gpuMemcpy2DAsync(dst, dpitch, src, spitch, width, height, vendor_kind(route),
                                       static_cast<gpuStream_t>(handle->stream)));
