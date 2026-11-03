@@ -123,16 +123,6 @@ void check_alignment(DdlaHandle_t h, char op, const int* a, int ia, int ja,
 }
 
 
-template <typename T>
-bool overlaps(const T* a, int lda, int ar, int ac, const T* b, int ldb, int br, int bc) {
-    if (ar==0 || ac==0 || br==0 || bc==0) return false;
-    // Include pitch gaps conservatively. Comparing address distances avoids
-    // ordering unrelated pointers or overflowing the end of an address range.
-    const auto ap=reinterpret_cast<std::uintptr_t>(a),bp=reinterpret_cast<std::uintptr_t>(b);
-    const std::size_t aspan=std::size_t(ac-1)*lda+ar,bspan=std::size_t(bc-1)*ldb+br;
-    return ap<=bp ? (bp-ap)/sizeof(T)<aspan : (ap-bp)/sizeof(T)<bspan;
-}
-
 // On a square grid the transposed local slab has exactly one destination.
 void transpose_peers(DdlaHandle_t h, const int* a, int ia, int ja,
                      const int* c, int ic, int jc, int& dest, int& source) {
@@ -244,8 +234,8 @@ void transpose_square(DdlaHandle_t h, T* send, T* receive, int m, int n,
     const int c_col0=num_loc(jc,dc[DDLA_NB_],h->mypcol_,dc[DDLA_CSRC_],pc);
     const int mr=num_loc(ic+m,dc[DDLA_MB_],h->myprow_,dc[DDLA_RSRC_],pr)-c_row0;
     const int nc=num_loc(jc+n,dc[DDLA_NB_],h->mypcol_,dc[DDLA_CSRC_],pc)-c_col0;
-    const bool snapshot_local=overlaps(sa,lda,ar,ac,c,ldc,mr,nc) ||
-        (use_b && overlaps(sb,ldb,br,bc,c,ldc,mr,nc));
+    const bool snapshot_local=detail::matrix_overlaps(sa,lda,ar,ac,c,ldc,mr,nc) ||
+        (use_b && detail::matrix_overlaps(sb,ldb,br,bc,c,ldc,mr,nc));
     int dest, source;
     transpose_peers(h,da,ia,ja,dc,ic,jc,dest,source);
     const std::size_t scount=std::size_t(ar)*ac,rcount=std::size_t(mr)*nc;
@@ -300,7 +290,7 @@ void transpose(DdlaHandle_t h, T* send, T* receive, CopyBlock* device_blocks,
     const int mr=num_loc(ic+m,dc[DDLA_MB_],h->myprow_,dc[DDLA_RSRC_],pr)-c_row0;
     const int nc=num_loc(jc+n,dc[DDLA_NB_],h->mypcol_,dc[DDLA_CSRC_],pc)-c_col0;
     const T* input=rows>0 && cols>0 ? a+ar0+std::size_t(ac0)*da[DDLA_LLD_] : a;
-    const bool snapshot_local=overlaps(input,da[DDLA_LLD_],rows,cols,c,ldc,mr,nc);
+    const bool snapshot_local=detail::matrix_overlaps(input,da[DDLA_LLD_],rows,cols,c,ldc,mr,nc);
 
     // The schedule lists, in the order schedule_bytes counts them.
     std::size_t src=0,dst=0;
@@ -476,15 +466,6 @@ void pgeadd_workspace_size(const DdlaHandle_t& h, char ta, char tb, bool use_a, 
     *backend_bytes=bytes;
 }
 
-std::size_t pgeadd_staging_count(const DdlaHandle_t& h, char ta, char tb, bool use_a, bool use_b,
-                                 int m, int n, const int* dc)
-{
-    if (m==0 || n==0) return 0;
-    std::size_t count[5];
-    staging_counts(h,ta,tb,use_a,use_b,m,n,dc,count);
-    return *std::max_element(count,count+5);
-}
-
 // Component 3.
 template <DdlaBackend Backend, typename T>
 void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
@@ -561,7 +542,7 @@ void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
             ld=dx[DDLA_LLD_];
             const T* input=x+xr+std::size_t(xc)*ld;
             if ((input==cv && ld==dc[DDLA_LLD_]) ||
-                !overlaps(input,ld,mr,nc,cv,dc[DDLA_LLD_],mr,nc)) return input;
+                !detail::matrix_overlaps(input,ld,mr,nc,cv,dc[DDLA_LLD_],mr,nc)) return input;
             // Shifted aliases must be consumed before either operand writes C.
             DDLA_CHECK(ddlaMemcpy2D(h,buf,std::size_t(mr)*sizeof(T),input,
                 std::size_t(ld)*sizeof(T),std::size_t(mr)*sizeof(T),nc));
@@ -584,7 +565,7 @@ void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
                 if (dest==h->myid) {
                     if (mr==0 || nc==0) return nullptr;
                     ld=slab_ld;
-                    if (!overlaps(slab_input,slab_ld,slab_rows,slab_cols,cv,dc[DDLA_LLD_],mr,nc)) return slab_input;
+                    if (!detail::matrix_overlaps(slab_input,slab_ld,slab_rows,slab_cols,cv,dc[DDLA_LLD_],mr,nc)) return slab_input;
                     // In-place geam only permits N operands, so overlap needs a copy.
                     copy(buf);
                     ld=slab_rows;

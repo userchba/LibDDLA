@@ -3,6 +3,7 @@
 // d, e and the ascending eigenvalues remain replicated host vectors.
 // pstedc('N') retains only first/last eigenvector rows needed by later merges.
 
+#include "helpers.h"
 #include <ddla/ddla.h>
 
 #include "ddla_connector.h"
@@ -670,12 +671,6 @@ PstedcPlan pstedc_check(const DdlaHandle_t& h, char jobz, int n, const R* d, con
         p.rows.borrow_q2 = count > 0; // separate, compact internal row output
         std::copy_n(desc, DDLA_DLEN_, p.destination.begin());
         matrix_impl::scatter_rows_workspace_size<R>(h, n, &p.transfer_backend, &p.transfer_host);
-#if defined(DDLA_USE_GPU_CPU_TUNNEL)
-        if (n && h->backend == DdlaBackend::GPU)
-            detail::agree_check(h, "pstedc communication storage", [&](detail::Agree&) {
-                if (p.transfer_backend) detail::tunnel_staging<char>(h, 0, p.transfer_backend);
-            });
-#endif
     }
     return p;
 }
@@ -819,18 +814,15 @@ PstedcVectorPlan pstedc_check(const DdlaHandle_t& h, int n, const R* d, const R*
     p.ldy = ldy;
     const detail::RowShare share(n, p.ranks);
     const std::size_t slab = std::size_t(std::max(1, share.count(p.rank))) * n;
-    const auto overlap = [&](const R* base, std::size_t count, const R* other, std::size_t other_count) {
-        if (!base || !other || !count || !other_count)
-            return false;
-        const auto a = reinterpret_cast<std::uintptr_t>(base), b = reinterpret_cast<std::uintptr_t>(other);
-        return a <= b ? (b - a) / sizeof(R) < count : (a - b) / sizeof(R) < other_count;
-    };
     p.borrow_q = scratch && share.count(p.rank) > 0 && scratch_elements >= slab &&
                  reinterpret_cast<std::uintptr_t>(scratch) % alignof(R) == 0 &&
-                 !overlap(scratch, slab, Y, std::size_t(ldy) * n) && !overlap(scratch, slab, d, n) &&
-                 !overlap(scratch, slab, e, n - 1) && !overlap(scratch, slab, w, n);
+                 !detail::array_overlaps(scratch, slab, Y, std::size_t(ldy) * n) &&
+                 !detail::array_overlaps(scratch, slab, d, n) &&
+                 !detail::array_overlaps(scratch, slab, e, n - 1) && !detail::array_overlaps(scratch, slab, w, n);
     p.borrow_q2 = share.count(p.rank) > 0 && ldy == std::max(1, share.count(p.rank)) &&
-                  !overlap(Y, slab, d, n) && !overlap(Y, slab, e, n - 1) && !overlap(Y, slab, w, n);
+                  !detail::array_overlaps(Y, slab, d, n) &&
+                  !detail::array_overlaps(Y, slab, e, n - 1) &&
+                  !detail::array_overlaps(Y, slab, w, n);
 
     return p;
 }

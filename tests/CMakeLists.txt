@@ -83,6 +83,8 @@ endfunction()
 enable_testing()
 
 # Reusable workspace checks for the local BLAS and Cholesky/utility components.
+add_test_executable(test_comm)
+target_link_libraries(test_comm PRIVATE ${CMAKE_DL_LIBS})
 add_test_executable(test_workspace_core 1)
 add_test_executable(test_workspace_write_matrix 1)
 add_test_executable(test_workspace_factorizations)
@@ -485,4 +487,11 @@ if(TARGET workspace_trace)
     add_dependencies(test_workspace_one_stage workspace_trace)
     set_tests_properties(test_workspace_one_stage_mpi PROPERTIES ENVIRONMENT
         "LD_PRELOAD=$<TARGET_FILE:workspace_trace>;DDLA_WORKSPACE_TRACE_REQUIRED=1;OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+endif()
+
+# The communication test checks cold/warm host-cache allocations explicitly.
+if(TARGET workspace_trace)
+    add_dependencies(test_comm workspace_trace)
+    set_tests_properties(test_comm_mpi PROPERTIES ENVIRONMENT
+        "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1;DDLA_WORKSPACE_TRACE_REQUIRED=1;LD_PRELOAD=$<TARGET_FILE:workspace_trace>")
 endif()

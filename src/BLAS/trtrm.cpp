@@ -20,17 +20,6 @@ namespace {
 // Columns of C per CPU product panel; the panel is n x min(n, trtrm_panel_width).
 constexpr int trtrm_panel_width = 256;
 
-// Address ranges include the column padding: rejecting overlap is conservative.
-template <typename T>
-bool overlaps(const T* a, int lda, const T* c, int ldc, int n)
-{
-    const auto x = reinterpret_cast<std::uintptr_t>(a);
-    const auto y = reinterpret_cast<std::uintptr_t>(c);
-    const std::size_t ax = (std::size_t(n - 1) * lda + n) * sizeof(T);
-    const std::size_t cy = (std::size_t(n - 1) * ldc + n) * sizeof(T);
-    return x <= y ? y - x < ax : x - y < cy;
-}
-
 #if DDLA_GPU_VENDOR
 // Retain these two-triangular-input kernels: the measured packed vendor
 // TRMM composition was 1.5-4.9x slower for n=1024..4096 on V100.
@@ -551,7 +540,8 @@ void trtrm_dimensions_check(int n, const T& alpha, const T* A, int lda, const T*
     if (!C) throw std::invalid_argument("trtrm: null C");
     if (alpha != T(0)) {
         if (!A || !B) throw std::invalid_argument("trtrm: null input");
-        if (overlaps(A, lda, C, ldc, n) || overlaps(B, ldb, C, ldc, n))
+        if (detail::matrix_overlaps(A, lda, n, n, C, ldc, n, n) ||
+            detail::matrix_overlaps(B, ldb, n, n, C, ldc, n, n))
             throw std::invalid_argument("trtrm: C must not overlap A or B");
     }
     if constexpr (Backend == DdlaBackend::GPU) {

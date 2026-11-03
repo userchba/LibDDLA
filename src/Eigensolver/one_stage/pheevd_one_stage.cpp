@@ -1,3 +1,4 @@
+#include "helpers.h"
 #include <ddla/ddla.h>
 #include <ddla/ddla_vector.h>
 #include "ddla_connector.h"
@@ -110,8 +111,7 @@ OneStagePlan one_stage_check(const DdlaHandle_t& h, DdlaBackend backend, bool st
                                     : std::size_t(0);
             };
             const auto ab = span(ar, ac, da[DDLA_LLD_]), zb = span(zr, zc, dz[DDLA_LLD_]);
-            const auto ap = reinterpret_cast<std::uintptr_t>(a), zp = reinterpret_cast<std::uintptr_t>(z);
-            result.backup = ab && zb && (ap <= zp ? zp - ap < ab : ap - zp < zb);
+            result.backup = detail::memory_overlaps(a, ab, z, zb);
             result.saved = result.a;
             result.saved[DDLA_M_] = result.saved[DDLA_N_] = n;
             result.saved[DDLA_LLD_] = std::max(1, ar);
@@ -145,23 +145,6 @@ OneStagePlan one_stage_check(const DdlaHandle_t& h, DdlaBackend backend, bool st
 
     } else
         p.values = pstedc_values_policy<R>(h, n);
-#if defined(DDLA_USE_GPU_CPU_TUNNEL)
-    if(backend==DdlaBackend::GPU)detail::agree_check(h,"one-stage communication storage",[&](detail::Agree&){
-        const int nb=da[DDLA_NB_];
-        const auto nr=std::size_t(num_loc(n,nb,0,0,p.pr)),nc=std::size_t(num_loc(n,nb,0,0,p.pc));
-        const auto width=std::size_t(job=='V'?std::min(nb,n-1):0);
-        const auto zc=std::size_t(job=='V'?num_loc(n,dz[DDLA_NB_],0,0,p.pc):0);
-        // Reduction vectors, reflector panels/Gram matrices, and their sums.
-        const auto elements=std::max({nr+1,nc+1,std::max({nr,nc,zc})*width,width*width});
-        std::size_t send=elements*sizeof(T),recv=send;
-        if(!stored_only){std::size_t pack,local,unpack,diag,tx,rx;
-            pherm_complete_geometry(p.complete,pack,local,unpack,diag,tx,rx);
-            send=std::max(send,tx*sizeof(T));recv=std::max(recv,rx*sizeof(T));}
-        if(job=='V'){std::size_t b=0,s=0;matrix_impl::scatter_rows_workspace_size<R>(h,n,&b,&s);
-            send=std::max(send,(b+1)/2);}
-        detail::tunnel_staging<char>(h,0,send);detail::tunnel_staging<char>(h,1,recv);
-    });
-#endif
     return p;
 }
 

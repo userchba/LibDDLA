@@ -25,14 +25,6 @@
 namespace ddla {
 namespace detail {
 namespace {
-template <class T> T cj(T x) {
-    return x;
-}
-
-template <class R> std::complex<R> cj(std::complex<R> x) {
-    return std::conj(x);
-}
-
 template <class T> auto re(T x) {
     return std::real(x);
 }
@@ -426,7 +418,7 @@ void form_u(const DdlaHandle_t& h, int n, const T* v, const T* y, const T* tau, 
     if constexpr (B == DdlaBackend::CPU) {
         const T t = *tau;
         for (int i = 0; i < n; ++i)
-            u[i] = cj(t) * y[i] - T(0.5) * t * cj(t) * re(*dot) * v[i];
+            u[i] = detail::host_conj(t) * y[i] - T(0.5) * t * detail::host_conj(t) * re(*dot) * v[i];
     } else {
 #if DDLA_GPU_VENDOR
         using D = DeviceScalarT<T>;
@@ -550,7 +542,7 @@ void factor_one(const DdlaHandle_t& h, int j, T* a, bool lower, int nb, int ld, 
         beta = -std::copysign(std::hypot(xnorm, std::abs(alpha)), R(std::real(alpha)));
         beta_for_v = beta;
         // Ratios avoid overflowing alpha-beta when the vector norm fits R.
-        t = cj(T(1) - alpha / beta);
+        t = detail::host_conj(T(1) - alpha / beta);
         denominator = alpha / beta - T(1);
         for (int q = 0; q < rescales; ++q)
             beta *= safmin;
@@ -581,7 +573,7 @@ void factor_one(const DdlaHandle_t& h, int j, T* a, bool lower, int nb, int ld, 
                         }
                         if (column) {
                             const T stored = i == pivot ? T(beta) : value;
-                            column[static_cast<std::size_t>(i) * inc] = lower ? cj(stored) : stored;
+                            column[static_cast<std::size_t>(i) * inc] = lower ? detail::host_conj(stored) : stored;
                         }
                     }
                     v[i] = value;

@@ -1,3 +1,4 @@
+#include "helpers.h"
 #include "blas_impl.h"
 // ---------------------------------------------------------------------------
 // Unified backend-templated matrix add / transpose-copy:
@@ -125,15 +126,6 @@ constexpr int kTile = 32;                        // transposed access: kTile x k
 constexpr int kStripElems = 1 << 14;             // plain access: strips of about this many elements
 constexpr long long kParallelMinElems = 1 << 16; // below this, a parallel region costs more than it saves
 
-// Conjugation is a no-op on real data, so 'C' behaves exactly like 'T'.
-inline float  maybe_conj(float x, bool)   { return x; }
-inline double maybe_conj(double x, bool)  { return x; }
-template <typename R>
-inline std::complex<R> maybe_conj(const std::complex<R>& x, bool c)
-{
-    return c ? std::conj(x) : x;
-}
-
 // Single operand (beta == 0): C(i,j) := alpha * blas_impl::op(A)(i,j), the copy / transpose-copy path.
 template <typename T, bool TA, bool CA, bool ONE>
 void copy_tile(T alpha, const T* A, std::size_t lda, T* C, std::size_t ldc,
@@ -143,7 +135,7 @@ void copy_tile(T alpha, const T* A, std::size_t lda, T* C, std::size_t ldc,
         T* const c = C + static_cast<std::size_t>(j) * ldc;
         for (int i = i0; i < i1; ++i) {
             T a;
-            if (TA) a = maybe_conj(A[static_cast<std::size_t>(j) + static_cast<std::size_t>(i) * lda], CA);
+            if (TA) a = detail::host_conj(A[static_cast<std::size_t>(j) + static_cast<std::size_t>(i) * lda], CA);
             else    a = A[static_cast<std::size_t>(i) + static_cast<std::size_t>(j) * lda];
             c[i] = ONE ? a : alpha * a;
         }
@@ -153,7 +145,7 @@ void copy_tile(T alpha, const T* A, std::size_t lda, T* C, std::size_t ldc,
 template <typename T>
 inline T load_op(const T* X, std::size_t ldx, bool trans, bool conj, int i, int j)
 {
-    return trans ? maybe_conj(X[static_cast<std::size_t>(j) + static_cast<std::size_t>(i) * ldx], conj)
+    return trans ? detail::host_conj(X[static_cast<std::size_t>(j) + static_cast<std::size_t>(i) * ldx], conj)
                  : X[static_cast<std::size_t>(i) + static_cast<std::size_t>(j) * ldx];
 }
 

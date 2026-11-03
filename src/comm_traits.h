@@ -70,37 +70,6 @@ inline MPI_Op to_mpi_op(gpucclRedOp_t op)
 }
 #endif
 
-// ---------------------------------------------------------------------------
-// Host staging for the GPU_CPU_TUNNEL path.  These return a typed pointer
-// into a handle-owned, grow-on-demand byte buffer (see DdlaStream), so the
-// tunnel collectives below avoid allocating a fresh std::vector per call.
-// Each comm* wrapper is synchronous (blocking MPI plus a stream sync where
-// an async host<->device copy follows), so a buffer is never live across two
-// wrappers and reuse is safe.
-//
-// Caveats:
-//  - The buffers grow to the largest size seen and never shrink (a
-//    high-water mark), which is the intended allocation-amortization tradeoff.
-//  - The buffers are owned per DdlaHandle_t and are therefore NOT safe for
-//    concurrent host-side use of the same handle from multiple threads;
-//    LibDDLA handles are single-threaded per rank today.
-// ---------------------------------------------------------------------------
-namespace detail {
-
-template <typename T>
-inline T* tunnel_staging(DdlaHandle_t h, int which, std::size_t count)
-{
-    std::vector<std::byte>& buf = (which == 0) ? h->tunnel_host_staging_a
-                                               : h->tunnel_host_staging_b;
-    const std::size_t need = (count ? count : 1) * sizeof(T);
-    if (buf.size() < need) {
-        buf.resize(need);
-    }
-    return reinterpret_cast<T*>(buf.data());
-}
-
-} // namespace detail
-
 enum class CommScope { Grid, Row, Col };
 
 template <DdlaBackend Backend> struct CommTraits;   // primary: intentionally undefined
@@ -184,8 +153,9 @@ struct CommTraits<DdlaBackend::GPU> {
 // branches below.
 //
 // The tunnel case stages through handle-owned host scratch buffers (see
-// detail::tunnel_staging below) -- callers never see or manage a host
-// pointer; the D2H copy, blocking MPI call, and H2D copy are inlined directly
+// DdlaStream::host_buffers). Each wrapper requests the exact message counts
+// and grows the cache only when needed; algorithm callers do not reserve it.
+// The host pointers stay private to this layer; the D2H copy, blocking MPI call, and H2D copy are inlined directly
 // in each wrapper below. Because the tunnel H2D copy is asynchronous, an extra
 // ddlaSynchronize is added after it so the copy completes before the
 // scratch buffer is reused by the next wrapper (in commBcast/commRecv/
@@ -216,7 +186,7 @@ inline void commBcast(const DdlaHandle_t& h, CommScope scope, T* buf, std::size_
         commBcast<Backend>(h, scope, buf, static_cast<int>(count), detail::mpi_datatype<T>(), root);
     } else {
 #if defined(DDLA_USE_GPU_CPU_TUNNEL)
-        T* host = detail::tunnel_staging<T>(h, 0, count);
+        T* host = h->host_buffers<T>(count)[0];
         const auto comm = CommTraits<Backend>::comm(h, scope);
         int rank;
         MPI_CHECK(MPI_Comm_rank(comm, &rank));
@@ -243,7 +213,7 @@ inline void commSend(const DdlaHandle_t& h, CommScope scope, const T* buf, std::
                            CommTraits<Backend>::comm(h, scope)));
     } else {
 #if defined(DDLA_USE_GPU_CPU_TUNNEL)
-        T* host = detail::tunnel_staging<T>(h, 0, count);
+        T* host = h->host_buffers<T>(count)[0];
         DDLA_CHECK(ddlaMemcpy(h, host, buf, count * sizeof(T)));
         DDLA_CHECK(ddlaSynchronize(h));
         MPI_CHECK(MPI_Send(host, (int)count, detail::mpi_datatype<T>(), peer, 0, CommTraits<Backend>::comm(h, scope)));
@@ -264,7 +234,7 @@ inline void commRecv(const DdlaHandle_t& h, CommScope scope, T* buf, std::size_t
                            CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
     } else {
 #if defined(DDLA_USE_GPU_CPU_TUNNEL)
-        T* host = detail::tunnel_staging<T>(h, 0, count);
+        T* host = h->host_buffers<T>(count)[0];
         DDLA_CHECK(ddlaSynchronize(h));
         MPI_CHECK(MPI_Recv(host, (int)count, detail::mpi_datatype<T>(), peer, 0, CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
         DDLA_CHECK(ddlaMemcpy(h, buf, host, count * sizeof(T)));
@@ -290,8 +260,7 @@ inline void commSendrecv(const DdlaHandle_t& h, CommScope scope,
                                CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
     } else {
 #if defined(DDLA_USE_GPU_CPU_TUNNEL)
-        T* hs = detail::tunnel_staging<T>(h, 0, scount);
-        T* hr = detail::tunnel_staging<T>(h, 1, rcount);
+        auto [hs, hr] = h->host_buffers<T>(scount, rcount);
         if (scount) DDLA_CHECK(ddlaMemcpy(h, hs, sbuf, scount * sizeof(T)));
         DDLA_CHECK(ddlaSynchronize(h));
         MPI_CHECK(MPI_Sendrecv(hs, (int)scount, detail::mpi_datatype<T>(), dest, 0,
@@ -325,8 +294,7 @@ inline void commSendrecv(const DdlaHandle_t& h, CommScope scope, const T* sbuf, 
                                CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
     } else {
 #if defined(DDLA_USE_GPU_CPU_TUNNEL)
-        T* hs = detail::tunnel_staging<T>(h, 0, count);
-        T* hr = detail::tunnel_staging<T>(h, 1, count);
+        auto [hs, hr] = h->host_buffers<T>(count, count);
         DDLA_CHECK(ddlaMemcpy(h, hs, sbuf, count * sizeof(T)));
         DDLA_CHECK(ddlaSynchronize(h));
         MPI_CHECK(MPI_Sendrecv(hs, (int)count, detail::mpi_datatype<T>(), peer, 0,
@@ -357,8 +325,7 @@ inline void commAllReduce(const DdlaHandle_t& h, CommScope scope,
                                 CommTraits<Backend>::comm(h, scope)));
     } else {
 #if defined(DDLA_USE_GPU_CPU_TUNNEL)
-        T* hs = detail::tunnel_staging<T>(h, 0, count);
-        T* hr = detail::tunnel_staging<T>(h, 1, count);
+        auto [hs, hr] = h->host_buffers<T>(count, count);
         DDLA_CHECK(ddlaMemcpy(h, hs, sbuf, count * sizeof(T)));
         // MPI_Allreduce overwrites hr; no copy of the undefined output is needed.
         DDLA_CHECK(ddlaSynchronize(h));
@@ -405,8 +372,7 @@ inline void commReduceSum(const DdlaHandle_t& h, CommScope scope,
                                   CommTraits<Backend>::comm(h, scope)));
         } else {
 #if defined(DDLA_USE_GPU_CPU_TUNNEL)
-            T* hs = detail::tunnel_staging<T>(h, 0, len);
-            T* hr = detail::tunnel_staging<T>(h, 1, len);
+            auto [hs, hr] = h->host_buffers<T>(len, len);
             DDLA_CHECK(ddlaMemcpy(h, hs, sbuf + off, sizeof(T) * len));
             DDLA_CHECK(ddlaSynchronize(h));
             MPI_CHECK(::MPI_Reduce(hs, hr, len, detail::mpi_datatype<T>(), MPI_SUM,
@@ -462,8 +428,7 @@ inline void commAlltoallv(const DdlaHandle_t& h, CommScope scope, int nprocs,
         // MPI_Alltoallv collective.
         int send_total = nprocs > 0 ? sdispls[nprocs - 1] + sendcounts[nprocs - 1] : 0;
         int recv_total = nprocs > 0 ? rdispls[nprocs - 1] + recvcounts[nprocs - 1] : 0;
-        T* h_send = detail::tunnel_staging<T>(h, 0, static_cast<std::size_t>(send_total));
-        T* h_recv = detail::tunnel_staging<T>(h, 1, static_cast<std::size_t>(recv_total));
+        auto [h_send, h_recv] = h->host_buffers<T>(static_cast<std::size_t>(send_total), static_cast<std::size_t>(recv_total));
         if (send_total > 0) {
             DDLA_CHECK(ddlaMemcpy(h, h_send, sendbuf, sizeof(T) * send_total));
             DDLA_CHECK(ddlaSynchronize(h));

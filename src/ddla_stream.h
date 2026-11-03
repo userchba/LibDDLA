@@ -3,7 +3,9 @@
 
 #include <ddla/ddla_handle_t.h>
 #include <mpi.h>
+#include <array>
 #include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -49,15 +51,30 @@ public:
     bool initialized = false;
     bool destroyed   = false;
 
-    // -- host staging for the GPU_CPU_TUNNEL path ---------------------------
-    // Grow-on-demand host buffers reused across comm* calls instead of
-    // allocating a fresh std::vector per collective.  Two buffers are needed
-    // because commAlltoallv stages both send and receive data simultaneously.
-    // ::operator new guarantees alignment suitable for any fundamental type, so
-    // reinterpret_cast<T*> is safe for T in
-    // {float, double, std::complex<float>, std::complex<double>}.
-    std::vector<std::byte> tunnel_host_staging_a;
-    std::vector<std::byte> tunnel_host_staging_b;
+    // Blocking tunnel communication reuses these two per-handle host buffers.
+    // Send and receive storage must be disjoint for sendrecv/all-to-all/reduce.
+    // Communication calls grow requested slots on demand and retain their
+    // high-water sizes; algorithms do not pre-size this cache. Finish GPU
+    // copies before another communication call reuses them. Like the handle's
+    // streams, this storage is not for concurrent host-thread use.
+    template <typename T>
+    std::array<T*, 2> host_buffers(std::size_t send_count, std::size_t recv_count = 0)
+    {
+        const std::array<std::size_t, 2> counts{send_count, recv_count};
+        for (const auto count : counts)
+            if (count > std::numeric_limits<std::size_t>::max() / sizeof(T))
+                throw std::length_error("ddla: host communication buffer size overflow");
+        std::array<T*, 2> result{};
+        for (std::size_t i = 0; i < counts.size(); ++i) {
+            auto& buffer = host_buffers_[i];
+            const std::size_t bytes = counts[i] * sizeof(T);
+            if (buffer.size() < bytes) buffer.resize(bytes);
+            // operator new supplies alignment for the supported BLAS scalars.
+            // Empty slots may be null; MPI and ddlaMemcpy ignore zero counts.
+            result[i] = buffer.empty() ? nullptr : reinterpret_cast<T*>(buffer.data());
+        }
+        return result;
+    }
 
     void* level_queue();
     int getLocalDevice(MPI_Comm local_comm) const;
@@ -79,6 +96,8 @@ public:
         if (major == 'C') return col * nprows_ + row;
         throw std::runtime_error("major should be 'R' or 'C'\n");
     }
+private:
+    std::vector<std::byte> host_buffers_[2];
 };
 
 } // namespace ddla

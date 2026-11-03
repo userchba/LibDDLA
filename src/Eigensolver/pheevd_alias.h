@@ -1,5 +1,6 @@
 #ifndef DDLA_PHEEVD_ALIAS_H
 #define DDLA_PHEEVD_ALIAS_H
+#include "helpers.h"
 #include <ddla/ddla.h>
 #include "ddla_connector.h"
 #include "ddla_desc.h"
@@ -59,8 +60,7 @@ std::size_t output_scratch_elements(const DdlaHandle_t& handle, int n,
     const int ac=num_loc(descA[DDLA_N_],descA[DDLA_NB_],mc,descA[DDLA_CSRC_],pc);
     if (ac>0 && static_cast<std::size_t>(descA[DDLA_LLD_])>limit/static_cast<std::size_t>(ac)) return 0;
     const std::size_t abytes=static_cast<std::size_t>(descA[DDLA_LLD_])*ac*sizeof(T);
-    const auto ap=reinterpret_cast<std::uintptr_t>(A), zp=reinterpret_cast<std::uintptr_t>(Z);
-    if (abytes && (zp>=ap ? zp-ap<abytes : ap-zp<zbytes)) return 0;
+    if (memory_overlaps(A, abytes, Z, zbytes)) return 0;
     return zbytes/sizeof(rt);
 }
 
@@ -100,7 +100,7 @@ template<class T>PheevdReflectorBackupPlan pheevd_reflector_backup_check(const D
         const auto ab=reflector_active_span<T>(p.rows,p.columns,p.source_ld);
         const auto zb=reflector_active_span<T>(num_loc(n,dz[DDLA_MB_],p.pr,dz[DDLA_RSRC_],p.npr),num_loc(n,dz[DDLA_NB_],p.pc,dz[DDLA_CSRC_],p.npc),dz[DDLA_LLD_]);
         if((ab&&!A)||(zb&&!Z))throw std::invalid_argument("pheevd: null active matrix");
-        if(ab&&zb){const auto a=reinterpret_cast<std::uintptr_t>(A),z=reinterpret_cast<std::uintptr_t>(Z);overlap=a<=z?z-a<ab:a-z<zb;}
+        overlap=memory_overlaps(A,ab,Z,zb);
         std::copy(da,da+DDLA_DLEN_,p.saved.begin());p.saved[DDLA_M_]=p.saved[DDLA_N_]=n;p.saved[DDLA_LLD_]=std::max(p.rows,1);
     });
     MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&overlap,1,MPI_INT,MPI_MAX,ddlaGetCommunicator(h)));p.needed=overlap!=0;return p;

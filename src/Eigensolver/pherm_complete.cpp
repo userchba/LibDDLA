@@ -155,11 +155,6 @@ bool pherm_borrows_scratch(const spectral_impl::HermitianPlan& p,std::size_t sen
 
 // ----- host helpers (CPU backend) -------------------------------------------
 
-
-template <typename U> inline U pherm_conj(U v) { return v; }
-inline std::complex<float> pherm_conj(std::complex<float> v) { return std::conj(v); }
-inline std::complex<double> pherm_conj(std::complex<double> v) { return std::conj(v); }
-
 template <typename U> inline void pherm_make_real(U&) {}
 template <typename R> inline void pherm_make_real(std::complex<R>& v) { v = std::complex<R>(v.real(), R(0)); }
 
@@ -184,7 +179,7 @@ void pherm_exec_cpu(const DdlaHandle_t& handle,const HermPlan& p,bool upper,T* A
             for (int c = 0; c < b.cols; ++c)
                 for (int r = 0; r < b.rows; ++r)
                     dst[b.dst_off + r + static_cast<long long>(c) * b.dst_ld] =
-                        pherm_conj(src[b.src_off + c + static_cast<long long>(r) * b.src_ld]);
+                        detail::host_conj(src[b.src_off + c + static_cast<long long>(r) * b.src_ld]);
         };
     };
     try {
@@ -211,7 +206,7 @@ void pherm_exec_cpu(const DdlaHandle_t& handle,const HermPlan& p,bool upper,T* A
             // the stored triangle is read, the opposite one is written
             for (int r = upper ? c + 1 : 0; r < (upper ? b.rows : c); ++r)
                 a[r + static_cast<long long>(c) * b.src_ld] =
-                    pherm_conj(a[c + static_cast<long long>(r) * b.src_ld]);
+                    detail::host_conj(a[c + static_cast<long long>(r) * b.src_ld]);
         }
     });
 
@@ -279,11 +274,6 @@ void pherm_exec_gpu(const DdlaHandle_t& handle,const HermPlan& p,bool upper,T* A
     const dim3 block(32, 8, 1);
 
     try {
-#if !defined(DDLA_USE_CCL) || defined(DDLA_USE_GPU_CPU_TUNNEL)
-        // commAlltoallv must not grow a host buffer after peers enter MPI.
-        detail::tunnel_staging<T>(handle, 0, p.send_total);
-        detail::tunnel_staging<T>(handle, 1, p.recv_total);
-#endif
         if(meta_count)
             DDLA_CHECK(ddlaMemcpy(handle,d_meta,meta,meta_count*sizeof(HermBlk)));
         if (p.npack) {
