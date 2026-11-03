@@ -150,8 +150,8 @@ target_link_libraries(myapp PRIVATE ddla::ddla)
 ```
 
 The installed `ddla::ddla` target supplies the include path, MPI dependency
-and configured compile definitions. Public headers obtain build capabilities
-from the generated `<ddla/ddla_config.h>` (`DDLA_HAS_CPU`, `DDLA_HAS_GPU`), so
+and configured compile definitions. CPU support is unconditional; public headers
+obtain GPU availability from `<ddla/ddla_config.h>` (`DDLA_HAS_GPU`), so
 applications using only the public API do not need private vendor headers.
 In a dual build, `ddlaInit(handle)` and an omitted compute-template backend
 default to GPU. For CPU calls, create a CPU handle and select
@@ -526,8 +526,8 @@ The stream implementation, workspace helpers and vendor aliases also stay
 private. Operation sources are grouped under `src/BLAS`, `src/PBLAS`,
 `src/LU`, `src/Cholesky`, `src/QR` and `src/vbatched`.
 
-The public `DDLA_HAS_CPU` / `DDLA_HAS_GPU` macros describe library
-capabilities. Private `DDLA_USE_CUDA` / `DDLA_USE_HIP` definitions select the
+CPU support is unconditional. The public `DDLA_HAS_GPU` macro describes GPU
+availability. Private `DDLA_USE_CUDA` / `DDLA_USE_HIP` definitions select the
 vendor API available in a source file; `src/gpu/gpu.h` derives
 `DDLA_GPU_VENDOR` from them. These conditions are distinct: a CPU-only
 consumer can link a GPU-enabled library. `gpu_cpu.h` supplies compatibility

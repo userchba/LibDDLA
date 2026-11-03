@@ -1,11 +1,8 @@
 // ---------------------------------------------------------------------------
 // Backend-templated LU factorization with partial pivoting (LAPACK ?getrf):  A = P * L * U.
 //
-// Structure follows src/scal.cpp / src/geam.cpp: one definition covering CPU (Fortran LAPACK ?getrf on host pointers)
-// and GPU (cuSOLVER / hipSOLVER getrf on device pointers, enqueued on the handle's stream), selected with
-// `if constexpr` on the Backend template parameter, the arms guarded by the BUILD CAPABILITY macros
-// (DDLA_HAS_CPU / DDLA_HAS_GPU).  The vendor calls are private to this translation unit; the public interface is the
-// templated ddla::getrf declared in <ddla/ddla.h>.
+// Dispatch follows the Backend template parameter. CPU code is always compiled;
+// DDLA_HAS_GPU enables GPU code, and DDLA_USE_CUDA / DDLA_USE_HIP select its vendor.
 //
 // Three components (plan_util.h): getrf_check; getrf_workspace_size (backend bytes of the vendor workspace);
 // getrf_run on the caller's scratch.
@@ -25,7 +22,6 @@
 #include "ddla_stream.h"
 #include "lapack_impl.h"
 
-#if DDLA_HAS_CPU
 // Host LAPACK ?getrf (Fortran ABI; the CPU BLAS library must provide LAPACK -- OpenBLAS and MKL do).
 extern "C" {
 void sgetrf_(const int*, const int*, float*, const int*, int*, int*);
@@ -33,7 +29,6 @@ void dgetrf_(const int*, const int*, double*, const int*, int*, int*);
 void cgetrf_(const int*, const int*, std::complex<float>*, const int*, int*, int*);
 void zgetrf_(const int*, const int*, std::complex<double>*, const int*, int*, int*);
 }
-#endif
 
 namespace ddla {
 
@@ -44,7 +39,6 @@ inline const char* getrf_backend_name(DdlaBackend backend)
     return backend == DdlaBackend::CPU ? "CPU" : "GPU";
 }
 
-#if DDLA_HAS_CPU
 inline void cpu_getrf(int m, int n, float* A, int lda, int* ipiv, int* info)
 {
     sgetrf_(&m, &n, A, &lda, ipiv, info);
@@ -64,7 +58,6 @@ inline void cpu_getrf(int m, int n, std::complex<double>* A, int lda, int* ipiv,
 {
     zgetrf_(&m, &n, A, &lda, ipiv, info);
 }
-#endif // DDLA_HAS_CPU
 
 #if DDLA_HAS_GPU
 #if DDLA_GPU_VENDOR
@@ -138,8 +131,6 @@ template <DdlaBackend Backend>
 void getrf_check(const DdlaHandle_t& handle, int m, int n, const void* A, int lda,
                  const int* ipiv, const int* info)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU getrf is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU getrf is not available in this LibDDLA build");
 
@@ -193,9 +184,7 @@ void getrf_run(const DdlaHandle_t& handle, int m, int n, T* A, int lda, int* ipi
     }
 
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         cpu_getrf(m, n, A, lda, ipiv, info);
-#endif
     } else {
 #if DDLA_HAS_GPU
         SOLVER_CHECK(gpu_getrf(handle, backend_work, backend_bytes, m, n, A, lda, ipiv, info));
@@ -227,14 +216,12 @@ void getrf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, int* ipiv, i
     template void lapack_impl::getrf_workspace_size<TYPE>(                   \
         const DdlaHandle_t&, int, int, TYPE*, int, std::size_t*)
 
-#if DDLA_HAS_CPU
 template void lapack_impl::getrf_check<DdlaBackend::CPU>(
     const DdlaHandle_t&, int, int, const void*, int, const int*, const int*);
 INSTANTIATE_GETRF(DdlaBackend::CPU, float);
 INSTANTIATE_GETRF(DdlaBackend::CPU, double);
 INSTANTIATE_GETRF(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_GETRF(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 template void lapack_impl::getrf_check<DdlaBackend::GPU>(

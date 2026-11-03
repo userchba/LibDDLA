@@ -204,9 +204,7 @@ int main(int argc,char** argv)
     MPI_Init(&argc,&argv);int size;MPI_Comm_size(MPI_COMM_WORLD,&size);TestOptions options;std::string error;
     if(!parse_options(argc,argv,size,options,error)){std::cerr<<error<<std::endl;MPI_Abort(MPI_COMM_WORLD,2);}
     for(auto grid:options.grids)for(char major:{'R','C'}){
-#if DDLA_HAS_CPU
         run<DdlaBackend::CPU>(MPI_COMM_WORLD,grid.first,grid.second,major);
-#endif
 #if DDLA_HAS_GPU
         run<DdlaBackend::GPU>(MPI_COMM_WORLD,grid.first,grid.second,major);
 #endif

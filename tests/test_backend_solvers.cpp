@@ -512,7 +512,6 @@ int main(int argc, char** argv)
     }
 
     for (auto grid : options.grids) {
-#if DDLA_HAS_CPU
         {
             DdlaHandle_t h = nullptr;
             ddlaInit(h, DdlaBackend::CPU);
@@ -525,7 +524,6 @@ int main(int argc, char** argv)
             check_ddla_sync(h);
             ddlaDestroy(h);
         }
-#endif
 #if DDLA_HAS_GPU
         {
             DdlaHandle_t h = nullptr;
@@ -533,9 +531,7 @@ int main(int argc, char** argv)
             ddlaSet(h, MPI_COMM_WORLD, grid.first, grid.second);
             if (rank == 0) std::cout << "=== GPU handle, grid " << grid_name(h) << " ===" << std::endl;
             run_backend<DdlaBackend::GPU>(h, options.shapes);
-#if DDLA_HAS_CPU
             check_rejected<DdlaBackend::CPU>(h, "[GPU handle, <CPU>]");
-#endif
             check_ddla_sync(h);
             ddlaDestroy(h);
         }

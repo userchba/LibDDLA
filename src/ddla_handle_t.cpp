@@ -17,11 +17,7 @@ bool ddlaBackendAvailable(DdlaBackend backend)
 {
     switch (backend) {
     case DdlaBackend::CPU:
-#if DDLA_HAS_CPU
         return true;
-#else
-        return false;
-#endif
     case DdlaBackend::GPU:
 #if DDLA_HAS_GPU
         return true;

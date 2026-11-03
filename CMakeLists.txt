@@ -55,7 +55,6 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR}/include)
 # ---------------------------------------------------------------------------
 # Generated capability header ddla_config.h
 # ---------------------------------------------------------------------------
-set(DDLA_HAS_CPU 1)
 if(DDLA_USE_CUDA OR DDLA_USE_HIP)
     set(DDLA_HAS_GPU 1)
 else()

@@ -119,7 +119,7 @@ template<DdlaBackend B> void invalid(const DdlaHandle_t& h,int rank,int size) {
         try{ddla::scatter<B,double>(h,m,n,ap,ia,ja,desc,root,wp,ld);}catch(const std::invalid_argument&){caught=true;}
         require_close(h,"collective scatter validation "+std::to_string(kind),caught?0:1,0);
     }
-#if DDLA_HAS_CPU && DDLA_HAS_GPU
+#if DDLA_HAS_GPU
     bool caught=false;
     try {
         if constexpr(B==DdlaBackend::GPU)ddla::gather<DdlaBackend::CPU,double>(h,0,0,nullptr,1,1,d,0,nullptr,0);
@@ -143,9 +143,7 @@ int main(int argc,char**argv) {
     TestOptions opts;std::string error;
     if(!parse_options(argc,argv,size,opts,error)){std::cerr<<error<<std::endl;MPI_Abort(MPI_COMM_WORLD,2);}
     for(auto grid:opts.grids)for(char major:{'R','C'}) {
-#if DDLA_HAS_CPU
         run<DdlaBackend::CPU>(MPI_COMM_WORLD,grid.first,grid.second,major);
-#endif
 #if DDLA_HAS_GPU
         run<DdlaBackend::GPU>(MPI_COMM_WORLD,grid.first,grid.second,major);
 #endif
@@ -154,9 +152,7 @@ int main(int argc,char**argv) {
         int rank;MPI_Comm_rank(MPI_COMM_WORLD,&rank);MPI_Comm sub;
         MPI_Comm_split(MPI_COMM_WORLD,rank%2,rank,&sub);
         int subsize;MPI_Comm_size(sub,&subsize);
-#if DDLA_HAS_CPU
         if(rank%2==0)run<DdlaBackend::CPU>(sub,subsize,1,'C');
-#endif
 #if DDLA_HAS_GPU
         if(rank%2==0)run<DdlaBackend::GPU>(sub,subsize,1,'C');
 #endif

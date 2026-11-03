@@ -589,7 +589,6 @@ int check_gemmBatched_standalone(const DdlaHandle_t& handle)
     return bad;
 }
 
-#if DDLA_HAS_CPU
 // ---------------------------------------------------------------------------
 // gemmBatched on a CPU handle runs on the handle's host-thread budget (DdlaStream::host_threads): every OpenMP thread computes whole
 // products while the BLAS is held to one thread, and the BLAS thread count is put back afterwards.  On a realistic batch (every op
@@ -703,7 +702,6 @@ int check_gemmBatched_threads()
     ddlaDestroy(h4);
     return bad;
 }
-#endif // DDLA_HAS_CPU
 
 template <DdlaBackend Backend, typename T>
 int run_type(const DdlaHandle_t& handle, char* arena, std::size_t arena_bytes)
@@ -790,7 +788,7 @@ int run_backend()
     return failures;
 }
 
-#if DDLA_HAS_CPU && DDLA_HAS_GPU
+#if DDLA_HAS_GPU
 // A backend mismatch and a null handle must both be rejected, per family.
 int check_rejections()
 {
@@ -846,7 +844,6 @@ int main(int argc, char** argv)
     const bool do_cpu = (!only || std::string(only) == "cpu");
     const bool do_gpu = (!only || std::string(only) == "gpu");
     int failures = 0;
-#if DDLA_HAS_CPU
     if (do_cpu) {
         failures += run_backend<DdlaBackend::CPU>();
         if (family_selected("gemmBatched")) {
@@ -856,15 +853,12 @@ int main(int argc, char** argv)
             failures += check_gemmBatched_threads<std::complex<double>>();
         }
     }
-#else
-    (void)do_cpu;
-#endif
 #if DDLA_HAS_GPU
     if (do_gpu) failures += run_backend<DdlaBackend::GPU>();
 #else
     (void)do_gpu;
 #endif
-#if DDLA_HAS_CPU && DDLA_HAS_GPU
+#if DDLA_HAS_GPU
     failures += check_rejections();
 #endif
 

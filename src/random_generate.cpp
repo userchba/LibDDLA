@@ -26,8 +26,6 @@ namespace random_impl {
 template <DdlaBackend Backend, typename T>
 void random_generate_check(const DdlaHandle_t& handle, T* data, const int64_t& lengthOfData)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU random_generate is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU random_generate is not available in this LibDDLA build");
 
@@ -49,7 +47,6 @@ void random_generate_run(const DdlaHandle_t& handle, PreparedRng& resource, T* d
     try {
         if(lengthOfData<=0)return;
         if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
             auto& rng=resource.engine;
             if constexpr (std::is_same_v<T, float>) {
                 std::uniform_real_distribution<float> dist(0.0f, 1.0f);
@@ -69,7 +66,6 @@ void random_generate_run(const DdlaHandle_t& handle, PreparedRng& resource, T* d
                 static_assert(sizeof(T) == 0,
                               "random_generate supports only float, double, std::complex<float>, std::complex<double>");
             }
-#endif
         } else {
 #if DDLA_HAS_GPU
             const auto gen=resource.generator();
@@ -113,12 +109,10 @@ void random_generate(const DdlaHandle_t& handle, T* data, const int64_t& lengthO
     template void random_impl::random_generate_check<BACKEND,TYPE>(const DdlaHandle_t&,TYPE*,const int64_t&); \
     template void random_impl::random_generate_run<BACKEND,TYPE>(const DdlaHandle_t&,random_impl::PreparedRng&,TYPE*,const int64_t&)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_RANDOM_GENERATE(DdlaBackend::CPU, float);
 INSTANTIATE_RANDOM_GENERATE(DdlaBackend::CPU, double);
 INSTANTIATE_RANDOM_GENERATE(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_RANDOM_GENERATE(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_RANDOM_GENERATE(DdlaBackend::GPU, float);

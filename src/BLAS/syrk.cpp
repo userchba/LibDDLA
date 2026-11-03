@@ -6,14 +6,12 @@
 #include "require_backend.h"
 #include <type_traits>
 
-#if DDLA_HAS_CPU
 extern "C" {
 void ssyrk_(const char*, const char*, const int*, const int*, const float*, const float*, const int*, const float*, float*, const int*);
 void dsyrk_(const char*, const char*, const int*, const int*, const double*, const double*, const int*, const double*, double*, const int*);
 void csyrk_(const char*, const char*, const int*, const int*, const std::complex<float>*, const std::complex<float>*, const int*, const std::complex<float>*, std::complex<float>*, const int*);
 void zsyrk_(const char*, const char*, const int*, const int*, const std::complex<double>*, const std::complex<double>*, const int*, const std::complex<double>*, std::complex<double>*, const int*);
 }
-#endif
 
 namespace ddla {
 namespace blas_impl {
@@ -33,7 +31,6 @@ void syrk_run(const DdlaHandle_t& h, char uplo, char trans, int n, int k,
 {
     if constexpr (std::is_arithmetic_v<T>) trans=detail::trans_real(trans);
     if constexpr (Backend==DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         if constexpr (std::is_same_v<T,float>)
             ssyrk_(&uplo, &trans,&n, &k,&alpha,A,&lda,&beta,C,&ldc);
         else if constexpr (std::is_same_v<T,double>)
@@ -42,7 +39,6 @@ void syrk_run(const DdlaHandle_t& h, char uplo, char trans, int n, int k,
             csyrk_(&uplo, &trans,&n, &k,&alpha,A,&lda,&beta,C,&ldc);
         else if constexpr (std::is_same_v<T,std::complex<double>>)
             zsyrk_(&uplo, &trans,&n, &k,&alpha,A,&lda,&beta,C,&ldc);
-#endif
     } else {
 #if DDLA_GPU_VENDOR
         if constexpr (std::is_same_v<T,float>) {
@@ -80,9 +76,7 @@ void syrk(const DdlaHandle_t& h, char uplo, char trans, int n, int k,
     template void blas_impl::syrk_run<B,T>(const DdlaHandle_t&,char,char,int,int,const T&,const T*,int,const T&,T*,int);
 #define TYPES(B) INSTANTIATE(B,float) INSTANTIATE(B,double) \
     INSTANTIATE(B,std::complex<float>) INSTANTIATE(B,std::complex<double>)
-#if DDLA_HAS_CPU
 TYPES(DdlaBackend::CPU)
-#endif
 #if DDLA_HAS_GPU
 TYPES(DdlaBackend::GPU)
 #endif

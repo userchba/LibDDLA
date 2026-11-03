@@ -89,9 +89,7 @@ int main(int argc,char**argv) {
         if(size!=1)throw std::invalid_argument("benchmark requires one MPI process");
         const std::string mode=argc>1?argv[1]:"gpu";
         std::cout<<std::setprecision(9)<<"backend,precision,trans,m,n,k,mixed_ms,complex_ms,speedup,max_relative_error,mixed_min_ms,mixed_max_ms,complex_min_ms,complex_max_ms,repeats,warmups\n";
-#if DDLA_HAS_CPU
         if(mode=="cpu")run<DdlaBackend::CPU>(argc,argv);else
-#endif
 #if DDLA_HAS_GPU
         if(mode=="gpu")run<DdlaBackend::GPU>(argc,argv);else
 #endif

@@ -171,7 +171,6 @@ template <DdlaBackend Backend, typename T>
 void ptranspose_vectors_run(const DdlaHandle_t& handle,const VectorRedistPlan& p,const T* src,T* dst,
     void* backend_work,std::size_t backend_bytes)
 {
-    static_assert(Backend!=DdlaBackend::CPU||DDLA_HAS_CPU,"CPU vector redistribution is not available");
     static_assert(Backend!=DdlaBackend::GPU||DDLA_HAS_GPU,"GPU vector redistribution is not available");
     if(!p.n||!p.nvc)return;
     const int n=p.n,nvc=p.nvc,nb=p.nb,ld_src=p.ld_src,ld_dst=p.ld_dst;
@@ -367,12 +366,10 @@ void preduce_add_vectors(
     template void spectral_impl::ptranspose_vectors_workspace_size<TYPE>(const DdlaHandle_t&,int,int,int,std::size_t*); \
     template void spectral_impl::preduce_add_vectors_workspace_size<TYPE>(const DdlaHandle_t&,int,int,int,int,std::size_t*)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PVECTOR_REDIST(DdlaBackend::CPU, float);
 INSTANTIATE_PVECTOR_REDIST(DdlaBackend::CPU, double);
 INSTANTIATE_PVECTOR_REDIST(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PVECTOR_REDIST(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PVECTOR_REDIST(DdlaBackend::GPU, float);

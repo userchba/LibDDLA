@@ -555,7 +555,6 @@ double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
                 nullptr, nullptr, T{}, nullptr, nullptr, 0);
         }))
         throw std::runtime_error("a null handle was accepted by gemmVbatched");
-#if DDLA_HAS_CPU
     {
         ddla::DdlaHandle_t cpu = nullptr;
         ddla::ddlaInit(cpu, ddla::DdlaBackend::CPU);
@@ -581,7 +580,6 @@ double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
         if (!mismatch || !cpu_backend || !mismatch_2s)
             throw std::runtime_error("gemmVbatched accepted a CPU handle or the CPU backend");
     }
-#endif
     case_count += 1;
     return maximum_error;
 }

@@ -3,19 +3,8 @@
 // Unified backend-templated triangular matrix multiply
 // (B := alpha*blas_impl::op(A)*B or B := alpha*B*blas_impl::op(A), per @p side).
 //
-// Structure follows src/herk.cpp exactly: one definition covering CPU (Fortran
-// BLAS) and GPU (cuBLAS/hipBLAS), selected with `if constexpr` on the Backend
-// template parameter, with the arms themselves guarded by the BUILD CAPABILITY
-// macros (DDLA_HAS_CPU / DDLA_HAS_GPU) and the vendor chosen per scalar arm by
-// the PER-TU macros (DDLA_USE_CUDA / DDLA_USE_HIP).
-//
-// Why the capability guard matters here: the previous design put a `#else`
-// CPU arm inside src/trmm.h selected by `!defined(DDLA_USE_CUDA) &&
-// !defined(DDLA_USE_HIP)`.  In a dual build (DDLA_USE_CPU + DDLA_USE_CUDA)
-// every TU defines DDLA_USE_CUDA, so that arm was never compiled -- while
-// DDLA_HAS_CPU was 1 and the CPU instantiation of this function still existed.
-// A CPU-backend call would therefore have reached cublasStrmm with HOST
-// pointers.  Guarding on DDLA_HAS_CPU removes that class of bug.
+// Dispatch follows the Backend template parameter. CPU code is always compiled;
+// DDLA_HAS_GPU enables GPU code, and DDLA_USE_CUDA / DDLA_USE_HIP select its vendor.
 //
 // The public interface follows BLAS and overwrites B. The GPU arm uses the
 // vendor-supported in-place case by passing B and ldb as both input and output.
@@ -34,7 +23,6 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 
-#if DDLA_HAS_CPU
 extern "C" {
 void strmm_(const char*, const char*, const char*, const char*, const int*, const int*,
             const float*, const float*, const int*, float*, const int*);
@@ -47,7 +35,6 @@ void ztrmm_(const char*, const char*, const char*, const char*, const int*, cons
             const std::complex<double>*, const std::complex<double>*, const int*,
             std::complex<double>*, const int*);
 }
-#endif
 
 // ---------------------------------------------------------------------------
 // GPU arm: the vendor calls.  Kept as free gpublasTrmm overloads so the
@@ -152,8 +139,6 @@ void trmm_check(
     const T* A, int lda,
     T* B, int ldb)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU trmm is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU trmm is not available in this LibDDLA build");
 
@@ -201,7 +186,6 @@ void trmm_run(
         return;
     }
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         if constexpr (std::is_same_v<T, float>) {
             strmm_(&side, &uplo, &trans, &diag, &m, &n, &alpha, A, &lda, B, &ldb);
         } else if constexpr (std::is_same_v<T, double>) {
@@ -213,11 +197,6 @@ void trmm_run(
         } else {
             static_assert(sizeof(T) == 0, "trmm: unsupported scalar type T");
         }
-#else
-        (void)handle; (void)side; (void)uplo; (void)trans; (void)diag;
-        (void)m; (void)n; (void)alpha; (void)A; (void)lda;
-        (void)B; (void)ldb;
-#endif
     } else {
 #if DDLA_HAS_GPU
         if constexpr (std::is_same_v<T, float> ||
@@ -262,12 +241,10 @@ void trmm(
         const DdlaHandle_t&, char, char, char, char, int, int,                 \
         const TYPE&, const TYPE*, int, TYPE*, int)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_TRMM(DdlaBackend::CPU, float);
 INSTANTIATE_TRMM(DdlaBackend::CPU, double);
 INSTANTIATE_TRMM(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_TRMM(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_TRMM(DdlaBackend::GPU, float);
@@ -282,12 +259,10 @@ INSTANTIATE_TRMM(DdlaBackend::GPU, std::complex<double>);
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::trmm_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char side, char uplo, char trans, char diag, int m, int n, const TYPE& alpha, const TYPE* A, int lda, TYPE* B, int ldb); \
     template void blas_impl::trmm_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char side, char uplo, char trans, char diag, int m, int n, const TYPE& alpha, const TYPE* A, int lda, TYPE* B, int ldb);
-#if DDLA_HAS_CPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#endif
 #if DDLA_HAS_GPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)

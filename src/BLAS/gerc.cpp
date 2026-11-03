@@ -6,20 +6,9 @@
 // from the left:  A := A - tau * v * w^H.  The update touches the leading
 // m x n submatrix of A only.
 //
-// Structure follows src/herk.cpp exactly: one definition covering CPU (Fortran
-// BLAS) and GPU (cuBLAS/hipBLAS), selected with `if constexpr` on the Backend
-// template parameter, with the arms themselves guarded by the BUILD CAPABILITY
-// macros (DDLA_HAS_CPU / DDLA_HAS_GPU) and the vendor chosen per scalar arm by
-// the PER-TU macros (DDLA_USE_CUDA / DDLA_USE_HIP).
+// Dispatch follows the Backend template parameter. CPU code is always compiled;
+// DDLA_HAS_GPU enables GPU code, and DDLA_USE_CUDA / DDLA_USE_HIP select its vendor.
 //
-// Why the capability guard matters here: the previous design put a `#else`
-// CPU arm inside src/gemv.h selected by `!defined(DDLA_USE_CUDA) &&
-// !defined(DDLA_USE_HIP)`.  In a dual build (DDLA_USE_CPU + DDLA_USE_CUDA)
-// every TU defines DDLA_USE_CUDA, so that arm was never compiled -- while
-// DDLA_HAS_CPU was 1 and the CPU instantiation of this function still existed.
-// A CPU-backend call would therefore have reached cublasSgemv with HOST
-// pointers.  Guarding on DDLA_HAS_CPU removes that class of bug.
-// ---------------------------------------------------------------------------
 #include <ddla/ddla.h>
 #include <ddla/ddla_handle_t.h>
 
@@ -32,7 +21,6 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 
-#if DDLA_HAS_CPU
 extern "C" {
 // Real: xGER (same signature for real and complex; real is plain xGER).
 void sger_(const int*, const int*, const float*,
@@ -51,7 +39,6 @@ void zgerc_(const int*, const int*, const std::complex<double>*,
             const std::complex<double>*, const int*,
             std::complex<double>*, const int*);
 }
-#endif
 
 // ---------------------------------------------------------------------------
 // GPU arm: the vendor calls.  Kept as free gpublasGerc overloads so the dispatch
@@ -135,8 +122,6 @@ void gerc_check(const DdlaHandle_t& handle, int m, int n,
           const T& alpha, const T* x, int incx,
           const T* y, int incy, T* A, int lda)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU gerc is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU gerc is not available in this LibDDLA build");
 
@@ -166,7 +151,6 @@ void gerc_run(const DdlaHandle_t& handle, int m, int n,
 {
     if (m <= 0 || n <= 0) return;
     if constexpr (Backend == DdlaBackend::CPU) {
-        #if DDLA_HAS_CPU
 if constexpr (std::is_same_v<T, float>) {
             sger_(&m, &n, &alpha, x, &incx, y, &incy, A, &lda);
         } else if constexpr (std::is_same_v<T, double>) {
@@ -178,7 +162,6 @@ if constexpr (std::is_same_v<T, float>) {
         } else {
             static_assert(sizeof(T) == 0, "gerc: unsupported scalar type T");
         }
-        #endif
     } else {
         #if DDLA_HAS_GPU
         BLAS_CHECK(gpublasGerc(static_cast<gpublasHandle_t>(handle->blasH), m, n, alpha, x, incx, y, incy, A, lda));
@@ -202,12 +185,10 @@ void gerc(const DdlaHandle_t& handle, int m, int n,
         const DdlaHandle_t&, int, int, const TYPE&, const TYPE*, int,        \
         const TYPE*, int, TYPE*, int)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_GERC(DdlaBackend::CPU, float);
 INSTANTIATE_GERC(DdlaBackend::CPU, double);
 INSTANTIATE_GERC(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_GERC(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_GERC(DdlaBackend::GPU, float);
@@ -222,12 +203,10 @@ INSTANTIATE_GERC(DdlaBackend::GPU, std::complex<double>);
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::gerc_check<BACKEND, TYPE>(const DdlaHandle_t& handle, int m, int n, const TYPE& alpha, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* A, int lda); \
     template void blas_impl::gerc_run<BACKEND, TYPE>(const DdlaHandle_t& handle, int m, int n, const TYPE& alpha, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* A, int lda);
-#if DDLA_HAS_CPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#endif
 #if DDLA_HAS_GPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)

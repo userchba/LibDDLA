@@ -22,12 +22,8 @@ enum class DdlaBackend {
 inline constexpr DdlaBackend default_backend_v =
 #if DDLA_HAS_GPU
     DdlaBackend::GPU;
-#elif DDLA_HAS_CPU
-    DdlaBackend::CPU;
 #else
-    // Unreachable: CMake requires at least one backend (CPU, CUDA, or HIP).
-    // Kept as a hard error so the header stays self-consistent.
-#error "LibDDLA requires at least one backend (CPU or GPU)"
+    DdlaBackend::CPU;
 #endif
 
 /// Status codes returned by the public API functions.

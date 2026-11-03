@@ -9,7 +9,6 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 
-#if DDLA_HAS_CPU
 // CPU BLAS Level-1 SCAL bindings (Fortran ABI), declared by hand rather than
 // via a vendor header -- same convention as gemm.cpp's sgemm_/dgemm_/cgemm_/
 // zgemm_ block.
@@ -19,11 +18,9 @@ void dscal_(const int*, const double*, double*, const int*);
 void cscal_(const int*, const std::complex<float>*, std::complex<float>*, const int*);
 void zscal_(const int*, const std::complex<double>*, std::complex<double>*, const int*);
 }
-#endif
 
 namespace ddla {
 
-#if DDLA_HAS_CPU
 inline void cpu_scal(int n, const float& alpha, float* x, int incx)
 {
     sscal_(&n, &alpha, x, &incx);
@@ -43,7 +40,6 @@ inline void cpu_scal(int n, const std::complex<double>& alpha, std::complex<doub
 {
     zscal_(&n, &alpha, x, &incx);
 }
-#endif
 
 #if DDLA_HAS_GPU
 namespace {
@@ -99,8 +95,6 @@ namespace blas_impl {
 template <DdlaBackend Backend, typename T>
 void scal_check(const DdlaHandle_t& handle, int n, const T& alpha, T* x, int incx)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU scal is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU scal is not available in this LibDDLA build");
 
@@ -122,9 +116,7 @@ void scal_run(const DdlaHandle_t& handle, int n, const T& alpha, T* x, int incx)
 {
     if (n <= 0) return;
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         cpu_scal(n, alpha, x, incx);
-#endif
     } else {
 #if DDLA_HAS_GPU
         BLAS_CHECK(gpublasScal(static_cast<gpublasHandle_t>(handle->blasH), static_cast<int64_t>(n), alpha, x,
@@ -146,12 +138,10 @@ void scal(const DdlaHandle_t& handle, int n, const T& alpha, T* x, int incx)
     template void scal<BACKEND, TYPE>(                                       \
         const DdlaHandle_t&, int, const TYPE&, TYPE*, int)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_SCAL(DdlaBackend::CPU, float);
 INSTANTIATE_SCAL(DdlaBackend::CPU, double);
 INSTANTIATE_SCAL(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_SCAL(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_SCAL(DdlaBackend::GPU, float);
@@ -166,12 +156,10 @@ INSTANTIATE_SCAL(DdlaBackend::GPU, std::complex<double>);
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::scal_check<BACKEND, TYPE>(const DdlaHandle_t& handle, int n, const TYPE& alpha, TYPE* x, int incx); \
     template void blas_impl::scal_run<BACKEND, TYPE>(const DdlaHandle_t& handle, int n, const TYPE& alpha, TYPE* x, int incx);
-#if DDLA_HAS_CPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#endif
 #if DDLA_HAS_GPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)

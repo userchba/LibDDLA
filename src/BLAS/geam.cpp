@@ -4,11 +4,8 @@
 //
 //     C(m x n) := alpha * blas_impl::op(A) + beta * blas_impl::op(B),     op in {'N', 'T', 'C'}.
 //
-// Structure follows src/trmm.cpp and src/scal.cpp: one definition covering CPU
-// and GPU, selected with `if constexpr` on the Backend template parameter, the
-// arms guarded by the BUILD CAPABILITY macros (DDLA_HAS_CPU / DDLA_HAS_GPU),
-// never by the per-TU vendor macro (a dual build defines DDLA_USE_CUDA in every
-// TU, so a vendor-macro `#else` CPU arm would never compile there).
+// Dispatch follows the Backend template parameter. CPU code is always compiled;
+// DDLA_HAS_GPU enables GPU code, and DDLA_USE_CUDA / DDLA_USE_HIP select its vendor.
 //
 // The out-of-place scaled transpose-copy that used to be `omatcopy` is the
 // special case beta == 0: `geam(h, 'T', 'N', m, n, 1, A, lda, 0, nullptr, 1, C, ldc)`.
@@ -122,7 +119,6 @@ namespace ddla {
 // ---------------------------------------------------------------------------
 // CPU arm.
 // ---------------------------------------------------------------------------
-#if DDLA_HAS_CPU
 namespace {
 
 constexpr int kTile = 32;                        // transposed access: kTile x kTile tiles
@@ -238,7 +234,6 @@ void cpu_geam(bool ta, bool ca, bool tb, bool cb, T alpha, const T* A, std::size
 }
 
 } // anonymous namespace
-#endif // DDLA_HAS_CPU
 
 namespace {
 
@@ -269,8 +264,6 @@ void geam_check(const DdlaHandle_t& handle, char transa, char transb, int m, int
           const T& beta, const T* B, int ldb,
           T* C, int ldc)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU geam is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU geam is not available in this LibDDLA build");
 
@@ -308,11 +301,9 @@ void geam_run(const DdlaHandle_t& handle, char transa, char transb, int m, int n
     if (m <= 0 || n <= 0) return;
     const bool zero_beta = (beta == T(0));
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         cpu_geam(ta != 'N', ta == 'C', tb != 'N', tb == 'C', alpha, A, static_cast<std::size_t>(lda),
                  beta, B, static_cast<std::size_t>(ldb), C, static_cast<std::size_t>(ldc),
                  m, n, handle->host_threads);
-#endif
     } else {
 #if DDLA_HAS_GPU
         const gpublasOperation_t opA = blas_impl::op(ta);
@@ -345,12 +336,10 @@ void geam(const DdlaHandle_t& handle, char transa, char transb, int m, int n,
         const DdlaHandle_t&, char, char, int, int,                             \
         const TYPE&, const TYPE*, int, const TYPE&, const TYPE*, int, TYPE*, int)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_GEAM(DdlaBackend::CPU, float);
 INSTANTIATE_GEAM(DdlaBackend::CPU, double);
 INSTANTIATE_GEAM(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_GEAM(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_GEAM(DdlaBackend::GPU, float);
@@ -365,12 +354,10 @@ INSTANTIATE_GEAM(DdlaBackend::GPU, std::complex<double>);
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::geam_check<BACKEND, TYPE>(const DdlaHandle_t& handle, char transa, char transb, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE& beta, const TYPE* B, int ldb, TYPE* C, int ldc); \
     template void blas_impl::geam_run<BACKEND, TYPE>(const DdlaHandle_t& handle, char transa, char transb, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE& beta, const TYPE* B, int ldb, TYPE* C, int ldc);
-#if DDLA_HAS_CPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#endif
 #if DDLA_HAS_GPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)

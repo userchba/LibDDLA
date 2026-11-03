@@ -134,12 +134,10 @@ void potrf_bottom_right_block(
     template void potrf_bottom_right_block<BACKEND, TYPE>(char, int, TYPE*, int, int, TYPE*, int*, int&, \
     const DdlaHandle_t&, void*, std::size_t)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_POTRF_BOTTOM_RIGHT_BLOCK(DdlaBackend::CPU, float);
 INSTANTIATE_POTRF_BOTTOM_RIGHT_BLOCK(DdlaBackend::CPU, double);
 INSTANTIATE_POTRF_BOTTOM_RIGHT_BLOCK(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_POTRF_BOTTOM_RIGHT_BLOCK(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_POTRF_BOTTOM_RIGHT_BLOCK(DdlaBackend::GPU, float);
@@ -312,7 +310,6 @@ void potrf_bottom_right(
     template void lapack_impl::potrf_bottom_right_workspace_size<TYPE>(const DdlaHandle_t&, char, int, TYPE*, \
         std::size_t*)
 
-#if DDLA_HAS_CPU
 template void lapack_impl::potrf_bottom_right_check<DdlaBackend::CPU>(
     char, int, const void*, int, const DdlaHandle_t&);
 template void lapack_impl::potrf_bottom_right_block_check<DdlaBackend::CPU>(
@@ -321,7 +318,6 @@ INSTANTIATE_POTRF_BOTTOM_RIGHT(DdlaBackend::CPU, float);
 INSTANTIATE_POTRF_BOTTOM_RIGHT(DdlaBackend::CPU, double);
 INSTANTIATE_POTRF_BOTTOM_RIGHT(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_POTRF_BOTTOM_RIGHT(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 template void lapack_impl::potrf_bottom_right_check<DdlaBackend::GPU>(

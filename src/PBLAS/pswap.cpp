@@ -233,7 +233,6 @@ void pswap(
     template void detail::swap_rows<BACKEND, TYPE>(const DdlaHandle_t&, \
     TYPE*, const int*, int, int, TYPE*, const int*, int, int, int, TYPE*, TYPE*)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PSWAP_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PSWAP(DdlaBackend::CPU, float);
 INSTANTIATE_PSWAP(DdlaBackend::CPU, double);
@@ -243,7 +242,6 @@ INSTANTIATE_SWAP_ROWS(DdlaBackend::CPU, float);
 INSTANTIATE_SWAP_ROWS(DdlaBackend::CPU, double);
 INSTANTIATE_SWAP_ROWS(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_SWAP_ROWS(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PSWAP_CHECK(DdlaBackend::GPU);

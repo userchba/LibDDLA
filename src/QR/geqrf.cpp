@@ -2,11 +2,8 @@
 // Backend-templated QR / QL factorization of one matrix on one process (LAPACK ?geqrf / ?geqlf):
 // A = Q * R for uplo = 'U', A = Q * L for uplo = 'L'.
 //
-// Structure follows src/getrf.cpp: one definition covering CPU (Fortran LAPACK ?geqrf / ?geqlf on host pointers) and
-// GPU (cuSOLVER / hipSOLVER geqrf on device pointers, enqueued on the handle's stream), selected with `if constexpr`
-// on the Backend template parameter, the arms guarded by the BUILD CAPABILITY macros (DDLA_HAS_CPU / DDLA_HAS_GPU).
-// The vendor calls are private to this translation unit; the public interface is the templated ddla::geqrf declared in
-// <ddla/ddla.h>.
+// Dispatch follows the Backend template parameter. CPU code is always compiled;
+// DDLA_HAS_GPU enables GPU code, and DDLA_USE_CUDA / DDLA_USE_HIP select its vendor.
 //
 // Three components (plan_util.h): geqrf_check; geqrf_workspace_size (backend bytes: the LAPACK work array on a CPU
 // handle; on a GPU handle a device info slot, the QL path's reversed copy and the vendor workspace); geqrf_run on the
@@ -36,7 +33,6 @@
 #include "pgeqrf_kernels.h"
 #include "plan_util.h"
 
-#if DDLA_HAS_CPU
 // Host LAPACK ?geqrf / ?geqlf (Fortran ABI; the CPU BLAS library must provide LAPACK -- OpenBLAS and MKL do).
 extern "C" {
 void sgeqrf_(const int*, const int*, float*, const int*, float*, float*, const int*, int*);
@@ -52,7 +48,6 @@ void cgeqlf_(const int*, const int*, std::complex<float>*, const int*, std::comp
 void zgeqlf_(const int*, const int*, std::complex<double>*, const int*, std::complex<double>*, std::complex<double>*,
              const int*, int*);
 }
-#endif
 
 namespace ddla {
 
@@ -63,7 +58,6 @@ inline const char* geqrf_backend_name(DdlaBackend backend)
     return backend == DdlaBackend::CPU ? "CPU" : "GPU";
 }
 
-#if DDLA_HAS_CPU
 inline void lapack_geqrf(bool lower, int m, int n, float* A, int lda, float* tau, float* work, int lwork, int* info)
 {
     if (lower) sgeqlf_(&m, &n, A, &lda, tau, work, &lwork, info);
@@ -110,7 +104,6 @@ void cpu_geqrf(void* work, std::size_t work_bytes, bool lower, int m, int n, T* 
     lapack_geqrf(lower, m, n, A, lda, tau, static_cast<T*>(work), lwork, &info);
     if (info != 0) throw std::runtime_error("geqrf: LAPACK reported an invalid argument");
 }
-#endif // DDLA_HAS_CPU
 
 #if DDLA_HAS_GPU
 #if DDLA_GPU_VENDOR
@@ -218,8 +211,6 @@ namespace lapack_impl {
 template <DdlaBackend Backend>
 char geqrf_check(const DdlaHandle_t& handle, char uplo, int m, int n, const void* A, int lda, const void* tau)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU geqrf is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU geqrf is not available in this LibDDLA build");
 
@@ -256,9 +247,7 @@ void geqrf_workspace_size(const DdlaHandle_t& handle, char uplo, int m, int n, T
     if (std::min(m, n) <= 0) return;
     const bool lower = uplo == 'L';
     if (handle->backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         *backend_bytes = static_cast<std::size_t>(cpu_geqrf_lwork(lower, m, n, A, lda, tau)) * sizeof(T);
-#endif
     } else {
 #if DDLA_HAS_GPU && DDLA_GPU_VENDOR
         int lwork = 0;
@@ -282,9 +271,7 @@ void geqrf_run(const DdlaHandle_t& handle, char uplo, int m, int n, T* A, int ld
     if (std::min(m, n) <= 0) return;   // nothing to factor
 
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         cpu_geqrf(backend_work, backend_bytes, uplo == 'L', m, n, A, lda, tau);
-#endif
     } else {
 #if DDLA_HAS_GPU
         char* const w = static_cast<char*>(backend_work);
@@ -320,14 +307,12 @@ void geqrf(const DdlaHandle_t& handle, char uplo, int m, int n, T* A, int lda, T
     template void lapack_impl::geqrf_workspace_size<TYPE>(                   \
         const DdlaHandle_t&, char, int, int, TYPE*, int, TYPE*, std::size_t*)
 
-#if DDLA_HAS_CPU
 template char lapack_impl::geqrf_check<DdlaBackend::CPU>(
     const DdlaHandle_t&, char, int, int, const void*, int, const void*);
 INSTANTIATE_GEQRF(DdlaBackend::CPU, float);
 INSTANTIATE_GEQRF(DdlaBackend::CPU, double);
 INSTANTIATE_GEQRF(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_GEQRF(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 template char lapack_impl::geqrf_check<DdlaBackend::GPU>(

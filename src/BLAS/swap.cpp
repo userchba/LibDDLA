@@ -2,12 +2,8 @@
 // ---------------------------------------------------------------------------
 // Backend-templated BLAS Level-1 swap:  x <-> y.
 //
-// Structure follows src/scal.cpp: one definition covering CPU (Fortran ?swap on host pointers) and GPU (cuBLAS / hipBLAS
-// ?swap on device pointers, enqueued on the handle's stream), selected with `if constexpr` on the Backend template
-// parameter, the arms guarded by the BUILD CAPABILITY macros (DDLA_HAS_CPU / DDLA_HAS_GPU), never by the per-TU vendor
-// macro alone.  The vendor overloads are private to this translation unit; the public interface is the templated
-// ddla::swap declared in <ddla/ddla.h>.
-// ---------------------------------------------------------------------------
+// Dispatch follows the Backend template parameter. CPU code is always compiled;
+// DDLA_HAS_GPU enables GPU code, and DDLA_USE_CUDA / DDLA_USE_HIP select its vendor.
 #include <ddla/ddla.h>
 #include <ddla/ddla_handle_t.h>
 
@@ -18,7 +14,6 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 
-#if DDLA_HAS_CPU
 // CPU BLAS Level-1 SWAP bindings (Fortran ABI), declared by hand like gemm.cpp / scal.cpp do.
 extern "C" {
 void sswap_(const int*, float*, const int*, float*, const int*);
@@ -26,7 +21,6 @@ void dswap_(const int*, double*, const int*, double*, const int*);
 void cswap_(const int*, std::complex<float>*, const int*, std::complex<float>*, const int*);
 void zswap_(const int*, std::complex<double>*, const int*, std::complex<double>*, const int*);
 }
-#endif
 
 namespace ddla {
 
@@ -37,7 +31,6 @@ inline const char* swap_backend_name(DdlaBackend backend)
     return backend == DdlaBackend::CPU ? "CPU" : "GPU";
 }
 
-#if DDLA_HAS_CPU
 inline void cpu_swap(int n, float* x, int incx, float* y, int incy)
 {
     sswap_(&n, x, &incx, y, &incy);
@@ -57,7 +50,6 @@ inline void cpu_swap(int n, std::complex<double>* x, int incx, std::complex<doub
 {
     zswap_(&n, x, &incx, y, &incy);
 }
-#endif // DDLA_HAS_CPU
 
 #if DDLA_HAS_GPU
 inline gpublasStatus_t gpublasSwap(gpublasHandle_t handle, int n, float* x, int incx, float* y, int incy)
@@ -106,8 +98,6 @@ namespace blas_impl {
 template <DdlaBackend Backend, typename T>
 void swap_check(const DdlaHandle_t& handle, int n, T* x, int incx, T* y, int incy)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU swap is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU swap is not available in this LibDDLA build");
 
@@ -135,9 +125,7 @@ void swap_run(const DdlaHandle_t& handle, int n, T* x, int incx, T* y, int incy)
 {
     if (n <= 0) return;
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         cpu_swap(n, x, incx, y, incy);
-#endif
     } else {
 #if DDLA_HAS_GPU
         BLAS_CHECK(gpublasSwap(static_cast<gpublasHandle_t>(handle->blasH), n, x, incx, y, incy));
@@ -158,12 +146,10 @@ void swap(const DdlaHandle_t& handle, int n, T* x, int incx, T* y, int incy)
     template void swap<BACKEND, TYPE>(                                       \
         const DdlaHandle_t&, int, TYPE*, int, TYPE*, int)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_SWAP(DdlaBackend::CPU, float);
 INSTANTIATE_SWAP(DdlaBackend::CPU, double);
 INSTANTIATE_SWAP(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_SWAP(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_SWAP(DdlaBackend::GPU, float);
@@ -178,12 +164,10 @@ INSTANTIATE_SWAP(DdlaBackend::GPU, std::complex<double>);
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::swap_check<BACKEND, TYPE>(const DdlaHandle_t& handle, int n, TYPE* x, int incx, TYPE* y, int incy); \
     template void blas_impl::swap_run<BACKEND, TYPE>(const DdlaHandle_t& handle, int n, TYPE* x, int incx, TYPE* y, int incy);
-#if DDLA_HAS_CPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#endif
 #if DDLA_HAS_GPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)

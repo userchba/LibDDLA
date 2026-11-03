@@ -202,10 +202,8 @@ int main(int argc, char* argv[])
     // One handle per available backend: random_generate takes the handle first and the backend must match it.
     DdlaHandle_t cpu = nullptr;
     DdlaHandle_t gpu = nullptr;
-#if DDLA_HAS_CPU
     ddlaInit(cpu, DdlaBackend::CPU);
     ddlaSet(cpu, MPI_COMM_WORLD);
-#endif
 #if DDLA_HAS_GPU
     ddlaInit(gpu, DdlaBackend::GPU);
     ddlaSet(gpu, MPI_COMM_WORLD);
@@ -215,9 +213,7 @@ int main(int argc, char* argv[])
 #if DDLA_HAS_GPU
     all_ok = test_backend<DdlaBackend::GPU>(gpu, cpu, myid) && all_ok;
 #endif
-#if DDLA_HAS_CPU
     all_ok = test_backend<DdlaBackend::CPU>(cpu, gpu, myid) && all_ok;
-#endif
 
     // Aggregate failure across all ranks
     int local_ok = all_ok ? 1 : 0;

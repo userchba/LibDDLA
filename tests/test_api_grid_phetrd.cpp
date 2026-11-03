@@ -181,7 +181,7 @@ template<DdlaBackend B>void invalid(DdlaHandle_t h){
     punmtr<B,double>(h,'R','L','C',7,0,nullptr,da,nullptr,nullptr,dc);
     DeviceBuffer<std::complex<double>>Z(h,128);
     rejected([&]{punmtr<B,std::complex<double>>(h,'L','U','T',0,0,nullptr,da,nullptr,Z.ptr,dc);});
-#if DDLA_HAS_CPU && DDLA_HAS_GPU
+#if DDLA_HAS_GPU
     constexpr auto other=B==DdlaBackend::CPU?DdlaBackend::GPU:DdlaBackend::CPU;
     rejected([&]{phetrd<other,double>(h,'U',0,nullptr,da,nullptr,nullptr,nullptr,info);});
 #endif
@@ -232,9 +232,7 @@ template<DdlaBackend B>void run(MPI_Comm comm,int pr,int pc,char major){
 int main(int argc,char**argv){MPI_Init(&argc,&argv);int size=0;MPI_Comm_size(MPI_COMM_WORLD,&size);TestOptions options;std::string error;
     if(!parse_options(argc,argv,size,options,error)){std::cerr<<error<<std::endl;MPI_Abort(MPI_COMM_WORLD,2);}
     for(auto grid:options.grids)for(char major:{'R','C'}){
-#if DDLA_HAS_CPU
         run<DdlaBackend::CPU>(MPI_COMM_WORLD,grid.first,grid.second,major);
-#endif
 #if DDLA_HAS_GPU
         run<DdlaBackend::GPU>(MPI_COMM_WORLD,grid.first,grid.second,major);
 #endif

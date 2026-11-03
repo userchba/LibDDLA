@@ -63,8 +63,6 @@ void write_matrix_run(const T* A,int m,int n,std::ostream& output,
 template <DdlaBackend Backend, typename T>
 void write_matrix(const T* A, int m, int n, const char* filename)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU write_matrix is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU write_matrix is not available in this LibDDLA build");
     if(!matrix_io_impl::write_matrix_check(A,m,n,filename))return;
@@ -82,12 +80,10 @@ void write_matrix(const T* A, int m, int n, const char* filename)
     template void matrix_io_impl::write_matrix_run<BACKEND, TYPE>(             \
         const TYPE*, int, int, std::ostream&, void*, std::size_t)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_WRITE_MATRIX(DdlaBackend::CPU, float);
 INSTANTIATE_WRITE_MATRIX(DdlaBackend::CPU, double);
 INSTANTIATE_WRITE_MATRIX(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_WRITE_MATRIX(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_WRITE_MATRIX(DdlaBackend::GPU, float);

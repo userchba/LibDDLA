@@ -133,12 +133,10 @@ void reverse_lower_to_upper(
     template void reverse_upper_to_lower<BACKEND, TYPE>(const DdlaHandle_t&, int, const TYPE*, int, TYPE*, int); \
     template void reverse_lower_to_upper<BACKEND, TYPE>(const DdlaHandle_t&, int, const TYPE*, int, TYPE*, int)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_REVERSE(DdlaBackend::CPU, float);
 INSTANTIATE_REVERSE(DdlaBackend::CPU, double);
 INSTANTIATE_REVERSE(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_REVERSE(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_REVERSE(DdlaBackend::GPU, float);

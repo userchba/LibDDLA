@@ -60,9 +60,8 @@ void ddla_c_record_error(const char* what)
 }
 
 // Run one library call on the handle's backend.  body is a template lambda
-// invoked with std::integral_constant<DdlaBackend, ...>; only the branches
-// this build actually contains are compiled (DDLA_HAS_CPU / DDLA_HAS_GPU from
-// ddla_config.h), so every lane -- CPU-only, GPU-only, dual -- links.
+// invoked with std::integral_constant<DdlaBackend, ...>. CPU is always available;
+// DDLA_HAS_GPU from ddla_config.h guards the optional GPU branch.
 template <typename F>
 int ddla_c_run(void* handle, F&& body)
 {
@@ -72,11 +71,7 @@ int ddla_c_run(void* handle, F&& body)
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         switch (ddla::ddlaGetBackend(hh)) {
         case ddla::DdlaBackend::CPU:
-#if DDLA_HAS_CPU
             return body(std::integral_constant<ddla::DdlaBackend, ddla::DdlaBackend::CPU>{});
-#else
-            return DDLA_C_STATUS_BACKEND_UNAVAILABLE;
-#endif
         case ddla::DdlaBackend::GPU:
 #if DDLA_HAS_GPU
             return body(std::integral_constant<ddla::DdlaBackend, ddla::DdlaBackend::GPU>{});

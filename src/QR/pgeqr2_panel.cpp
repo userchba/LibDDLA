@@ -412,7 +412,6 @@ void qr_panel_distributed(const DdlaHandle_t& handle, T* A, const int* descA, Qr
         const DdlaHandle_t&, TYPE*, const int*, QrWorkspace<TYPE>&, char, int, int, int, int, int, int, int, \
         int, TYPE*, TYPE*, TYPE*, bool);
 
-#if DDLA_HAS_CPU
 INSTANTIATE_QR_PANEL_DIST(DdlaBackend::CPU, float);
 INSTANTIATE_QR_PANEL_DIST(DdlaBackend::CPU, double);
 INSTANTIATE_QR_PANEL_DIST(DdlaBackend::CPU, std::complex<float>);
@@ -421,7 +420,6 @@ INSTANTIATE_QR_PANEL(DdlaBackend::CPU, float);
 INSTANTIATE_QR_PANEL(DdlaBackend::CPU, double);
 INSTANTIATE_QR_PANEL(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_QR_PANEL(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_QR_PANEL_DIST(DdlaBackend::GPU, float);

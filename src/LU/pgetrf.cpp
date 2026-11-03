@@ -186,13 +186,11 @@ void pgetrf(const DdlaHandle_t& handle, int m, int n, T* A, int ia, int ja,
     const int*, const int*)
 
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PGETRF_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PGETRF(DdlaBackend::CPU, float);
 INSTANTIATE_PGETRF(DdlaBackend::CPU, double);
 INSTANTIATE_PGETRF(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PGETRF(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PGETRF_CHECK(DdlaBackend::GPU);

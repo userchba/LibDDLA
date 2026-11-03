@@ -265,7 +265,7 @@ template <typename T>
 void call_pgeqrf(const ddla::DdlaHandle_t& handle, int m, int n,
                  T* d_A, const int* desc, T* tau, int& info)
 {
-#if DDLA_HAS_CPU && DDLA_HAS_GPU
+#if DDLA_HAS_GPU
     if (ddlaGetBackend(handle) == DdlaBackend::CPU)
         ddla::pgeqrf<DdlaBackend::CPU, T>(handle, 'U', m, n, d_A, desc, tau, info);
     else
@@ -915,7 +915,7 @@ static void check_body(const ddla::DdlaHandle_t& handle, const Shape& base)
         ddla::ddlaDestroy(h_cm);
     }
 
-#if DDLA_HAS_CPU && DDLA_HAS_GPU
+#if DDLA_HAS_GPU
     // Dual lane: the whole case list again on a CPU handle, so the CPU arm
     // gets real coverage in the dual configuration too.  The case tags are
     // backend-qualified so the two lanes' log lines cannot be confused (the

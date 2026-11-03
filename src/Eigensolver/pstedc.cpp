@@ -613,8 +613,7 @@ PstedcPlan pstedc_check(const DdlaHandle_t& h, char jobz, int n, const R* d, con
         agreement.mode("spectral operation", 3112);
         if (!h)
             throw std::invalid_argument("pstedc: null handle");
-        if ((h->backend == DdlaBackend::CPU && !DDLA_HAS_CPU) ||
-            (h->backend == DdlaBackend::GPU && !DDLA_HAS_GPU))
+        if (h->backend == DdlaBackend::GPU && !DDLA_HAS_GPU)
             throw std::invalid_argument("pstedc: backend not built");
         if ((jobz != 'N' && jobz != 'V') || n < 0)
             throw std::invalid_argument("pstedc: invalid jobz or dimension");
@@ -1471,10 +1470,8 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
 #define PSTEDC_VECTORS_RUN(B, R)                                                                                \
     template void pstedc_run<B, R>(const DdlaHandle_t&, const PstedcVectorPlan&, PstedcResources&,    \
                                         R*, R*, R*, R*, R*, void*, std::size_t, void*, std::size_t)
-#if DDLA_HAS_CPU
 PSTEDC_VECTORS_RUN(DdlaBackend::CPU, float);
 PSTEDC_VECTORS_RUN(DdlaBackend::CPU, double);
-#endif
 #if DDLA_HAS_GPU
 PSTEDC_VECTORS_RUN(DdlaBackend::GPU, float);
 PSTEDC_VECTORS_RUN(DdlaBackend::GPU, double);
@@ -1866,10 +1863,8 @@ PSTEDC_CHECK_SIZE(double);
 #define PSTEDC_PHASE_RUN(B, R)                                                                               \
     template void pstedc_run<B, R>(const DdlaHandle_t&, const PstedcPlan&, R*, R*, R*, R*, void*,            \
                                    std::size_t, void*, std::size_t, PstedcResources*)
-#if DDLA_HAS_CPU
 PSTEDC_PHASE_RUN(DdlaBackend::CPU, float);
 PSTEDC_PHASE_RUN(DdlaBackend::CPU, double);
-#endif
 #if DDLA_HAS_GPU
 PSTEDC_PHASE_RUN(DdlaBackend::GPU, float);
 PSTEDC_PHASE_RUN(DdlaBackend::GPU, double);
@@ -1902,13 +1897,11 @@ void pstedc_allocate(const DdlaHandle_t& handle, const spectral_impl::PstedcPlan
             rows.emplace(handle, p.rows);
     });
     switch (handle->backend) {
-#if DDLA_HAS_CPU
     case DdlaBackend::CPU:
         spectral_impl::pstedc_run<DdlaBackend::CPU, rt>(handle, p, diag_in, e_in, w, z, backend_work.data(),
                                                         backend_bytes, host_work.data(), host_bytes,
                                                         rows ? &*rows : nullptr);
         break;
-#endif
 #if DDLA_HAS_GPU
     case DdlaBackend::GPU:
         spectral_impl::pstedc_run<DdlaBackend::GPU, rt>(handle, p, diag_in, e_in, w, z, backend_work.data(),
@@ -2000,13 +1993,11 @@ void pstedc(const DdlaHandle_t& handle, int n, rt* d, rt* e, rt* w, rt* Y, int l
             resources.emplace(handle, p);
         });
         switch (backend) {
-#if DDLA_HAS_CPU
         case DdlaBackend::CPU:
             spectral_impl::pstedc_run<DdlaBackend::CPU, rt>(handle, p, *resources, d, e, w, Y, scratch,
                                                                  backend_work.data(), backend_bytes,
                                                                  host_work.data(), host_bytes);
             break;
-#endif
 #if DDLA_HAS_GPU
         case DdlaBackend::GPU:
             spectral_impl::pstedc_run<DdlaBackend::GPU, rt>(handle, p, *resources, d, e, w, Y, scratch,

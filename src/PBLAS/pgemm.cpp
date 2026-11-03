@@ -16,9 +16,7 @@
 #include "check_agree.h"
 #include "plan_util.h"
 
-// CPU-only includes (no GPU vendor headers pulled in by these; safe in any
-// build -- DDLA_HAS_CPU below still gates whether the CPU pgemm/transport
-// paths are ever compiled).
+// Host includes used by the CPU paths in every build; no GPU vendor headers.
 #include <cstdlib>
 #include <complex>
 #include <new>
@@ -292,8 +290,6 @@ Algorithm pgemm_check(
     bool alpha_is_zero, const int* descA, const int* descB, const int* descC,
     Algorithm algorithm, int& panel_width)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU pgemm is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU pgemm is not available in this LibDDLA build");
 
@@ -578,14 +574,12 @@ void pgemm(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
     INSTANTIATE_PGEMM_MIXED(BACKEND, double, double, std::complex<double>); \
     INSTANTIATE_PGEMM_MIXED(BACKEND, double, std::complex<double>, double)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PGEMM_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PGEMM(DdlaBackend::CPU, float);
 INSTANTIATE_PGEMM(DdlaBackend::CPU, double);
 INSTANTIATE_PGEMM(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PGEMM(DdlaBackend::CPU, std::complex<double>);
 INSTANTIATE_PGEMM_MIXED_BACKEND(DdlaBackend::CPU);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PGEMM_CHECK(DdlaBackend::GPU);

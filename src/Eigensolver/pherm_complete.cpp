@@ -155,7 +155,6 @@ bool pherm_borrows_scratch(const spectral_impl::HermitianPlan& p,std::size_t sen
 
 // ----- host helpers (CPU backend) -------------------------------------------
 
-#if DDLA_HAS_CPU
 
 template <typename U> inline U pherm_conj(U v) { return v; }
 inline std::complex<float> pherm_conj(std::complex<float> v) { return std::conj(v); }
@@ -218,7 +217,6 @@ void pherm_exec_cpu(const DdlaHandle_t& handle,const HermPlan& p,bool upper,T* A
 
 }
 
-#endif // DDLA_HAS_CPU
 
 // ----- device kernels (GPU backend) -----------------------------------------
 
@@ -346,7 +344,6 @@ HermitianPlan pherm_complete_check(const DdlaHandle_t& handle,DdlaBackend backen
     int signature[13]={int(backend),int(uplo),n,handle->nprows_,handle->npcols_,int(handle->major)};
     detail::descriptor_signature(signature+6,descA);
     detail::agree_signature(handle,"pherm_complete",signature);
-#if DDLA_HAS_CPU
     if(n>0&&backend==DdlaBackend::CPU) {
         // Every rank enters topology discovery, even if only some worker
         // caches were warmed by previous calls on a different communicator.
@@ -355,7 +352,6 @@ HermitianPlan pherm_complete_check(const DdlaHandle_t& handle,DdlaBackend backen
         MPI_CHECK(MPI_Comm_size(node,&ranks_on_node));MPI_CHECK(MPI_Comm_free(&node));
         p.threads=detail::host_omp_threads_for_node(ranks_on_node);
     }
-#endif
     return p;
 }
 void pherm_complete_geometry(const HermitianPlan& p,std::size_t& pack_count, std::size_t& local_count, std::size_t& unpack_count, std::size_t& diag_count, std::size_t& send_total_count, std::size_t& recv_total_count)
@@ -418,9 +414,7 @@ void pherm_complete_run(const DdlaHandle_t& handle,const HermitianPlan& p,T* A,T
     assert(static_cast<std::size_t>(w-static_cast<char*>(backend_work))<=backend_bytes);
     (void)backend_bytes;(void)device;
     if constexpr(Backend==DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         pherm_exec_cpu<T>(handle,plan,p.upper,A,p.pr*p.pc,p.threads,send,recv);
-#endif
     } else {
 #if defined(DDLA_USE_CUDA)||defined(DDLA_USE_HIP)
         pherm_exec_gpu<T>(handle,plan,p.upper,A,p.pr*p.pc,device,meta,send,recv);
@@ -465,12 +459,10 @@ void pherm_complete(const DdlaHandle_t& handle, char uplo, int n,
     template void spectral_impl::pherm_complete_workspace_size<TYPE>(const DdlaHandle_t&, \
         const spectral_impl::HermitianPlan&,std::size_t,std::size_t*,std::size_t*)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PHERM_COMPLETE(DdlaBackend::CPU, float);
 INSTANTIATE_PHERM_COMPLETE(DdlaBackend::CPU, double);
 INSTANTIATE_PHERM_COMPLETE(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PHERM_COMPLETE(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PHERM_COMPLETE(DdlaBackend::GPU, float);

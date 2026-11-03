@@ -260,13 +260,11 @@ void pgetrs_bpiv(
     const int*)
 
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PGETRS_BPIV_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PGETRS_BPIV(DdlaBackend::CPU, float);
 INSTANTIATE_PGETRS_BPIV(DdlaBackend::CPU, double);
 INSTANTIATE_PGETRS_BPIV(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PGETRS_BPIV(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PGETRS_BPIV_CHECK(DdlaBackend::GPU);

@@ -319,10 +319,8 @@ int main(int argc, char** argv)
     }
 
     int failures = 0;
-#if DDLA_HAS_CPU
     if (rank == 0) std::cout << "  running CPU backend" << std::endl;
     failures += run_backend<DdlaBackend::CPU>();
-#endif
 #if DDLA_HAS_GPU
     if (rank == 0) std::cout << "  running GPU backend" << std::endl;
     failures += run_backend<DdlaBackend::GPU>();

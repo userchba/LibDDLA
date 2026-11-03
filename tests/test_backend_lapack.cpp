@@ -1035,11 +1035,7 @@ int main(int argc, char** argv)
     const bool do_cpu = (!only || std::string(only) == "cpu");
     const bool do_gpu = (!only || std::string(only) == "gpu");
     int failures = 0;
-#if DDLA_HAS_CPU
     if (do_cpu) failures += run_backend<DdlaBackend::CPU>();
-#else
-    (void)do_cpu;
-#endif
 #if DDLA_HAS_GPU
     if (do_gpu) failures += run_backend<DdlaBackend::GPU>();
 #else
@@ -1049,17 +1045,13 @@ int main(int argc, char** argv)
     {   // argument checks: one handle of each available backend; in a dual build each is also handed the
         // other backend's handle to prove the mismatch is rejected.
         DdlaHandle_t cpu = nullptr, gpu = nullptr;
-#if DDLA_HAS_CPU
         ddlaInit(cpu, DdlaBackend::CPU);
         ddlaSet(cpu, MPI_COMM_WORLD);
-#endif
 #if DDLA_HAS_GPU
         ddlaInit(gpu, DdlaBackend::GPU);
         ddlaSet(gpu, MPI_COMM_WORLD);
 #endif
-#if DDLA_HAS_CPU
         failures += check_rejections<DdlaBackend::CPU>(cpu, gpu);
-#endif
 #if DDLA_HAS_GPU
         failures += check_rejections<DdlaBackend::GPU>(gpu, cpu);
 #endif

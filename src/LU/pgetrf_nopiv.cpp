@@ -265,13 +265,11 @@ void pgetrf_nopiv(
     template void lu_impl::pgetrf_nopiv_check<BACKEND>(const DdlaHandle_t&, int, int, const int*)
 
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PGETRF_NOPIV_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PGETRF_NOPIV(DdlaBackend::CPU, float);
 INSTANTIATE_PGETRF_NOPIV(DdlaBackend::CPU, double);
 INSTANTIATE_PGETRF_NOPIV(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PGETRF_NOPIV(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PGETRF_NOPIV_CHECK(DdlaBackend::GPU);

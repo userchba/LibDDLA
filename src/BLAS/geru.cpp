@@ -9,7 +9,6 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 
-#if DDLA_HAS_CPU
 extern "C" {
 void sger_(const int*, const int*, const float*, const float*, const int*,
            const float*, const int*, float*, const int*);
@@ -24,7 +23,6 @@ void zgeru_(const int*, const int*, const std::complex<double>*,
             const std::complex<double>*, const int*,
             std::complex<double>*, const int*);
 }
-#endif
 
 namespace ddla {
 
@@ -35,7 +33,6 @@ inline const char* geru_backend_name(DdlaBackend backend)
     return backend == DdlaBackend::CPU ? "CPU" : "GPU";
 }
 
-#if DDLA_HAS_CPU
 inline void cpu_geru(int m, int n, const float& alpha,
                      const float* x, int incx, const float* y, int incy,
                      float* A, int lda)
@@ -65,7 +62,6 @@ inline void cpu_geru(int m, int n, const std::complex<double>& alpha,
 {
     zgeru_(&m, &n, &alpha, x, &incx, y, &incy, A, &lda);
 }
-#endif // DDLA_HAS_CPU
 
 #if DDLA_HAS_GPU
 // GPU arm: the vendor calls, one overload per scalar type (cuBLAS / hipBLAS ger / geru).  Private to this translation
@@ -115,8 +111,6 @@ template <DdlaBackend Backend, typename T>
 void geru_check(const DdlaHandle_t& handle, int m, int n, const T& alpha,
           const T* x, int incx, const T* y, int incy, T* A, int lda)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU geru is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU geru is not available in this LibDDLA build");
 
@@ -142,9 +136,7 @@ void geru_run(const DdlaHandle_t& handle, int m, int n, const T& alpha,
 {
     if (m <= 0 || n <= 0) return;
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         cpu_geru(m, n, alpha, x, incx, y, incy, A, lda);
-#endif
     } else {
 #if DDLA_HAS_GPU
         BLAS_CHECK(gpublasGeru(static_cast<gpublasHandle_t>(handle->blasH), m, n, alpha, x, incx, y, incy, A, lda));
@@ -167,12 +159,10 @@ void geru(const DdlaHandle_t& handle, int m, int n, const T& alpha,
         const DdlaHandle_t&, int, int, const TYPE&, const TYPE*, int,        \
         const TYPE*, int, TYPE*, int)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_GERU(DdlaBackend::CPU, float);
 INSTANTIATE_GERU(DdlaBackend::CPU, double);
 INSTANTIATE_GERU(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_GERU(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_GERU(DdlaBackend::GPU, float);
@@ -187,12 +177,10 @@ INSTANTIATE_GERU(DdlaBackend::GPU, std::complex<double>);
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::geru_check<BACKEND, TYPE>(const DdlaHandle_t& handle, int m, int n, const TYPE& alpha, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* A, int lda); \
     template void blas_impl::geru_run<BACKEND, TYPE>(const DdlaHandle_t& handle, int m, int n, const TYPE& alpha, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* A, int lda);
-#if DDLA_HAS_CPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#endif
 #if DDLA_HAS_GPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)

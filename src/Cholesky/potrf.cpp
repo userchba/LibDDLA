@@ -2,10 +2,8 @@
 // Backend-templated Cholesky factorization of a Hermitian positive-definite matrix (LAPACK ?potrf):
 //     A = U^H * U  (uplo = 'U')        or        A = L * L^H  (uplo = 'L').
 //
-// Structure follows src/getrf.cpp: one definition covering CPU (Fortran LAPACK ?potrf on host pointers) and GPU
-// (cuSOLVER / hipSOLVER potrf on device pointers, enqueued on the handle's stream), selected with `if constexpr`
-// on the Backend template parameter, the arms guarded by DDLA_HAS_CPU / DDLA_HAS_GPU.  The vendor calls are private
-// to this translation unit; the public interface is the templated ddla::potrf declared in <ddla/ddla.h>.
+// Dispatch follows the Backend template parameter. CPU code is always compiled;
+// DDLA_HAS_GPU enables GPU code, and DDLA_USE_CUDA / DDLA_USE_HIP select its vendor.
 //
 // Three components (plan_util.h): potrf_check; potrf_workspace_size (backend bytes of the vendor workspace);
 // potrf_run on the caller's scratch.
@@ -26,7 +24,6 @@
 #include "ddla_stream.h"
 #include "lapack_impl.h"
 
-#if DDLA_HAS_CPU
 // Host LAPACK ?potrf (Fortran ABI; the CPU BLAS library must provide LAPACK -- OpenBLAS and MKL do).
 extern "C" {
 void spotrf_(const char*, const int*, float*, const int*, int*);
@@ -34,7 +31,6 @@ void dpotrf_(const char*, const int*, double*, const int*, int*);
 void cpotrf_(const char*, const int*, std::complex<float>*, const int*, int*);
 void zpotrf_(const char*, const int*, std::complex<double>*, const int*, int*);
 }
-#endif
 
 namespace ddla {
 
@@ -45,7 +41,6 @@ inline const char* potrf_backend_name(DdlaBackend backend)
     return backend == DdlaBackend::CPU ? "CPU" : "GPU";
 }
 
-#if DDLA_HAS_CPU
 inline void cpu_potrf(char uplo, int n, float* A, int lda, int* info)
 {
     spotrf_(&uplo, &n, A, &lda, info);
@@ -65,7 +60,6 @@ inline void cpu_potrf(char uplo, int n, std::complex<double>* A, int lda, int* i
 {
     zpotrf_(&uplo, &n, A, &lda, info);
 }
-#endif // DDLA_HAS_CPU
 
 #if DDLA_HAS_GPU
 #if DDLA_GPU_VENDOR
@@ -141,8 +135,6 @@ namespace lapack_impl {
 template <DdlaBackend Backend>
 char potrf_check(const DdlaHandle_t& handle, char uplo, int n, const void* A, int lda, const int* info)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU potrf is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU potrf is not available in this LibDDLA build");
 
@@ -201,9 +193,7 @@ void potrf_run(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda, int*
     }
 
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         cpu_potrf(uplo, n, A, lda, info);
-#endif
     } else {
 #if DDLA_HAS_GPU
         SOLVER_CHECK(gpu_potrf(handle, backend_work, backend_bytes,
@@ -236,14 +226,12 @@ void potrf(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda, int* inf
     template void lapack_impl::potrf_workspace_size<TYPE>(                   \
         const DdlaHandle_t&, char, int, TYPE*, int, std::size_t*)
 
-#if DDLA_HAS_CPU
 template char lapack_impl::potrf_check<DdlaBackend::CPU>(
     const DdlaHandle_t&, char, int, const void*, int, const int*);
 INSTANTIATE_POTRF(DdlaBackend::CPU, float);
 INSTANTIATE_POTRF(DdlaBackend::CPU, double);
 INSTANTIATE_POTRF(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_POTRF(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 template char lapack_impl::potrf_check<DdlaBackend::GPU>(

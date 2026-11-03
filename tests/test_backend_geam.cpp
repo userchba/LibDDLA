@@ -342,7 +342,6 @@ int run_type(const DdlaHandle_t& h)
     geam<Backend, T>(h, 'N', 'N', 0, 5, alpha, nullptr, 1, beta, nullptr, 1, nullptr, 1);
     geam<Backend, T>(h, 'T', 'C', 5, 0, alpha, nullptr, 1, beta, nullptr, 1, nullptr, 1);
 
-#if DDLA_HAS_CPU
     if constexpr (Backend == DdlaBackend::CPU) {
         for (char ta : ops) {
             bad += check_exact_copy_cpu<T>(h, ta, 37, 53);
@@ -352,7 +351,6 @@ int run_type(const DdlaHandle_t& h)
         }
         bad += check_alpha_zero_cpu<T>(h, 'T', 'C', 40, 33);
     }
-#endif
     return bad;
 }
 
@@ -377,7 +375,6 @@ int run_backend()
     return failures;
 }
 
-#if DDLA_HAS_CPU
 // The same large problems on a 1-thread and a 4-thread handle give identical bits, and the handle really
 // carries the thread budget it was asked for.
 template <typename T>
@@ -438,7 +435,6 @@ int check_threads()
     ddlaDestroy(h4);
     return bad;
 }
-#endif
 
 // -- argument checks --------------------------------------------------------------
 template <DdlaBackend Backend>
@@ -493,14 +489,10 @@ int main(int argc, char** argv)
     const bool do_cpu = (!only || std::string(only) == "cpu");
     const bool do_gpu = (!only || std::string(only) == "gpu");
     int failures = 0;
-#if DDLA_HAS_CPU
     if (do_cpu) {
         failures += run_backend<DdlaBackend::CPU>();
         failures += check_threads();
     }
-#else
-    (void)do_cpu;
-#endif
 #if DDLA_HAS_GPU
     if (do_gpu) failures += run_backend<DdlaBackend::GPU>();
 #else
@@ -510,17 +502,13 @@ int main(int argc, char** argv)
     {   // argument checks: one handle of each available backend; in a dual build each is also handed the
         // other backend's handle to prove the mismatch is rejected.
         DdlaHandle_t cpu = nullptr, gpu = nullptr;
-#if DDLA_HAS_CPU
         ddlaInit(cpu, DdlaBackend::CPU);
         ddlaSet(cpu, MPI_COMM_WORLD);
-#endif
 #if DDLA_HAS_GPU
         ddlaInit(gpu, DdlaBackend::GPU);
         ddlaSet(gpu, MPI_COMM_WORLD);
 #endif
-#if DDLA_HAS_CPU
         failures += check_rejections<DdlaBackend::CPU>(cpu, gpu);
-#endif
 #if DDLA_HAS_GPU
         failures += check_rejections<DdlaBackend::GPU>(gpu, cpu);
 #endif

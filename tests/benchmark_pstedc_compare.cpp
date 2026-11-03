@@ -262,11 +262,7 @@ template<class R>void run(const Options& o,int rank,int P)
                 throw std::runtime_error("GPU workspace execution unavailable in this build");
 #endif
             }else{
-#if DDLA_HAS_CPU
                 ddla_reuse(std::integral_constant<ddla::DdlaBackend,ddla::DdlaBackend::CPU>{});
-#else
-                throw std::runtime_error("CPU workspace execution unavailable in this build");
-#endif
             }
         }
         else if(slab)ddla::pstedc<R>(h,o.n,d.data(),e.data(),w.data(),output,ld);

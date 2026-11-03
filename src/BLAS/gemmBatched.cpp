@@ -3,19 +3,8 @@
 // Unified backend-templated batched matrix multiply over arrays of pointers:
 // for i in [0, batchCount):  C[i] := alpha*blas_impl::op(A[i])*blas_impl::op(B[i]) + beta*C[i].
 //
-// Structure follows src/herk.cpp exactly: one definition covering CPU (Fortran
-// BLAS) and GPU (cuBLAS/hipBLAS), selected with `if constexpr` on the Backend
-// template parameter, with the arms themselves guarded by the BUILD CAPABILITY
-// macros (DDLA_HAS_CPU / DDLA_HAS_GPU) and the vendor chosen per scalar arm by
-// the PER-TU macros (DDLA_USE_CUDA / DDLA_USE_HIP).
-//
-// Why the capability guard matters here: the previous design put a `#else`
-// CPU arm inside src/gemmBatched.h selected by `!defined(DDLA_USE_CUDA) &&
-// !defined(DDLA_USE_HIP)`.  In a dual build (DDLA_USE_CPU + DDLA_USE_CUDA)
-// every TU defines DDLA_USE_CUDA, so that arm was never compiled -- while
-// DDLA_HAS_CPU was 1 and the CPU instantiation of this function still existed.
-// A CPU-backend call would therefore have reached cublasZgemmBatched with HOST
-// pointers.  Guarding on DDLA_HAS_CPU removes that class of bug.
+// Dispatch follows the Backend template parameter. CPU code is always compiled;
+// DDLA_HAS_GPU enables GPU code, and DDLA_USE_CUDA / DDLA_USE_HIP select its vendor.
 //
 // The array-of-pointer arguments keep the `const T* const Aarray[]` shape: the
 // pointers themselves are read-only to this wrapper (the vendor prototypes and
@@ -42,13 +31,8 @@
 #include "ddla_stream.h"
 #include "host_threads.h"
 
-#if DDLA_HAS_CPU
 extern "C" {
-// Fortran BLAS entry points for the CPU arm below.  Guarded by the BUILD
-// CAPABILITY (DDLA_HAS_CPU), not the per-TU vendor macro: in a dual build
-// every TU defines DDLA_USE_CUDA/DDLA_USE_HIP while still instantiating the
-// CPU templates, so `#if !defined(DDLA_USE_CUDA)` would leave these
-// declarations out exactly where they are needed.
+// Fortran BLAS entry points for the CPU arm, available in every build.
 void sgemm_(const char*, const char*, const int*, const int*, const int*,
             const float*, const float*, const int*, const float*, const int*,
             const float*, float*, const int*);
@@ -93,7 +77,6 @@ void for_each_product(int nthreads, int count, Call&& call)
 
 } // namespace
 } // namespace ddla
-#endif // DDLA_HAS_CPU
 
 // ---------------------------------------------------------------------------
 // GPU arm: the vendor calls.  Kept as free gpublasGemmBatched overloads so the
@@ -233,8 +216,6 @@ void gemmBatched_check(
     T* const Carray[], int ldc,
     int batchCount)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU gemmBatched is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU gemmBatched is not available in this LibDDLA build");
 
@@ -269,7 +250,6 @@ void gemmBatched_run(
     int batchCount)
 {
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         // One Fortran gemm per matrix, spread over the handle's host threads (see for_each_product).  The characters go to
         // the Fortran entry points unconverted.
         const int nthreads = handle->host_threads;
@@ -296,11 +276,6 @@ void gemmBatched_run(
         } else {
             static_assert(sizeof(T) == 0, "gemmBatched: unsupported scalar type T");
         }
-#else
-        (void)handle; (void)transa; (void)transb; (void)m; (void)n; (void)k;
-        (void)alpha; (void)Aarray; (void)lda; (void)Barray; (void)ldb;
-        (void)beta; (void)Carray; (void)ldc; (void)batchCount;
-#endif
     } else {
 #if DDLA_HAS_GPU
         if constexpr (std::is_same_v<T, float> ||
@@ -348,12 +323,10 @@ void gemmBatched(
         const TYPE&, const TYPE* const[], int, const TYPE* const[], int,       \
         const TYPE&, TYPE* const[], int, int)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_GEMM_BATCHED(DdlaBackend::CPU, float);
 INSTANTIATE_GEMM_BATCHED(DdlaBackend::CPU, double);
 INSTANTIATE_GEMM_BATCHED(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_GEMM_BATCHED(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_GEMM_BATCHED(DdlaBackend::GPU, float);
@@ -368,12 +341,10 @@ INSTANTIATE_GEMM_BATCHED(DdlaBackend::GPU, std::complex<double>);
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::gemmBatched_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k, const TYPE& alpha, const TYPE* const Aarray[], int lda, const TYPE* const Barray[], int ldb, const TYPE& beta, TYPE* const Carray[], int ldc, int batchCount); \
     template void blas_impl::gemmBatched_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k, const TYPE& alpha, const TYPE* const Aarray[], int lda, const TYPE* const Barray[], int ldb, const TYPE& beta, TYPE* const Carray[], int ldc, int batchCount);
-#if DDLA_HAS_CPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#endif
 #if DDLA_HAS_GPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)

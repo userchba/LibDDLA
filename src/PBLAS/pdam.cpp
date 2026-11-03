@@ -136,10 +136,8 @@ void pdam(const DdlaHandle_t& handle, const T1& alpha, T2* A, const int* array_d
     INSTANTIATE_PDAM(BACKEND, double, std::complex<double>);                 \
     INSTANTIATE_PDAM(BACKEND, std::complex<double>, std::complex<double>)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PDAM_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PDAM_ALL(DdlaBackend::CPU);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PDAM_CHECK(DdlaBackend::GPU);

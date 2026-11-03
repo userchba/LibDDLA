@@ -1100,9 +1100,7 @@ template<DdlaBackend B,class T>void phetrd(const DdlaHandle_t& h,char uplo,int n
  template void spectral_impl::phetrd_run<B,T>(const DdlaHandle_t&,const spectral_impl::HetrdPlan&,spectral_impl::HetrdResources&,T*,T*,typename real_type<T>::type*,int&,void*,std::size_t,void*,std::size_t)
 #define DDLA_HETRD_TYPES(B) \
  DDLA_HETRD(B,float);DDLA_HETRD(B,double);DDLA_HETRD(B,std::complex<float>);DDLA_HETRD(B,std::complex<double>)
-#if DDLA_HAS_CPU
 DDLA_HETRD_TYPES(DdlaBackend::CPU);
-#endif
 #if DDLA_HAS_GPU
 DDLA_HETRD_TYPES(DdlaBackend::GPU);
 #endif

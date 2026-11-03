@@ -134,9 +134,7 @@ template<DdlaBackend B,class T>void tiny_case(DdlaHandle_t h)
 template<DdlaBackend B>void run(MPI_Comm comm,int pr,int pc,char major){DdlaHandle_t h=nullptr;ddlaInit(h,B);ddlaSet(h,comm,pr,pc,major);cases<B,float>(h);cases<B,double>(h);cases<B,std::complex<float>>(h);cases<B,std::complex<double>>(h);tiny_case<B,float>(h);tiny_case<B,double>(h);tiny_case<B,std::complex<float>>(h);tiny_case<B,std::complex<double>>(h);if(h->myid==0)std::cout<<"workspace factorizations PASS backend="<<int(B)<<" grid="<<pr<<"x"<<pc<<" major="<<major<<std::endl;ddlaDestroy(h);}
 }
 int main(int argc,char** argv){MPI_Init(&argc,&argv);int size;MPI_Comm_size(MPI_COMM_WORLD,&size);TestOptions opts;std::string error;if(!parse_options(argc,argv,size,opts,error)){std::cerr<<error<<std::endl;MPI_Abort(MPI_COMM_WORLD,2);}for(auto grid:opts.grids)for(char major:{'R','C'}){
-#if DDLA_HAS_CPU
 run<DdlaBackend::CPU>(MPI_COMM_WORLD,grid.first,grid.second,major);
-#endif
 #if DDLA_HAS_GPU
 run<DdlaBackend::GPU>(MPI_COMM_WORLD,grid.first,grid.second,major);
 #endif
