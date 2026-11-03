@@ -345,7 +345,7 @@ void qr_panel_distributed(const DdlaHandle_t& handle, T* A, const int* descA, Qr
                 w = ws.wr;
             }
             if (ns > 0)
-                blas_impl::gerc_run<Backend,T>(handle, ns, ncr, T(-1) * conj_h(tau_v), Acol + s_lo, 1, w, 1, A_rest, lld);
+                blas_impl::gerc_run<Backend,T>(handle, ns, ncr, T(-1) * detail::host_conj(tau_v), Acol + s_lo, 1, w, 1, A_rest, lld);
         }
         // beta replaces the unit entry / alpha.
         if (mine) {

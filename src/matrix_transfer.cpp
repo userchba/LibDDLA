@@ -410,12 +410,6 @@ void scatter_rows_run(const DdlaHandle_t& h,int k,const typename real_type<T>::t
         const int factor_cols=num_loc(k,desc[DDLA_NB_],h->mypcol_,desc[DDLA_CSRC_],h->npcols_);
         // Operational failure agreement only: all argument checking is complete.
         detail::agree_check(h,"scatter_rows preparation",[&](detail::Agree&) {
-#if defined(DDLA_USE_GPU_CPU_TUNNEL)
-            // The panel transfers stage through the handle's host buffer (one
-            // slot, comm_traits.h): grow it here, once, with failures agreed.
-            if constexpr(B==DdlaBackend::GPU)
-                if (panel) detail::tunnel_staging<T>(h,0,std::min(panel,std::size_t(INT_MAX)/sizeof(T)));
-#endif
             if (mloc>factor_rows && nloc>0)
                 convert_rows<B,T>(h,nullptr,1,dst+factor_rows,desc[DDLA_LLD_],mloc-factor_rows,nloc,false);
             if (nloc>factor_cols && factor_rows>0)

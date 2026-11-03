@@ -11,8 +11,8 @@
 
 using namespace api_grid_test;
 namespace {
-bool no_scratch(const workspace_test::Snapshot& s)
-{return !s.ddla_alloc&&!s.ddla_free&&!s.pinned_alloc&&!s.raw_gpu_alloc&&!s.host_new&&!s.vendor_query&&!s.resource_setup;}
+bool no_scratch(const workspace_test::Snapshot& s,bool allow_host_growth=false)
+{return !s.ddla_alloc&&!s.ddla_free&&!s.pinned_alloc&&!s.raw_gpu_alloc&&(allow_host_growth||!s.host_new)&&!s.vendor_query&&!s.resource_setup;}
 bool pure(const workspace_test::Snapshot& s)
 {return no_scratch(s)&&!s.copies&&!s.launches&&!s.syncs&&!s.collectives;}
 // Exactly the sized backend and host bytes, between 256-byte canaries.
@@ -103,7 +103,12 @@ void exercise(DdlaHandle_t h,bool stored,char uplo,char job,int n,bool alias=fal
         workspace_test::Scope scope;
         spectral_impl::one_stage_run<B,T>(h,p,resources,a.ptr,eigenvalues.data(),job=='V'?target:nullptr,info,nullptr,
             owner.backend(),backend_bytes,owner.host(),host_bytes);
-        const auto snapshot=scope.finish();require_close(h,"one-stage run has no managed scratch/query/setup",no_scratch(snapshot)?0:1,0);
+        const auto snapshot=scope.finish();
+        bool allow_host_growth=false;
+#if defined(DDLA_USE_GPU_CPU_TUNNEL)
+        allow_host_growth=B==DdlaBackend::GPU && pass==0;
+#endif
+        require_close(h,"one-stage run reuses algorithm scratch and warm communication storage",no_scratch(snapshot,allow_host_growth)?0:1,0);
         require_close(h,"one-stage info",info,0);check_ddla_sync(h);owner.verify();
         const auto result=download(h,job=='V'?target:a.ptr,job=='V'?local_size(h,target_desc):before.size());
         const auto changed_input=download(h,a.ptr,before.size());

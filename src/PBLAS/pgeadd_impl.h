@@ -56,12 +56,6 @@ void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
                 void* backend_work, std::size_t backend_bytes,
                 void* host_work, std::size_t host_bytes);
 
-// The largest staging buffer of a call of at most m x n, in elements: the
-// longest message such a call sends or receives, which a GPU_CPU_TUNNEL build
-// stages in the handle's host buffers (callers grow them once, before a loop).
-std::size_t pgeadd_staging_count(const DdlaHandle_t& h, char ta, char tb, bool use_a, bool use_b,
-                                 int m, int n, const int* dc);
-
 }} // namespace ddla::pgeadd_impl
 
 #endif // DDLA_PGEADD_IMPL_H

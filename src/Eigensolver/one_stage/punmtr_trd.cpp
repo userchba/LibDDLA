@@ -57,11 +57,7 @@ template<class T>UnmtrTrdPlan punmtr_trd_check(const DdlaHandle_t& h,DdlaBackend
         if(!tau||(ar&&ac&&!A)||(cr&&cc&&!C))throw std::invalid_argument("punmtr: missing active data");
         const auto ab=detail::reflector_active_span<T>(ar,ac,a[DDLA_LLD_]);
         const auto cb=detail::reflector_active_span<T>(cr,cc,c[DDLA_LLD_]);
-        const auto overlaps=[](const void* x,std::size_t xb,const void* y,std::size_t yb) {
-            const auto xp=reinterpret_cast<std::uintptr_t>(x),yp=reinterpret_cast<std::uintptr_t>(y);
-            return xb&&yb&&(xp<=yp?yp-xp<xb:xp-yp<yb);
-        };
-        if(overlaps(A,ab,C,cb)||overlaps(tau,std::size_t(nq-1)*sizeof(T),C,cb))
+        if(detail::memory_overlaps(A,ab,C,cb)||detail::memory_overlaps(tau,std::size_t(nq-1)*sizeof(T),C,cb))
             throw std::invalid_argument("punmtr: output overlaps stored reflectors or tau");
         return result;
     });

@@ -42,6 +42,7 @@
 #ifndef DDLA_PGEQRF_IMPL_H
 #define DDLA_PGEQRF_IMPL_H
 
+#include "helpers.h"
 #include <ddla/ddla.h>
 
 #include <algorithm>
@@ -54,10 +55,6 @@
 
 namespace ddla {
 namespace qr_impl {
-
-// Host conjugation overloads (std::conj of a real argument returns complex).
-template <typename U> U conj_h(U v) { return v; }
-template <typename U> std::complex<U> conj_h(std::complex<U> v) { return std::conj(v); }
 
 // Buffers shared by the panel and update steps, carved by qr_block_run from the
 // caller's scratch (see qr_block_workspace_size).  tau holds the reflector scalars the
