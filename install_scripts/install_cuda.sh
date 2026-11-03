@@ -8,7 +8,6 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=3
 #SBATCH --output=../libddla_cuda.out
-#SBATCH --error=../libddla_cuda.out
 
 module load gcc/11.3.0
 module load openmpi/4.1.8-cuda
@@ -50,6 +49,7 @@ rm -rf ${INSTALL_DIR}
 cmake -B $BUILD_DIR -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
         -DCMAKE_CXX_COMPILER=g++ \
         -DDDLA_USE_CUDA=ON \
+        -DDDLA_CPU_BLAS_LIBRARY=/data/app/openblas/0.3.29/lib/libopenblas.so \
         -DDDLA_USE_CCL=ON \
         -DCMAKE_CUDA_ARCHITECTURES=70
 
@@ -58,7 +58,7 @@ cmake -B $BUILD_DIR -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
         # -DCMAKE_Fortran_COMPILER=gfortran \
         # -DMPI_CXX_COMPILER=mpicxx \
 
-cmake --build $BUILD_DIR -j 8
+cmake --build $BUILD_DIR -j "${SLURM_CPUS_PER_TASK:-1}"
 
 cmake --install $BUILD_DIR --prefix $INSTALL_DIR
 

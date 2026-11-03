@@ -15,7 +15,7 @@
 # KSSG caps DefMemPerCPU at ~4 GB/CPU: --mem must stay <= 4G × cpus-per-task.
 #SBATCH --mem=@MEM@
 #SBATCH --time=@TIME@
-#SBATCH --output=@RESULTS@/kssg-slurm-%j.log
+#SBATCH --output=@RESULTS@/kssg-slurm.log
 #SBATCH --export=NIL
 
 set -euo pipefail
@@ -37,7 +37,7 @@ BUILD_GPU=@BUILD_GPU@
 cmake -S @SOURCE@ -B $BUILD_GPU \
     -DDDLA_USE_HIP=ON \
     -DDDLA_USE_CCL=ON \
-    -DDDLA_LAPACK_LIBRARY="$OPENBLAS" \
+    -DDDLA_CPU_BLAS_LIBRARY="$OPENBLAS" \
     -DBUILD_TESTS=ON \
     -DCMAKE_CXX_COMPILER=g++ \
     -DCMAKE_HIP_ARCHITECTURES=gfx906 \

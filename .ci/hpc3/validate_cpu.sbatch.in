@@ -33,7 +33,6 @@ module -t list 2>&1 | tee @RESULTS@/cpu-modules.txt
 command -v cmake mpicxx mpirun | tee @RESULTS@/cpu-tools.txt
 
 cmake -S @SOURCE@ -B @BUILD_CPU@ \
-    -DDDLA_USE_CPU=ON \
     -DBUILD_TESTS=ON \
     -DDDLA_CPU_BLAS_LIBRARY=$OPENBLAS \
     -DCMAKE_BUILD_TYPE=Release \

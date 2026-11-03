@@ -8,7 +8,6 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=7
 #SBATCH --output=../libddla_hip.out
-#SBATCH --error=../libddla_hip.out
 
 ulimit -s unlimited
 ulimit -c unlimited
@@ -58,9 +57,11 @@ echo 'Install Dir:' $INSTALL_DIR
 echo "任务运行节点列表: ${SLURM_NODELIST}"
 rm -rf ${BUILD_DIR}
 rm -rf ${INSTALL_DIR}
+: "${OPENBLAS:?Set OPENBLAS to a host CBLAS and LAPACK library}"
 cmake -B $BUILD_DIR -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
         -DROCM_PATH=$ROCM_PATH \
         -DDDLA_USE_HIP=ON \
+        -DDDLA_CPU_BLAS_LIBRARY="$OPENBLAS" \
         -DCMAKE_PREFIX_PATH=$ROCM_PATH \
         -DCMAKE_CXX_COMPILER=g++ \
         -DCMAKE_CXX_FLAGS="-g -O2 -fopenmp" \
@@ -76,7 +77,7 @@ cmake -B $BUILD_DIR -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
         
         # -DBUILD_TESTS=ON \
 
-cmake --build $BUILD_DIR -j 8
+cmake --build $BUILD_DIR -j "${SLURM_CPUS_PER_TASK:-1}"
 
 cmake --install $BUILD_DIR --prefix $INSTALL_DIR
 
