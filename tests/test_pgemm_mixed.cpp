@@ -133,14 +133,12 @@ int main(int argc,char**argv) {
     try {
         const std::string mode=argc>1?argv[1]:"all";
         if(mode!="all" && mode!="cpu" && mode!="gpu")throw std::runtime_error("invalid backend mode");
-        if((mode=="cpu" && !DDLA_HAS_CPU)||(mode=="gpu" && !DDLA_HAS_GPU))throw std::runtime_error("backend unavailable");
+        if((mode=="gpu" && !DDLA_HAS_GPU))throw std::runtime_error("backend unavailable");
         int np=1;MPI_Comm_size(MPI_COMM_WORLD,&np);
         const int pr=argc>2?std::stoi(argv[2]):1,pc=argc>3?std::stoi(argv[3]):np;
         if(pr*pc!=np)throw std::runtime_error("grid does not match ranks");
         setenv("DDLA_PGEMM_KPANEL","6",1);
-#if DDLA_HAS_CPU
         if(mode!="gpu")run<DdlaBackend::CPU>(pr,pc);
-#endif
 #if DDLA_HAS_GPU
         if(mode!="cpu")run<DdlaBackend::GPU>(pr,pc);
 #endif

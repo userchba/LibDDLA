@@ -301,7 +301,7 @@ int run(bool quick, const std::string& uplos)
     rejects([&] { trtrm<Backend,double>(h, 'L','N','U','N', 2, 1., a, 2, b, 2, 0., b+1, 2); });
     trtrm<Backend,double>(h, 'U','T','L','C', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1);
     trtrm<Backend,double>(h, 'L','C','U','T', 2, 0., nullptr, 2, nullptr, 2, 1., nullptr, 2);
-#if DDLA_HAS_CPU && DDLA_HAS_GPU
+#if DDLA_HAS_GPU
     constexpr DdlaBackend Other = Backend == DdlaBackend::CPU ? DdlaBackend::GPU : DdlaBackend::CPU;
     rejects([&] { trtrm<Other,double>(h, 'L','N','L','N', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1); });
 #endif
@@ -327,9 +327,7 @@ int main(int argc, char** argv)
                 else throw std::invalid_argument("--uplo requires U, L or both");
             } else throw std::invalid_argument("unknown test option");
         }
-#if DDLA_HAS_CPU
         bad += run<DdlaBackend::CPU>(quick,uplos);
-#endif
 #if DDLA_HAS_GPU
         bad += run<DdlaBackend::GPU>(quick,uplos);
 #endif

@@ -152,9 +152,7 @@ int main(int argc,char** argv) {
     MPI_Init(&argc,&argv);try {
         int np;MPI_Comm_size(MPI_COMM_WORLD,&np);int pr=argc>1?std::stoi(argv[1]):1,pc=argc>2?std::stoi(argv[2]):np;
         if(pr*pc!=np)throw std::runtime_error("wrong grid");
-#if DDLA_HAS_CPU
         run<DdlaBackend::CPU>(pr,pc);
-#endif
 #if DDLA_HAS_GPU
         run<DdlaBackend::GPU>(pr,pc);
 #endif

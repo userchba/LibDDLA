@@ -207,7 +207,7 @@ template <DdlaBackend BE,typename R> int run_type(DdlaHandle_t h) {
     fails+=reject_cr(h,'N','N',-1,1,1,1,1,1);
     fails+=reject_cr(h,'N','N',2,1,1,1,1,2);
     fails+=reject_cr(h,'N','N',1,1,2,1,1,1);
-#if DDLA_HAS_CPU && DDLA_HAS_GPU
+#if DDLA_HAS_GPU
     constexpr auto other=BE==DdlaBackend::CPU?DdlaBackend::GPU:DdlaBackend::CPU;
     bool rejected=false;
     try { gemm<other,R>(h,'N','N',0,0,0,Z(1),static_cast<const R*>(nullptr),1,
@@ -228,9 +228,7 @@ int main(int argc,char**argv) {
     MPI_Init(&argc,&argv); int failures=0;
     const std::string mode=argc>1?argv[1]:"all";
     try {
-#if DDLA_HAS_CPU
         if(mode!="gpu") failures+=run<DdlaBackend::CPU>();
-#endif
 #if DDLA_HAS_GPU
         if(mode!="cpu") failures+=run<DdlaBackend::GPU>();
 #endif

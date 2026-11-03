@@ -2,19 +2,8 @@
 // ---------------------------------------------------------------------------
 // Unified backend-templated Euclidean norm (result := ||x||_2).
 //
-// Structure follows src/herk.cpp exactly: one definition covering CPU (Fortran
-// BLAS) and GPU (cuBLAS/hipBLAS), selected with `if constexpr` on the Backend
-// template parameter, with the arms themselves guarded by the BUILD CAPABILITY
-// macros (DDLA_HAS_CPU / DDLA_HAS_GPU) and the vendor chosen per scalar arm by
-// the PER-TU macros (DDLA_USE_CUDA / DDLA_USE_HIP).
-//
-// Why the capability guard matters here: the previous design put a `#else`
-// CPU arm inside src/nrm2.h selected by `!defined(DDLA_USE_CUDA) &&
-// !defined(DDLA_USE_HIP)`.  In a dual build (DDLA_USE_CPU + DDLA_USE_CUDA)
-// every TU defines DDLA_USE_CUDA, so that arm was never compiled -- while
-// DDLA_HAS_CPU was 1 and the CPU instantiation of this function still existed.
-// A CPU-backend call would therefore have reached cublasDnrm2 with HOST
-// pointers.  Guarding on DDLA_HAS_CPU removes that class of bug.
+// Dispatch follows the Backend template parameter. CPU code is always compiled;
+// DDLA_HAS_GPU enables GPU code, and DDLA_USE_CUDA / DDLA_USE_HIP select its vendor.
 //
 // POINTER SEMANTICS -- the result is written THROUGH A POINTER, not returned
 // by value, and the pointer's address space depends on the backend:
@@ -43,7 +32,6 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 
-#if DDLA_HAS_CPU
 extern "C" {
 // Real-valued function returns: safe ABI (unlike the complex xDOTC family,
 // whose hidden-argument return convention is compiler-dependent).  The CPU arm
@@ -53,7 +41,6 @@ double dnrm2_(const int*, const double*, const int*);
 float  scnrm2_(const int*, const std::complex<float>*, const int*);
 double dznrm2_(const int*, const std::complex<double>*, const int*);
 }
-#endif
 
 // ---------------------------------------------------------------------------
 // GPU arm: the vendor calls.  Kept as free gpublasNrm2 overloads so the
@@ -145,8 +132,6 @@ void nrm2_check(
     const T* x, int incx,
     typename real_type<T>::type* result)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU nrm2 is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU nrm2 is not available in this LibDDLA build");
 
@@ -172,7 +157,6 @@ void nrm2_run(
     typename real_type<T>::type* result)
 {
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         // HOST result pointer: the Fortran function returns the value and the
         // CPU arm performs the store.
         if constexpr (std::is_same_v<T, float>) {
@@ -186,9 +170,6 @@ void nrm2_run(
         } else {
             static_assert(sizeof(T) == 0, "nrm2: unsupported scalar type T");
         }
-#else
-        (void)handle; (void)n; (void)x; (void)incx; (void)result;
-#endif
     } else {
 #if DDLA_HAS_GPU
         // DEVICE result pointer: the vendor arm forces DEVICE pointer mode.
@@ -224,12 +205,10 @@ void nrm2(
         const DdlaHandle_t&, int, const TYPE*, int,                            \
         typename real_type<TYPE>::type*)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_NRM2(DdlaBackend::CPU, float);
 INSTANTIATE_NRM2(DdlaBackend::CPU, double);
 INSTANTIATE_NRM2(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_NRM2(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_NRM2(DdlaBackend::GPU, float);
@@ -244,12 +223,10 @@ INSTANTIATE_NRM2(DdlaBackend::GPU, std::complex<double>);
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::nrm2_check<BACKEND, TYPE>( const DdlaHandle_t& handle, int n, const TYPE* x, int incx, typename real_type<TYPE>::type* result); \
     template void blas_impl::nrm2_run<BACKEND, TYPE>( const DdlaHandle_t& handle, int n, const TYPE* x, int incx, typename real_type<TYPE>::type* result);
-#if DDLA_HAS_CPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#endif
 #if DDLA_HAS_GPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)

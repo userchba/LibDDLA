@@ -314,13 +314,11 @@ void pgetf2(const DdlaHandle_t& handle, int m, int n, int width, T* A, int ia, i
     template bool lu_impl::pgetf2_check<BACKEND>(const DdlaHandle_t&, int, int, int, const void*, int, int, \
         const int*, const int*)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PGETF2_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PGETF2(DdlaBackend::CPU, float);
 INSTANTIATE_PGETF2(DdlaBackend::CPU, double);
 INSTANTIATE_PGETF2(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PGETF2(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PGETF2_CHECK(DdlaBackend::GPU);

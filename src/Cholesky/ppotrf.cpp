@@ -479,12 +479,10 @@ bool ppotrf(
     int& info, \
     bool is_head, int location)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PPOTRF(DdlaBackend::CPU, float);
 INSTANTIATE_PPOTRF(DdlaBackend::CPU, double);
 INSTANTIATE_PPOTRF(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PPOTRF(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PPOTRF(DdlaBackend::GPU, float);
@@ -498,13 +496,11 @@ INSTANTIATE_PPOTRF(DdlaBackend::GPU, std::complex<double>);
 
 
 #define DDLA_CHOLESKY_RUN(BACKEND,TYPE) template bool cholesky_impl::ppotrf_run<BACKEND,TYPE>( const DdlaHandle_t& handle, char uplo, int n, TYPE* A, int ia, int ja, const int* array_descA, int& info, bool is_head, int location, void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes );
-#if DDLA_HAS_CPU
 template void cholesky_impl::ppotrf_check<DdlaBackend::CPU>(const DdlaHandle_t&,char,int,const void*,int,int,const int*,bool,int);
 DDLA_CHOLESKY_RUN(DdlaBackend::CPU,float)
 DDLA_CHOLESKY_RUN(DdlaBackend::CPU,double)
 DDLA_CHOLESKY_RUN(DdlaBackend::CPU,std::complex<float>)
 DDLA_CHOLESKY_RUN(DdlaBackend::CPU,std::complex<double>)
-#endif
 #if DDLA_HAS_GPU
 template void cholesky_impl::ppotrf_check<DdlaBackend::GPU>(const DdlaHandle_t&,char,int,const void*,int,int,const int*,bool,int);
 DDLA_CHOLESKY_RUN(DdlaBackend::GPU,float)

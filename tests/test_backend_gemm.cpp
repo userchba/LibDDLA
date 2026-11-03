@@ -181,7 +181,7 @@ int run_backend()
     return failures;
 }
 
-#if DDLA_HAS_CPU && DDLA_HAS_GPU
+#if DDLA_HAS_GPU
 int check_backend_mismatch()
 {
     DdlaHandle_t cpu = nullptr;
@@ -228,13 +228,11 @@ int main(int argc, char** argv)
 #endif
 
     int failures = 0;
-#if DDLA_HAS_CPU
     failures += run_backend<DdlaBackend::CPU>();
-#endif
 #if DDLA_HAS_GPU
     failures += run_backend<DdlaBackend::GPU>();
 #endif
-#if DDLA_HAS_CPU && DDLA_HAS_GPU
+#if DDLA_HAS_GPU
     failures += check_backend_mismatch();
 #endif
 

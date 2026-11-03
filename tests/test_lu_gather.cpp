@@ -358,9 +358,7 @@ int main(int argc,char**argv) {
     TestOptions opts;std::string error;
     if(!parse_options(argc,argv,size,opts,error)){if(rank==0)std::cerr<<error<<std::endl;MPI_Abort(MPI_COMM_WORLD,2);}
     for(auto grid:opts.grids) {
-#if DDLA_HAS_CPU
         {DdlaHandle_t h=nullptr;ddlaInit(h,DdlaBackend::CPU);ddlaSet(h,work_comm,grid.first,grid.second,std::getenv("LU_TEST_COLUMN_MAJOR")?'C':'R');run<DdlaBackend::CPU>(h);ddlaDestroy(h);}
-#endif
 #if DDLA_HAS_GPU
         {DdlaHandle_t h=nullptr;ddlaInit(h,DdlaBackend::GPU);ddlaSet(h,work_comm,grid.first,grid.second,std::getenv("LU_TEST_COLUMN_MAJOR")?'C':'R');run<DdlaBackend::GPU>(h);ddlaDestroy(h);}
 #endif

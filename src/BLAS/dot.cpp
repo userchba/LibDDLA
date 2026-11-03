@@ -2,19 +2,8 @@
 // ---------------------------------------------------------------------------
 // Unified backend-templated conjugate dot product (result := x^H * y).
 //
-// Structure follows src/herk.cpp exactly: one definition covering CPU (Fortran
-// BLAS) and GPU (cuBLAS/hipBLAS), selected with `if constexpr` on the Backend
-// template parameter, with the arms themselves guarded by the BUILD CAPABILITY
-// macros (DDLA_HAS_CPU / DDLA_HAS_GPU) and the vendor chosen per scalar arm by
-// the PER-TU macros (DDLA_USE_CUDA / DDLA_USE_HIP).
-//
-// Why the capability guard matters here: the previous design put a `#else`
-// CPU arm inside src/dot.h selected by `!defined(DDLA_USE_CUDA) &&
-// !defined(DDLA_USE_HIP)`.  In a dual build (DDLA_USE_CPU + DDLA_USE_CUDA)
-// every TU defines DDLA_USE_CUDA, so that arm was never compiled -- while
-// DDLA_HAS_CPU was 1 and the CPU instantiation of this function still existed.
-// A CPU-backend call would therefore have reached cublasDdotc with HOST
-// pointers.  Guarding on DDLA_HAS_CPU removes that class of bug.
+// Dispatch follows the Backend template parameter. CPU code is always compiled;
+// DDLA_HAS_GPU enables GPU code, and DDLA_USE_CUDA / DDLA_USE_HIP select its vendor.
 //
 // POINTER SEMANTICS -- the result is written THROUGH A POINTER, not returned
 // by value, and the pointer's address space depends on the backend:
@@ -49,14 +38,12 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 
-#if DDLA_HAS_CPU
 extern "C" {
 float  sdot_(const int*, const float*, const int*, const float*, const int*);
 double ddot_(const int*, const double*, const int*, const double*, const int*);
 void cblas_cdotc_sub(int, const void*, int, const void*, int, void*);
 void cblas_zdotc_sub(int, const void*, int, const void*, int, void*);
 }
-#endif
 
 // ---------------------------------------------------------------------------
 // GPU arm: the vendor calls.  Kept as free gpublasDotc overloads so the
@@ -159,8 +146,6 @@ void dotc_check(
     const T* y, int incy,
     T* result)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU dotc is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU dotc is not available in this LibDDLA build");
 
@@ -187,7 +172,6 @@ void dotc_run(
     T* result)
 {
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         if constexpr (std::is_same_v<T, float>) {
             *result = sdot_(&n, x, &incx, y, &incy);
         } else if constexpr (std::is_same_v<T, double>) {
@@ -201,9 +185,6 @@ void dotc_run(
         } else {
             static_assert(sizeof(T) == 0, "dotc: unsupported scalar type T");
         }
-#else
-        (void)handle; (void)n; (void)x; (void)incx; (void)y; (void)incy; (void)result;
-#endif
     } else {
 #if DDLA_HAS_GPU
         // DEVICE result pointer: the vendor arm forces DEVICE pointer mode.
@@ -239,12 +220,10 @@ void dotc(
     template void dotc<BACKEND, TYPE>(                                         \
         const DdlaHandle_t&, int, const TYPE*, int, const TYPE*, int, TYPE*)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_DOTC(DdlaBackend::CPU, float);
 INSTANTIATE_DOTC(DdlaBackend::CPU, double);
 INSTANTIATE_DOTC(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_DOTC(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_DOTC(DdlaBackend::GPU, float);
@@ -259,12 +238,10 @@ INSTANTIATE_DOTC(DdlaBackend::GPU, std::complex<double>);
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::dotc_check<BACKEND, TYPE>( const DdlaHandle_t& handle, int n, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* result); \
     template void blas_impl::dotc_run<BACKEND, TYPE>( const DdlaHandle_t& handle, int n, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* result);
-#if DDLA_HAS_CPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#endif
 #if DDLA_HAS_GPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)

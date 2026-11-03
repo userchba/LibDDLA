@@ -110,9 +110,7 @@ int main(int argc,char**argv)
     MPI_Init(&argc,&argv);int rank=0;MPI_Comm_rank(MPI_COMM_WORLD,&rank);int failed=0;
     const auto filename="/tmp/libddla_workspace_write_matrix_"+std::to_string(::getpid())+"_"+std::to_string(rank)+".txt";
     try{
-#if DDLA_HAS_CPU
         backend<DdlaBackend::CPU>(filename);
-#endif
 #if DDLA_HAS_GPU
         backend<DdlaBackend::GPU>(filename);
 #endif

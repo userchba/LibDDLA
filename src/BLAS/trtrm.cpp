@@ -370,7 +370,6 @@ void launch_general(gpuStream_t stream, int n, D al, const void* a, int lda, int
 }
 #endif
 
-#if DDLA_HAS_CPU
 // OpenBLAS TRMM outperformed the scalar host loops. The packed operand reads
 // only its stored triangle; one panel of the caller's scratch serves all
 // column panels.
@@ -437,7 +436,6 @@ void trtrm_cpu(const DdlaHandle_t& h, char ua, char xa, char ub, char xb,
     }
 }
 
-#endif
 
 template <bool Upper, DdlaBackend Backend, typename T>
 void trtrm_impl(const DdlaHandle_t& handle, int n, const T& alpha,
@@ -446,10 +444,8 @@ void trtrm_impl(const DdlaHandle_t& handle, int n, const T& alpha,
 {
     if (n == 0 || (alpha == T(0) && beta == T(1))) return;
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         trtrm_cpu(handle, Upper ? 'U' : 'L', 'N', Upper ? 'U' : 'L', 'N',
                    n, alpha, A, lda, B, ldb, beta, C, ldc, work, bytes);
-#endif
     } else {
 #if DDLA_GPU_VENDOR
         using D = detail::DeviceScalarT<T>;
@@ -490,11 +486,9 @@ void trtrm_general_impl(const DdlaHandle_t& handle, int n, const T& alpha,
                         [[maybe_unused]] std::size_t bytes)
 {
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         trtrm_cpu(handle, (UpA != ta) ? 'U' : 'L', ca ? 'C' : (ta ? 'T' : 'N'),
                    (UpB != tb) ? 'U' : 'L', cb ? 'C' : (tb ? 'T' : 'N'),
                    n, alpha, A, lda, B, ldb, beta, C, ldc, work, bytes);
-#endif
     } else {
 #if DDLA_GPU_VENDOR
         using D = detail::DeviceScalarT<T>;
@@ -631,9 +625,7 @@ void trtrm(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, ch
     INSTANTIATE_TRTRM(B, double); \
     INSTANTIATE_TRTRM(B, std::complex<float>); \
     INSTANTIATE_TRTRM(B, std::complex<double>)
-#if DDLA_HAS_CPU
 INSTANTIATE_TRTRM_TYPES(DdlaBackend::CPU);
-#endif
 #if DDLA_HAS_GPU
 INSTANTIATE_TRTRM_TYPES(DdlaBackend::GPU);
 #endif
@@ -642,12 +634,10 @@ INSTANTIATE_TRTRM_TYPES(DdlaBackend::GPU);
 #define DDLA_TRTRM_PHASES(B,T) \
  template void blas_impl::trtrm_check<B,T>(const DdlaHandle_t&,char,char,char,char,int,const T&,const T*,int,const T*,int,const T&,T*,int); \
  template void blas_impl::trtrm_run<B,T>(const DdlaHandle_t&,char,char,char,char,int,const T&,const T*,int,const T*,int,const T&,T*,int,void*,std::size_t);
-#if DDLA_HAS_CPU
 DDLA_TRTRM_PHASES(DdlaBackend::CPU,float)
 DDLA_TRTRM_PHASES(DdlaBackend::CPU,double)
 DDLA_TRTRM_PHASES(DdlaBackend::CPU,std::complex<float>)
 DDLA_TRTRM_PHASES(DdlaBackend::CPU,std::complex<double>)
-#endif
 #if DDLA_HAS_GPU
 DDLA_TRTRM_PHASES(DdlaBackend::GPU,float)
 DDLA_TRTRM_PHASES(DdlaBackend::GPU,double)

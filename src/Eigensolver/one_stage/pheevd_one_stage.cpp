@@ -377,12 +377,10 @@ void pheevd_one_stage_uplo(const DdlaHandle_t& h, char job, char uplo, int n, T*
     template void detail::pheevd_one_stage_uplo_timed<B, T>(const DdlaHandle_t&, char, char, int, T*,        \
                                                             const int*, typename real_type<T>::type*, T*,    \
                                                             const int*, int&, detail::OneStageTimes*);
-#if DDLA_HAS_CPU
 INST(DdlaBackend::CPU, float)
 INST(DdlaBackend::CPU, double)
 INST(DdlaBackend::CPU, std::complex<float>)
 INST(DdlaBackend::CPU, std::complex<double>)
-#endif
 #if DDLA_HAS_GPU
 INST(DdlaBackend::GPU, float)
 INST(DdlaBackend::GPU, double)

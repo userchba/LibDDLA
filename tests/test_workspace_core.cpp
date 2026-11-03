@@ -281,9 +281,7 @@ int main(int argc,char** argv)
 {
     MPI_Init(&argc,&argv);int status=0;
     try {
-#if DDLA_HAS_CPU
         backend<DdlaBackend::CPU>();
-#endif
 #if DDLA_HAS_GPU
         backend<DdlaBackend::GPU>();
 #endif

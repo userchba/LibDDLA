@@ -284,13 +284,11 @@ void ptrmm(const DdlaHandle_t& handle, char side, char uplo, char trans, char di
 #define INSTANTIATE_PTRMM_SIZE(TYPE) \
     template void ptrmm_impl::ptrmm_workspace_size<TYPE>(const DdlaHandle_t&, \
         char, char, int, int, bool, const int*, const int*, std::size_t*, std::size_t*)
-#if DDLA_HAS_CPU
 INSTANTIATE_PTRMM_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PTRMM(DdlaBackend::CPU, float);
 INSTANTIATE_PTRMM(DdlaBackend::CPU, double);
 INSTANTIATE_PTRMM(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PTRMM(DdlaBackend::CPU, std::complex<double>);
-#endif
 #if DDLA_HAS_GPU
 INSTANTIATE_PTRMM_CHECK(DdlaBackend::GPU);
 INSTANTIATE_PTRMM(DdlaBackend::GPU, float);

@@ -4,20 +4,8 @@
 //   C := alpha*A*B + beta*C    (side = 'L')   or
 //   C := alpha*B*A + beta*C    (side = 'R').
 //
-// Structure follows src/gemm.cpp and src/herk.cpp exactly: one definition
-// covering CPU (Fortran BLAS) and GPU (cuBLAS/hipBLAS), selected with
-// `if constexpr` on the Backend template parameter, with the arms themselves
-// guarded by the BUILD CAPABILITY macros (DDLA_HAS_CPU / DDLA_HAS_GPU) and the
-// vendor chosen per scalar arm by the PER-TU macros (DDLA_USE_CUDA /
-// DDLA_USE_HIP).
-//
-// Why the capability guard matters here: the previous design put a `#else`
-// CPU arm inside src/hemm.h selected by `!defined(DDLA_USE_CUDA) &&
-// !defined(DDLA_USE_HIP)`.  In a dual build (DDLA_USE_CPU + DDLA_USE_CUDA)
-// every TU defines DDLA_USE_CUDA, so that arm was never compiled -- while
-// DDLA_HAS_CPU was 1 and the CPU instantiation of this function still existed.
-// A CPU-backend call would therefore have reached cublasChemm with HOST
-// pointers.  Guarding on DDLA_HAS_CPU removes that class of bug.
+// Dispatch follows the Backend template parameter. CPU code is always compiled;
+// DDLA_HAS_GPU enables GPU code, and DDLA_USE_CUDA / DDLA_USE_HIP select its vendor.
 //
 // Scalar convention: xHEMM takes alpha and beta of the operands' own type T
 // (both real for the real scalar types, complex for the complex ones), so the
@@ -36,7 +24,6 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 
-#if DDLA_HAS_CPU
 extern "C" {
 // Real: xHEMM has no real-scalar BLAS counterpart, so the real types use xSYMM.
 void ssymm_(const char*, const char*, const int*, const int*, const float*,
@@ -53,7 +40,6 @@ void zhemm_(const char*, const char*, const int*, const int*, const std::complex
             const std::complex<double>*, const int*, const std::complex<double>*, const int*,
             const std::complex<double>*, std::complex<double>*, const int*);
 }
-#endif
 
 // ---------------------------------------------------------------------------
 // GPU arm: the vendor calls.  Kept as free gpublasHemm overloads so the
@@ -157,8 +143,6 @@ void hemm_check(
     const T& beta,
     T* C, int ldc)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU hemm is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU hemm is not available in this LibDDLA build");
 
@@ -192,7 +176,6 @@ void hemm_run(
     T* C, int ldc)
 {
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         // Real data: HEMM == SYMM; complex data calls xHEMM.  There is no
         // transpose flag in this family, so nothing needs normalising.
         if constexpr (std::is_same_v<T, float>) {
@@ -210,11 +193,6 @@ void hemm_run(
         } else {
             static_assert(sizeof(T) == 0, "hemm: unsupported scalar type T");
         }
-#else
-        (void)handle; (void)side; (void)uplo; (void)m; (void)n;
-        (void)alpha; (void)A; (void)lda; (void)B; (void)ldb;
-        (void)beta; (void)C; (void)ldc;
-#endif
     } else {
 #if DDLA_HAS_GPU
         // The real types map onto xSYMM inside gpublasHemm.
@@ -260,12 +238,10 @@ void hemm(
         const TYPE&, const TYPE*, int, const TYPE*, int,                       \
         const TYPE&, TYPE*, int)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_HEMM(DdlaBackend::CPU, float);
 INSTANTIATE_HEMM(DdlaBackend::CPU, double);
 INSTANTIATE_HEMM(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_HEMM(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_HEMM(DdlaBackend::GPU, float);
@@ -280,12 +256,10 @@ INSTANTIATE_HEMM(DdlaBackend::GPU, std::complex<double>);
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::hemm_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char side, char uplo, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE* B, int ldb, const TYPE& beta, TYPE* C, int ldc); \
     template void blas_impl::hemm_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char side, char uplo, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE* B, int ldb, const TYPE& beta, TYPE* C, int ldc);
-#if DDLA_HAS_CPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#endif
 #if DDLA_HAS_GPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)

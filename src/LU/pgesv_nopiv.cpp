@@ -126,13 +126,11 @@ void pgesv_nopiv(
     const int*)
 
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PGESV_NOPIV_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PGESV_NOPIV(DdlaBackend::CPU, float);
 INSTANTIATE_PGESV_NOPIV(DdlaBackend::CPU, double);
 INSTANTIATE_PGESV_NOPIV(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PGESV_NOPIV(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PGESV_NOPIV_CHECK(DdlaBackend::GPU);

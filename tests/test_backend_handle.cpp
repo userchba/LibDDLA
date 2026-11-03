@@ -151,17 +151,12 @@ int main(int argc, char** argv)
         ddlaInit(h_cpu, DdlaBackend::CPU);
         ddlaSet(h_cpu, MPI_COMM_WORLD, 'R');
         void* s = ddlaGetStream(h_cpu);
-#if DDLA_HAS_CPU
         TEST("CPU handle stream is nullptr", s == nullptr);
         TEST("CPU handle has no native resources",
              h_cpu->stream == nullptr && h_cpu->stream_data == nullptr &&
              h_cpu->stream_level == nullptr && h_cpu->blasH == nullptr && h_cpu->solverH == nullptr &&
              h_cpu->nccl_comm == nullptr && h_cpu->nccl_row_comm == nullptr && h_cpu->nccl_col_comm == nullptr);
         TEST("CPU level queue stays null", h_cpu->level_queue() == nullptr);
-#else
-        // In a GPU-only build, CPU backend shouldn't be available
-        (void)s;
-#endif
         ddlaDestroy(h_cpu);
     } else {
         if (myid == 0)

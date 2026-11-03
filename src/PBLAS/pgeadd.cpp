@@ -655,13 +655,11 @@ void pgeadd(const DdlaHandle_t& h, char transa, char transb, int m, int n,
 #define INSTANTIATE_PGEADD_SIZE(T) \
     template void pgeadd_impl::pgeadd_workspace_size<T>(const DdlaHandle_t&,char,char,bool,bool,int,int,const int*, \
         std::size_t*,std::size_t*)
-#if DDLA_HAS_CPU
 INSTANTIATE_PGEADD_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PGEADD(DdlaBackend::CPU,float);
 INSTANTIATE_PGEADD(DdlaBackend::CPU,double);
 INSTANTIATE_PGEADD(DdlaBackend::CPU,std::complex<float>);
 INSTANTIATE_PGEADD(DdlaBackend::CPU,std::complex<double>);
-#endif
 #if DDLA_HAS_GPU
 INSTANTIATE_PGEADD_CHECK(DdlaBackend::GPU);
 INSTANTIATE_PGEADD(DdlaBackend::GPU,float);

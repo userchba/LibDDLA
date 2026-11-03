@@ -2,10 +2,8 @@
 // ---------------------------------------------------------------------------
 // Backend-templated row interchanges (LAPACK ?laswp):  for i = k1..k2, swap row i of A with row ipiv(i).
 //
-// Structure follows src/getrf.cpp: one definition covering CPU (Fortran LAPACK ?laswp on host pointers) and GPU, selected
-// with `if constexpr` on the Backend template parameter, the arms guarded by DDLA_HAS_CPU / DDLA_HAS_GPU.  The vendor
-// calls are private to this translation unit; the public interface is the templated ddla::laswp declared in
-// <ddla/ddla.h>.
+// Dispatch follows the Backend template parameter. CPU code is always compiled;
+// DDLA_HAS_GPU enables GPU code, and DDLA_USE_CUDA / DDLA_USE_HIP select its vendor.
 //
 // Three components (plan_util.h): laswp_check; laswp_workspace_size (host bytes of the pivot staging);
 // laswp_run on the caller's scratch.
@@ -33,7 +31,6 @@
 #include "ddla_stream.h"
 #include "lapack_impl.h"
 
-#if DDLA_HAS_CPU
 // Host LAPACK ?laswp (Fortran ABI; the CPU BLAS library must provide LAPACK -- OpenBLAS and MKL do).
 extern "C" {
 void slaswp_(const int*, float*, const int*, const int*, const int*, const int*, const int*);
@@ -41,7 +38,6 @@ void dlaswp_(const int*, double*, const int*, const int*, const int*, const int*
 void claswp_(const int*, std::complex<float>*, const int*, const int*, const int*, const int*, const int*);
 void zlaswp_(const int*, std::complex<double>*, const int*, const int*, const int*, const int*, const int*);
 }
-#endif
 
 namespace ddla {
 
@@ -52,7 +48,6 @@ inline const char* laswp_backend_name(DdlaBackend backend)
     return backend == DdlaBackend::CPU ? "CPU" : "GPU";
 }
 
-#if DDLA_HAS_CPU
 inline void cpu_laswp(int n, float* A, int lda, int k1, int k2, const int* ipiv, int incx)
 {
     slaswp_(&n, A, &lda, &k1, &k2, ipiv, &incx);
@@ -72,7 +67,6 @@ inline void cpu_laswp(int n, std::complex<double>* A, int lda, int k1, int k2, c
 {
     zlaswp_(&n, A, &lda, &k1, &k2, ipiv, &incx);
 }
-#endif // DDLA_HAS_CPU
 
 #if DDLA_HAS_GPU
 #if DDLA_GPU_VENDOR && GPU_HAS_SOLVER_LASWP
@@ -166,8 +160,6 @@ template <DdlaBackend Backend>
 void laswp_check(const DdlaHandle_t& handle, int n, const void* A, int lda, int k1, int k2,
                  const int* ipiv, int incx)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU laswp is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU laswp is not available in this LibDDLA build");
 
@@ -211,9 +203,7 @@ void laswp_run(const DdlaHandle_t& handle, int n, T* A, int lda, int k1, int k2,
     if (n <= 0 || k1 > k2) return;
 
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         cpu_laswp(n, A, lda, k1, k2, ipiv, incx);
-#endif
     } else {
 #if DDLA_HAS_GPU
         gpu_laswp(handle, host_work, host_bytes, n, A, lda, k1, k2, ipiv, incx);
@@ -244,14 +234,12 @@ void laswp(const DdlaHandle_t& handle, int n, T* A, int lda, int k1, int k2, con
     template void lapack_impl::laswp_run<BACKEND, TYPE>(                     \
         const DdlaHandle_t&, int, TYPE*, int, int, int, const int*, int, void*, std::size_t)
 
-#if DDLA_HAS_CPU
 template void lapack_impl::laswp_check<DdlaBackend::CPU>(
     const DdlaHandle_t&, int, const void*, int, int, int, const int*, int);
 INSTANTIATE_LASWP(DdlaBackend::CPU, float);
 INSTANTIATE_LASWP(DdlaBackend::CPU, double);
 INSTANTIATE_LASWP(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_LASWP(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 template void lapack_impl::laswp_check<DdlaBackend::GPU>(

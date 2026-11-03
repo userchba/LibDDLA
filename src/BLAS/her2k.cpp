@@ -4,20 +4,8 @@
 //   C := alpha*A*B^H + conj(alpha)*B*A^H + beta*C    (trans = 'N')   or
 //   C := alpha*A^H*B + conj(alpha)*B^H*A + beta*C    (trans = 'C').
 //
-// Structure follows src/gemm.cpp and src/herk.cpp exactly: one definition
-// covering CPU (Fortran BLAS) and GPU (cuBLAS/hipBLAS), selected with
-// `if constexpr` on the Backend template parameter, with the arms themselves
-// guarded by the BUILD CAPABILITY macros (DDLA_HAS_CPU / DDLA_HAS_GPU) and the
-// vendor chosen per scalar arm by the PER-TU macros (DDLA_USE_CUDA /
-// DDLA_USE_HIP).
-//
-// Why the capability guard matters here: the previous design put a `#else`
-// CPU arm inside src/her2k.h selected by `!defined(DDLA_USE_CUDA) &&
-// !defined(DDLA_USE_HIP)`.  In a dual build (DDLA_USE_CPU + DDLA_USE_CUDA)
-// every TU defines DDLA_USE_CUDA, so that arm was never compiled -- while
-// DDLA_HAS_CPU was 1 and the CPU instantiation of this function still existed.
-// A CPU-backend call would therefore have reached cublasCher2k with HOST
-// pointers.  Guarding on DDLA_HAS_CPU removes that class of bug.
+// Dispatch follows the Backend template parameter. CPU code is always compiled;
+// DDLA_HAS_GPU enables GPU code, and DDLA_USE_CUDA / DDLA_USE_HIP select its vendor.
 //
 // Scalar convention: xHER2K (and cuBLAS v2 / hipBLAS) takes a COMPLEX alpha
 // with a REAL beta.  The signature mirrors that: `const T& alpha` and
@@ -37,7 +25,6 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 
-#if DDLA_HAS_CPU
 extern "C" {
 // Real: xHER2K has no real-scalar BLAS counterpart, so the real types use
 // xSYR2K (alpha and beta are real in both families).
@@ -57,7 +44,6 @@ void zher2k_(const char*, const char*, const int*, const int*,
              const std::complex<double>*, const int*, const double*,
              std::complex<double>*, const int*);
 }
-#endif
 
 // ---------------------------------------------------------------------------
 // GPU arm: the vendor calls.  Kept as free gpublasHer2k overloads so the
@@ -173,8 +159,6 @@ void her2k_check(
     const typename real_type<T>::type& beta,
     T* C, int ldc)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU her2k is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU her2k is not available in this LibDDLA build");
 
@@ -208,7 +192,6 @@ void her2k_run(
     T* C, int ldc)
 {
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         // Real data: HER2K == SYR2K, and 'C' must be spelled 'T' because some
         // vendor copies reject 'C' on real operands.  Complex data keeps the
         // caller's flag ('N' or 'C') -- xHER2K accepts both.
@@ -227,11 +210,6 @@ void her2k_run(
         } else {
             static_assert(sizeof(T) == 0, "her2k: unsupported scalar type T");
         }
-#else
-        (void)handle; (void)uplo; (void)trans; (void)n; (void)k;
-        (void)alpha; (void)A; (void)lda; (void)B; (void)ldb;
-        (void)beta; (void)C; (void)ldc;
-#endif
     } else {
 #if DDLA_HAS_GPU
         // The real types map onto xSYR2K with a normalised transpose inside
@@ -278,12 +256,10 @@ void her2k(
         const TYPE&, const TYPE*, int, const TYPE*, int,                       \
         const typename real_type<TYPE>::type&, TYPE*, int)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_HER2K(DdlaBackend::CPU, float);
 INSTANTIATE_HER2K(DdlaBackend::CPU, double);
 INSTANTIATE_HER2K(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_HER2K(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_HER2K(DdlaBackend::GPU, float);
@@ -298,12 +274,10 @@ INSTANTIATE_HER2K(DdlaBackend::GPU, std::complex<double>);
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::her2k_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, char trans, int n, int k, const TYPE& alpha, const TYPE* A, int lda, const TYPE* B, int ldb, const typename real_type<TYPE>::type& beta, TYPE* C, int ldc); \
     template void blas_impl::her2k_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, char trans, int n, int k, const TYPE& alpha, const TYPE* A, int lda, const TYPE* B, int ldb, const typename real_type<TYPE>::type& beta, TYPE* C, int ldc);
-#if DDLA_HAS_CPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#endif
 #if DDLA_HAS_GPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)

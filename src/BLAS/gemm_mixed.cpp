@@ -14,9 +14,7 @@
 #include <stdexcept>
 #include <type_traits>
 
-#if DDLA_HAS_CPU
 #include "gemm_mixed_cpu.h"
-#endif
 
 namespace ddla {
 namespace {
@@ -304,12 +302,10 @@ void mixed_gemm_workspace_size(const DdlaHandle_t& h, int m, int n, int k, bool 
 {
     *backend_bytes = 0;
     if (m <= 0 || n <= 0 || k <= 0) return;
-#if DDLA_HAS_CPU
     if (h->backend == DdlaBackend::CPU) {
         detail::mixed_gemm_cpu_workspace_size<R>(h, m, n, k, complex_left, backend_bytes);
         return;
     }
-#endif
     if (!complex_left && m <= 256 && n <= 256 && k <= 256) return;
     const std::size_t nb = std::min(n, mixed_panel);
     const std::size_t pack = complex_left ? 2 * std::size_t(m) * k : 2 * std::size_t(k) * nb;
@@ -325,7 +321,6 @@ void gemm_check(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
           std::complex<R>* C, int ldc)
 {
     static_assert(std::is_same_v<R,float> || std::is_same_v<R,double>);
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU);
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU);
     if (!h) throw std::runtime_error("gemm(real,complex): null handle");
     if (ddlaGetBackend(h) != Backend)
@@ -353,9 +348,7 @@ void gemm_run(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
     if (!product && beta==R(1)) return;
     if (ta=='C') ta='T';
     if constexpr (Backend==DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         detail::mixed_gemm_cpu(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,product,backend_work,backend_bytes);
-#endif
     } else {
 #if DDLA_HAS_GPU
         mixed_gpu(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,product,backend_work,backend_bytes);
@@ -373,11 +366,9 @@ void gemm(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
     std::size_t backend_bytes = 0;
     if (alpha != R(0)) blas_impl::mixed_gemm_workspace_size<R>(h, m, n, k, false, &backend_bytes);
     if constexpr (Backend==DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         // The caller thread's cached scratch, reused across calls (gemm_mixed_cpu.h).
         char* const work=detail::mixed_gemm_cpu_cached_workspace(backend_bytes);
         blas_impl::gemm_run<Backend,R>(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,work,backend_bytes);
-#endif
     } else {
         vector<char> work(h, backend_bytes);
         blas_impl::gemm_run<Backend,R>(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,work.data(),backend_bytes);
@@ -386,10 +377,8 @@ void gemm(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
 #define DDLA_MIXED_PHASES(BACKEND,R) \
     template void blas_impl::gemm_check<BACKEND,R>(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k, const std::complex<R>& alpha, const R* A, int lda, const std::complex<R>* B, int ldb, const std::complex<R>& beta, std::complex<R>* C, int ldc); \
     template void blas_impl::gemm_run<BACKEND,R>(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k, const std::complex<R>& alpha, const R* A, int lda, const std::complex<R>* B, int ldb, const std::complex<R>& beta, std::complex<R>* C, int ldc, void* backend_work, std::size_t backend_bytes);
-#if DDLA_HAS_CPU
 DDLA_MIXED_PHASES(DdlaBackend::CPU,float)
 DDLA_MIXED_PHASES(DdlaBackend::CPU,double)
-#endif
 #if DDLA_HAS_GPU
 DDLA_MIXED_PHASES(DdlaBackend::GPU,float)
 DDLA_MIXED_PHASES(DdlaBackend::GPU,double)
@@ -400,10 +389,8 @@ DDLA_MIXED_PHASES(DdlaBackend::GPU,double)
 #define MIXED_INST(B,R) template void gemm<B,R>(const DdlaHandle_t&,char,char,int,int,int, \
     const std::complex<R>&,const R*,int,const std::complex<R>*,int, \
     const std::complex<R>&,std::complex<R>*,int)
-#if DDLA_HAS_CPU
 MIXED_INST(DdlaBackend::CPU,float);
 MIXED_INST(DdlaBackend::CPU,double);
-#endif
 #if DDLA_HAS_GPU
 MIXED_INST(DdlaBackend::GPU,float);
 MIXED_INST(DdlaBackend::GPU,double);
@@ -418,7 +405,6 @@ void gemm_check(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
           std::complex<R>* C, int ldc)
 {
     static_assert(std::is_same_v<R,float> || std::is_same_v<R,double>);
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU);
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU);
     if (!h) throw std::runtime_error("gemm(complex,real): null handle");
     if (ddlaGetBackend(h) != Backend)
@@ -446,9 +432,7 @@ void gemm_run(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
     if (!product && beta==R(1)) return;
     if (tb=='C') tb='T';
     if constexpr (Backend==DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         detail::mixed_gemm_cpu(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,product,backend_work,backend_bytes);
-#endif
     } else {
 #if DDLA_HAS_GPU
         mixed_gpu_cr(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,product,backend_work,backend_bytes);
@@ -466,11 +450,9 @@ void gemm(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
     std::size_t backend_bytes = 0;
     if (alpha != R(0)) blas_impl::mixed_gemm_workspace_size<R>(h, m, n, k, true, &backend_bytes);
     if constexpr (Backend==DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         // The caller thread's cached scratch, reused across calls (gemm_mixed_cpu.h).
         char* const work=detail::mixed_gemm_cpu_cached_workspace(backend_bytes);
         blas_impl::gemm_run<Backend,R>(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,work,backend_bytes);
-#endif
     } else {
         vector<char> work(h, backend_bytes);
         blas_impl::gemm_run<Backend,R>(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,work.data(),backend_bytes);
@@ -479,10 +461,8 @@ void gemm(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
 #define DDLA_MIXED_PHASES(BACKEND,R) \
     template void blas_impl::gemm_check<BACKEND,R>(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k, const std::complex<R>& alpha, const std::complex<R>* A, int lda, const R* B, int ldb, const std::complex<R>& beta, std::complex<R>* C, int ldc); \
     template void blas_impl::gemm_run<BACKEND,R>(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k, const std::complex<R>& alpha, const std::complex<R>* A, int lda, const R* B, int ldb, const std::complex<R>& beta, std::complex<R>* C, int ldc, void* backend_work, std::size_t backend_bytes);
-#if DDLA_HAS_CPU
 DDLA_MIXED_PHASES(DdlaBackend::CPU,float)
 DDLA_MIXED_PHASES(DdlaBackend::CPU,double)
-#endif
 #if DDLA_HAS_GPU
 DDLA_MIXED_PHASES(DdlaBackend::GPU,float)
 DDLA_MIXED_PHASES(DdlaBackend::GPU,double)
@@ -493,10 +473,8 @@ DDLA_MIXED_PHASES(DdlaBackend::GPU,double)
 #define MIXED_CR_INST(B,R) template void gemm<B,R>(const DdlaHandle_t&,char,char,int,int,int, \
     const std::complex<R>&,const std::complex<R>*,int,const R*,int, \
     const std::complex<R>&,std::complex<R>*,int)
-#if DDLA_HAS_CPU
 MIXED_CR_INST(DdlaBackend::CPU,float);
 MIXED_CR_INST(DdlaBackend::CPU,double);
-#endif
 #if DDLA_HAS_GPU
 MIXED_CR_INST(DdlaBackend::GPU,float);
 MIXED_CR_INST(DdlaBackend::GPU,double);

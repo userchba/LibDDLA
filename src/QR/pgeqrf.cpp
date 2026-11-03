@@ -422,12 +422,10 @@ INSTANTIATE_QR_SETUP(std::complex<double>);
     template TYPE* qr_block_run<BACKEND, TYPE>(const DdlaHandle_t&, TYPE*, const int*, const QrPlan&,     \
         bool, bool, bool, TYPE*, int, TYPE*, int, void*, std::size_t, void*, std::size_t)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_QR_BLOCK(DdlaBackend::CPU, float);
 INSTANTIATE_QR_BLOCK(DdlaBackend::CPU, double);
 INSTANTIATE_QR_BLOCK(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_QR_BLOCK(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_QR_BLOCK(DdlaBackend::GPU, float);
@@ -451,8 +449,6 @@ namespace qr_impl {
 template <DdlaBackend Backend>
 bool pgeqrf_check(const DdlaHandle_t& handle, char uplo, int m, int n, const int* descA, const void* tau)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU pgeqrf is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU pgeqrf is not available in this LibDDLA build");
     return detail::agree_check(handle, "pgeqrf", [&](detail::Agree& agree) {
@@ -561,14 +557,12 @@ void pgeqrf(
         const DdlaHandle_t&, char, bool, int, int, TYPE*,          \
         const int*, TYPE*, std::size_t*, std::size_t*)
 
-#if DDLA_HAS_CPU
 template bool qr_impl::pgeqrf_check<DdlaBackend::CPU>(
     const DdlaHandle_t&, char, int, int, const int*, const void*);
 INSTANTIATE_PGEQRF(DdlaBackend::CPU, float);
 INSTANTIATE_PGEQRF(DdlaBackend::CPU, double);
 INSTANTIATE_PGEQRF(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PGEQRF(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 template bool qr_impl::pgeqrf_check<DdlaBackend::GPU>(

@@ -6,10 +6,8 @@
 //     direct = 'B':  H = H(k) ... H(2) H(1) = I - V T V^H,  T lower triangular,
 // V being the n x k matrix of the reflector vectors in ?geqrf / ?geqlf storage (see ddla.h).
 //
-// Structure follows src/geqrf.cpp: one definition covering CPU (Fortran LAPACK ?larft on host pointers) and GPU (device
-// pointers, enqueued on the handle's stream), selected with `if constexpr` on the Backend template parameter, the arms
-// guarded by the BUILD CAPABILITY macros (DDLA_HAS_CPU / DDLA_HAS_GPU).  The public interface is the templated
-// ddla::larft declared in <ddla/ddla.h>.
+// Dispatch follows the Backend template parameter. CPU code is always compiled;
+// DDLA_HAS_GPU enables GPU code, and DDLA_USE_CUDA / DDLA_USE_HIP select its vendor.
 //
 // Three components (plan_util.h): larft_check; larft_workspace_size (backend bytes of the GPU scratch; the CPU path
 // needs none); larft_run on the caller's scratch.
@@ -47,7 +45,6 @@
 #include "plan_util.h"
 #include "reflector_build_T.h"
 
-#if DDLA_HAS_CPU
 // Host LAPACK ?larft (Fortran ABI; the CPU BLAS library must provide LAPACK -- OpenBLAS and MKL do).  V is not const: LAPACK
 // releases before 3.10 overwrite the unit entries of V while they run and put the old values back.
 extern "C" {
@@ -58,7 +55,6 @@ void clarft_(const char*, const char*, const int*, const int*, std::complex<floa
 void zlarft_(const char*, const char*, const int*, const int*, std::complex<double>*, const int*,
              const std::complex<double>*, std::complex<double>*, const int*);
 }
-#endif
 
 namespace ddla {
 
@@ -69,7 +65,6 @@ inline const char* larft_backend_name(DdlaBackend backend)
     return backend == DdlaBackend::CPU ? "CPU" : "GPU";
 }
 
-#if DDLA_HAS_CPU
 inline void lapack_larft(char direct, int n, int k, float* V, int ldv, const float* tau, float* t, int ldt)
 {
     const char storev = 'C';
@@ -100,7 +95,6 @@ void cpu_larft(char direct, int n, int k, T* V, int ldv, const T* tau, T* t, int
     for (int c = 0; c < k; ++c) std::fill(t + static_cast<std::size_t>(c) * ldt, t + static_cast<std::size_t>(c) * ldt + k, T(0));
     lapack_larft(direct, n, k, V, ldv, tau, t, ldt);
 }
-#endif // DDLA_HAS_CPU
 
 #if DDLA_HAS_GPU
 #if DDLA_GPU_VENDOR
@@ -157,8 +151,6 @@ template <DdlaBackend Backend>
 char larft_check(const DdlaHandle_t& handle, char direct, char storev, int n, int k,
                  const void* V, int ldv, const void* tau, const void* Tmat, int ldt)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU larft is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU larft is not available in this LibDDLA build");
 
@@ -210,9 +202,7 @@ void larft_run(const DdlaHandle_t& handle, char direct, int n, int k, T* V, int 
     if (k <= 0) return;   // nothing to build
 
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         cpu_larft(direct, n, k, V, ldv, tau, Tmat, ldt);
-#endif
     } else {
 #if DDLA_HAS_GPU
         assert(backend_bytes >= 2 * detail::padded_bytes<T>(static_cast<std::size_t>(k) * k));
@@ -247,14 +237,12 @@ void larft(const DdlaHandle_t& handle, char direct, char storev, int n, int k, T
 #define INSTANTIATE_LARFT_SIZE(TYPE)                                         \
     template void lapack_impl::larft_workspace_size<TYPE>(const DdlaHandle_t&, int, int, std::size_t*)
 
-#if DDLA_HAS_CPU
 template char lapack_impl::larft_check<DdlaBackend::CPU>(
     const DdlaHandle_t&, char, char, int, int, const void*, int, const void*, const void*, int);
 INSTANTIATE_LARFT(DdlaBackend::CPU, float);
 INSTANTIATE_LARFT(DdlaBackend::CPU, double);
 INSTANTIATE_LARFT(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_LARFT(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 template char lapack_impl::larft_check<DdlaBackend::GPU>(

@@ -183,9 +183,7 @@ template<DdlaBackend B,class T>void punmtr(const DdlaHandle_t& h,char side,char 
  template void spectral_impl::punmtr_trd_run<B,T>(const DdlaHandle_t&,const spectral_impl::UnmtrTrdPlan&,const T*,const T*,T*,void*,std::size_t)
 #define DDLA_UNMTR_TRD_TYPES(B) \
  DDLA_UNMTR_TRD(B,float);DDLA_UNMTR_TRD(B,double);DDLA_UNMTR_TRD(B,std::complex<float>);DDLA_UNMTR_TRD(B,std::complex<double>)
-#if DDLA_HAS_CPU
 DDLA_UNMTR_TRD_TYPES(DdlaBackend::CPU);
-#endif
 #if DDLA_HAS_GPU
 DDLA_UNMTR_TRD_TYPES(DdlaBackend::GPU);
 #endif

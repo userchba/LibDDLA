@@ -334,9 +334,7 @@ void stationary_run(const DdlaHandle_t& h, bool keep_a, char ta,char tb,
 #define DDLA_INSTANTIATE_STATIONARY_SIZE(T, TA, TB) \
     template void stationary_workspace_size<T,TA,TB>(const DdlaHandle_t&, bool, char, char, int, int, int, bool, \
         const int*, const int*, const int*, std::size_t*, std::size_t*)
-#if DDLA_HAS_CPU
 DDLA_INSTANTIATE_STATIONARY_BACKEND(DdlaBackend::CPU);
-#endif
 #if DDLA_HAS_GPU
 DDLA_INSTANTIATE_STATIONARY_BACKEND(DdlaBackend::GPU);
 #endif

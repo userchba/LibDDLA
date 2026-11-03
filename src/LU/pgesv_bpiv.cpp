@@ -147,13 +147,11 @@ void pgesv_bpiv(
     const int*)
 
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PGESV_BPIV_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PGESV_BPIV(DdlaBackend::CPU, float);
 INSTANTIATE_PGESV_BPIV(DdlaBackend::CPU, double);
 INSTANTIATE_PGESV_BPIV(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PGESV_BPIV(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PGESV_BPIV_CHECK(DdlaBackend::GPU);

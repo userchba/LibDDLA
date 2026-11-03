@@ -207,13 +207,11 @@ void plapiv(
 #define INSTANTIATE_PLAPIV_SIZE(TYPE) \
     template void plapiv_impl::plapiv_workspace_size<TYPE>(const DdlaHandle_t&, int, const int*, std::size_t*)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PLAPIV_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PLAPIV(DdlaBackend::CPU, float);
 INSTANTIATE_PLAPIV(DdlaBackend::CPU, double);
 INSTANTIATE_PLAPIV(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PLAPIV(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PLAPIV_CHECK(DdlaBackend::GPU);

@@ -403,13 +403,11 @@ void transport_block(
         const DdlaHandle_t&, char, char, int, int, const int*,              \
         std::size_t*, std::size_t*, int, int)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_TRANSPORT_CHECK(DdlaBackend::CPU);
 INSTANTIATE_TRANSPORT_BLOCK(DdlaBackend::CPU, float);
 INSTANTIATE_TRANSPORT_BLOCK(DdlaBackend::CPU, double);
 INSTANTIATE_TRANSPORT_BLOCK(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_TRANSPORT_BLOCK(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_TRANSPORT_CHECK(DdlaBackend::GPU);

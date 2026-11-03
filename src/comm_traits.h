@@ -48,7 +48,7 @@ inline int MPI_Allreduce(const std::complex<double>* sendbuff, std::complex<doub
     return MPI_Allreduce(sendbuff, recvbuff, count, MPI_DOUBLE_COMPLEX, op, comm);
 }
 
-// In dual builds (GPU vendor + DDLA_HAS_CPU) a single TU can instantiate both
+// In GPU-enabled builds a single TU can instantiate both
 // the CCL and the CPU path of commAllReduce; there cclOp is ncclRedOp_t and
 // must be translated before it reaches MPI.
 inline MPI_Op to_mpi_op(MPI_Op op) { return op; }

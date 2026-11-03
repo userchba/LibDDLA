@@ -69,11 +69,7 @@ int main(int argc,char** argv) {
            std::string("NTC").find(ta)==std::string::npos || std::string("NTC").find(tb)==std::string::npos ||
            (type!='d' && type!='z')) throw std::runtime_error("invalid benchmark argument");
         if(std::string(argv[1])=="cpu") {
-#if DDLA_HAS_CPU
             run<DdlaBackend::CPU>(pr,pc,m,n,k,ta,tb,nb,reps,type);
-#else
-            throw std::runtime_error("CPU backend unavailable");
-#endif
         } else if(std::string(argv[1])=="gpu") {
 #if DDLA_HAS_GPU
             run<DdlaBackend::GPU>(pr,pc,m,n,k,ta,tb,nb,reps,type);

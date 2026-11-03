@@ -96,9 +96,7 @@ int main(int argc,char** argv) {
         int np;MPI_Comm_size(MPI_COMM_WORLD,&np);const int pr=argc>1?std::stoi(argv[1]):1,pc=argc>2?std::stoi(argv[2]):np;
         const bool before=argc>3 && std::string(argv[3])=="expect-block";
         if(pr*pc!=np)throw std::runtime_error("wrong grid");
-#if DDLA_HAS_CPU
         run<DdlaBackend::CPU>(pr,pc,before);
-#endif
 #if DDLA_HAS_GPU
         run<DdlaBackend::GPU>(pr,pc,before);
 #endif

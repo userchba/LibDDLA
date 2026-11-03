@@ -133,9 +133,7 @@ template<DdlaBackend B,class T>void punmtr(const DdlaHandle_t& h,char side,char 
 #define DDLA_UNMTR_TYPES(B) \
     DDLA_UNMTR_INSTANTIATE(B,float); DDLA_UNMTR_INSTANTIATE(B,double); \
     DDLA_UNMTR_INSTANTIATE(B,std::complex<float>); DDLA_UNMTR_INSTANTIATE(B,std::complex<double>)
-#if DDLA_HAS_CPU
 DDLA_UNMTR_TYPES(DdlaBackend::CPU);
-#endif
 #if DDLA_HAS_GPU
 DDLA_UNMTR_TYPES(DdlaBackend::GPU);
 #endif

@@ -132,13 +132,11 @@ void pgesv(
     const int*, const int*)
 
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PGESV_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PGESV(DdlaBackend::CPU, float);
 INSTANTIATE_PGESV(DdlaBackend::CPU, double);
 INSTANTIATE_PGESV(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PGESV(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PGESV_CHECK(DdlaBackend::GPU);

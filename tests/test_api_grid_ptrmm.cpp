@@ -151,7 +151,7 @@ void invalid_cases(DdlaHandle_t h) {
     try { ptrmm<Backend,double>(nullptr,'L','U','N','N',0,0,0.,nullptr,a,nullptr,b); }
     catch(const std::runtime_error&) { caught=true; }
     if (!caught) throw std::runtime_error("ptrmm null handle not rejected");
-#if DDLA_HAS_CPU && DDLA_HAS_GPU
+#if DDLA_HAS_GPU
     caught=false;
     constexpr auto Wrong = Backend==DdlaBackend::CPU ? DdlaBackend::GPU : DdlaBackend::CPU;
     try { ptrmm<Wrong,double>(h,'L','U','N','N',0,0,0.,nullptr,a,nullptr,b); }
@@ -185,9 +185,7 @@ int main(int argc,char** argv) {
         // Reverse communicator ranks as well as exercising both grid orders.
         MPI_Comm reversed; MPI_Comm_split(MPI_COMM_WORLD,0,np-1-rank,&reversed);
         for(auto grid:options.grids) for(char major:{'R','C'}) {
-#if DDLA_HAS_CPU
             run<DdlaBackend::CPU>(reversed,grid.first,grid.second,major,stress);
-#endif
 #if DDLA_HAS_GPU
             run<DdlaBackend::GPU>(reversed,grid.first,grid.second,major,stress);
 #endif

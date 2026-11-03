@@ -161,9 +161,7 @@ int main(int argc, char** argv)
             ddla::DDLA_CHECK(ddla::ddlaSet(h, MPI_COMM_WORLD));
             handles.push_back(h);
         };
-#if DDLA_HAS_CPU
         add_handle(ddla::DdlaBackend::CPU);
-#endif
 #if DDLA_HAS_GPU
         add_handle(ddla::DdlaBackend::GPU);
 #endif

@@ -18,8 +18,6 @@ namespace detail {
 template <DdlaBackend Backend>
 inline void require_backend(const DdlaHandle_t& handle, const char* routine_name)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "the CPU backend is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "the GPU backend is not available in this LibDDLA build");
     if (handle == nullptr) {

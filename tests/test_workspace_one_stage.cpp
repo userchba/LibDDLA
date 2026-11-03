@@ -206,9 +206,7 @@ int main(int argc,char** argv)
     // Exercise D&C merges/resources on these small numerical problems.
     setenv("DDLA_EIG_DC_LEAF","4",1);
     for(auto grid:options.grids)for(char major:{'R','C'}) {
-#if DDLA_HAS_CPU
         run<DdlaBackend::CPU>(MPI_COMM_WORLD,grid.first,grid.second,major);
-#endif
 #if DDLA_HAS_GPU
         run<DdlaBackend::GPU>(MPI_COMM_WORLD,grid.first,grid.second,major);
 #endif

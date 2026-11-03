@@ -6,12 +6,10 @@
 #include "require_backend.h"
 #include <type_traits>
 
-#if DDLA_HAS_CPU
 extern "C" {
 void csymm_(const char*, const char*, const int*, const int*, const std::complex<float>*, const std::complex<float>*, const int*, const std::complex<float>*, const int*, const std::complex<float>*, std::complex<float>*, const int*);
 void zsymm_(const char*, const char*, const int*, const int*, const std::complex<double>*, const std::complex<double>*, const int*, const std::complex<double>*, const int*, const std::complex<double>*, std::complex<double>*, const int*);
 }
-#endif
 
 namespace ddla {
 namespace blas_impl {
@@ -34,12 +32,10 @@ void symm_run(const DdlaHandle_t& h, char side, char uplo, int m, int n,
         blas_impl::hemm_run<Backend,T>(h,side,uplo,m,n,alpha,A,lda,B,ldb,beta,C,ldc);
     } else {
     if constexpr (Backend==DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         if constexpr (std::is_same_v<T,std::complex<float>>)
             csymm_(&side, &uplo,&m, &n,&alpha,A,&lda,B,&ldb,&beta,C,&ldc);
         else if constexpr (std::is_same_v<T,std::complex<double>>)
             zsymm_(&side, &uplo,&m, &n,&alpha,A,&lda,B,&ldb,&beta,C,&ldc);
-#endif
     } else {
 #if DDLA_GPU_VENDOR
         if constexpr (std::is_same_v<T,std::complex<float>>) {
@@ -74,9 +70,7 @@ void symm(const DdlaHandle_t& h, char side, char uplo, int m, int n,
     template void blas_impl::symm_run<B,T>(const DdlaHandle_t&,char,char,int,int,const T&,const T*,int,const T*,int,const T&,T*,int);
 #define TYPES(B) INSTANTIATE(B,float) INSTANTIATE(B,double) \
     INSTANTIATE(B,std::complex<float>) INSTANTIATE(B,std::complex<double>)
-#if DDLA_HAS_CPU
 TYPES(DdlaBackend::CPU)
-#endif
 #if DDLA_HAS_GPU
 TYPES(DdlaBackend::GPU)
 #endif

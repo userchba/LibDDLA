@@ -157,13 +157,11 @@ void pgetrs(
     template void lu_impl::pgetrs_check<BACKEND>(const DdlaHandle_t&, char, char, int, int, const int*, const int*)
 
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PGETRS_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PGETRS(DdlaBackend::CPU, float);
 INSTANTIATE_PGETRS(DdlaBackend::CPU, double);
 INSTANTIATE_PGETRS(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PGETRS(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PGETRS_CHECK(DdlaBackend::GPU);

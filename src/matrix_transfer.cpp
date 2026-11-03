@@ -475,9 +475,7 @@ void scatter_rows(const DdlaHandle_t& h,int k,const typename real_type<T>::type*
 #define INST_ROWS_BACKEND(B) \
  INST_ROWS(B,float); INST_ROWS(B,double); \
  INST_ROWS(B,std::complex<float>); INST_ROWS(B,std::complex<double>)
-#if DDLA_HAS_CPU
 INST_ROWS_BACKEND(DdlaBackend::CPU);
-#endif
 #if DDLA_HAS_GPU
 INST_ROWS_BACKEND(DdlaBackend::GPU);
 #endif
@@ -540,9 +538,7 @@ void scatter(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
     INST(B, double); \
     INST(B, std::complex<float>); \
     INST(B, std::complex<double>)
-#if DDLA_HAS_CPU
 TYPES(DdlaBackend::CPU);
-#endif
 #if DDLA_HAS_GPU
 TYPES(DdlaBackend::GPU);
 #endif

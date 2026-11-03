@@ -198,9 +198,7 @@ void panel_gather(const DdlaHandle_t& h, int m, int n, int width, T* A, int ia, 
 #define INST(B,T) template void panel_gather<B,T>(const DdlaHandle_t&, int, int, int, T*, int, int, const int*, \
     int*, int&, int, void*, std::size_t, void*, std::size_t)
 #define INST_TYPES(B) INST(B,float); INST(B,double); INST(B,std::complex<float>); INST(B,std::complex<double>)
-#if DDLA_HAS_CPU
 INST_TYPES(DdlaBackend::CPU);
-#endif
 #if DDLA_HAS_GPU
 INST_TYPES(DdlaBackend::GPU);
 #endif

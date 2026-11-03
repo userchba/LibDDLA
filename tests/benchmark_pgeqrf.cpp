@@ -93,7 +93,7 @@ template <typename T>
 void call_pgeqrf(const DdlaHandle_t& handle, int m, int n,
                  T* d_A, const int* desc, T* tau, int& info)
 {
-#if DDLA_HAS_CPU && DDLA_HAS_GPU
+#if DDLA_HAS_GPU
     if (ddlaGetBackend(handle) == DdlaBackend::CPU)
         pgeqrf<DdlaBackend::CPU, T>(handle, bench_uplo(), m, n, d_A, desc, tau, info);
     else

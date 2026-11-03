@@ -301,7 +301,7 @@ void call_ql(const ddla::DdlaHandle_t& handle, const CaseGeom& g,
         constexpr DdlaBackend B = decltype(backend_tag)::value;
         ddla::pgeqrf<B, T>(handle, 'L', g.m, g.n, d_A, desc, tau, info);
     };
-#if DDLA_HAS_CPU && DDLA_HAS_GPU
+#if DDLA_HAS_GPU
     if (ddlaGetBackend(handle) == DdlaBackend::CPU) go(std::integral_constant<DdlaBackend, DdlaBackend::CPU>{});
     else go(std::integral_constant<DdlaBackend, DdlaBackend::GPU>{});
 #elif DDLA_HAS_GPU
@@ -582,7 +582,7 @@ std::string geom_tag(const CaseGeom& g)
 template <typename Fn>
 void on_backend(const ddla::DdlaHandle_t& handle, Fn fn)
 {
-#if DDLA_HAS_CPU && DDLA_HAS_GPU
+#if DDLA_HAS_GPU
     if (ddlaGetBackend(handle) == DdlaBackend::CPU) fn(std::integral_constant<DdlaBackend, DdlaBackend::CPU>{});
     else fn(std::integral_constant<DdlaBackend, DdlaBackend::GPU>{});
 #elif DDLA_HAS_GPU
@@ -787,7 +787,7 @@ static void check_body(const ddla::DdlaHandle_t& handle, const Shape& base)
         ddla::ddlaDestroy(h_cm);
     }
 
-#if DDLA_HAS_CPU && DDLA_HAS_GPU
+#if DDLA_HAS_GPU
     // Dual lane: the whole case list again on a CPU handle.
     if (ddlaGetBackend(handle) == DdlaBackend::GPU && ddlaBackendAvailable(DdlaBackend::CPU)) {
         ddla::DdlaHandle_t h_cpu = nullptr;

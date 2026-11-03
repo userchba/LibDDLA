@@ -357,13 +357,11 @@ void getrf_nopiv(int m, int n, T* A, int lda, int* info_buffer, const DdlaHandle
     template void getrf_nopiv<BACKEND, TYPE>(int, int, TYPE*, int, int*, const DdlaHandle_t&); \
     template void lapack_impl::getrf_nopiv_run<BACKEND, TYPE>(const DdlaHandle_t&, int, int, TYPE*, int, int*)
 
-#if DDLA_HAS_CPU
 template void lapack_impl::getrf_nopiv_check<DdlaBackend::CPU>(const DdlaHandle_t&);
 INSTANTIATE_GETRF_NOPIV(DdlaBackend::CPU, float);
 INSTANTIATE_GETRF_NOPIV(DdlaBackend::CPU, double);
 INSTANTIATE_GETRF_NOPIV(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_GETRF_NOPIV(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 template void lapack_impl::getrf_nopiv_check<DdlaBackend::GPU>(const DdlaHandle_t&);

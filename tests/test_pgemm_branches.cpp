@@ -147,9 +147,7 @@ int main(int argc,char** argv) {
         int pr=argc>1?std::stoi(argv[1]):1,pc=argc>2?std::stoi(argv[2]):np;
         bool quick=argc>3 && std::string(argv[3])=="quick";
         if(pr*pc!=np) throw std::runtime_error("grid does not match ranks");
-#if DDLA_HAS_CPU
         backend_cases<DdlaBackend::CPU>(pr,pc,quick);
-#endif
 #if DDLA_HAS_GPU
         backend_cases<DdlaBackend::GPU>(pr,pc,quick);
 #endif

@@ -3,20 +3,9 @@
 // Unified backend-templated matrix-vector product
 // (y := alpha*blas_impl::op(A)*x + beta*y).
 //
-// Structure follows src/herk.cpp exactly: one definition covering CPU (Fortran
-// BLAS) and GPU (cuBLAS/hipBLAS), selected with `if constexpr` on the Backend
-// template parameter, with the arms themselves guarded by the BUILD CAPABILITY
-// macros (DDLA_HAS_CPU / DDLA_HAS_GPU) and the vendor chosen per scalar arm by
-// the PER-TU macros (DDLA_USE_CUDA / DDLA_USE_HIP).
+// Dispatch follows the Backend template parameter. CPU code is always compiled;
+// DDLA_HAS_GPU enables GPU code, and DDLA_USE_CUDA / DDLA_USE_HIP select its vendor.
 //
-// Why the capability guard matters here: the previous design put a `#else`
-// CPU arm inside src/gemv.h selected by `!defined(DDLA_USE_CUDA) &&
-// !defined(DDLA_USE_HIP)`.  In a dual build (DDLA_USE_CPU + DDLA_USE_CUDA)
-// every TU defines DDLA_USE_CUDA, so that arm was never compiled -- while
-// DDLA_HAS_CPU was 1 and the CPU instantiation of this function still existed.
-// A CPU-backend call would therefore have reached cublasSgemv with HOST
-// pointers.  Guarding on DDLA_HAS_CPU removes that class of bug.
-// ---------------------------------------------------------------------------
 #include <ddla/ddla.h>
 #include <ddla/ddla_handle_t.h>
 
@@ -29,7 +18,6 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 
-#if DDLA_HAS_CPU
 extern "C" {
 // xGEMV takes the transpose character directly ('N', 'T' or 'C' -- the complex
 // types accept the conjugate transpose), so the CPU arm forwards the caller's
@@ -47,7 +35,6 @@ void zgemv_(const char*, const int*, const int*, const std::complex<double>*,
             const std::complex<double>*, const int*, const std::complex<double>*, const int*,
             const std::complex<double>*, std::complex<double>*, const int*);
 }
-#endif
 
 // ---------------------------------------------------------------------------
 // GPU arm: the vendor calls.  Kept as free gpublasGemv overloads so the dispatch
@@ -153,8 +140,6 @@ void gemv_check(
     const T& beta,
     T* y, int incy)
 {
-    static_assert(Backend != DdlaBackend::CPU || DDLA_HAS_CPU,
-                  "CPU gemv is not available in this LibDDLA build");
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU gemv is not available in this LibDDLA build");
 
@@ -186,7 +171,6 @@ void gemv_run(
     T* y, int incy)
 {
     if constexpr (Backend == DdlaBackend::CPU) {
-#if DDLA_HAS_CPU
         // xGEMV consumes the transpose character directly, so the caller's
         // flag ('N', 'T' or 'C') is forwarded unchanged.
         if constexpr (std::is_same_v<T, float>) {
@@ -200,10 +184,6 @@ void gemv_run(
         } else {
             static_assert(sizeof(T) == 0, "gemv: unsupported scalar type T");
         }
-#else
-        (void)handle; (void)trans; (void)m; (void)n; (void)alpha; (void)A; (void)lda;
-        (void)x; (void)incx; (void)beta; (void)y; (void)incy;
-#endif
     } else {
 #if DDLA_HAS_GPU
         if constexpr (std::is_same_v<T, float> ||
@@ -245,12 +225,10 @@ void gemv(
         const TYPE&, const TYPE*, int,                                         \
         const TYPE*, int, const TYPE&, TYPE*, int)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_GEMV(DdlaBackend::CPU, float);
 INSTANTIATE_GEMV(DdlaBackend::CPU, double);
 INSTANTIATE_GEMV(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_GEMV(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_GEMV(DdlaBackend::GPU, float);
@@ -265,12 +243,10 @@ INSTANTIATE_GEMV(DdlaBackend::GPU, std::complex<double>);
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::gemv_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char trans, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE* x, int incx, const TYPE& beta, TYPE* y, int incy); \
     template void blas_impl::gemv_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char trans, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE* x, int incx, const TYPE& beta, TYPE* y, int incy);
-#if DDLA_HAS_CPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#endif
 #if DDLA_HAS_GPU
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)

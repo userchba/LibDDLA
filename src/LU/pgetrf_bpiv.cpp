@@ -346,13 +346,11 @@ void pgetrf_bpiv(
     template void lu_impl::pgetrf_bpiv_check<BACKEND>(const DdlaHandle_t&, int, int, const int*)
 
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PGETRF_BPIV_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PGETRF_BPIV(DdlaBackend::CPU, float);
 INSTANTIATE_PGETRF_BPIV(DdlaBackend::CPU, double);
 INSTANTIATE_PGETRF_BPIV(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PGETRF_BPIV(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PGETRF_BPIV_CHECK(DdlaBackend::GPU);

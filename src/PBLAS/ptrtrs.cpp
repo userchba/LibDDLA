@@ -425,13 +425,11 @@ void ptrtrs(
     template void ptrtrs_impl::ptrtrs_workspace_size<TYPE>(const DdlaHandle_t&, char, char, \
     int, int, const int*, const int*, std::size_t*, std::size_t*)
 
-#if DDLA_HAS_CPU
 INSTANTIATE_PTRTRS_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PTRTRS(DdlaBackend::CPU, float);
 INSTANTIATE_PTRTRS(DdlaBackend::CPU, double);
 INSTANTIATE_PTRTRS(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PTRTRS(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 INSTANTIATE_PTRTRS_CHECK(DdlaBackend::GPU);

@@ -71,13 +71,11 @@ void pposv(const DdlaHandle_t& h,char side,char uplo,char trans,int n,int nrhs,T
     template void cholesky_impl::pposv_run<BACKEND,TYPE>(const DdlaHandle_t&,char,char,char,int,int,TYPE*,int,int,const int*,TYPE*,int,int,const int*,int&,bool,int, \
     void*,std::size_t,void*,std::size_t)
 
-#if DDLA_HAS_CPU
 template void cholesky_impl::pposv_check<DdlaBackend::CPU>(const DdlaHandle_t&,char,char,char,int,int,const void*,int,int,const int*,const void*,int,int,const int*,bool,int);
 INSTANTIATE_PPOSV(DdlaBackend::CPU, float);
 INSTANTIATE_PPOSV(DdlaBackend::CPU, double);
 INSTANTIATE_PPOSV(DdlaBackend::CPU, std::complex<float>);
 INSTANTIATE_PPOSV(DdlaBackend::CPU, std::complex<double>);
-#endif
 
 #if DDLA_HAS_GPU
 template void cholesky_impl::pposv_check<DdlaBackend::GPU>(const DdlaHandle_t&,char,char,char,int,int,const void*,int,int,const int*,const void*,int,int,const int*,bool,int);
