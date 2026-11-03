@@ -1768,8 +1768,8 @@ void pheevd_one_stage_uplo(const DdlaHandle_t& handle, char jobz, char uplo, int
  *
  * Matrices reside in the handle's backend memory. lda/ldb/ldc are column
  * strides in elements, with conventional BLAS minimum leading dimensions.
- * C must not overlap A/B. No rank communication is performed. Selected
- * batched paths use bounded temporary diagonal blocks and pointer tables;
+ * C must not overlap A/B. No rank communication is performed. Products
+ * use batched GEMM with temporary diagonal blocks and pointer tables;
  * private workspace-size/run components allow callers to reuse that memory.
  * GPU work is ordered on the handle's stream without extra synchronization.
  *
