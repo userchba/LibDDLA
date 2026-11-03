@@ -132,48 +132,6 @@ else()
 endif()
 list(APPEND math_libs ${DDLA_CPU_BLAS_LIBRARIES})
 
-# Detect the optional triangular-product interface in the selected CPU BLAS.
-include(CheckCXXSourceCompiles)
-include(CMakePushCheckState)
-cmake_push_check_state(RESET)
-if(DDLA_CPU_BLAS_LIBRARY)
-    set(CMAKE_REQUIRED_LIBRARIES "${DDLA_CPU_BLAS_LIBRARY}")
-else()
-    set(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
-endif()
-# OpenBLAS/vendor BLAS use GEMMT; Reference BLAS uses GEMMTR. Prefer GEMMT
-# when both exist, and retain the decomposition for providers with neither.
-# Recheck after switching the selected BLAS in an existing build directory.
-unset(DDLA_CPU_HAS_GEMMT CACHE)
-unset(DDLA_CPU_HAS_GEMMTR CACHE)
-check_cxx_source_compiles([=[
-    extern "C" {
-    void sgemmt_(); void dgemmt_(); void cgemmt_(); void zgemmt_();
-    }
-    int main() {
-        sgemmt_(); dgemmt_(); cgemmt_(); zgemmt_();
-        return 0;
-    }
-]=] DDLA_CPU_HAS_GEMMT)
-if(NOT DDLA_CPU_HAS_GEMMT)
-    check_cxx_source_compiles([=[
-        extern "C" {
-        void sgemmtr_(); void dgemmtr_(); void cgemmtr_(); void zgemmtr_();
-        }
-        int main() {
-            sgemmtr_(); dgemmtr_(); cgemmtr_(); zgemmtr_();
-            return 0;
-        }
-    ]=] DDLA_CPU_HAS_GEMMTR)
-endif()
-if(DDLA_CPU_HAS_GEMMT)
-    message(STATUS "CPU triangular product interface: GEMMT")
-elseif(DDLA_CPU_HAS_GEMMTR)
-    message(STATUS "CPU triangular product interface: GEMMTR")
-else()
-    message(STATUS "CPU triangular product interface: GEMM decomposition")
-endif()
-cmake_pop_check_state()
 
 # ---------------------------------------------------------------------------
 # Host LAPACK is required by both CPU computations and host portions of GPU

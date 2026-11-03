@@ -497,3 +497,7 @@ if(TARGET workspace_trace)
     set_tests_properties(test_comm_mpi PROPERTIES ENVIRONMENT
         "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1;DDLA_WORKSPACE_TRACE_REQUIRED=1;LD_PRELOAD=$<TARGET_FILE:workspace_trace>")
 endif()
+
+# Exercise bounded batched triangular GEMM and reusable backend scratch.
+add_test_executable(test_gemmt_batched 1)
+target_include_directories(test_gemmt_batched PRIVATE ${PROJECT_SOURCE_DIR}/src)

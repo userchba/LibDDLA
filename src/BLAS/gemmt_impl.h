@@ -9,7 +9,8 @@ namespace ddla { namespace blas_impl {
 // Updates only the selected triangle; no structure is assumed for partial
 // products. The query sizes reusable caller-owned backend memory. The run
 // neither allocates nor validates, and leaves the opposite triangle untouched.
-// A null workspace retains the scratch-free implementation.
+// Product calls require the backend workspace returned by the query.
+// Empty products and pure triangle scaling require no workspace.
 // Backend scratch bytes only; this query performs no allocation.
 template <typename T>
 void gemmt_workspace_size(const DdlaHandle_t& h, char transa, char transb,

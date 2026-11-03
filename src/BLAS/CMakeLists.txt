@@ -57,8 +57,3 @@ if(DDLA_USE_CPU)
     set_source_files_properties(gemm_mixed_cpu.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES COMPILE_OPTIONS "${_ddla_cpu_kernel_opts}")
 endif()
-
-# GEMMT/GEMMTR are optional; the implementation retains a GEMM fallback.
-set_source_files_properties(gemmt.cpp TARGET_DIRECTORY ddla_lib PROPERTIES
-    COMPILE_DEFINITIONS
-    "DDLA_CPU_HAS_GEMMT=$<BOOL:${DDLA_CPU_HAS_GEMMT}>;DDLA_CPU_HAS_GEMMTR=$<BOOL:${DDLA_CPU_HAS_GEMMTR}>")
