@@ -3,6 +3,7 @@
 # gemm_vbatched.cpp carry device code and switch LANGUAGE under CUDA/HIP.
 target_sources(ddla_lib PRIVATE
     gemm.cpp
+    gemmt.cpp
     gemm_mixed.cpp
     herk.cpp
     her2k.cpp
@@ -41,12 +42,12 @@ set_source_files_properties(geam.cpp gemmBatched.cpp TARGET_DIRECTORY ddla_lib
 
 if(DDLA_USE_CUDA)
     target_sources(ddla_lib PRIVATE gemm_vbatched.cpp)
-    set_source_files_properties(trtrm.cpp gemm_mixed.cpp gemm_vbatched.cpp TARGET_DIRECTORY ddla_lib
+    set_source_files_properties(trtrm.cpp gemmt.cpp gemm_mixed.cpp gemm_vbatched.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES LANGUAGE CUDA)
 endif()
 if(DDLA_USE_HIP)
     target_sources(ddla_lib PRIVATE gemm_vbatched.cpp)
-    set_source_files_properties(trtrm.cpp gemm_mixed.cpp gemm_vbatched.cpp TARGET_DIRECTORY ddla_lib
+    set_source_files_properties(trtrm.cpp gemmt.cpp gemm_mixed.cpp gemm_vbatched.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES LANGUAGE HIP)
 endif()
 
@@ -56,3 +57,8 @@ if(DDLA_USE_CPU)
     set_source_files_properties(gemm_mixed_cpu.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES COMPILE_OPTIONS "${_ddla_cpu_kernel_opts}")
 endif()
+
+# GEMMT/GEMMTR are optional; the implementation retains a GEMM fallback.
+set_source_files_properties(gemmt.cpp TARGET_DIRECTORY ddla_lib PROPERTIES
+    COMPILE_DEFINITIONS
+    "DDLA_CPU_HAS_GEMMT=$<BOOL:${DDLA_CPU_HAS_GEMMT}>;DDLA_CPU_HAS_GEMMTR=$<BOOL:${DDLA_CPU_HAS_GEMMTR}>")

@@ -229,6 +229,33 @@ for AB when estimated costs are close. There is no public branch override.
 `DDLA_PGEMM_KPANEL` continues to control K-panel batching in AB only; AC and BC
 use one output descriptor block per panel, bounding temporary storage.
 
+### Products of triangular matrices
+
+`trtrm` and `ptrtrm` accept independent input triangles. Upper times lower and
+lower times upper produce a full, generally nonsymmetric matrix. Matching
+triangles update only the corresponding triangle of C. All diagonal entries
+are explicit; unused input triangles need not be initialized.
+
+```cpp
+// Full C = alpha * U * L + beta * C.
+ddla::trtrm<ddla::DdlaBackend::CPU>(h, 'U', 'N', 'L', 'N', n,
+    alpha, U, ldu, L, ldl, beta, C, ldc);
+ddla::ptrtrm<ddla::DdlaBackend::CPU>(h, 'U', 'N', 'L', 'N', n,
+    alpha, U_local, descU, L_local, descL, beta, C_local, descC);
+```
+
+Both routines use the flag order `uplo_a, transa, uplo_b, transb`, with
+`N`, `T`, and `C` for unchanged, transpose, and conjugate transpose. The uplo
+flags describe stored triangles; transposition flips the effective triangle.
+The effective triangles determine whether one triangle or all of C is updated.
+Distributed `ptrtrm` redistributes one panel at a time for transposed operands;
+its descriptors require a common square block size and matching source
+coordinates. Both routines expose only this four-flag interface.
+
+The distributed implementation shares one sweep for NN and transposed
+operands. Its compile-time NN specialization preserves direct packing and
+batched updates; transposed panels use `pgeadd` for redistribution.
+
 ### Descriptor (ScaLAPACK `int[9]`)
 
 Distributed routines describe matrix layouts with a plain length-9 int array

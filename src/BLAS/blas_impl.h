@@ -372,5 +372,17 @@ template <DdlaBackend Backend, typename T>
 void gemm_sym_run(const DdlaHandle_t& h, char symmetry, char uplo, char ta, char tb,
     int n, int k, const T& alpha, const T* a, int lda, const T* b, int ldb,
     const T& beta, T* c, int ldc);
+template <DdlaBackend Backend, typename T>
+void gemmt_check(const DdlaHandle_t& h, char uplo, char ta, char tb,
+    int n, int k, const T& alpha, const T* a, int lda, const T* b, int ldb,
+    const T& beta, T* c, int ldc);
+// Backend scratch bytes only; this query performs no allocation.
+template <typename T>
+void gemmt_workspace_size(const DdlaHandle_t& h, char transa, char transb,
+    int n, int k, std::size_t* backend_bytes);
+template <DdlaBackend Backend, typename T>
+void gemmt_run(const DdlaHandle_t& h, char uplo, char ta, char tb,
+    int n, int k, const T& alpha, const T* a, int lda, const T* b, int ldb,
+    const T& beta, T* c, int ldc, void* backend_work, std::size_t backend_bytes);
 }} // namespace ddla::blas_impl
 #endif
