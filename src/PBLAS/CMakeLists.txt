@@ -9,6 +9,7 @@ target_sources(ddla_lib PRIVATE
     pgemm_stationary.cpp
     ptrtrs.cpp
     ptrmm.cpp
+    ptrtrm.cpp
     plapiv.cpp
     pswap.cpp
     pgeadd.cpp

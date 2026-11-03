@@ -1758,6 +1758,57 @@ void pheevd_one_stage_uplo(const DdlaHandle_t& handle, char jobz, char uplo, int
     T* A, const int* descA, typename real_type<T>::type* w,
     T* Z, const int* descZ, int& info);
 
+/**
+ * @brief Single-process general matrix product updating one output triangle.
+ *
+ * Compute uplo='U' or 'L' of C := alpha*op(A)*op(B) + beta*C.
+ * op(A) is n-by-k and op(B) is k-by-n. A and B are general matrices;
+ * no symmetry or Hermitian structure is assumed. The opposite triangle and
+ * padding are untouched. C uses ordinary column-major, not packed, storage.
+ *
+ * Matrices reside in the handle's backend memory. lda/ldb/ldc are column
+ * strides in elements, with conventional BLAS minimum leading dimensions.
+ * C must not overlap A/B. No rank communication is performed. Selected
+ * batched paths use bounded temporary diagonal blocks and pointer tables;
+ * private workspace-size/run components allow callers to reuse that memory.
+ * GPU work is ordered on the handle's stream without extra synchronization.
+ *
+ * beta=0 reads no old C; alpha=0 or k=0 reads no A/B. n=0 and
+ * alpha=0,beta=1 are no-ops. Complex alpha, beta and diagonal entries are
+ * unrestricted. Flags are case-insensitive; transa/transb are N/T/C.
+ * The four standard real/complex scalar types are supported.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void gemmt(const DdlaHandle_t& handle, char uplo,
+    char transa, char transb, int n, int k,
+    const T& alpha, const T* A, int lda, const T* B, int ldb,
+    const T& beta, T* C, int ldc);
+
+/**
+ * @brief Distributed C := alpha*op(A)*op(B) + beta*C, aligned with trtrm.
+ *
+ * uplo_a/uplo_b name the stored triangles; transa/transb are N/T/C and flip
+ * the effective triangle for T/C. C conjugates complex entries and equals T
+ * for real types. Flags are case insensitive. Matching effective triangles
+ * update only that triangle of C, preserving the opposite half; mixed
+ * effective triangles update all of C. Diagonals are explicit (non-unit).
+ *
+ * All descriptors use matching square blocks and source coordinates. Larger
+ * descriptors and padded leading dimensions are supported; only the leading
+ * n-by-n region participates. C must not overlap either active input. With
+ * alpha=0, A/B are not referenced and may be null; beta=0 does not read old C.
+ * n=0 or alpha=0,beta=1 is a no-op. Empty ranks may pass null local buffers.
+ * All grid ranks must participate with matching global operation arguments.
+ *
+ * Transposed panels are redistributed with bounded panel workspace, without
+ * replicating full matrices. NN retains the batched triangular sweep. This
+ * four-flag interface is the only public ptrtrm interface.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void ptrtrm(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, char transb,
+    int n, const T& alpha, const T* A, const int* descA, const T* B, const int* descB,
+    const T& beta, T* C, const int* descC);
+
 } // namespace ddla
 
 #endif // DDLA_H
