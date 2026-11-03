@@ -39,9 +39,7 @@ endif()
 # The CPU backend links against a concrete BLAS library (OpenBLAS in the
 # HPC3 build); propagate its full path so consumers can link libddla.so.
 set(_ddla_link_libs MPI::MPI_CXX)
-if(@DDLA_USE_CPU@)
-  list(APPEND _ddla_link_libs "@DDLA_CPU_BLAS_LIBRARY@")
-endif()
+list(APPEND _ddla_link_libs "@DDLA_CPU_BLAS_LIBRARIES@")
 
 if(NOT TARGET ddla::ddla)
   add_library(ddla::ddla SHARED IMPORTED)

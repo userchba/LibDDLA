@@ -22,7 +22,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 option(BUILD_TESTS "Build test programs" OFF) 
-option(DDLA_USE_CPU "Build with CPU-only backend" OFF)
+# Every library contains the CPU backend. CUDA/HIP add GPU specializations.
+# Migrate old caches instead of silently retaining a GPU-only installation.
+if(DEFINED DDLA_USE_CPU AND NOT DDLA_USE_CPU)
+    message(STATUS "CPU backend is always enabled; ignoring obsolete DDLA_USE_CPU=OFF")
+endif()
+set(DDLA_USE_CPU ON CACHE INTERNAL "CPU backend is always enabled" FORCE)
 option(DDLA_USE_CUDA "Build with CUDA" OFF)
 option(DDLA_USE_HIP "Build with HIP" OFF)
 option(DDLA_USE_DEBUG "DEBUG for program" OFF)
@@ -33,14 +38,9 @@ option(DDLA_ENABLE_PYTHON "Build the Python bindings and C-ABI library" OFF)
 if(DDLA_USE_CUDA AND DDLA_USE_HIP)
     message(FATAL_ERROR "Cannot enable both CUDA and HIP")
 endif()
-if ((NOT DDLA_USE_CPU) AND (NOT DDLA_USE_CUDA) AND (NOT DDLA_USE_HIP))
-    message(FATAL_ERROR "Must enable at least one backend (CPU, CUDA, or HIP)")
-endif()
-# Dual-build mode: CPU + (CUDA or HIP).
-# Each library source is compiled once with the selected GPU vendor active;
-# backend templates provide CPU and GPU implementations in the same target.
+# Each source is compiled once; GPU builds instantiate CPU and GPU backends.
 set(DDLA_DUAL_BUILD OFF)
-if(DDLA_USE_CPU AND (DDLA_USE_CUDA OR DDLA_USE_HIP))
+if(DDLA_USE_CUDA OR DDLA_USE_HIP)
     set(DDLA_DUAL_BUILD ON)
 endif()
 
@@ -55,11 +55,7 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR}/include)
 # ---------------------------------------------------------------------------
 # Generated capability header ddla_config.h
 # ---------------------------------------------------------------------------
-if(DDLA_USE_CPU OR DDLA_DUAL_BUILD)
-    set(DDLA_HAS_CPU 1)
-else()
-    set(DDLA_HAS_CPU 0)
-endif()
+set(DDLA_HAS_CPU 1)
 if(DDLA_USE_CUDA OR DDLA_USE_HIP)
     set(DDLA_HAS_GPU 1)
 else()
@@ -114,38 +110,32 @@ if(DDLA_USE_HIP)
         list(APPEND math_libs ${HIP_LIBRARIES})
     endif()
 endif()
-# cpu setting
-if(DDLA_USE_CPU)
-    # DDLA_USE_CPU definition is set on target in src/CMakeLists.txt
-endif()
-if(DDLA_USE_CPU OR DDLA_DUAL_BUILD)
-    if(DDLA_USE_CCL AND NOT DDLA_DUAL_BUILD)
-        message(FATAL_ERROR "DDLA_USE_CCL is not supported with CPU-only backend")
-    endif()
-    if(DDLA_USE_GPU_CPU_TUNNEL AND NOT DDLA_DUAL_BUILD)
-        message(FATAL_ERROR "DDLA_USE_GPU_CPU_TUNNEL is not supported with CPU-only backend")
-    endif()
-    set(DDLA_CPU_BLAS_LIBRARY "" CACHE FILEPATH "Path to BLAS library for CPU backend")
-    if(DDLA_CPU_BLAS_LIBRARY)
-        if(NOT EXISTS "${DDLA_CPU_BLAS_LIBRARY}")
-            message(FATAL_ERROR "DDLA_CPU_BLAS_LIBRARY set to nonexistent file: ${DDLA_CPU_BLAS_LIBRARY}")
-        endif()
-        message(STATUS "Using CPU BLAS: ${DDLA_CPU_BLAS_LIBRARY}")
-        list(APPEND math_libs "${DDLA_CPU_BLAS_LIBRARY}")
-    else()
-        find_package(BLAS REQUIRED)
-        message(STATUS "Using BLAS: ${BLAS_LIBRARIES}")
-        list(APPEND math_libs ${BLAS_LIBRARIES})
+# Host BLAS is required for CPU-only and CPU+GPU builds alike.
+if(NOT DDLA_HAS_GPU)
+    if(DDLA_USE_CCL OR DDLA_USE_GPU_CPU_TUNNEL)
+        message(FATAL_ERROR "GPU communication options require CUDA or HIP")
     endif()
 endif()
+set(DDLA_CPU_BLAS_LIBRARY "" CACHE FILEPATH "Path to BLAS library for CPU backend")
+if(NOT DDLA_CPU_BLAS_LIBRARY AND DEFINED ENV{OPENBLAS} AND EXISTS "$ENV{OPENBLAS}")
+    set(DDLA_CPU_BLAS_LIBRARY "$ENV{OPENBLAS}" CACHE FILEPATH "Path to BLAS library for CPU backend" FORCE)
+endif()
+if(DDLA_CPU_BLAS_LIBRARY)
+    if(NOT EXISTS "${DDLA_CPU_BLAS_LIBRARY}")
+        message(FATAL_ERROR "DDLA_CPU_BLAS_LIBRARY set to nonexistent file: ${DDLA_CPU_BLAS_LIBRARY}")
+    endif()
+    message(STATUS "Using CPU BLAS: ${DDLA_CPU_BLAS_LIBRARY}")
+    set(DDLA_CPU_BLAS_LIBRARIES "${DDLA_CPU_BLAS_LIBRARY}")
+else()
+    find_package(BLAS REQUIRED)
+    message(STATUS "Using BLAS: ${BLAS_LIBRARIES}")
+    set(DDLA_CPU_BLAS_LIBRARIES ${BLAS_LIBRARIES})
+endif()
+list(APPEND math_libs ${DDLA_CPU_BLAS_LIBRARIES})
 # ---------------------------------------------------------------------------
-# Host LAPACK (Fortran ABI) -- required whenever the LIBRARY is built from
-# source: the QR panel's CPU arm (?GEQRF / ?GEQLF / ?LARFT) and the host references of
-# the QR tests call it on the CPU and GPU backends alike.  CPU-only and dual builds already carry it
-# (OpenBLAS ships LAPACK in the same library the CPU backend links);
-# GPU-only builds must be pointed at one explicitly.  Link-only consumers
-# of an installed LibDDLA (BUILD_TESTS=OFF does not change this; the
-# library target is still built here) see the same requirement.
+# Host LAPACK is required by both CPU computations and host portions of GPU
+# algorithms. OpenBLAS/MKL normally supply it with BLAS; a separate LAPACK
+# library can be selected explicitly when BLAS does not include it.
 # ---------------------------------------------------------------------------
 set(DDLA_LAPACK_LIBRARY "" CACHE FILEPATH "Path to host LAPACK library (pgeqrf host arms)")
 if(NOT DDLA_LAPACK_LIBRARY AND NOT DDLA_CPU_BLAS_LIBRARY AND DEFINED ENV{OPENBLAS} AND EXISTS "$ENV{OPENBLAS}")
@@ -158,22 +148,14 @@ if(DDLA_LAPACK_LIBRARY)
     message(STATUS "Using host LAPACK: ${DDLA_LAPACK_LIBRARY}")
     list(APPEND math_libs "${DDLA_LAPACK_LIBRARY}")
 elseif(DDLA_CPU_BLAS_LIBRARY)
-    # OpenBLAS and the other common CPU BLAS builds ship LAPACK in the same
-    # library.  In CPU-only and dual builds that library is already on
-    # math_libs (the CPU-BLAS block above runs whenever DDLA_USE_CPU, and a
-    # dual build sets it); only a GPU-only build must add it here, or the
-    # CPU-arm template instantiations link undefined.
-    if(NOT DDLA_USE_CPU)
-        message(STATUS "Using host LAPACK from DDLA_CPU_BLAS_LIBRARY: ${DDLA_CPU_BLAS_LIBRARY}")
-        list(APPEND math_libs "${DDLA_CPU_BLAS_LIBRARY}")
-    endif()
+    # The selected combined BLAS/LAPACK library is already linked above.
 else()
     find_package(LAPACK)
     if(NOT LAPACK_FOUND)
         message(FATAL_ERROR "LibDDLA needs a host LAPACK (pgeqrf host arms): pass "
                             "-DDDLA_LAPACK_LIBRARY=<path> (OpenBLAS works, e.g. "
                             "-DDDLA_LAPACK_LIBRARY=/path/to/libopenblas.so) or, for "
-                            "CPU/dual builds, -DDDLA_CPU_BLAS_LIBRARY=<path> if that "
+                            "all builds, -DDDLA_CPU_BLAS_LIBRARY=<path> if that "
                             "library ships LAPACK (OpenBLAS does).")
     endif()
     message(STATUS "Using LAPACK: ${LAPACK_LIBRARIES}")

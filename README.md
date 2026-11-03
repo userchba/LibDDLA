@@ -2,18 +2,17 @@
 
 LibDDLA 0.0.6 is a C++17 template library for **distributed dense linear algebra**.
 It provides ScaLAPACK-style APIs with 2D block-cyclic data distribution over an
-MPI process grid, with a CPU (OpenBLAS/vendor BLAS), CUDA, or HIP backend
-selected at build time, including an optional dual CPU+GPU build that compiles
-both backends into one library and selects between them per handle at
-runtime. All functions live in the `ddla` namespace.
+MPI process grid. Every build includes the CPU backend (OpenBLAS/vendor
+BLAS). CUDA or HIP can add GPU support to the same library, with backend
+selection per handle at runtime. All functions live in the `ddla` namespace.
 
 ## Key facts and caveats
 
-- **Backend selection.** Enable `DDLA_USE_CPU`, `DDLA_USE_CUDA`, or
-  `DDLA_USE_HIP` (at least one is required; `DDLA_USE_CUDA` and `DDLA_USE_HIP`
-  are mutually exclusive). Combining `DDLA_USE_CPU` with `DDLA_USE_CUDA` or
-  `DDLA_USE_HIP` builds a **dual** library containing both backends,
-  selectable per `DdlaHandle_t` at runtime.
+- **Backend selection.** The CPU backend is always built. Enable
+  `DDLA_USE_CUDA` or `DDLA_USE_HIP` to add GPU support; the two GPU vendors
+  are mutually exclusive. With neither enabled the build is CPU-only.
+  There is no GPU-only configuration or `DDLA_USE_CPU` build option.
+  CPU+GPU libraries select the backend per `DdlaHandle_t` at runtime.
 - **CPU and GPU coverage.** Both backends provide the local BLAS/LAPACK
   wrappers, including `gemm`, `trmm`, `trtrm`, `gemmBatched`, `getrf`, `potrf`,
   `geqrf` and `larft`; distributed GEMM, LU, Cholesky, QR/QL, triangular
@@ -23,7 +22,7 @@ runtime. All functions live in the `ddla` namespace.
   handle (host BLAS/LAPACK, MPI), `<DdlaBackend::GPU>` on a GPU handle, and the
   default is the build's default backend. Only the variable-size batched GEMMs
   (`gemmVbatched`, `gemmVbatched2s`) need `DDLA_USE_CUDA` or `DDLA_USE_HIP`
-  (alone or in a dual build).
+  in a CPU+GPU build.
   `DDLA_USE_CCL` and `DDLA_USE_GPU_CPU_TUNNEL` are not supported with a
   CPU-only build, since there is no GPU backend to communicate with.
 - **Supported scalar types** are `float`, `double`, `std::complex<float>`, and
@@ -56,7 +55,7 @@ runtime. All functions live in the `ddla` namespace.
 - **CMake** ≥ 3.18 (the source lists use `TARGET_DIRECTORY` properties)
 - **C++17** compiler
 - **MPI** (Open MPI or MPICH)
-- **CPU backend:** a BLAS library (e.g. OpenBLAS) providing the standard
+- **Every build:** a BLAS library (e.g. OpenBLAS) providing the standard
   Fortran `?gemm`/`?scal`/`?axpy`/`i?amax`/`?ger`/`?geru`/`?swap` symbols,
   the CBLAS `cblas_cdotc_sub` / `cblas_zdotc_sub` complex-dot interfaces, and
   the LAPACK `?getrf`/`?potrf`/`?laswp`/`?geqrf`/`?geqlf`/`?larft` ones. OpenBLAS
@@ -66,11 +65,11 @@ runtime. All functions live in the `ddla` namespace.
 - **CUDA backend:** CUDA Toolkit with cuBLAS, cuSOLVER, cuRAND
 - **HIP backend:** ROCm / DTK with hipBLAS, hipSOLVER, hipRAND, and a CMake
   version with first-class HIP language support
-- **Host LAPACK:** required by every source build, including GPU-only builds.
+- **Host LAPACK:** required by every source build.
   Use `-DDDLA_LAPACK_LIBRARY=/path/to/libopenblas.so` when it is not already
   supplied by `DDLA_CPU_BLAS_LIBRARY` or found by `find_package(LAPACK)`.
-  CMake also accepts an existing library path from the `OPENBLAS` environment
-  variable when neither library option is set.
+  CMake also accepts an existing BLAS/LAPACK library path from the `OPENBLAS`
+  environment variable when `DDLA_CPU_BLAS_LIBRARY` is unset.
 - **CCL mode:** NCCL or RCCL for direct inter-GPU collectives (enable
   `-DDDLA_USE_CCL=ON`)
 
@@ -93,7 +92,6 @@ MI200 series).
 
 ```bash
 cmake -S . -B build-cpu                                 \
-  -DDDLA_USE_CPU=ON                                      \
   -DDDLA_CPU_BLAS_LIBRARY=/path/to/libopenblas.so         \
   -DBUILD_TESTS=ON                                        \
   -DCMAKE_INSTALL_PREFIX="$PWD/install"
@@ -101,12 +99,12 @@ cmake --build build-cpu -j
 cmake --build build-cpu --target install
 ```
 
-### CUDA
+### CPU + CUDA
 
 ```bash
 cmake -S . -B build-cuda                               \
   -DDDLA_USE_CUDA=ON                                   \
-  -DDDLA_LAPACK_LIBRARY=/path/to/libopenblas.so         \
+  -DDDLA_CPU_BLAS_LIBRARY=/path/to/libopenblas.so       \
   -DCMAKE_CUDA_ARCHITECTURES="80"                      \
   -DBUILD_TESTS=ON                                     \
   -DDDLA_USE_CCL=ON                                    \
@@ -115,12 +113,12 @@ cmake --build build-cuda -j
 cmake --build build-cuda --target install
 ```
 
-### HIP / ROCm
+### CPU + HIP / ROCm
 
 ```bash
 cmake -S . -B build-hip                                \
   -DDDLA_USE_HIP=ON                                    \
-  -DDDLA_LAPACK_LIBRARY=/path/to/libopenblas.so         \
+  -DDDLA_CPU_BLAS_LIBRARY=/path/to/libopenblas.so       \
   -DCMAKE_HIP_ARCHITECTURES="gfx90a"                   \
   -DBUILD_TESTS=ON                                     \
   -DDDLA_USE_CCL=ON                                    \
@@ -129,10 +127,11 @@ cmake --build build-hip -j
 cmake --build build-hip --target install
 ```
 
-### Dual CPU + GPU
+### Runtime backend selection
 
-Combine `DDLA_USE_CPU` with `DDLA_USE_CUDA` (or `DDLA_USE_HIP`) to build both
-backends into one library, selectable per `DdlaHandle_t` at runtime:
+Every CUDA or HIP build contains both CPU and GPU specializations. No
+additional CPU build switch is needed. Legacy caches with `DDLA_USE_CPU=OFF`
+are migrated to CPU-enabled builds during configuration.
 
 The private `DdlaStream` has the same layout for CPU and GPU handles. Streams,
 BLAS/solver handles and CCL communicators occupy opaque `void*` slots; CPU
@@ -140,19 +139,6 @@ handles leave them null. `src/ddla_stream.cpp` provides backend-templated
 resource setup and cleanup in one translation unit. Dual builds compile each
 library source once and generate both backend specializations in that pass;
 they do not build a second CPU copy of the shared sources.
-
-```bash
-cmake -S . -B build-dual                                \
-  -DDDLA_USE_CPU=ON                                      \
-  -DDDLA_USE_CUDA=ON                                      \
-  -DDDLA_CPU_BLAS_LIBRARY=/path/to/libopenblas.so         \
-  -DCMAKE_CUDA_ARCHITECTURES="80"                         \
-  -DBUILD_TESTS=ON                                        \
-  -DDDLA_USE_CCL=ON                                       \
-  -DCMAKE_INSTALL_PREFIX="$PWD/install"
-cmake --build build-dual -j
-cmake --build build-dual --target install
-```
 
 The installed layout uses `include/ddla/*.h`, the platform library directory
 (normally `lib/libddla.so` on Linux), and a CMake package under
@@ -176,9 +162,8 @@ default to GPU. For CPU calls, create a CPU handle and select
 | Option                     | Default | Description |
 |---------------------------|---------|-------------|
 | `BUILD_TESTS`             | OFF     | Build test executables |
-| `DDLA_USE_CPU`            | OFF     | Build with the CPU backend (OpenBLAS/vendor BLAS); combine with `DDLA_USE_CUDA`/`DDLA_USE_HIP` for a dual CPU+GPU build |
-| `DDLA_USE_CUDA`           | OFF     | Build for NVIDIA CUDA GPUs |
-| `DDLA_USE_HIP`            | OFF     | Build for AMD HIP/ROCm GPUs |
+| `DDLA_USE_CUDA`           | OFF     | Add NVIDIA CUDA support to the CPU backend |
+| `DDLA_USE_HIP`            | OFF     | Add AMD HIP/ROCm support to the CPU backend |
 | `DDLA_CPU_BLAS_LIBRARY`   | (empty) | Path to a BLAS library for the CPU backend; falls back to `find_package(BLAS REQUIRED)` if unset |
 | `DDLA_LAPACK_LIBRARY`     | (empty) | Host LAPACK for all source builds; otherwise use `DDLA_CPU_BLAS_LIBRARY`, the `OPENBLAS` environment path, or LAPACK discovery |
 | `DDLA_USE_DEBUG`          | OFF     | Enable `DDLA_USE_DEBUG` preprocessor macro |

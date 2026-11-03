@@ -29,7 +29,7 @@ jobs:
 
       - name: Configure
         run: >
-          cmake -S . -B build -DDDLA_USE_CPU=ON -DBUILD_TESTS=ON
+          cmake -S . -B build -DBUILD_TESTS=ON
           -DDDLA_CPU_BLAS_LIBRARY=/usr/lib/x86_64-linux-gnu/libopenblas.so
           -DCMAKE_BUILD_TYPE=Release
           -DDDLA_TEST_NP=2
@@ -42,7 +42,7 @@ jobs:
         run: ctest --test-dir build -L cpu --output-on-failure
 
   cuda:
-    name: CUDA build (compile check, no GPU runner)
+    name: CPU+CUDA build (compile check, no GPU runner)
     runs-on: ubuntu-22.04
     container:
       image: nvcr.io/nvidia/nvhpc:25.1-devel-cuda12.6-ubuntu22.04
@@ -58,14 +58,14 @@ jobs:
         run: >
           cmake -S . -B build-cuda -DDDLA_USE_CUDA=ON -DBUILD_TESTS=ON
           -DCMAKE_CUDA_ARCHITECTURES=70 -DCMAKE_BUILD_TYPE=Release
-          -DDDLA_LAPACK_LIBRARY=/usr/lib/x86_64-linux-gnu/libopenblas.so
+          -DDDLA_CPU_BLAS_LIBRARY=/usr/lib/x86_64-linux-gnu/libopenblas.so
           -DCMAKE_CXX_FLAGS=-I/opt/nvidia/hpc_sdk/Linux_x86_64/25.1/cuda/12.6/include
 
       - name: Build (CUDA)
         run: cmake --build build-cuda -j2
 
   hip:
-    name: HIP build (compile check, no DCU runner)
+    name: CPU+HIP build (compile check, no DCU runner)
     runs-on: ubuntu-22.04
     container:
       image: rocm/dev-ubuntu-22.04:5.7
@@ -83,7 +83,7 @@ jobs:
         run: >
           cmake -S . -B build-hip -DDDLA_USE_HIP=ON -DBUILD_TESTS=ON
           -DCMAKE_HIP_ARCHITECTURES=gfx90a -DCMAKE_BUILD_TYPE=Release
-          -DDDLA_LAPACK_LIBRARY=/usr/lib/x86_64-linux-gnu/libopenblas.so
+          -DDDLA_CPU_BLAS_LIBRARY=/usr/lib/x86_64-linux-gnu/libopenblas.so
 
       - name: Build (HIP)
         run: cmake --build build-hip -j2
