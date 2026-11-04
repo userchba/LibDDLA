@@ -220,7 +220,7 @@ void launch(gpuStream_t stream, int n, D al, const void* a, int lda, const void*
 // enumeration and k pairing of trtrm_triangle; mixed results run a full tile
 // grid where every tile sums the k corner that both triangle masks admit:
 // U x L sums k in [max(row0, col0), n), L x U sums k in [0, min ends).
-template <bool UpA, bool UpB, typename T, bool ReadC, int Tile, int K, int BX, int BY, bool Prefetch>
+template <bool UpA, bool UpB, typename T, bool ReadC, int Tile, int K, int BX, int BY, bool Prefetch, bool Direct=false>
 __global__ void trtrm_general(int n, T alpha, const void* __restrict__ a, int lda, int ta, int ca,
                               const void* __restrict__ b, int ldb, int tb, int cb,
                               T beta, void* __restrict__ c, int ldc)
@@ -267,10 +267,10 @@ __global__ void trtrm_general(int n, T alpha, const void* __restrict__ a, int ld
         for (int q = tid; q < Tile * K; q += Threads) {
             const int r = q % Tile, k = q / Tile;
             const int i = row0 + r, kk = kbegin + k;
-            sa[k][r] = load_tri<UpA,T>(a, lda, i, kk, n, ta, ca);
+            sa[k][r] = load_tri<UpA,T>(a, lda, i, kk, n, Direct ? 0 : ta, Direct ? 0 : ca);
             const int br = q % K, bc = q / K;
             const int bk = kbegin + br, j = col0 + bc;
-            sb[bc][br] = load_tri<UpB,T>(b, ldb, bk, j, n, tb, cb);
+            sb[bc][br] = load_tri<UpB,T>(b, ldb, bk, j, n, Direct ? 0 : tb, Direct ? 0 : cb);
         }
     }
     for (int k0 = kbegin; k0 < kend; k0 += K) {
@@ -279,10 +279,10 @@ __global__ void trtrm_general(int n, T alpha, const void* __restrict__ a, int ld
             for (int q = tid; q < Tile * K; q += Threads) {
                 const int r = q % Tile, k = q / Tile;
                 const int i = row0 + r, kk = k0 + k;
-                sa[k][r] = load_tri<UpA,T>(a, lda, i, kk, n, ta, ca);
+                sa[k][r] = load_tri<UpA,T>(a, lda, i, kk, n, Direct ? 0 : ta, Direct ? 0 : ca);
                 const int br = q % K, bc = q / K;
                 const int bk = k0 + br, j = col0 + bc;
-                sb[bc][br] = load_tri<UpB,T>(b, ldb, bk, j, n, tb, cb);
+                sb[bc][br] = load_tri<UpB,T>(b, ldb, bk, j, n, Direct ? 0 : tb, Direct ? 0 : cb);
             }
         }
         __syncthreads();
@@ -293,10 +293,10 @@ __global__ void trtrm_general(int n, T alpha, const void* __restrict__ a, int ld
                     const int q = tid + l * Threads;
                     const int r = q % Tile, k = q / Tile;
                     const int i = row0 + r, kk = k0 + K + k;
-                    next_a[l] = load_tri<UpA,T>(a, lda, i, kk, n, ta, ca);
+                    next_a[l] = load_tri<UpA,T>(a, lda, i, kk, n, Direct ? 0 : ta, Direct ? 0 : ca);
                     const int br = q % K, bc = q / K;
                     const int bk = k0 + K + br, j = col0 + bc;
-                    next_b[l] = load_tri<UpB,T>(b, ldb, bk, j, n, tb, cb);
+                    next_b[l] = load_tri<UpB,T>(b, ldb, bk, j, n, Direct ? 0 : tb, Direct ? 0 : cb);
                 }
             }
         }
@@ -354,6 +354,16 @@ void launch_general(gpuStream_t stream, int n, D al, const void* a, int lda, int
                     const void* b, int ldb, int tb, int cb, D be, void* c, int ldc) {
     const std::uint64_t nt = (n - 1) / Tile + 1;
     const std::uint64_t blocks = UpA == UpB ? nt * (nt + 1) / 2 : nt * nt;
+    if constexpr (UpA!=UpB && !std::is_arithmetic_v<D>) {
+        // The complex mixed NN product has fixed contiguous load directions.
+        // Specialize only this case so its inner loop carries no runtime
+        // transpose/conjugation branches; other flag pairs keep the same code.
+        if (!(ta || ca || tb || cb)) {
+            if (be==D(0)) trtrm_general<UpA,UpB,D,false,Tile,K,BX,BY,Prefetch,true><<<unsigned(blocks),dim3(BX,BY),0,stream>>>(n,al,a,lda,0,0,b,ldb,0,0,be,c,ldc);
+            else trtrm_general<UpA,UpB,D,true,Tile,K,BX,BY,Prefetch,true><<<unsigned(blocks),dim3(BX,BY),0,stream>>>(n,al,a,lda,0,0,b,ldb,0,0,be,c,ldc);
+            return;
+        }
+    }
     if (be == D(0)) trtrm_general<UpA,UpB,D,false,Tile,K,BX,BY,Prefetch><<<unsigned(blocks),dim3(BX,BY),0,stream>>>(n,al,a,lda,ta,ca,b,ldb,tb,cb,be,c,ldc);
     else trtrm_general<UpA,UpB,D,true,Tile,K,BX,BY,Prefetch><<<unsigned(blocks),dim3(BX,BY),0,stream>>>(n,al,a,lda,ta,ca,b,ldb,tb,cb,be,c,ldc);
 }

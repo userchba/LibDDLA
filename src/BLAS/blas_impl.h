@@ -365,14 +365,6 @@ void trtrm_run(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b
            int n, const T& alpha, const T* A, int lda, const T* B, int ldb,
            const T& beta, T* C, int ldc, void* backend_work, std::size_t backend_bytes);
 template <DdlaBackend Backend, typename T>
-void gemm_sym_check(const DdlaHandle_t& h, char symmetry, char uplo, char ta, char tb,
-    int n, int k, const T& alpha, const T* a, int lda, const T* b, int ldb,
-    const T& beta, T* c, int ldc);
-template <DdlaBackend Backend, typename T>
-void gemm_sym_run(const DdlaHandle_t& h, char symmetry, char uplo, char ta, char tb,
-    int n, int k, const T& alpha, const T* a, int lda, const T* b, int ldb,
-    const T& beta, T* c, int ldc);
-template <DdlaBackend Backend, typename T>
 void gemmt_check(const DdlaHandle_t& h, char uplo, char ta, char tb,
     int n, int k, const T& alpha, const T* a, int lda, const T* b, int ldb,
     const T& beta, T* c, int ldc);
