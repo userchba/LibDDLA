@@ -107,79 +107,158 @@ void check_region(const int* d, int i, int j, int m, int n) {
         throw std::invalid_argument("pgeadd: submatrix outside descriptor");
 }
 
-// Equal block boundaries let each input tile map to exactly one output tile.
-// N additionally preserves ownership, so it needs no communication.
-void check_alignment(DdlaHandle_t h, char op, const int* a, int ia, int ja,
-                     const int* c, int ic, int jc) {
-    const bool trans=op!='N';
-    const int mb=a[trans?DDLA_NB_:DDLA_MB_], nb=a[trans?DDLA_MB_:DDLA_NB_];
-    if (mb!=c[DDLA_MB_] || nb!=c[DDLA_NB_] ||
-        (trans?ja:ia)%mb!=ic%mb || (trans?ia:ja)%nb!=jc%nb)
-        throw std::invalid_argument("pgeadd: blocks and submatrix offsets must align after N/T/C");
-    if (!trans &&
-        (indxg2p(ia,mb,a[DDLA_RSRC_],h->nprows_)!=indxg2p(ic,mb,c[DDLA_RSRC_],h->nprows_) ||
-         indxg2p(ja,nb,a[DDLA_CSRC_],h->npcols_)!=indxg2p(jc,nb,c[DDLA_CSRC_],h->npcols_)))
-        throw std::invalid_argument("pgeadd: N requires matching input and output block owners");
+// Equal block boundaries permit a whole-slab transfer. Other layouts are
+// partitioned at both operands' boundaries by the general redistribution.
+bool aligned_blocks(char op, const int* a, int ia, int ja,
+                    const int* c, int ic, int jc)
+{
+    const bool transposed = op != 'N';
+    const int mb = a[transposed ? DDLA_NB_ : DDLA_MB_];
+    const int nb = a[transposed ? DDLA_MB_ : DDLA_NB_];
+    return mb == c[DDLA_MB_] && nb == c[DDLA_NB_]
+        && (transposed ? ja : ia) % mb == ic % mb
+        && (transposed ? ia : ja) % nb == jc % nb;
 }
 
-
-// On a square grid the transposed local slab has exactly one destination.
-void transpose_peers(DdlaHandle_t h, const int* a, int ia, int ja,
-                     const int* c, int ic, int jc, int& dest, int& source) {
-    const int p=h->nprows_;
-    const long long dr=static_cast<long long>(ic)/c[DDLA_MB_]-ja/a[DDLA_NB_]+c[DDLA_RSRC_]-a[DDLA_CSRC_];
-    const long long dc=static_cast<long long>(jc)/c[DDLA_NB_]-ia/a[DDLA_MB_]+c[DDLA_CSRC_]-a[DDLA_RSRC_];
-    const auto wrap=[&](long long x) { const int y=x%p;return y<0?y+p:y; };
-    dest=h->rc_to_rank(wrap(h->mypcol_+dr),wrap(h->myprow_+dc));
-    source=h->rc_to_rank(wrap(h->mypcol_-dc),wrap(h->myprow_-dr));
+bool local_layout(DdlaHandle_t h, char op, const int* a, int ia, int ja,
+                  const int* c, int ic, int jc)
+{
+    return op == 'N' && aligned_blocks(op, a, ia, ja, c, ic, jc)
+        && indxg2p(ia, a[DDLA_MB_], a[DDLA_RSRC_], h->nprows_)
+            == indxg2p(ic, c[DDLA_MB_], c[DDLA_RSRC_], h->nprows_)
+        && indxg2p(ja, a[DDLA_NB_], a[DDLA_CSRC_], h->npcols_)
+            == indxg2p(jc, c[DDLA_NB_], c[DDLA_CSRC_], h->npcols_);
 }
 
-// The square-grid route sends each local slab as one message with an int count.
-bool square_route(DdlaHandle_t h, int m, int n) {
-    return h->nprows_==h->npcols_ && std::size_t(m)*n<=INT_MAX;
+bool slab_route(DdlaHandle_t h, char op, int m, int n,
+                const int* a, int ia, int ja, const int* c, int ic, int jc)
+{
+    return (op == 'N' || h->nprows_ == h->npcols_)
+        && std::size_t(m) * n <= INT_MAX
+        && aligned_blocks(op, a, ia, ja, c, ic, jc);
 }
 
-// Element counts of the operand staging of calls of at most m x n, in
-// carving order: send | receive | packed | aa | bb.  Every bound is taken from
-// C's block sizes: the alignment check makes A's and B's blocks equal to them
-// after N/T/C.  A transposed operand's stored region is n x m, its local part
-// at most locmax(n,nb,pr) x locmax(m,mb,pc); an operand that is not transposed
-// shares C's owners, so its local part is C's.  The buffers a path can use are
-// counted as the maximum over the paths the flags allow (the choice between
-// them also depends on pointer aliasing, which a size for a loop of calls
-// cannot know).  Every count is monotone in m and n.
+// A whole-slab N exchange shifts owners. T/C additionally swaps process axes.
+void slab_peers(DdlaHandle_t h, char op, const int* a, int ia, int ja,
+                const int* c, int ic, int jc, int& dest, int& source)
+{
+    const bool transposed = op != 'N';
+    const long long dr = static_cast<long long>(ic) / c[DDLA_MB_]
+        - (transposed ? ja / a[DDLA_NB_] : ia / a[DDLA_MB_])
+        + c[DDLA_RSRC_] - a[transposed ? DDLA_CSRC_ : DDLA_RSRC_];
+    const long long dc = static_cast<long long>(jc) / c[DDLA_NB_]
+        - (transposed ? ia / a[DDLA_MB_] : ja / a[DDLA_NB_])
+        + c[DDLA_CSRC_] - a[transposed ? DDLA_RSRC_ : DDLA_CSRC_];
+    const auto wrap = [](long long value, int procs) {
+        const int remainder = value % procs;
+        return remainder < 0 ? remainder + procs : remainder;
+    };
+    const int r = h->myprow_, col = h->mypcol_;
+    dest = h->rc_to_rank(wrap((transposed ? col : r) + dr, h->nprows_),
+                         wrap((transposed ? r : col) + dc, h->npcols_));
+    source = transposed
+        ? h->rc_to_rank(wrap(col - dc, h->nprows_), wrap(r - dr, h->npcols_))
+        : h->rc_to_rank(wrap(r - dr, h->nprows_), wrap(col - dc, h->npcols_));
+}
+
+// Visit rectangles that stay within one stored input block and one output
+// block. The same partition drives count validation, packing and receiving.
+template <typename Visit>
+void rectangles(char op, int m, int n, const int* a, int ia, int ja,
+                const int* c, int ic, int jc, Visit visit)
+{
+    const bool transposed = op != 'N';
+    for (int i = 0; i < m;) {
+        const int source_i = (transposed ? ja : ia) + i;
+        const int input_mb = a[transposed ? DDLA_NB_ : DDLA_MB_];
+        const int rows = std::min({m - i, input_mb - source_i % input_mb,
+                                   c[DDLA_MB_] - (ic + i) % c[DDLA_MB_]});
+        for (int j = 0; j < n;) {
+            const int source_j = (transposed ? ia : ja) + j;
+            const int input_nb = a[transposed ? DDLA_MB_ : DDLA_NB_];
+            const int cols = std::min({n - j, input_nb - source_j % input_nb,
+                                       c[DDLA_NB_] - (jc + j) % c[DDLA_NB_]});
+            visit(i, j, rows, cols, ia + (transposed ? j : i),
+                  ja + (transposed ? i : j));
+            j += cols;
+        }
+        i += rows;
+    }
+}
+
+// Bounds include arbitrary region phases when general is true. Each owned
+// block is subdivided only by the other descriptor's block boundaries, so
+// schedules stay proportional to locally owned pieces.
+std::size_t segment_bound(int length, int own_block, int other_block,
+                          int procs, bool general)
+{
+    const std::size_t own_tiles = detail::tilesmax(length, own_block);
+    const std::size_t owned = (own_tiles + procs - 1) / procs;
+    if (!general) return owned;
+    const std::size_t global = own_tiles + detail::tilesmax(length, other_block) - 1;
+    const std::size_t per_block = detail::tilesmax(std::min(length, own_block), other_block);
+    return std::min(global, owned * per_block);
+}
+
+void schedule_bounds(DdlaHandle_t h, char op, int m, int n,
+                     const int* a, const int* c, bool general,
+                     std::size_t& src, std::size_t& dst)
+{
+    const bool transposed = op != 'N';
+    const int mb = a ? a[transposed ? DDLA_NB_ : DDLA_MB_] : c[DDLA_MB_];
+    const int nb = a ? a[transposed ? DDLA_MB_ : DDLA_NB_] : c[DDLA_NB_];
+    const int pr = h->nprows_, pc = h->npcols_;
+    src = segment_bound(m, mb, c[DDLA_MB_], transposed ? pc : pr, general)
+        * segment_bound(n, nb, c[DDLA_NB_], transposed ? pr : pc, general);
+    dst = segment_bound(m, c[DDLA_MB_], mb, pr, general)
+        * segment_bound(n, c[DDLA_NB_], nb, pc, general);
+}
+
+bool redistribution(const DdlaHandle_t& h, char ta, char tb, bool use_a, bool use_b,
+                    int m, int n, const int* dc, const int* da, const int* db,
+                    bool general, std::size_t& src, std::size_t& dst)
+{
+    src = dst = 0;
+    const bool square = h->nprows_ == h->npcols_ && std::size_t(m) * n <= INT_MAX;
+    const auto operand = [&](char op, bool used, const int* d) {
+        if (!used || (!general && (op == 'N' || square))) return;
+        std::size_t sends, receives;
+        schedule_bounds(h, op, m, n, d, dc, general, sends, receives);
+        src = std::max(src, sends);
+        dst = std::max(dst, receives);
+    };
+    operand(ta, use_a, da);
+    operand(tb, use_b, db);
+    return src != 0 || dst != 0;
+}
+
+// Operand staging retains the aligned layout for existing internal queries.
+// New redistribution calls supply their source descriptors and request general
+// bounds, covering different blocks and region phases without a global copy.
 void staging_counts(const DdlaHandle_t& h, char ta, char tb, bool use_a, bool use_b,
-                    int m, int n, const int* dc, std::size_t (&count)[5])
+                    int m, int n, const int* dc, std::size_t (&count)[5],
+                    const int* da, const int* db, bool general)
 {
-    const int pr=h->nprows_,pc=h->npcols_,mb=dc[DDLA_MB_],nb=dc[DDLA_NB_];
-    const std::size_t cloc=std::size_t(detail::locmax(m,mb,pr))*detail::locmax(n,nb,pc);
-    const std::size_t slab_t=std::size_t(detail::locmax(n,nb,pr))*detail::locmax(m,mb,pc);
-    const bool a_t=use_a && ta!='N', b_t=use_b && tb!='N';
-    const std::size_t slab_a=ta=='N'?cloc:slab_t, slab_b=tb=='N'?cloc:slab_t;
-    std::size_t send=0,receive=0,packed=0;
-    if (a_t) { send=std::max(send,slab_a); receive=cloc; packed=std::max(packed,slab_a); }
-    if (b_t) { send=std::max(send,slab_b); receive=cloc; packed=std::max(packed,slab_b); }
-    count[0]=send;
-    count[1]=receive;
-    count[2]=packed;
-    count[3]=use_a ? (a_t?std::max(slab_a,cloc):cloc) : 0;
-    count[4]=use_b ? (b_t?std::max(slab_b,cloc):cloc) : 0;
-}
-
-// Whether a call of at most m x n can take the redistribution route (a
-// transposed operand on a non-square grid, or a slab too large for one MPI
-// count), and its schedule bounds: each rank is the source of at most `src`
-// A tiles (the ones it owns) and the destination of at most `dst` C tiles.
-bool redistribution(const DdlaHandle_t& h, bool transposed, int m, int n, const int* dc,
-                    std::size_t& src, std::size_t& dst)
-{
-    src=dst=0;
-    if (!transposed || square_route(h,m,n)) return false;
-    const int pr=h->nprows_,pc=h->npcols_;
-    const std::size_t tm=detail::tilesmax(m,dc[DDLA_MB_]),tn=detail::tilesmax(n,dc[DDLA_NB_]);
-    src=((tn+pr-1)/pr)*((tm+pc-1)/pc);
-    dst=((tm+pr-1)/pr)*((tn+pc-1)/pc);
-    return true;
+    const int pr = h->nprows_, pc = h->npcols_;
+    const std::size_t cloc = std::size_t(detail::locmax(m, dc[DDLA_MB_], pr))
+        * detail::locmax(n, dc[DDLA_NB_], pc);
+    std::fill(count, count + 5, 0);
+    const auto operand = [&](char op, bool used, const int* d, int slot) {
+        if (!used) return;
+        const bool transposed = op != 'N';
+        const int mb = d ? d[DDLA_MB_] : dc[transposed ? DDLA_NB_ : DDLA_MB_];
+        const int nb = d ? d[DDLA_NB_] : dc[transposed ? DDLA_MB_ : DDLA_NB_];
+        const std::size_t slab = std::size_t(detail::locmax(transposed ? n : m, mb, pr))
+            * detail::locmax(transposed ? m : n, nb, pc);
+        count[slot] = std::max(slab, cloc);
+        if (transposed || general) {
+            count[0] = std::max(count[0], slab);
+            count[1] = cloc;
+            count[2] = std::max(count[2], slab);
+        }
+    };
+    operand(ta, use_a, da, 3);
+    operand(tb, use_b, db, 4);
 }
 
 // Host bytes of the redistribution schedule, in carving order: local |
@@ -221,15 +300,16 @@ const T* slab(DdlaHandle_t h, const T* x, const int* d, int i, int j, int rows, 
 // co-located with the first: one geam pre-adds both slabs into one message.
 // send / receive are the staging buffers of pgeadd_run's scratch.
 template <DdlaBackend Backend, typename T>
-void transpose_square(DdlaHandle_t h, T* send, T* receive, int m, int n,
+void exchange_slab(DdlaHandle_t h, T* send, T* receive, int m, int n,
     char opa, const T* a, const int* da, int ia, int ja, const T& alpha,
     bool use_b, char opb, const T* b, const int* db, int ib, int jb, const T& beta,
     T* c, const int* dc, int ic, int jc, int ldc)
 {
     const int pr=h->nprows_,pc=h->npcols_,rank=h->myid;
     int lda, ar, ac, ldb=1, br=0, bc=0;
-    const T* sa=slab(h,a,da,ia,ja,n,m,lda,ar,ac);
-    const T* sb=use_b ? slab(h,b,db,ib,jb,n,m,ldb,br,bc) : nullptr;
+    const bool transposed = opa != 'N';
+    const T* sa=slab(h,a,da,ia,ja,transposed?n:m,transposed?m:n,lda,ar,ac);
+    const T* sb=use_b ? slab(h,b,db,ib,jb,transposed?n:m,transposed?m:n,ldb,br,bc) : nullptr;
     const int c_row0=num_loc(ic,dc[DDLA_MB_],h->myprow_,dc[DDLA_RSRC_],pr);
     const int c_col0=num_loc(jc,dc[DDLA_NB_],h->mypcol_,dc[DDLA_CSRC_],pc);
     const int mr=num_loc(ic+m,dc[DDLA_MB_],h->myprow_,dc[DDLA_RSRC_],pr)-c_row0;
@@ -237,7 +317,7 @@ void transpose_square(DdlaHandle_t h, T* send, T* receive, int m, int n,
     const bool snapshot_local=detail::matrix_overlaps(sa,lda,ar,ac,c,ldc,mr,nc) ||
         (use_b && detail::matrix_overlaps(sb,ldb,br,bc,c,ldc,mr,nc));
     int dest, source;
-    transpose_peers(h,da,ia,ja,dc,ic,jc,dest,source);
+    slab_peers(h,opa,da,ia,ja,dc,ic,jc,dest,source);
     const std::size_t scount=std::size_t(ar)*ac,rcount=std::size_t(mr)*nc;
     const auto combine=[&](T* dst, int rows, int cols, int ldd) {
         blas_impl::geam_run<Backend>(h,opa,use_b?opb:'N',rows,cols,alpha,sa,lda,
@@ -250,7 +330,7 @@ void transpose_square(DdlaHandle_t h, T* send, T* receive, int m, int n,
             return;
         }
     }
-    if (scount) combine(send,ac,ar,ac);
+    if (scount) combine(send,transposed?ac:ar,transposed?ar:ac,transposed?ac:ar);
     if (dest==rank) {
         DDLA_CHECK(ddlaMemcpy2D(h,c,std::size_t(ldc)*sizeof(T),send,
             std::size_t(mr)*sizeof(T),std::size_t(mr)*sizeof(T),nc));
@@ -267,17 +347,17 @@ void transpose_square(DdlaHandle_t h, T* send, T* receive, int m, int n,
     }
 }
 
-// The transposed copy op(A) -> C of one operand.  send / receive are the
+// Copy op(A) -> C with redistribution. The send / receive buffers are the
 // staging buffers and device_blocks the device schedule of pgeadd_run's
 // backend scratch; the host schedule is carved from host (host_bytes).
 template <DdlaBackend Backend, typename T>
-void transpose(DdlaHandle_t h, T* send, T* receive, CopyBlock* device_blocks,
+void redistribute(DdlaHandle_t h, T* send, T* receive, CopyBlock* device_blocks,
     char* host, [[maybe_unused]] std::size_t host_bytes, char op, int m, int n,
     const T* a, const int* da, int ia, int ja,
     T* c, const int* dc, int ic, int jc, int ldc)
 {
-    if (square_route(h,m,n)) {
-        transpose_square<Backend,T>(h,send,receive,m,n,op,a,da,ia,ja,T(1),false,'N',nullptr,nullptr,0,0,T(0),c,dc,ic,jc,ldc);
+    if (slab_route(h,op,m,n,da,ia,ja,dc,ic,jc)) {
+        exchange_slab<Backend,T>(h,send,receive,m,n,op,a,da,ia,ja,T(1),false,'N',nullptr,nullptr,0,0,T(0),c,dc,ic,jc,ldc);
         return;
     }
     const int pr=h->nprows_,pc=h->npcols_,rank=h->myid,np=pr*pc;
@@ -285,8 +365,8 @@ void transpose(DdlaHandle_t h, T* send, T* receive, CopyBlock* device_blocks,
     const int c_col0=num_loc(jc,dc[DDLA_NB_],h->mypcol_,dc[DDLA_CSRC_],pc);
     const int ar0=num_loc(ia,da[DDLA_MB_],h->myprow_,da[DDLA_RSRC_],pr);
     const int ac0=num_loc(ja,da[DDLA_NB_],h->mypcol_,da[DDLA_CSRC_],pc);
-    const int rows=num_loc(ia+n,da[DDLA_MB_],h->myprow_,da[DDLA_RSRC_],pr)-ar0;
-    const int cols=num_loc(ja+m,da[DDLA_NB_],h->mypcol_,da[DDLA_CSRC_],pc)-ac0;
+    const int rows=num_loc(ia+(op=='N'?m:n),da[DDLA_MB_],h->myprow_,da[DDLA_RSRC_],pr)-ar0;
+    const int cols=num_loc(ja+(op=='N'?n:m),da[DDLA_NB_],h->mypcol_,da[DDLA_CSRC_],pc)-ac0;
     const int mr=num_loc(ic+m,dc[DDLA_MB_],h->myprow_,dc[DDLA_RSRC_],pr)-c_row0;
     const int nc=num_loc(jc+n,dc[DDLA_NB_],h->mypcol_,dc[DDLA_CSRC_],pc)-c_col0;
     const T* input=rows>0 && cols>0 ? a+ar0+std::size_t(ac0)*da[DDLA_LLD_] : a;
@@ -294,7 +374,7 @@ void transpose(DdlaHandle_t h, T* send, T* receive, CopyBlock* device_blocks,
 
     // The schedule lists, in the order schedule_bytes counts them.
     std::size_t src=0,dst=0;
-    redistribution(h,true,m,n,dc,src,dst);
+    schedule_bounds(h,op,m,n,da,dc,!aligned_blocks(op,da,ia,ja,dc,ic,jc),src,dst);
     const std::size_t both=std::min(src,dst);
     char* hw=host;
     CopyBlock* const local=detail::take<CopyBlock>(hw,both);
@@ -312,26 +392,22 @@ void transpose(DdlaHandle_t h, T* send, T* receive, CopyBlock* device_blocks,
     assert(std::size_t(hw-host)<=host_bytes);
 
     std::size_t nlocal=0,nsends=0,nreceives=0;
-    for (int i=0; i<m; ) {
-        const int nr=std::min(m-i,dc[DDLA_MB_]-(ic+i)%dc[DDLA_MB_]);
-        for (int j=0; j<n; ) {
-            const int nc=std::min(n-j,dc[DDLA_NB_]-(jc+j)%dc[DDLA_NB_]);
-            const int ar=ia+j,ac=ja+i,cr=ic+i,cc=jc+j;
-            const int src_rank=h->rc_to_rank(indxg2p(ar,da[DDLA_MB_],da[DDLA_RSRC_],pr),
-                                            indxg2p(ac,da[DDLA_NB_],da[DDLA_CSRC_],pc));
-            const int dst_rank=h->rc_to_rank(indxg2p(cr,dc[DDLA_MB_],dc[DDLA_RSRC_],pr),
-                                            indxg2p(cc,dc[DDLA_NB_],dc[DDLA_CSRC_],pc));
-            CopyBlock b{nc,nr,0,0,da[DDLA_LLD_],ldc};
-            if (src_rank==rank) b.src=indxg2l(ar,da[DDLA_MB_],pr)+std::size_t(indxg2l(ac,da[DDLA_NB_],pc))*b.lds;
-            if (dst_rank==rank) b.dst=indxg2l(cr,dc[DDLA_MB_],pr)-c_row0+
+    rectangles(op,m,n,da,ia,ja,dc,ic,jc,[&](int i,int j,int nr,int nc,int ar,int ac) {
+        const int cr=ic+i,cc=jc+j;
+        const int src_rank=h->rc_to_rank(indxg2p(ar,da[DDLA_MB_],da[DDLA_RSRC_],pr),
+                                        indxg2p(ac,da[DDLA_NB_],da[DDLA_CSRC_],pc));
+        const int dst_rank=h->rc_to_rank(indxg2p(cr,dc[DDLA_MB_],dc[DDLA_RSRC_],pr),
+                                        indxg2p(cc,dc[DDLA_NB_],dc[DDLA_CSRC_],pc));
+        CopyBlock block{op=='N'?nr:nc,op=='N'?nc:nr,0,0,da[DDLA_LLD_],ldc};
+        if (src_rank==rank)
+            block.src=indxg2l(ar,da[DDLA_MB_],pr)+std::size_t(indxg2l(ac,da[DDLA_NB_],pc))*block.lds;
+        if (dst_rank==rank)
+            block.dst=indxg2l(cr,dc[DDLA_MB_],pr)-c_row0+
                 std::size_t(indxg2l(cc,dc[DDLA_NB_],pc)-c_col0)*ldc;
-            if (src_rank==rank && dst_rank==rank) local[nlocal++]=b;
-            else if (src_rank==rank) sends[nsends++]={b,dst_rank};
-            else if (dst_rank==rank) receives[nreceives++]={b,src_rank};
-            j+=nc;
-        }
-        i+=nr;
-    }
+        if (src_rank==rank && dst_rank==rank) local[nlocal++]=block;
+        else if (src_rank==rank) sends[nsends++]={block,dst_rank};
+        else if (dst_rank==rank) receives[nreceives++]={block,src_rank};
+    });
     assert(nlocal<=both && nsends<=src && nreceives<=dst);
     // Stable ordering preserves the same global rectangle order within a peer.
     sort_by_peer(sends,nsends,ordered,cursor,np);
@@ -344,7 +420,7 @@ void transpose(DdlaHandle_t h, T* send, T* receive, CopyBlock* device_blocks,
         const auto& b=t.block;
         const std::size_t size=std::size_t(b.rows)*b.cols;
         assert(size<=std::size_t(INT_MAX)-ns);
-        pack[npack++]={b.rows,b.cols,b.src,ns,b.lds,b.cols};
+        pack[npack++]={b.rows,b.cols,b.src,ns,b.lds,op=='N'?b.rows:b.cols};
         ns+=size; sc[t.peer]+=static_cast<int>(size);
     }
     for (std::size_t i=0;i<nreceives;++i) {
@@ -352,7 +428,7 @@ void transpose(DdlaHandle_t h, T* send, T* receive, CopyBlock* device_blocks,
         const auto& b=t.block;
         const std::size_t size=std::size_t(b.rows)*b.cols;
         assert(size<=std::size_t(INT_MAX)-nr);
-        scatter[nscatter++]={b.cols,b.rows,nr,b.dst,b.cols,ldc};
+        scatter[nscatter++]={op=='N'?b.rows:b.cols,op=='N'?b.cols:b.rows,nr,b.dst,op=='N'?b.rows:b.cols,ldc};
         nr+=size; rc[t.peer]+=static_cast<int>(size);
     }
     if (snapshot_local) {
@@ -360,7 +436,7 @@ void transpose(DdlaHandle_t h, T* send, T* receive, CopyBlock* device_blocks,
         // packed before C is touched. Appended local data is outside MPI counts.
         for (std::size_t i=0;i<nlocal;++i) {
             const CopyBlock& b=local[i];
-            const int rows=b.cols,cols=b.rows;
+            const int rows=op=='N'?b.rows:b.cols,cols=op=='N'?b.cols:b.rows;
             pack[npack++]={b.rows,b.cols,b.src,ns,b.lds,rows};
             local_scatter[nlocal_scatter++]={rows,cols,ns,b.dst,rows,ldc};
             ns+=std::size_t(rows)*cols;
@@ -386,29 +462,24 @@ void transpose(DdlaHandle_t h, T* send, T* receive, CopyBlock* device_blocks,
 void check_mpi_counts(const DdlaHandle_t& h,char op,int m,int n,const int* da,int ia,int ja,
     const int* dc,int ic,int jc)
 {
-    if(op=='N' || m==0 || n==0 || square_route(h,m,n))return;
+    if (m==0 || n==0 || local_layout(h,op,da,ia,ja,dc,ic,jc)
+        || slab_route(h,op,m,n,da,ia,ja,dc,ic,jc)) return;
     std::size_t sent=0,received=0;
-    for(int i=0;i<m;) {
-        const int rows=std::min(m-i,dc[DDLA_MB_]-(ic+i)%dc[DDLA_MB_]);
-        for(int j=0;j<n;) {
-            const int cols=std::min(n-j,dc[DDLA_NB_]-(jc+j)%dc[DDLA_NB_]);
-            const int source=h->rc_to_rank(indxg2p(ia+j,da[DDLA_MB_],da[DDLA_RSRC_],h->nprows_),
-                indxg2p(ja+i,da[DDLA_NB_],da[DDLA_CSRC_],h->npcols_));
-            const int target=h->rc_to_rank(indxg2p(ic+i,dc[DDLA_MB_],dc[DDLA_RSRC_],h->nprows_),
-                indxg2p(jc+j,dc[DDLA_NB_],dc[DDLA_CSRC_],h->npcols_));
-            const auto count=std::size_t(rows)*cols;
-            if(source!=target && source==h->myid) {
-                if(count>std::size_t(INT_MAX)-sent)throw std::overflow_error("pgeadd: MPI send count overflow");
-                sent+=count;
-            }
-            if(source!=target && target==h->myid) {
-                if(count>std::size_t(INT_MAX)-received)throw std::overflow_error("pgeadd: MPI receive count overflow");
-                received+=count;
-            }
-            j+=cols;
+    rectangles(op,m,n,da,ia,ja,dc,ic,jc,[&](int i,int j,int rows,int cols,int ar,int ac) {
+        const int source=h->rc_to_rank(indxg2p(ar,da[DDLA_MB_],da[DDLA_RSRC_],h->nprows_),
+                                       indxg2p(ac,da[DDLA_NB_],da[DDLA_CSRC_],h->npcols_));
+        const int target=h->rc_to_rank(indxg2p(ic+i,dc[DDLA_MB_],dc[DDLA_RSRC_],h->nprows_),
+                                       indxg2p(jc+j,dc[DDLA_NB_],dc[DDLA_CSRC_],h->npcols_));
+        const auto count=std::size_t(rows)*cols;
+        if (source!=target && source==h->myid) {
+            if (count>std::size_t(INT_MAX)-sent) throw std::overflow_error("pgeadd: MPI send count overflow");
+            sent+=count;
         }
-        i+=rows;
-    }
+        if (source!=target && target==h->myid) {
+            if (count>std::size_t(INT_MAX)-received) throw std::overflow_error("pgeadd: MPI receive count overflow");
+            received+=count;
+        }
+    });
 }
 
 template <DdlaBackend Backend>
@@ -425,8 +496,6 @@ void pgeadd_check(const DdlaHandle_t& h, char transa, char transb, int m, int n,
         check_region(da,ia,ja,transa=='N'?m:n,transa=='N'?n:m);
         check_region(db,ib,jb,transb=='N'?m:n,transb=='N'?n:m);
         check_region(dc,ic,jc,m,n);
-        check_alignment(h,transa,da,ia-1,ja-1,dc,ic-1,jc-1);
-        check_alignment(h,transb,db,ib-1,jb-1,dc,ic-1,jc-1);
         if(use_a)check_mpi_counts(h,transa,m,n,da,ia-1,ja-1,dc,ic-1,jc-1);
         if(use_b)check_mpi_counts(h,transb,m,n,db,ib-1,jb-1,dc,ic-1,jc-1);
     });
@@ -448,17 +517,18 @@ void pgeadd_check(const DdlaHandle_t& h, char transa, char transb, int m, int n,
 template <typename T>
 void pgeadd_workspace_size(const DdlaHandle_t& h, char ta, char tb, bool use_a, bool use_b,
                            int m, int n, const int* dc,
-                           std::size_t* backend_bytes, std::size_t* host_bytes)
+                           std::size_t* backend_bytes, std::size_t* host_bytes,
+                           const int* da, const int* db, bool general)
 {
     *backend_bytes=0;
     *host_bytes=0;
     if (m==0 || n==0) return;
     std::size_t count[5];
-    staging_counts(h,ta,tb,use_a,use_b,m,n,dc,count);
+    staging_counts(h,ta,tb,use_a,use_b,m,n,dc,count,da,db,general);
     std::size_t bytes=0;
     for (const std::size_t c : count) bytes+=detail::padded_bytes<T>(c);
     std::size_t src=0,dst=0;
-    if (redistribution(h,(use_a && ta!='N') || (use_b && tb!='N'),m,n,dc,src,dst)) {
+    if (redistribution(h,ta,tb,use_a,use_b,m,n,dc,da,db,general,src,dst)) {
         if (h->backend==DdlaBackend::GPU)
             bytes+=detail::padded_bytes<CopyBlock>(src+std::min(src,dst)+dst);
         *host_bytes=schedule_bytes(src,dst,h->nprows_*h->npcols_);
@@ -477,10 +547,16 @@ void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
 {
     try {
         if (m==0 || n==0) return;
+        const bool general = (alpha!=T(0) && (ta=='N'
+            ? !local_layout(h,ta,da,ia-1,ja-1,dc,ic-1,jc-1)
+            : !aligned_blocks(ta,da,ia-1,ja-1,dc,ic-1,jc-1)))
+            || (beta!=T(0) && (tb=='N'
+            ? !local_layout(h,tb,db,ib-1,jb-1,dc,ic-1,jc-1)
+            : !aligned_blocks(tb,db,ib-1,jb-1,dc,ic-1,jc-1)));
         // The scratch, in the order pgeadd_workspace_size counts it, for this call
         // (no larger than the call it was sized for).
         std::size_t count[5];
-        staging_counts(h,ta,tb,alpha!=T(0),beta!=T(0),m,n,dc,count);
+        staging_counts(h,ta,tb,alpha!=T(0),beta!=T(0),m,n,dc,count,da,db,general);
         char* w=static_cast<char*>(backend_work);
         T* const send=detail::take<T>(w,count[0]);
         T* const receive=detail::take<T>(w,count[1]);
@@ -490,7 +566,7 @@ void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
         CopyBlock* device_blocks=nullptr;
         std::size_t src=0,dst=0;
         if (Backend==DdlaBackend::GPU &&
-            redistribution(h,(alpha!=T(0) && ta!='N') || (beta!=T(0) && tb!='N'),m,n,dc,src,dst))
+            redistribution(h,ta,tb,alpha!=T(0),beta!=T(0),m,n,dc,da,db,general,src,dst))
             device_blocks=detail::take<CopyBlock>(w,src+std::min(src,dst)+dst);
         assert(std::size_t(w-static_cast<char*>(backend_work))<=backend_bytes);
         char* const host=static_cast<char*>(host_work);
@@ -509,18 +585,18 @@ void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
             const T* x=copy_a?a:b; const int* dx=copy_a?da:db;
             const int ix=copy_a?ia:ib,jx=copy_a?ja:jb;
             const char op=copy_a?ta:tb;
-            if (op!='N') {
-                transpose<Backend>(h,send,receive,device_blocks,host,host_bytes,op,m,n,x,dx,ix-1,jx-1,
+            if (op!='N' || !local_layout(h,op,dx,ix-1,jx-1,dc,ic-1,jc-1)) {
+                redistribute<Backend>(h,send,receive,device_blocks,host,host_bytes,op,m,n,x,dx,ix-1,jx-1,
                     cv,dc,ic-1,jc-1,dc[DDLA_LLD_]);
                 return;
             }
         }
-        const bool square=square_route(h,m,n);
+        const bool square=!general && h->nprows_==h->npcols_ && std::size_t(m)*n<=INT_MAX;
         // Co-located transposed operands pre-add on the sender, so one message
         // delivers alpha*op(A)+beta*op(B) straight into C.
         if (square && ta!='N' && tb!='N' && alpha!=T(0) && beta!=T(0) &&
             colocated(h,da,ia-1,ja-1,db,ib-1,jb-1)) {
-            transpose_square<Backend>(h,send,receive,m,n,ta,a,da,ia-1,ja-1,alpha,true,tb,b,db,ib-1,jb-1,beta,
+            exchange_slab<Backend>(h,send,receive,m,n,ta,a,da,ia-1,ja-1,alpha,true,tb,b,db,ib-1,jb-1,beta,
                 cv,dc,ic-1,jc-1,dc[DDLA_LLD_]);
             return;
         }
@@ -550,14 +626,15 @@ void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
             return buf;
         };
         auto prepare=[&](const T* x,const int* dx,int ix,int jx,char& op,const T& scale,T* buf,int& ld)->const T* {
-            if (op=='N') return local(x,dx,ix,jx,scale,buf,ld);
+            if (op=='N' && local_layout(h,op,dx,ix-1,jx-1,dc,ic-1,jc-1))
+                return local(x,dx,ix,jx,scale,buf,ld);
             if (scale==T(0)) return nullptr;
-            if (square) {
+            if (slab_route(h,op,m,n,dx,ix-1,jx-1,dc,ic-1,jc-1)) {
                 // The slab stays untransposed: add() applies op while reading it.
                 int dest, source;
-                transpose_peers(h,dx,ix-1,jx-1,dc,ic-1,jc-1,dest,source);
+                slab_peers(h,op,dx,ix-1,jx-1,dc,ic-1,jc-1,dest,source);
                 int slab_ld, slab_rows, slab_cols;
-                const T* slab_input=slab(h,x,dx,ix-1,jx-1,n,m,slab_ld,slab_rows,slab_cols);
+                const T* slab_input=slab(h,x,dx,ix-1,jx-1,op=='N'?m:n,op=='N'?n:m,slab_ld,slab_rows,slab_cols);
                 const auto copy=[&](T* dst) {
                     DDLA_CHECK(ddlaMemcpy2D(h,dst,std::size_t(slab_rows)*sizeof(T),slab_input,
                         std::size_t(slab_ld)*sizeof(T),std::size_t(slab_rows)*sizeof(T),slab_cols));
@@ -579,11 +656,11 @@ void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
                     slab_send=packed;
                 }
                 commSendrecv<Backend>(h,CommScope::Grid,slab_send,scount,dest,buf,rcount,source);
-                ld=std::max(1,nc);
+                ld=std::max(1,op=='N'?mr:nc);
                 return buf;
             }
             ld=std::max(1,mr);
-            transpose<Backend>(h,send,receive,device_blocks,host,host_bytes,op,m,n,x,dx,ix-1,jx-1,
+            redistribute<Backend>(h,send,receive,device_blocks,host,host_bytes,op,m,n,x,dx,ix-1,jx-1,
                 buf,dc,ic-1,jc-1,ld);
             op='N';
             return buf;
@@ -614,7 +691,13 @@ void pgeadd(const DdlaHandle_t& h, char transa, char transb, int m, int n,
     transb=static_cast<char>(std::toupper(static_cast<unsigned char>(transb)));
     std::size_t backend_bytes=0,host_bytes=0;
     pgeadd_impl::pgeadd_workspace_size<T>(h,transa,transb,alpha!=T(0),beta!=T(0),m,n,dc,
-        &backend_bytes,&host_bytes);
+        &backend_bytes,&host_bytes,da,db,
+        (alpha!=T(0) && (transa=='N'
+            ? !pgeadd_impl::local_layout(h,transa,da,ia-1,ja-1,dc,ic-1,jc-1)
+            : !pgeadd_impl::aligned_blocks(transa,da,ia-1,ja-1,dc,ic-1,jc-1)))
+        || (beta!=T(0) && (transb=='N'
+            ? !pgeadd_impl::local_layout(h,transb,db,ib-1,jb-1,dc,ic-1,jc-1)
+            : !pgeadd_impl::aligned_blocks(transb,db,ib-1,jb-1,dc,ic-1,jc-1))));
     vector<char> backend_work(h,backend_bytes);
     std::vector<char> host_work(host_bytes);
     pgeadd_impl::pgeadd_run<Backend,T>(h,transa,transb,m,n,
@@ -635,7 +718,7 @@ void pgeadd(const DdlaHandle_t& h, char transa, char transb, int m, int n,
         const int*,int,int,const int*,int,int,const int*,int,int,bool,bool)
 #define INSTANTIATE_PGEADD_SIZE(T) \
     template void pgeadd_impl::pgeadd_workspace_size<T>(const DdlaHandle_t&,char,char,bool,bool,int,int,const int*, \
-        std::size_t*,std::size_t*)
+        std::size_t*,std::size_t*,const int*,const int*,bool)
 INSTANTIATE_PGEADD_CHECK(DdlaBackend::CPU);
 INSTANTIATE_PGEADD(DdlaBackend::CPU,float);
 INSTANTIATE_PGEADD(DdlaBackend::CPU,double);

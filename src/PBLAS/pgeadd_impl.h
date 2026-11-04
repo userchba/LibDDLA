@@ -8,12 +8,10 @@
 namespace ddla { namespace pgeadd_impl {
 
 // pgeadd split into the three components of plan_util.h: check, workspace
-// size, run.  Library-internal callers (ptrmm, phemm, pgemm_sym, pgemm's
+// size, run.  Library-internal callers (ptrmm, phemm, pgemmt, pgemm's
 // stationary branches) size the scratch once for the largest panel they will
 // add and call pgeadd_run for every panel, with no argument check and no
 // allocation.
-
-// The normalized transposition flags, and whether there is nothing to do.
 
 // Component 1: validate every argument exactly like the public entry.  A
 // null or mismatched handle throws std::runtime_error, everything else
@@ -32,8 +30,9 @@ void pgeadd_check(const DdlaHandle_t& h, char transa, char transb, int m, int n,
                         const int* db, int ib, int jb,
                         const int* dc, int ic, int jc, bool use_a, bool use_b);
 
-// Component 2: the scratch of calls of at most m x n with the block sizes of
-// dc.  use_a / use_b say whether alpha / beta can be nonzero (a zero
+// Component 2: the scratch of calls of at most m x n. Source descriptors
+// specify their block geometry when provided. use_a / use_b say whether
+// alpha / beta can be nonzero (a zero
 // coefficient reads no operand and needs no buffer).  Backend: the staging of
 // the redistribution and of the prepared operands, and on a GPU handle the
 // device copy of the redistribution schedule; host: that schedule (only for
@@ -42,7 +41,13 @@ void pgeadd_check(const DdlaHandle_t& h, char transa, char transb, int m, int n,
 template <typename T>
 void pgeadd_workspace_size(const DdlaHandle_t& h, char ta, char tb, bool use_a, bool use_b,
                            int m, int n, const int* dc,
-                           std::size_t* backend_bytes, std::size_t* host_bytes);
+                           std::size_t* backend_bytes, std::size_t* host_bytes,
+                           const int* da = nullptr, const int* db = nullptr,
+                           bool allow_unaligned = false);
+
+// Pass source descriptors and allow_unaligned=true when block sizes, phases
+// or N owners may differ. Omitted descriptors retain the aligned-panel sizing
+// contract used by existing internal callers. Bounds cover every start offset.
 
 // Component 3: C := alpha*op(A) + beta*op(B).  No validation, no allocation;
 // ta/tb are the normalized flags of pgeadd_check.  The host scratch holds
