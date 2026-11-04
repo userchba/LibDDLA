@@ -350,4 +350,10 @@ __device__ __forceinline__ T gpuShflDown32(T v, int off)
 
 #define gpublasZsyr2k cublasZsyr2k
 
+// Diagonal matrix multiplication.
+#define gpublasSdgmm cublasSdgmm
+#define gpublasDdgmm cublasDdgmm
+#define gpublasCdgmm cublasCdgmm
+#define gpublasZdgmm cublasZdgmm
+
 #endif // DDLA_GPU_CUDA_H

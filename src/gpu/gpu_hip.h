@@ -346,4 +346,10 @@ __device__ __forceinline__ T gpuShflDown32(T v, int off)
 
 #define gpublasZsyr2k hipblasZsyr2k
 
+// Diagonal matrix multiplication.
+#define gpublasSdgmm hipblasSdgmm
+#define gpublasDdgmm hipblasDdgmm
+#define gpublasCdgmm hipblasCdgmm
+#define gpublasZdgmm hipblasZdgmm
+
 #endif // DDLA_GPU_HIP_H

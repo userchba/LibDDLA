@@ -4,6 +4,7 @@
 # next to their CPU arm (plain C++ in a CPU-only build) and switch LANGUAGE
 # under CUDA/HIP.
 target_sources(ddla_lib PRIVATE
+    pdgmm.cpp
     pgemm.cpp
     pgemm_select.cpp
     pgemm_stationary.cpp

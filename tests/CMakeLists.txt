@@ -501,3 +501,6 @@ endif()
 # Exercise bounded batched triangular GEMM and reusable backend scratch.
 add_test_executable(test_gemmt_batched 1)
 target_include_directories(test_gemmt_batched PRIVATE ${PROJECT_SOURCE_DIR}/src)
+
+add_test_executable(test_dgmm 1)
+target_include_directories(test_dgmm PRIVATE ${PROJECT_SOURCE_DIR}/src)

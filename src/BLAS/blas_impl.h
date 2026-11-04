@@ -14,6 +14,14 @@ inline gpublasOperation_t op(char c) noexcept { c=upper(c); return c=='N' ? GPUB
 inline gpublasFillMode_t fill(char c) noexcept { return upper(c)=='U' ? GPUBLAS_FILL_MODE_UPPER : GPUBLAS_FILL_MODE_LOWER; }
 inline gpublasSideMode_t side(char c) noexcept { return upper(c)=='L' ? GPUBLAS_SIDE_LEFT : GPUBLAS_SIDE_RIGHT; }
 inline gpublasDiagType_t diag(char c) noexcept { return upper(c)=='U' ? GPUBLAS_DIAG_UNIT : GPUBLAS_DIAG_NON_UNIT; }
+// diagonal_length describes the complete replicated vector for overlap checks.
+template <DdlaBackend Backend, typename T, typename U>
+void dgmm_check(const DdlaHandle_t& h, char side, int m, int n,
+    const T* A, int lda, const U* x, int incx, T* C, int ldc, int diagonal_length);
+template <DdlaBackend Backend, typename T, typename U>
+void dgmm_run(const DdlaHandle_t& h, char side, int m, int n,
+    const T* A, int lda, const U* x, int incx, T* C, int ldc);
+
 template <DdlaBackend Backend, typename T>
 void gemm_check(
     const DdlaHandle_t& handle,

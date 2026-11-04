@@ -11,6 +11,43 @@
 
 namespace ddla{
 
+/**
+ * @brief Scale rows or columns by a diagonal vector in backend memory.
+ * Compute C = diag(x)*A for side='L', or C = A*diag(x) for side='R'.
+ * A and C are column-major m-by-n matrices. x has m logical entries for L
+ * and n for R. For incx>=0, entry i is x[i*incx]. For incx<0 it is
+ * x[(length-1-i)*abs(incx)]. incx=0 repeats x[0].
+ * A, x and C reside in the handle's memory domain. The four standard scalar
+ * types are supported. Complex matrices also accept a real diagonal of the
+ * matching precision. No conjugation is applied. A==C is supported when
+ * lda==ldc. Other matrix overlap and output/diagonal overlap are rejected.
+ * Empty outputs permit null pointers. Output padding and inputs are preserved
+ * except for the explicitly requested in-place matrix update.
+ * Execution is ordered on the handle stream and requires no DDLA workspace.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T, typename U>
+void dgmm(const DdlaHandle_t& handle, char side, int m, int n,
+    const T* A, int lda, const U* x, int incx, T* C, int ldc);
+
+/**
+ * @brief Distributed diagonal scaling with the full diagonal on every rank.
+ * Compute the leading m-by-n part of C using dgmm's side, type and stride
+ * conventions. x is replicated in backend memory on every rank. Each replica
+ * contains the same logical diagonal, with length m for L or n for R.
+ * A and C use identical block sizes and source coordinates on the handle's
+ * grid. Larger parent descriptors and different valid leading dimensions are
+ * supported. Only the leading region is updated. In-place operation follows
+ * dgmm's rules. Ranks without active entries permit null matrix/vector pointers.
+ * Validation is collective and global metadata must agree. The caller supplies
+ * matching diagonal values. Execution uses local block strips without matrix
+ * communication, DDLA allocation or workspace and follows the handle stream.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T, typename U>
+void pdgmm(const DdlaHandle_t& handle, char side, int m, int n,
+    const T* A, const int* descA, const U* x, int incx, T* C, const int* descC);
+
+
+
 /// Real counterpart of a scalar type: `real_type<double>::type == double`,
 /// `real_type<complex<double>>::type == double`.  Used for eigenvalue arrays
 /// and residual norms of Hermitian problems.
