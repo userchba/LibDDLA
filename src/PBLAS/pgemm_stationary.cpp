@@ -2,7 +2,6 @@
 #include "pgeadd_impl.h"
 #include "pblas_workspace.h"
 #include "comm_traits.h"
-#include "transport_block.h"
 #include "plan_util.h"
 #include <algorithm>
 #include <cassert>
@@ -239,9 +238,8 @@ void stationary_run_fixed(const DdlaHandle_t& h, char ta, char tb,
             panel_op = tx == 'N' ? 'T' : 'N';
         }
         // An untransposed transport stages nothing.
-        transport_impl::transport_run<Backend, TX>(h, k_rows ? 'C' : 'R', 'N',
-            input_desc[DDLA_M_], input_desc[DDLA_N_], input, 0, 0, input_desc, panel,
-            nullptr, 0, nullptr, 0);
+        pblas::broadcast_panel<Backend, TX>(h, k_rows, input_desc[DDLA_M_], input_desc[DDLA_N_], input, 0, 0,
+            input_desc, panel);
         const int panel_ld = k_rows ? std::max(1, kloc) : width;
 
         if (floc > 0 && kloc > 0) {

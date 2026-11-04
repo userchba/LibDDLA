@@ -119,7 +119,7 @@ add_test_executable(test_backend_lapack)
 # test_backend_solvers calls them with an explicit backend on every backend the build contains, which is what exercises the CPU
 # arms in a dual build.
 add_test_executable(test_backend_solvers)
-add_test_executable(test_api_grid_transport_block)
+add_test_executable(test_api_grid_pgeadd_panels)
 add_test_executable(test_api_grid_ptrtrs)
 add_test_executable(test_api_grid_ptrmm)
 add_test_executable(test_api_grid_phemm)

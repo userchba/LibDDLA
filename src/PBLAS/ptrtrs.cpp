@@ -9,7 +9,7 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 #include "require_backend.h"
-#include "transport_block.h"
+#include "pblas_workspace.h"
 #include "comm_traits.h"
 #include "check_agree.h"
 #include "plan_util.h"
@@ -71,8 +71,7 @@ void scratch_counts(const DdlaHandle_t& handle, char side, int m, int n,
 // (scratch_counts) | the panel transport's send staging ], host [ the panel
 // transport's schedule ].  The A panel of a transposed solve is a row panel
 // (side 'L', nb x n_solve) or a column panel (side 'R', n_solve x nb)
-// gathered through transport_block, which stages it only for trans != 'N' on
-// a non-square grid.
+// gathered through pgeadd and row/column broadcasts with reusable redistribution scratch.
 template <typename T>
 void ptrtrs_workspace_size(const DdlaHandle_t& handle, char side, char trans, int m, int n,
                            const int* array_descA, const int* array_descB,
@@ -83,11 +82,11 @@ void ptrtrs_workspace_size(const DdlaHandle_t& handle, char side, char trans, in
     const int nb = array_descA[DDLA_MB_], order = side == 'L' ? m : n;
     std::size_t count[3], transport_bytes = 0;
     scratch_counts(handle, side, m, n, array_descA, array_descB, count);
-    // A transposed panel of A must land on the solve axis's own distribution (the one B uses), not on the
-    // transport's crossed sources.
-    transport_impl::transport_workspace_size<T>(handle, side == 'L' ? 'R' : 'C', trans,
-        side == 'L' ? nb : order, side == 'L' ? order : nb, array_descA, &transport_bytes, host_bytes,
-        array_descA[DDLA_RSRC_], array_descA[DDLA_CSRC_]);
+    const bool left = side=='L';
+    const bool stored_column = left == (trans=='N');
+    pblas::panel_workspace_size<T>(handle,left,trans,
+        stored_column?order:nb,stored_column?nb:order,array_descA,array_descA,
+        &transport_bytes,host_bytes);
     for (const std::size_t c : count) *backend_bytes += detail::padded_bytes<T>(c);
     *backend_bytes += transport_bytes;
 }
@@ -146,7 +145,6 @@ void ptrtrs_run(const DdlaHandle_t& handle,
             // at each diagonal block, trsm on the owner row of B, broadcast the
             // solved block row, then gemm-update the remaining rows of B.
             const bool solve_backward = (uplo == 'U' && trans == 'N') || (uplo == 'L' && trans != 'N');
-            const char panel_direction = (trans == 'N') ? 'C' : 'R';
             int n_s_start,n_s_end,n_s_step;
             if(solve_backward){
                 n_s_start = n_solve % nb == 0 ? n_solve - nb : n_solve - n_solve % nb;
@@ -190,13 +188,7 @@ void ptrtrs_run(const DdlaHandle_t& handle,
                         B + mm_row_start, lldB
                     );
                 }
-                transport_impl::transport_run<Backend, T>(handle,
-                    'R', 'N',
-                    nb_real, n,
-                    B, n_s, 0, array_descB,
-                    block_B,
-                    transport_work, transport_bytes, host_work, host_bytes
-                );
+                pblas::broadcast_panel<Backend, T>(handle, false, nb_real, n, B, n_s, 0, array_descB, block_B);
                 int length_block_A;
                 int g_m, g_n;
                 int g_ia, g_ja;
@@ -231,14 +223,8 @@ void ptrtrs_run(const DdlaHandle_t& handle,
                         g_ia = 0;
                     }
                 }
-                transport_impl::transport_run<Backend, T>(handle,
-                    panel_direction, trans,
-                    g_m, g_n,
-                    A, g_ia, g_ja, array_descA,
-                    block_A,
-                    transport_work, transport_bytes, host_work, host_bytes,
-                    array_descA[DDLA_RSRC_], array_descA[DDLA_CSRC_]
-                );
+                pblas::panel_run<Backend, T>(handle, true, trans, g_m, g_n, A, g_ia, g_ja, array_descA,
+                    array_descA, block_A, transport_work, transport_bytes, host_work, host_bytes);
                 if(solve_backward){
                     length_block_A = mm_row_start;
                     B_offset = 0;
@@ -248,10 +234,10 @@ void ptrtrs_run(const DdlaHandle_t& handle,
                 }
                 DDLA_CHECK(ddlaSynchronize(ddla_handle));
                 if(length_block_A > 0){
-                    blas_impl::gemm_run<Backend, T>(ddla_handle, trans, 'N',
+                    blas_impl::gemm_run<Backend, T>(ddla_handle, 'N', 'N',
                         length_block_A, n_loc_B, nb_real,
                         (T)-1.0,
-                        block_A, trans == 'N' ? length_block_A : nb_real,
+                        block_A, length_block_A,
                         block_B, nb_real,
                         (T)1.0,
                         B + B_offset, lldB);
@@ -310,22 +296,14 @@ void ptrtrs_run(const DdlaHandle_t& handle,
                     );
                 }
                 // gather the solved block column of B (local part: m_loc x nb_real)
-                transport_impl::transport_run<Backend, T>(handle,
-                    'C', 'N',
-                    m, nb_real,
-                    B, 0, n_s, array_descB,
-                    block_B,
-                    transport_work, transport_bytes, host_work, host_bytes
-                );
+                pblas::broadcast_panel<Backend, T>(handle, true, m, nb_real, B, 0, n_s, array_descB, block_B);
                 // gather the far-side panel of A: for trans='N' the row panel of A
                 // on the far side of the diagonal block; for trans!='N' the column
                 // panel of A on the far side, transposed during the gather.
                 int length_block_A;
                 int g_m, g_n;
                 int g_ia, g_ja;
-                char panel_dir;
                 if(trans == 'N'){
-                    panel_dir = 'R';
                     g_m = nb_real;
                     g_ia = n_s;
                     if(far_right){
@@ -342,7 +320,6 @@ void ptrtrs_run(const DdlaHandle_t& handle,
                         B_offset = 0;
                     }
                 }else{
-                    panel_dir = 'C';
                     g_n = nb_real;
                     g_ja = n_s;
                     if(far_right){
@@ -357,14 +334,8 @@ void ptrtrs_run(const DdlaHandle_t& handle,
                         B_offset = 0;
                     }
                 }
-                transport_impl::transport_run<Backend, T>(handle,
-                    panel_dir, trans,
-                    g_m, g_n,
-                    A, g_ia, g_ja, array_descA,
-                    block_A,
-                    transport_work, transport_bytes, host_work, host_bytes,
-                    array_descA[DDLA_RSRC_], array_descA[DDLA_CSRC_]
-                );
+                pblas::panel_run<Backend, T>(handle, false, trans, g_m, g_n, A, g_ia, g_ja, array_descA,
+                    array_descA, block_A, transport_work, transport_bytes, host_work, host_bytes);
                 DDLA_CHECK(ddlaSynchronize(ddla_handle));
                 if(length_block_A > 0 && m_loc_B > 0){
                     blas_impl::gemm_run<Backend, T>(ddla_handle, 'N', 'N',

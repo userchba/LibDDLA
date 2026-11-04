@@ -2,6 +2,7 @@
 #include "matrix_transfer.h"
 #include "comm_traits.h"
 #include "row_share.h"
+#include "PBLAS/pblas_workspace.h"
 #include "workspace_test_common.h"
 
 #include <array>
@@ -119,7 +120,7 @@ void transfer_case(DdlaHandle_t h,int M,int N,int ia,int ja,int m,int n,int root
 }
 
 template <DdlaBackend B,typename T>
-void transport_case(DdlaHandle_t h,char axis,char op)
+void panel_case(DdlaHandle_t h,char axis,char op)
 {
     constexpr int M=19,N=17,mb=3,nb=5;
     const int rs=h->nprows_-1,cs=h->npcols_-1;
@@ -127,49 +128,44 @@ void transport_case(DdlaHandle_t h,char axis,char op)
     auto source=make_local<T>(h,desc,[](int i,int j){return value<T>(i,j);});
     DeviceBuffer<T> input(h,source.size());upload(h,input.ptr,source);
     const int m=axis=='R'?2:M,n=axis=='C'?2:N;
-    const int source_length=axis=='R'?num_loc(n,nb,h->mypcol_,cs,h->npcols_)
-                                          :num_loc(m,mb,h->myprow_,rs,h->nprows_);
-    const int target_length=op=='N'?source_length:
-        (axis=='R'?num_loc(n,nb,h->myprow_,cs,h->nprows_)
-                  :num_loc(m,mb,h->mypcol_,rs,h->npcols_));
-    const std::size_t count=std::size_t(axis=='R'?m:n)*std::max(source_length,target_length);
-    DeviceBuffer<T> output(h,count);
-    transport_impl::transport_check<B>(h,axis,op,m,n,desc);
+    const bool column_panel=(axis=='C')==(op=='N');
+    const int output_m=op=='N'?m:n,output_n=op=='N'?n:m;
+    const int local_rows=column_panel?num_loc(output_m,mb,h->myprow_,rs,h->nprows_):output_m;
+    const int local_cols=column_panel?output_n:num_loc(output_n,nb,h->mypcol_,cs,h->npcols_);
+    DeviceBuffer<T> output(h,std::max(std::size_t(1),std::size_t(local_rows)*local_cols));
+    int target[DDLA_DLEN_];
+    pblas::panel_descriptor(target,h,column_panel,op,m,n,0,0,desc,desc);
+    pgeadd_impl::pgeadd_check<B>(h,op,'N',output_m,output_n,desc,1,1,target,1,1,target,1,1,true,false);
     MPI_Barrier(h->comm);
     bool pure=true;
     if(h->myid==0) {
         workspace_test::Scope scope(true);
         std::size_t backend_bytes=0,host_bytes=0;
-        transport_impl::transport_workspace_size<T>(h,axis,op,m,n,desc,&backend_bytes,&host_bytes);
+        pblas::panel_workspace_size<T>(h,column_panel,op,m,n,desc,desc,&backend_bytes,&host_bytes);
         pure=pure_query(scope.finish());
     }
     MPI_Barrier(h->comm);
-    require_close(h,"one-rank transport query is pure",pure?0:1,0);
+    require_close(h,"one-rank panel query is pure",pure?0:1,0);
     std::size_t backend_bytes=0,host_bytes=0;
-    transport_impl::transport_workspace_size<T>(h,axis,op,m,n,desc,&backend_bytes,&host_bytes);
+    pblas::panel_workspace_size<T>(h,column_panel,op,m,n,desc,desc,&backend_bytes,&host_bytes);
     GuardedScratch scratch(h,backend_bytes,host_bytes);
     for(int pass=0;pass<2;++pass) {
         workspace_test::Scope scope;
-        transport_impl::transport_run<B,T>(h,axis,op,m,n,input.ptr,0,0,desc,output.ptr,
-                                           scratch.backend(),backend_bytes,scratch.host(),host_bytes);
+        pblas::panel_run<B,T>(h,column_panel,op,m,n,input.ptr,0,0,desc,desc,output.ptr,
+                              scratch.backend(),backend_bytes,scratch.host(),host_bytes);
         const auto snapshot=scope.finish();
-        require_close(h,"transport run performs no allocation/query",run_allocates_nothing<B>(snapshot,pass)?0:1,0);
+        require_close(h,"panel run performs no allocation/query",run_allocates_nothing<B>(snapshot,pass)?0:1,0);
         check_ddla_sync(h);
-        const auto got=download(h,output.ptr,std::size_t(axis=='R'?m:n)*target_length);
+        const auto got=download(h,output.ptr,std::size_t(local_rows)*local_cols);
         double err=0;
-        for(int j=0;j<target_length;++j) {
-            const int global=axis=='R'
-                ?indxl2g(j,nb,op=='N'?h->mypcol_:h->myprow_,cs,op=='N'?h->npcols_:h->nprows_)
-                :indxl2g(j,mb,op=='N'?h->myprow_:h->mypcol_,rs,op=='N'?h->nprows_:h->npcols_);
-            for(int i=0;i<(axis=='R'?m:n);++i) {
-                const T expected=axis=='R'?value<T>(i,global):value<T>(global,i);
-                const std::size_t offset=axis=='C' && op=='N'
-                    ?std::size_t(j)+std::size_t(i)*target_length
-                    :std::size_t(i)+std::size_t(j)*(axis=='R'?m:n);
-                err=std::max(err,double(std::abs(got[offset]-expected)));
-            }
+        for(int j=0;j<local_cols;++j)for(int i=0;i<local_rows;++i) {
+            const int row=column_panel?indxl2g(i,mb,h->myprow_,rs,h->nprows_):i;
+            const int col=column_panel?j:indxl2g(j,nb,h->mypcol_,cs,h->npcols_);
+            T expected=op=='N'?value<T>(row,col):value<T>(col,row);
+            if constexpr(!std::is_arithmetic_v<T>) if(op=='C')expected=std::conj(expected);
+            err=std::max(err,double(std::abs(got[i+std::size_t(j)*local_rows]-expected)));
         }
-        require_close(h,"transport run exact rectangular redistribution",err,0);
+        require_close(h,"panel run exact rectangular redistribution",err,0);
         scratch.verify();
     }
 }
@@ -281,23 +277,23 @@ template <DdlaBackend B> void shared_scratch_case(DdlaHandle_t h)
     auto host_float=make_local<float>(h,float_desc,[](int i,int j){return value<float>(i,j,71);});
     DeviceBuffer<float> floats(h,host_float.size());upload(h,floats.ptr,host_float);
     const int source_length=num_loc(M,mb,h->myprow_,0,h->nprows_);
-    const int target_length=num_loc(M,mb,h->mypcol_,0,h->npcols_);
-    DeviceBuffer<float> transported(h,std::size_t(2)*std::max(source_length,target_length));
+    const int target_length=num_loc(M,nb,h->mypcol_,0,h->npcols_);
+    DeviceBuffer<float> panel_output(h,std::size_t(2)*std::max(source_length,target_length));
     DeviceBuffer<float> gathered(h,h->myid==0?std::size_t(M)*N:0);
     std::vector<float> expected_gather(h->myid==0?std::size_t(M)*N:0);
     if(h->myid==0)for(int j=0;j<N;++j)for(int i=0;i<M;++i)
         expected_gather[i+std::size_t(j)*M]=value<float>(i,j,71);
     matrix_impl::scatter_rows_check<B,T>(h,k,source_rows.ptr,ld,false,m,n,rows.ptr,row_desc);
-    transport_impl::transport_check<B>(h,'C','T',M,2,float_desc);
+
     matrix_impl::gather_check<B,float>(h,M,N,floats.ptr,1,1,float_desc,0,gathered.ptr,M);
     // One scratch, the largest of the three, serves them all.
-    std::size_t row_backend=0,row_host=0,transport_backend=0,transport_host=0,gather_backend=0,gather_host=0;
+    std::size_t row_backend=0,row_host=0,panel_backend=0,panel_host=0,gather_backend=0,gather_host=0;
     matrix_impl::scatter_rows_workspace_size<T>(h,k,&row_backend,&row_host);
-    transport_impl::transport_workspace_size<float>(h,'C','T',M,2,float_desc,&transport_backend,&transport_host);
+    pblas::panel_workspace_size<float>(h,false,'T',M,2,float_desc,float_desc,&panel_backend,&panel_host);
     matrix_impl::transfer_workspace_size<float>(h,M,N,1,1,float_desc,0,&gather_backend,&gather_host);
-    GuardedScratch scratch(h,std::max({row_backend,transport_backend,gather_backend}),
-                           std::max({row_host,transport_host,gather_host}));
-    // Float transport/packing and metadata deliberately occupy the same bytes
+    GuardedScratch scratch(h,std::max({row_backend,panel_backend,gather_backend}),
+                           std::max({row_host,panel_host,gather_host}));
+    // Float panel/packing and metadata deliberately occupy the same bytes
     // between two complex row conversions.
     for(int pass=0;pass<2;++pass) {
         upload(h,rows.ptr,initial);
@@ -308,19 +304,19 @@ template <DdlaBackend B> void shared_scratch_case(DdlaHandle_t h)
         require_close(h,"shared scratch complex row run has no allocation",run_allocates_nothing<B>(row_snapshot,pass)?0:1,0);
         require_close(h,"shared scratch restores complex panels and padding",
             same(download(h,rows.ptr,expected_rows.size()),expected_rows)?0:1,0);
-        workspace_test::Scope transport_scope;
-        transport_impl::transport_run<B,float>(h,'C','T',M,2,floats.ptr,0,0,float_desc,transported.ptr,
-                                               scratch.backend(),transport_backend,scratch.host(),transport_host);
-        const auto transport_snapshot=transport_scope.finish();
-        require_close(h,"shared scratch float transport has no allocation",run_allocates_nothing<B>(transport_snapshot,pass)?0:1,0);
+        workspace_test::Scope panel_scope;
+        pblas::panel_run<B,float>(h,false,'T',M,2,floats.ptr,0,0,float_desc,float_desc,panel_output.ptr,
+                                               scratch.backend(),panel_backend,scratch.host(),panel_host);
+        const auto panel_snapshot=panel_scope.finish();
+        require_close(h,"shared scratch float panel has no allocation",run_allocates_nothing<B>(panel_snapshot,pass)?0:1,0);
         check_ddla_sync(h);
-        const auto got=download(h,transported.ptr,std::size_t(2)*target_length);
+        const auto got=download(h,panel_output.ptr,std::size_t(2)*target_length);
         double err=0;
         for(int j=0;j<target_length;++j)for(int i=0;i<2;++i) {
-            const int gr=indxl2g(j,mb,h->mypcol_,0,h->npcols_);
+            const int gr=indxl2g(j,nb,h->mypcol_,0,h->npcols_);
             err=std::max(err,double(std::abs(got[i+std::size_t(j)*2]-value<float>(gr,i,71))));
         }
-        require_close(h,"shared scratch float transport values",err,0);
+        require_close(h,"shared scratch float panel values",err,0);
         workspace_test::Scope gather_scope;
         matrix_impl::gather_run<B,float>(h,M,N,floats.ptr,1,1,float_desc,0,gathered.ptr,M,
                                          scratch.backend(),gather_backend,scratch.host(),gather_host);
@@ -343,8 +339,8 @@ template <DdlaBackend B> void run(MPI_Comm comm,int pr,int pc,char major)
     transfer_case<B,T>(h,2,1,1,1,2,1,0); \
     rows_case<B,T>(h,7,false); rows_case<B,T>(h,7,true); \
     rows_case<B,T>(h,1,false); rows_case<B,T>(h,0,true); \
-    transport_case<B,T>(h,'R','N'); transport_case<B,T>(h,'C','N'); \
-    transport_case<B,T>(h,'R','T'); transport_case<B,T>(h,'C','T')
+    panel_case<B,T>(h,'R','N'); panel_case<B,T>(h,'C','N'); \
+    panel_case<B,T>(h,'R','T'); panel_case<B,T>(h,'C','T')
     CASES(float);CASES(double);CASES(std::complex<float>);CASES(std::complex<double>);
 #undef CASES
     if(h->myid==0)std::cout<<"workspace transfer PASS backend="<<int(B)<<" grid="<<pr<<"x"<<pc<<" major="<<major<<std::endl;

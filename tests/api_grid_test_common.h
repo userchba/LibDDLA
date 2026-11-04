@@ -17,7 +17,6 @@
 
 #include <ddla/ddla.h>
 #include "ddla_connector.h"
-#include "transport_block.h"
 #include "test_desc_helpers.h"
 
 namespace api_grid_test {

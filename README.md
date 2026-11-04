@@ -373,11 +373,10 @@ the host. Pitches and copy sizes are in bytes.
 | Function | Description |
 |----------|-------------|
 | `pgemm` | `C = α·op(A)·op(B) + β·C`; automatic AB/SUMMA, AC, or BC communication |
-| `pgeadd` | `C = α·op(A) + β·op(B)` with required one-based `ia,ja`, `ib,jb`, `ic,jc`; aligned block layouts only (block sizes and within-block offsets match after `N/T/C`; `N` also requires matching owners); direct local `N,N` addition and one-destination local-region transpose on square grids (`m*n <= INT_MAX`); transpose-copy with `α=1`, `β=0` |
+| `pgeadd` | `C = α·op(A) + β·op(B)` with required one-based `ia,ja`, `ib,jb`, `ic,jc`. Supports independent block sizes, within-block offsets, and owners for `N/T/C`. Matching layouts retain direct local addition and whole-slab redistribution, including transpose on square grids (`m*n <= INT_MAX`). Other layouts use block-intersection redistribution. |
 | `pdam` | Add scalar to the diagonal of a distributed matrix (leading-block, optional `n`; default `-1` = whole matrix) |
 | `ptrmm` | In-place triangular multiply: `B = α·op(A)·B` or `B = α·B·op(A)` |
 | `gather` / `scatter` | Move a submatrix between distributed storage and a column-major buffer on one root rank; explicit one-based origins, host buffers on CPU and device buffers on GPU |
-| `transport_block` | Extract/transpose a contiguous block from a distributed matrix into a local buffer |
 
 ### Local BLAS and triangular products
 

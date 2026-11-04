@@ -2,12 +2,11 @@
 #include "ddla_desc.h"
 #include "comm_traits.h"
 #include "require_backend.h"
-#include "transport_block.h"
+#include "pblas_workspace.h"
 #include "check_agree.h"
 #include "plan_util.h"
 #include "ptrmm_impl.h"
 #include "pgeadd_impl.h"
-#include "pblas_workspace.h"
 #include "BLAS/blas_impl.h"
 #include <ddla/ddla_vector.h>
 #include <algorithm>
@@ -71,9 +70,7 @@ void triangular_panel(const DdlaHandle_t& h, bool left, char trans,
     const int procs = left ? h->nprows_ : h->npcols_;
     const int target = db[left ? DDLA_RSRC_ : DDLA_CSRC_];
     if (trans == 'N') {
-        transport_impl::transport_run<Backend, T>(h, left ? 'C' : 'R', 'N',
-            left ? length : width, left ? width : length,
-            A, left ? first : k, left ? k : first, da, panel, nullptr, 0, nullptr, 0);
+        pblas::broadcast_panel<Backend, T>(h, left, left ? length : width, left ? width : length, A, left ? first : k, left ? k : first, da, panel);
         const int source = da[left ? DDLA_RSRC_ : DDLA_CSRC_];
         if (source != target) {
             const int send_length = num_loc(first + length, nb, coord, source, procs)
@@ -99,8 +96,7 @@ void triangular_panel(const DdlaHandle_t& h, bool left, char trans,
         T(1), A, (left ? k : first) + 1, (left ? first : k) + 1, da,
         T(0), static_cast<const T*>(nullptr), 1, 1, d, work, 1, 1, d,
         add_work, add_bytes, add_host, add_host_bytes);
-    transport_impl::transport_run<Backend, T>(h, left ? 'C' : 'R', 'N',
-                            d[DDLA_M_], d[DDLA_N_], work, 0, 0, d, panel, nullptr, 0, nullptr, 0);
+    pblas::broadcast_panel<Backend, T>(h, left, d[DDLA_M_], d[DDLA_N_], work, 0, 0, d, panel);
 }
 
 } // namespace
@@ -211,9 +207,7 @@ void ptrmm_run(const DdlaHandle_t& handle, char side, char uplo, char trans, cha
             // sweep updates only panels already visited, so every input is used
             // before it is overwritten and alpha is applied exactly once. Local TRMM
             // overwrites B itself; block_B stays original for the GEMM updates.
-            transport_impl::transport_run<Backend, T>(handle, left ? 'R' : 'C', 'N',
-                left ? width : m, left ? n : width,
-                B, left ? k : 0, left ? 0 : k, descB, block_B, nullptr, 0, nullptr, 0);
+            pblas::broadcast_panel<Backend, T>(handle, !left, left ? width : m, left ? n : width, B, left ? k : 0, left ? 0 : k, descB, block_B);
             const int coord = left ? row : col, procs = left ? pr : pc;
             const int source = descB[left ? DDLA_RSRC_ : DDLA_CSRC_];
             const int local_k = num_loc(k, nb, coord, source, procs);
