@@ -752,18 +752,14 @@ void pgeqrf(const DdlaHandle_t& handle, char uplo, int m, int n,
 /**
  * @brief Distributed addition: C(ic:ic+m-1,jc:jc+n-1) = alpha*op(A) + beta*op(B).
  *
- * The block sizes of op(A), op(B), and C must match: N keeps MB/NB;
- * T/C swaps them. Starting offsets within these blocks must also match
- * after applying N/T/C. N inputs must have the same owning ranks as C at
- * their origins; N,N adds the local regions directly. On square grids T/C
- * transposes each whole local region and sends it to one destination rank;
- * rectangular grids exchange aligned blocks as needed. The single-message
- * path requires m*n <= INT_MAX; larger regions use the block path. There
- * is no reblocking or general redistribution; incompatible layouts throw
- * std::invalid_argument, including for zero coefficients and empty regions.
- * All six origins are required one-based global indices and may lie inside
- * aligned distribution blocks. ia/ja and ib/jb locate the stored input regions before
- * N/T/C is applied; transposed inputs have n stored rows and m stored columns.
+ * Inputs and output may use different block sizes, source coordinates and
+ * submatrix offsets. Aligned N regions with matching owners use local copies.
+ * Aligned regions use whole-slab owner shifts for N, and whole-slab transpose
+ * exchanges on square grids. Other layouts exchange rectangles split at both
+ * input and output block boundaries. The whole-slab message path requires
+ * m*n <= INT_MAX. All six origins are one-based global indices. ia/ja and
+ * ib/jb locate stored inputs before N/T/C is applied, so transposed inputs
+ * have n stored rows and m stored columns.
  * A zero coefficient leaves that input unread. Only the requested output
  * region is modified. C may alias an input; input values are consumed before
  * output is written.
@@ -1617,14 +1613,6 @@ void gemmVbatched2s(
     const int* segment_sizes,
     int segment_count);
 
-template <DdlaBackend Backend = default_backend_v, typename T>
-void transport_block(
-    const DdlaHandle_t& handle,
-    char sData, char trans,
-    int m, int n,
-    const T* A, int ia, int ja, const int* descA,
-    T* block_A
-);
 
 /**
  * @brief Fill a buffer with independent uniform random values in [0, 1).

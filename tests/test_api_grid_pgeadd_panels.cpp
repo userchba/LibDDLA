@@ -1,4 +1,5 @@
 #include "api_grid_test_common.h"
+#include "PBLAS/pblas_workspace.h"
 
 using namespace api_grid_test;
 
@@ -31,7 +32,7 @@ void check_non_square_block_transpose(
 
     const int row_panel_rows = mb;
     const int target_row_columns = ddla::num_loc(
-        n, nb, myprow, icsrc, nprows
+        n, mb, myprow, irsrc, nprows
     );
     for(char trans : {'T', 'C'}){
         const size_t output_count = static_cast<size_t>(row_panel_rows)
@@ -39,36 +40,39 @@ void check_non_square_block_transpose(
         const size_t buffer_count = static_cast<size_t>(row_panel_rows)
                                   * std::max(ddla_test::n_loc(handle, desc), target_row_columns);
         DeviceBuffer<Complex> d_row(handle, buffer_count);
-        ddla::transport_block(handle, 
-            'R', trans, row_panel_rows, n,
-            d_A.ptr, 0, 0, desc, d_row.ptr
-        );
+        std::size_t backend_bytes=0,host_bytes=0;
+        ddla::pblas::panel_workspace_size<Complex>(handle,true,trans,row_panel_rows,n,desc,desc,
+            &backend_bytes,&host_bytes);
+        ddla::vector<char> scratch(handle,backend_bytes);
+        std::vector<char> host_scratch(host_bytes);
+        ddla::pblas::panel_run<ddla::default_backend_v,Complex>(handle,true,trans,row_panel_rows,n,
+            d_A.ptr,0,0,desc,desc,d_row.ptr,scratch.data(),backend_bytes,host_scratch.data(),host_bytes);
         auto h_row = download(handle, d_row.ptr, output_count);
 
         double err = 0.0;
         for(int jloc = 0; jloc < target_row_columns; ++jloc){
             const int j = ddla::indxl2g(
-                jloc, nb, myprow, icsrc, nprows
+                jloc, mb, myprow, irsrc, nprows
             );
             if(j >= n) continue;
             for(int i = 0; i < row_panel_rows; ++i){
                 err = std::max(
                     err,
-                    std::abs(h_row[i + jloc * row_panel_rows]
-                           - general_value(i, j, tag))
+                    std::abs(h_row[jloc + i * target_row_columns]
+                           - (trans=='C'?std::conj(general_value(i,j,tag)):general_value(i,j,tag)))
                 );
             }
         }
         require_close(
             handle,
-            std::string("transport_block non-square blocks (R,") + trans + ')',
+            std::string("pgeadd_panels non-square blocks (R,") + trans + ')',
             err, 1e-12
         );
     }
 
     const int col_panel_cols = nb;
     const int target_col_rows = ddla::num_loc(
-        m, mb, mypcol, irsrc, npcols
+        m, nb, mypcol, icsrc, npcols
     );
     for(char trans : {'T', 'C'}){
         const size_t output_count = static_cast<size_t>(col_panel_cols)
@@ -76,16 +80,19 @@ void check_non_square_block_transpose(
         const size_t buffer_count = static_cast<size_t>(col_panel_cols)
                                   * std::max(ddla_test::m_loc(handle, desc), target_col_rows);
         DeviceBuffer<Complex> d_col(handle, buffer_count);
-        ddla::transport_block(handle, 
-            'C', trans, m, col_panel_cols,
-            d_A.ptr, 0, 0, desc, d_col.ptr
-        );
+        std::size_t backend_bytes=0,host_bytes=0;
+        ddla::pblas::panel_workspace_size<Complex>(handle,false,trans,m,col_panel_cols,desc,desc,
+            &backend_bytes,&host_bytes);
+        ddla::vector<char> scratch(handle,backend_bytes);
+        std::vector<char> host_scratch(host_bytes);
+        ddla::pblas::panel_run<ddla::default_backend_v,Complex>(handle,false,trans,m,col_panel_cols,
+            d_A.ptr,0,0,desc,desc,d_col.ptr,scratch.data(),backend_bytes,host_scratch.data(),host_bytes);
         auto h_col = download(handle, d_col.ptr, output_count);
 
         double err = 0.0;
         for(int iloc = 0; iloc < target_col_rows; ++iloc){
             const int i = ddla::indxl2g(
-                iloc, mb, mypcol, irsrc, npcols
+                iloc, nb, mypcol, icsrc, npcols
             );
             if(i >= m) continue;
             for(int j = 0; j < col_panel_cols; ++j){
@@ -99,7 +106,7 @@ void check_non_square_block_transpose(
         }
         require_close(
             handle,
-            std::string("transport_block non-square blocks (C,") + trans + ')',
+            std::string("pgeadd_panels non-square blocks (C,") + trans + ')',
             err, 1e-12
         );
     }
@@ -127,7 +134,7 @@ void check_host_tunnel_workspace(const ddla::DdlaHandle_t& handle)
 
     const size_t count = static_cast<size_t>(mb) * ddla_test::n_loc(handle, desc);
     DeviceBuffer<Complex> d_row(handle, count);
-    ddla::transport_block(handle, 'R', 'N', mb, n, d_A.ptr, 0, 0, desc, d_row.ptr);
+    ddla::pblas::broadcast_panel<ddla::default_backend_v>(handle, false, mb, n, d_A.ptr, 0, 0, desc, d_row.ptr);
     auto h_row = download(handle, d_row.ptr, count);
 
     double err = 0.0;
@@ -140,12 +147,12 @@ void check_host_tunnel_workspace(const ddla::DdlaHandle_t& handle)
             );
         }
     }
-    require_close(handle, "transport_block host workspace (R,N)", err, 1e-12);
+    require_close(handle, "pgeadd_panels host workspace (R,N)", err, 1e-12);
 }
 
 } // namespace
 
-void check_transport_block(const ddla::DdlaHandle_t& handle, const Shape& base)
+void check_pgeadd_panels(const ddla::DdlaHandle_t& handle, const Shape& base)
 {
     const int nb = base.nb;
     int nprows = 0, npcols = 0;
@@ -163,7 +170,7 @@ void check_transport_block(const ddla::DdlaHandle_t& handle, const Shape& base)
 
     const int rows = std::min(nb, m);
     DeviceBuffer<Complex> d_row(handle, static_cast<size_t>(rows) * ddla_test::n_loc(handle, desc));
-    ddla::transport_block(handle, 'R', 'N', rows, n, d_A.ptr, 0, 0, desc, d_row.ptr);
+    ddla::pblas::broadcast_panel<ddla::default_backend_v>(handle, false, rows, n, d_A.ptr, 0, 0, desc, d_row.ptr);
     auto h_row = download(handle, d_row.ptr, static_cast<size_t>(rows) * ddla_test::n_loc(handle, desc));
     double err_row = 0.0;
     for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
@@ -172,11 +179,11 @@ void check_transport_block(const ddla::DdlaHandle_t& handle, const Shape& base)
             err_row = std::max(err_row, std::abs(h_row[r + jloc * rows] - general_value(r, j, 7)));
         }
     }
-    require_close(handle, "transport_block(handle, R,N)", err_row, 1e-12);
+    require_close(handle, "pgeadd_panels(handle, R,N)", err_row, 1e-12);
 
     const int cols = std::min(nb, n);
     DeviceBuffer<Complex> d_col(handle, static_cast<size_t>(ddla_test::m_loc(handle, desc)) * cols);
-    ddla::transport_block(handle, 'C', 'N', m, cols, d_A.ptr, 0, 0, desc, d_col.ptr);
+    ddla::pblas::broadcast_panel<ddla::default_backend_v>(handle, true, m, cols, d_A.ptr, 0, 0, desc, d_col.ptr);
     auto h_col = download(handle, d_col.ptr, static_cast<size_t>(ddla_test::m_loc(handle, desc)) * cols);
     double err_col = 0.0;
     for(int c = 0; c < cols; ++c){
@@ -185,7 +192,7 @@ void check_transport_block(const ddla::DdlaHandle_t& handle, const Shape& base)
             err_col = std::max(err_col, std::abs(h_col[iloc + c * ddla_test::m_loc(handle, desc)] - general_value(i, c, 7)));
         }
     }
-    require_close(handle, "transport_block(handle, C,N)", err_col, 1e-12);
+    require_close(handle, "pgeadd_panels(handle, C,N)", err_col, 1e-12);
 
     check_non_square_block_transpose(handle, base);
     check_host_tunnel_workspace(handle);
@@ -193,5 +200,5 @@ void check_transport_block(const ddla::DdlaHandle_t& handle, const Shape& base)
 
 int main(int argc, char** argv)
 {
-    return run_grid_test(argc, argv, "test_api_grid_transport_block", check_transport_block);
+    return run_grid_test(argc, argv, "test_api_grid_pgeadd_panels", check_pgeadd_panels);
 }

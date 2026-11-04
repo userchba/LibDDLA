@@ -25,9 +25,7 @@ message(STATUS "Building ddla library version ${CMAKE_PROJECT_VERSION}")
 # The files that keep a GPU kernel next to their CPU arm (LU/getrf_nopiv.cpp,
 # PBLAS/pdam.cpp, PBLAS/pgeadd.cpp, Cholesky/potrf_bottom_right_transform.cpp)
 # are always listed and compile as plain C++ in a CPU-only build: all kernel
-# code is behind DDLA_USE_CUDA / DDLA_USE_HIP.  transport_block.cpp is here
-# because the CPU pgemm and the triangular solves call the unified
-# transport_block<DdlaBackend::CPU,T>.
+# code is behind DDLA_USE_CUDA / DDLA_USE_HIP.
 if(DDLA_USE_CPU AND NOT DDLA_DUAL_BUILD)
     set(ddla_cpu_only_build ON)
 else()
@@ -64,7 +62,6 @@ target_sources(ddla_lib PRIVATE
     write_matrix.cpp
     random_generate.cpp
     matrix_transfer.cpp
-    transport_block.cpp
     ddla_handle_t.cpp
     ddla_stream.cpp
     ddla_desc.cpp

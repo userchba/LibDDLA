@@ -3,15 +3,15 @@
 // This oracle addresses global elements directly, independently of the block
 // planner. Guards check every element outside C's requested rectangle.
 template <DdlaBackend Backend,typename T>
-void check_case(DdlaHandle_t h,char ta,char tb,int m,int n,int mode,int alias,bool shifted,int& cases,int pointer_shift=0,bool colocate=false)
+void check_case(DdlaHandle_t h,char ta,char tb,int m,int n,int mode,int alias,bool shifted,int& cases,int pointer_shift=0,bool colocate=false,int layout=0)
 {
     int pr,pc; ddlaGetGridDims(h,pr,pc);
     const int mb=alias?3:4,nb=3;
-    const int ic=shifted?(alias?5:6):1,jc=shifted?5:1;
-    const int ia=shifted?(ta=='N'?ic+mb:jc+nb):1;
-    const int ja=shifted?(ta=='N'?jc+2*nb:ic+2*mb):1;
-    const int ib=shifted?(tb=='N'?ic+2*mb:jc+2*nb):1;
-    const int jb=shifted?(tb=='N'?jc+nb:ic+mb):1;
+    const int ic=layout?3:shifted?(alias?5:6):1,jc=layout?4:shifted?5:1;
+    const int ia=layout?2:shifted?(ta=='N'?ic+mb:jc+nb):1;
+    const int ja=layout?4:shifted?(ta=='N'?jc+2*nb:ic+2*mb):1;
+    const int ib=layout?4:shifted?(tb=='N'?ic+2*mb:jc+2*nb):1;
+    const int jb=layout?2:shifted?(tb=='N'?jc+nb:ic+mb):1;
     const int rs=pr-1,cs=pc-1;
     const T alpha=mode==1||mode==3||mode==5?T(0):mode==4?T(1):scalar<T>(0.7,-0.2);
     const T beta=mode==2||mode==3||mode==4?T(0):mode==5?T(1):scalar<T>(-0.3,0.15);
@@ -20,10 +20,10 @@ void check_case(DdlaHandle_t h,char ta,char tb,int m,int n,int mode,int alias,bo
     // process cycles, so the operands share owners. alias 3 reads A and B from C.
     const bool co=colocate && ta!='N' && tb!='N';
     const bool a_in_c=alias==1||alias==3,b_in_c=alias==2||alias==3;
-    Matrix<T> a(h,extent,extent,ta=='N'?mb:nb,ta=='N'?nb:mb,
+    Matrix<T> a(h,extent,extent,layout==1?2:ta=='N'?mb:nb,layout==1?5:ta=='N'?nb:mb,
         ta=='N'?(rs+pr-(shifted?1:0))%pr:0,
         ta=='N'?(cs+2*pc-(shifted?2:0))%pc:pc-1,1,alpha==T(0));
-    Matrix<T> b(h,extent,extent,tb=='N'?mb:nb,tb=='N'?nb:mb,
+    Matrix<T> b(h,extent,extent,layout==1?5:tb=='N'?mb:nb,layout==1?2:tb=='N'?nb:mb,
         co?(a_in_c?rs:0):tb=='N'?(rs+2*pr-(shifted?2:0))%pr:pr-1,
         co?(a_in_c?cs:pc-1):tb=='N'?(cs+pc-(shifted?1:0))%pc:0,2,beta==T(0));
     Matrix<T> c(h,extent,extent,mb,nb,rs,cs,3,true);
@@ -33,6 +33,8 @@ void check_case(DdlaHandle_t h,char ta,char tb,int m,int n,int mode,int alias,bo
     if(alias==2) { bv=c.data+pointer_shift;db=c.d;bi=tb=='N'?ic:jc;bj=tb=='N'?jc+nb*pc:ic; }
     if(co) { bi=ai+nb*pr;bj=aj+mb*pc; }
     if(alias==3) { bv=c.data;db=c.d; }
+    if(layout && a_in_c) {ai=2;aj=3;}
+    if(layout && b_in_c) {bi=4;bj=2;}
     // Aliased inputs start with finite values. Other C cases start poisoned.
     if(alias) { for(int j=0;j<c.nc;++j) for(int i=0;i<c.nr;++i) {
         int gi=indxl2g(i,mb,c.r,c.d[DDLA_RSRC_],pr),gj=indxl2g(j,nb,c.c,c.d[DDLA_CSRC_],pc);
@@ -68,7 +70,7 @@ void check_case(DdlaHandle_t h,char ta,char tb,int m,int n,int mode,int alias,bo
     MPI_Allreduce(&bad,&any,1,MPI_INT,MPI_MAX,ddlaGetCommunicator(h));
     constexpr bool single=std::is_same_v<T,float>||std::is_same_v<T,std::complex<float>>;
     if(any || worst>(single?3e-5:2e-11)) {
-        if(ddlaGetRank(h)==0)std::cerr<<"pgeadd FAIL ops="<<ta<<tb<<" shape="<<m<<','<<n<<" mode="<<mode<<" alias="<<alias<<" shifted="<<shifted<<" pointer_shift="<<pointer_shift<<" colocate="<<co<<" bytes="<<sizeof(T)<<" error="<<worst<<" guard="<<any<<'\n';
+        if(ddlaGetRank(h)==0)std::cerr<<"pgeadd FAIL ops="<<ta<<tb<<" shape="<<m<<','<<n<<" mode="<<mode<<" alias="<<alias<<" shifted="<<shifted<<" layout="<<layout<<" pointer_shift="<<pointer_shift<<" colocate="<<co<<" bytes="<<sizeof(T)<<" error="<<worst<<" guard="<<any<<'\n';
         throw std::runtime_error("pgeadd shifted regression");
     }
     ++cases;
@@ -104,48 +106,37 @@ void scalar_cases(DdlaHandle_t h,int& cases) {
             for(int alias:{1,3}) check_case<Backend,T>(h,ta,tb,9,7,0,alias,true,cases,0,true);
         }
     }
+    for(char ta:{'N','T','C'})for(char tb:{'N','T','C'}) {
+        for(int layout:{1,2})for(int mode=0;mode<6;++mode) {
+            check_case<Backend,T>(h,ta,tb,9,7,mode,0,true,cases,0,false,layout);
+            check_case<Backend,T>(h,ta,tb,1,2,mode,0,true,cases,0,false,layout);
+        }
+        for(int alias:{1,2,3})for(int mode:{0,4,5})
+            check_case<Backend,T>(h,ta,tb,9,7,mode,alias,true,cases,0,false,2);
+    }
     int d[DDLA_DLEN_];DDLA_CHECK(ddlaDescInit(d,h,48,48,4,3,0,0));
     auto rejected=[&](char ta,char tb,const int* da,int ai,int aj,const int* db,int bi,int bj,int ci,int cj,int m=2) {
         bool caught=false;
         try { pgeadd<Backend,T>(h,ta,tb,m,2,T(0),nullptr,ai,aj,da,T(0),nullptr,bi,bj,db,nullptr,ci,cj,d); }
         catch(const std::invalid_argument&){caught=true;}
-        if(!caught)throw std::runtime_error("pgeadd failed to reject incompatible layout or invalid region");
+        if(!caught)throw std::runtime_error("pgeadd failed to reject an invalid descriptor, flag or region");
     };
     rejected('N','N',d,0,1,d,1,1,1,1);rejected('N','N',d,1,0,d,1,1,1,1);
     rejected('N','N',d,48,1,d,1,1,1,1);rejected('N','N',d,1,1,d,1,1,48,1);
     rejected('?','N',d,1,1,d,1,1,1,1);
-    int bad[DDLA_DLEN_],trans[DDLA_DLEN_];
-    DDLA_CHECK(ddlaDescInit(bad,h,48,48,5,3,0,0));
-    DDLA_CHECK(ddlaDescInit(trans,h,48,48,3,4,0,0));
-    // Validate both input layouts even when their coefficients are zero.
+    int bad[DDLA_DLEN_];
+    std::copy(d,d+DDLA_DLEN_,bad);bad[DDLA_MB_]=0;
     rejected('N','N',bad,1,1,d,1,1,1,1);
+    std::copy(d,d+DDLA_DLEN_,bad);bad[DDLA_LLD_]=0;
     rejected('N','N',d,1,1,bad,1,1,1,1);
-    rejected('T','N',d,1,1,d,1,1,1,1);
-    rejected('N','C',d,1,1,d,1,1,1,1);
-    rejected('N','N',d,2,1,d,1,1,1,1);
-    rejected('N','N',d,1,1,d,1,2,1,1);
-    rejected('T','N',trans,1,2,d,1,1,1,1);
-    rejected('N','C',d,1,1,trans,2,1,1,1);
-    rejected('N','N',bad,1,1,d,1,1,1,1,0);
-    if(pr>1) {
-        DDLA_CHECK(ddlaDescInit(bad,h,48,48,4,3,1,0));
-        rejected('N','N',bad,1,1,d,1,1,1,1);
-        rejected('N','N',d,1,1,bad,1,1,1,1);
-        rejected('N','N',d,5,1,d,1,1,1,1);
-    }
-    if(pc>1) {
-        DDLA_CHECK(ddlaDescInit(bad,h,48,48,4,3,0,1));
-        rejected('N','N',bad,1,1,d,1,1,1,1);
-        rejected('N','N',d,1,1,bad,1,1,1,1);
-        rejected('N','N',d,1,4,d,1,1,1,1);
-    }
+    rejected('N','N',d,1,1,d,1,1,1,1,-1);
 }
 
 template <DdlaBackend Backend> void run(int pr,int pc) {
     DdlaHandle_t h=nullptr;DDLA_CHECK(ddlaInit(h,Backend));DDLA_CHECK(ddlaSet(h,MPI_COMM_WORLD,pr,pc));
     int cases=0;scalar_cases<Backend,float>(h,cases);scalar_cases<Backend,double>(h,cases);
     scalar_cases<Backend,std::complex<float>>(h,cases);scalar_cases<Backend,std::complex<double>>(h,cases);
-    if(ddlaGetRank(h)==0)std::cout<<"PGEADD_PASS backend="<<int(Backend)<<" grid="<<pr<<'x'<<pc<<" cases="<<cases<<" invalid="<<4*(14+3*(pr>1)+3*(pc>1))<<'\n';
+    if(ddlaGetRank(h)==0)std::cout<<"PGEADD_PASS backend="<<int(Backend)<<" grid="<<pr<<'x'<<pc<<" cases="<<cases<<" invalid="<<32<<'\n';
     DDLA_CHECK(ddlaDestroy(h));
 }
 int main(int argc,char** argv) {

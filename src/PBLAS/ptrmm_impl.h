@@ -23,7 +23,7 @@ bool ptrmm_check(const DdlaHandle_t& handle, char side, char uplo, char trans, c
 // of ptrmm_check.  Backend: the staged diagonal block, a block row/column of
 // the original B, the off-diagonal panel of A and the buffer the panel is
 // exchanged or transposed into, then the scratch of pgeadd for a transposed
-// panel; host: that pgeadd's (transport_block never stages anything here,
+// panel; host: that pgeadd's (direct panel broadcasts need no staging here,
 // every transport is untransposed).  Nothing for alpha == 0.  No validation,
 // no collectives.
 template <typename T>

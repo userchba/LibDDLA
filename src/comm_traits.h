@@ -94,9 +94,7 @@ template <>
 struct CommTraits<DdlaBackend::GPU> {
 #if defined(DDLA_USE_GPU_CPU_TUNNEL)
     // Tunnel wins if both DDLA_USE_CCL and DDLA_USE_GPU_CPU_TUNNEL are set
-    // (matches this project's existing precedence elsewhere, e.g.
-    // transport_block.cpp's `#if DDLA_USE_CCL && !DDLA_USE_GPU_CPU_TUNNEL`
-    // group-batch guard).
+    // (including grouped panel broadcasts).
     using comm_t = MPI_Comm;
     static comm_t comm(const DdlaHandle_t& h, CommScope s) {
         switch (s) {

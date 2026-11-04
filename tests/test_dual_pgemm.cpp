@@ -21,8 +21,7 @@
 #include <ddla/ddla.h>
 #include "test_desc_helpers.h"
 #include "ddla_connector.h"
-#include "ddla_stream.h"
-#include "transport_block.h"
+#include "PBLAS/pblas_workspace.h"
 
 using namespace ddla;
 
@@ -460,17 +459,7 @@ int main(int argc, char** argv)
         ddlaDestroy(h_g);
     }
 
-    // --- Test transport_block<DdlaBackend::CPU> succeeds on a CPU handle ---
-    // (Contract intentionally changed: transport_block used to reject CPU
-    // handles outright; it is now backend-unified via CommTraits<Backend>
-    // and genuinely supports CPU. Full CPU-path correctness across varied
-    // grid shapes/transposes/k==0 is already covered indirectly by
-    // test_cpu_pgemm's existing extensive coverage, exercised through
-    // CpuOps::transport_panel -> transport_block<DdlaBackend::CPU,T>; this
-    // is a focused API-level check that the explicit-Backend CPU
-    // instantiation completes without throwing and produces the correct
-    // (uniform-input) result for the portion of the buffer it actually
-    // writes.)
+    // CPU panel packing and broadcast through the same helper used by PGEMM.
     {
         DdlaHandle_t h_cpu_tb = nullptr;
         ddlaInit(h_cpu_tb, DdlaBackend::CPU);
@@ -481,30 +470,20 @@ int main(int argc, char** argv)
         std::size_t sz = static_cast<std::size_t>(desc_tb[DDLA_LLD_] * ddla_test::n_loc(h_cpu_tb, desc_tb));
         const std::complex<double> fill_value(3.0, -2.0);
         std::vector<std::complex<double>> buf(sz > 0 ? sz : 1, fill_value);
-        // Panel row-extent (m_panel) is one block height (mb), not the full
-        // 8 global rows: for sData='R', transport_block reads m_panel LOCAL
-        // rows directly from buf on the owning row-rank (matching how it's
-        // actually used in pgemm's SUMMA loop and in
-        // test_api_grid_transport_block.cpp's row_panel_rows=mb) -- using the
-        // full 8 here would over-read buf's local storage on any grid where a
-        // row-rank owns fewer than 8 local rows. block_buf holds the gathered
-        // m_panel x cols panel (pitch m_panel, not desc_tb's local lld/n_loc);
-        // 8*8 is always big enough regardless of grid shape or m_panel choice.
+        // One block row is packed with its own leading dimension.
         const int m_panel = desc_tb[DDLA_MB_];
         std::vector<std::complex<double>> block_buf(
             64, std::complex<double>(-999.0, -999.0));
 
         bool tb_ok = true;
         try {
-            transport_block<DdlaBackend::CPU>(h_cpu_tb, 'R', 'N', m_panel, 8,
+            pblas::broadcast_panel<DdlaBackend::CPU>(h_cpu_tb, false, m_panel, 8,
                             buf.data(), 0, 0, desc_tb, block_buf.data());
         } catch (...) {
             tb_ok = false;
         }
 
-        // Only the portion transport_block actually writes for this
-        // (sData='R', trans='N') case: an m_panel x cols panel, cols = the
-        // local column count this rank owns out of the full n=8 columns.
+        // Validate the replicated block row on every participating rank.
         const int j_loc = num_loc(0, desc_tb[DDLA_NB_], ddla_test::mypcol(h_cpu_tb), desc_tb[DDLA_CSRC_], ddla_test::npcols(h_cpu_tb));
         const int n_loc_val = num_loc(8, desc_tb[DDLA_NB_], ddla_test::mypcol(h_cpu_tb), desc_tb[DDLA_CSRC_], ddla_test::npcols(h_cpu_tb));
         const int cols = n_loc_val - j_loc;
@@ -513,7 +492,7 @@ int main(int argc, char** argv)
             for (int k = 0; k < m_panel * cols; ++k)
                 tb_err = std::max(tb_err, std::abs(block_buf[k] - fill_value));
         }
-        TEST("transport_block<DdlaBackend::CPU> succeeds and returns uniform input unchanged",
+        TEST("CPU panel broadcast returns the uniform input",
              tb_ok && tb_err < 1e-12);
 
         ddlaDestroy(h_cpu_tb);

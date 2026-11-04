@@ -8,7 +8,6 @@
 #SBATCH --ntasks-per-node=6
 #SBATCH --cpus-per-task=3
 #SBATCH --output=../../log_cuda
-#SBATCH --error=../../err_cuda
 
 set -e
 
@@ -84,7 +83,7 @@ api_grid_files=(
     "test_api_grid_device_memory"
     "test_api_grid_pgemm"
     "test_api_grid_pgeadd"
-    "test_api_grid_transport_block"
+    "test_api_grid_pgeadd_panels"
     "test_api_grid_pdam"
     "test_api_grid_pswap"
     "test_api_grid_plapiv"

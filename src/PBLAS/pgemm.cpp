@@ -11,7 +11,7 @@
 #include <ddla/ddla_vector.h>
 #include "ddla_stream.h"
 #include <vector>
-#include "transport_block.h"
+#include "pblas_workspace.h"
 #include "pgemm_impl.h"
 #include "check_agree.h"
 #include "plan_util.h"
@@ -90,7 +90,7 @@ KStage ab_stage(int s, int k, int nb, int bpg)
 // Element counts of the SUMMA branch's staging, in carving order: the A panel
 // (TA) and the B panel (TB) of one k slice, and the one-block B tile (TB).
 // The B panel is stored as (kk x n_loc) with ld = kk so one gemm sees the
-// whole run, but transport_block writes a (w x n_loc) tile with ld = w; every
+// whole run, but the panel copy writes a (w x n_loc) tile with ld = w; every
 // block of a multi-block run is staged in the tile and copied into the panel
 // with the panel pitch.  Each is a real allocation (>= 1 element) even at
 // zero local extent.
@@ -114,21 +114,17 @@ void ab_counts(const DdlaHandle_t& h, char transa, char transb, int m, int n, in
     count[2] = std::max(std::size_t(1), std::size_t(nb) * cols_b);
 }
 
-// The (backend, host) bytes of the transport of a transposed operand's panel,
-// gathered through transport_block's transposed path: A as a w x m row panel,
-// B as an n x w column panel.  An untransposed operand stages nothing.
+// Query redistribution once for the largest A/B panel. Aligned N panels use
+// the direct copy/broadcast path and need no additional scratch.
 template <typename TA, typename TB>
-void ab_transport_bytes(const DdlaHandle_t& h, char transa, char transb, int m, int n, int nb,
-                        const int* descA, const int* descB,
-                        std::size_t (&transport_a)[2], std::size_t (&transport_b)[2])
+void ab_panel_bytes(const DdlaHandle_t& h, char transa, char transb, int m, int n, int nb,
+                    const int* descA, const int* descB, const int* descC,
+                    std::size_t (&panel_a)[2], std::size_t (&panel_b)[2])
 {
-    transport_a[0] = transport_a[1] = transport_b[0] = transport_b[1] = 0;
-    if (transa != 'N')
-        transport_impl::transport_workspace_size<TA>(h, 'R', transa, nb, m, descA,
-                                                     &transport_a[0], &transport_a[1]);
-    if (transb != 'N')
-        transport_impl::transport_workspace_size<TB>(h, 'C', transb, n, nb, descB,
-                                                     &transport_b[0], &transport_b[1]);
+    pblas::panel_workspace_size<TA>(h,true,transa,transa=='N'?m:nb,transa=='N'?nb:m,
+        descA,descC,&panel_a[0],&panel_a[1]);
+    pblas::panel_workspace_size<TB>(h,false,transb,transb=='N'?nb:n,transb=='N'?n:nb,
+        descB,descC,&panel_b[0],&panel_b[1]);
 }
 
 template <DdlaBackend Backend, typename T, typename TA, typename TB>
@@ -157,9 +153,9 @@ void ab_run(
     const int stages = ab_stages(k, nb, bpg);
 
     // The scratch, in the order pgemm_workspace_size counts it.
-    std::size_t count[3], transport_a[2], transport_b[2];
+    std::size_t count[3], panel_a_bytes[2], panel_b_bytes[2];
     ab_counts(h, transa, transb, m, n, k, descA, descB, descC, panel_width, count);
-    ab_transport_bytes<TA, TB>(h, transa, transb, m, n, nb, descA, descB, transport_a, transport_b);
+    ab_panel_bytes<TA, TB>(h, transa, transb, m, n, nb, descA, descB, descC, panel_a_bytes, panel_b_bytes);
     char* bw = static_cast<char*>(backend_work);
     char* hw = static_cast<char*>(host_work);
     TA* A_temp[2];
@@ -169,10 +165,10 @@ void ab_run(
         B_temp[i] = detail::take<TB>(bw, count[1]);
     }
     TB* const B_blk = detail::take<TB>(bw, count[2]);
-    char* const tr_a = detail::take<char>(bw, transport_a[0]);
-    char* const tr_b = detail::take<char>(bw, transport_b[0]);
-    char* const tr_a_host = detail::take<char>(hw, transport_a[1]);
-    char* const tr_b_host = detail::take<char>(hw, transport_b[1]);
+    char* const tr_a = detail::take<char>(bw, panel_a_bytes[0]);
+    char* const tr_b = detail::take<char>(bw, panel_b_bytes[0]);
+    char* const tr_a_host = detail::take<char>(hw, panel_a_bytes[1]);
+    char* const tr_b_host = detail::take<char>(hw, panel_b_bytes[1]);
     const std::size_t used = static_cast<std::size_t>(bw - static_cast<char*>(backend_work));
     assert(used <= backend_bytes);
     assert(static_cast<std::size_t>(hw - static_cast<char*>(host_work)) <= host_bytes);
@@ -183,7 +179,7 @@ void ab_run(
 
     // Wait out the in-flight panel transport before the local gemm reads it
     // (GPU only: CPU BLAS is synchronous and every MPI call in
-    // transport_block<DdlaBackend::CPU> is blocking).
+    // CPU panel communication is blocking).
     auto sync_panel = [&]() {
         if constexpr (Backend != DdlaBackend::CPU) {
             DDLA_CHECK(ddlaSynchronize(h));
@@ -200,7 +196,7 @@ void ab_run(
         const int cnt = stage.cnt;
         const int kk = stage.kk;
 
-        // Gather the stage's blocks one transport_block call each. The A tile
+        // Gather the stage's blocks one panel copy each. The A tile
         // (sData 'C', transa 'N') is (rows x w) with ld = rows, so it lands
         // straight in the panel at column offset b * w; the B tile (sData 'R',
         // transb 'N') is (w x cols) with ld = w, which only matches the panel
@@ -211,50 +207,18 @@ void ab_run(
             const int g = ks + b * nb;
             const int w = std::min(nb, k - g);
 
-            if (transa == 'N') {
-                transport_impl::transport_run<Backend, TA>(handle,
-                    'C', transa,
-                    m, w,
-                    A, 0, g, descA,
-                    A_temp[temp_buffer] + (std::size_t)b * w * m_loc_A,
-                    tr_a, transport_a[0], tr_a_host, transport_a[1]);
-            } else {
-                transport_impl::transport_run<Backend, TA>(handle,
-                    'R', transa,
-                    w, m,
-                    A, g, 0, descA,
-                    A_temp[temp_buffer],
-                    tr_a, transport_a[0], tr_a_host, transport_a[1]);
-            }
-
-            if (transb == 'N') {
-                if (cnt != 1) {  // multi-block: tile ld w != panel ld kk, stage + repack
-                    transport_impl::transport_run<Backend, TB>(handle,
-                        'R', transb,
-                        w, n,
-                        B, g, 0, descB,
-                        B_blk,
-                        tr_b, transport_b[0], tr_b_host, transport_b[1]);
-                    DDLA_CHECK(ddlaMemcpy2D(h,
-                        B_temp[temp_buffer] + (std::size_t)b * w, (std::size_t)kk * sizeof(TB),
-                        B_blk, (std::size_t)w * sizeof(TB),
-                        (std::size_t)w * sizeof(TB), (std::size_t)n_loc_B));
-                } else {
-                    transport_impl::transport_run<Backend, TB>(handle,
-                        'R', transb,
-                        w, n,
-                        B, g, 0, descB,
-                        B_temp[temp_buffer],
-                        tr_b, transport_b[0], tr_b_host, transport_b[1]);
-                }
-            } else {
-                transport_impl::transport_run<Backend, TB>(handle,
-                    'C', transb,
-                    n, w,
-                    B, 0, g, descB,
-                    B_temp[temp_buffer],
-                    tr_b, transport_b[0], tr_b_host, transport_b[1]);
-            }
+            pblas::panel_run<Backend,TA>(handle,true,transa,
+                transa=='N'?m:w,transa=='N'?w:m,A,transa=='N'?0:g,transa=='N'?g:0,
+                descA,descC,A_temp[temp_buffer]+std::size_t(b)*w*m_loc_C,
+                tr_a,panel_a_bytes[0],tr_a_host,panel_a_bytes[1]);
+            TB* const destination = cnt==1 ? B_temp[temp_buffer] : B_blk;
+            pblas::panel_run<Backend,TB>(handle,false,transb,
+                transb=='N'?w:n,transb=='N'?n:w,B,transb=='N'?g:0,transb=='N'?0:g,
+                descB,descC,destination,tr_b,panel_b_bytes[0],tr_b_host,panel_b_bytes[1]);
+            if (cnt!=1)
+                DDLA_CHECK(ddlaMemcpy2D(h,B_temp[temp_buffer]+std::size_t(b)*w,
+                    std::size_t(kk)*sizeof(TB),B_blk,std::size_t(w)*sizeof(TB),
+                    std::size_t(w)*sizeof(TB),n_loc_C));
         }
     };
 
@@ -266,10 +230,10 @@ void ab_run(
         if (m_loc_C > 0 && n_loc_C > 0) {
             const T gemm_beta = first_gemm ? beta : static_cast<T>(1.0);
             local_gemm_run<Backend, T, TA, TB>(
-                h, transa, 'N',
+                h, 'N', 'N',
                 m_loc_C, n_loc_C, kb,
                 alpha,
-                A_temp[temp_buffer], transa == 'N' ? static_cast<int>(m_loc_C) : kb,
+                A_temp[temp_buffer], m_loc_C,
                 B_temp[temp_buffer], kb,
                 gemm_beta,
                 C, lldC, gemm_work, gemm_bytes);
@@ -380,9 +344,9 @@ void pgemm_workspace_size(
 
     const int nb = ab_block(transa, descA);
     const int bpg = ab_blocks_per_gemm(transa, transb, nb, panel_width);
-    std::size_t count[3], transport_a[2], transport_b[2];
+    std::size_t count[3], panel_a_bytes[2], panel_b_bytes[2];
     ab_counts(h, transa, transb, m, n, k, descA, descB, descC, panel_width, count);
-    ab_transport_bytes<TA, TB>(h, transa, transb, m, n, nb, descA, descB, transport_a, transport_b);
+    ab_panel_bytes<TA, TB>(h, transa, transb, m, n, nb, descA, descB, descC, panel_a_bytes, panel_b_bytes);
     // The local gemm runs a full stage, a shorter last run of whole blocks and the tail block.
     const int m_loc_C = num_loc(m, descC[DDLA_MB_], h->myprow_, descC[DDLA_RSRC_], h->nprows_);
     const int n_loc_C = num_loc(n, descC[DDLA_NB_], h->mypcol_, descC[DDLA_CSRC_], h->npcols_);
@@ -395,9 +359,9 @@ void pgemm_workspace_size(
     }
     *backend_bytes = 2 * (detail::padded_bytes<TA>(count[0]) + detail::padded_bytes<TB>(count[1]))
                    + detail::padded_bytes<TB>(count[2])
-                   + detail::padded_bytes<char>(transport_a[0]) + detail::padded_bytes<char>(transport_b[0])
+                   + detail::padded_bytes<char>(panel_a_bytes[0]) + detail::padded_bytes<char>(panel_b_bytes[0])
                    + gemm_bytes;
-    *host_bytes = detail::padded_bytes<char>(transport_a[1]) + detail::padded_bytes<char>(transport_b[1]);
+    *host_bytes = detail::padded_bytes<char>(panel_a_bytes[1]) + detail::padded_bytes<char>(panel_b_bytes[1]);
 }
 
 // Component 3.
