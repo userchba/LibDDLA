@@ -10,6 +10,8 @@ target_sources(ddla_lib PRIVATE
     pgemm_stationary.cpp
     ptrtrs.cpp
     ptrmm.cpp
+    phemm.cpp
+    psymm.cpp
     ptrtrm.cpp
     plapiv.cpp
     pswap.cpp
@@ -19,10 +21,10 @@ target_sources(ddla_lib PRIVATE
 # Source properties are looked up in the directory of ddla_lib (src/), so set
 # them there explicitly (TARGET_DIRECTORY, CMake >= 3.18).
 if(DDLA_USE_CUDA)
-    set_source_files_properties(pdam.cpp pgeadd.cpp TARGET_DIRECTORY ddla_lib
+    set_source_files_properties(pdam.cpp pgeadd.cpp phemm.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES LANGUAGE CUDA)
 endif()
 if(DDLA_USE_HIP)
-    set_source_files_properties(pdam.cpp pgeadd.cpp TARGET_DIRECTORY ddla_lib
+    set_source_files_properties(pdam.cpp pgeadd.cpp phemm.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES LANGUAGE HIP)
 endif()

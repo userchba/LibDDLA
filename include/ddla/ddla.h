@@ -135,6 +135,89 @@ void ptrmm(
     const T* A, const int* descA, T* B, const int* descB
 );
 
+/**
+ * @brief Distributed Hermitian product: C := alpha*A*B + beta*C (side 'L'),
+ *        or C := alpha*B*A + beta*C (side 'R'). Real types use symmetry.
+ *
+ * Only the selected triangle of A is read; the opposite triangle and the
+ * imaginary diagonal components are never referenced. A and B are unchanged.
+ * C is a full general matrix. Only the leading logical submatrices are used;
+ * descriptor padding is untouched. A has order m (left) or n (right).
+ *
+ * A uses square blocks matching the multiplied dimension of B and C. B/C
+ * block shapes must match; all three source coordinates may differ. C must
+ * not overlap either referenced input. alpha == 0 reads no A/B; beta == 0
+ * reads no old C. Empty output or alpha == 0, beta == 1 is a no-op and permits
+ * null matrix pointers. Otherwise pointers are required where local entries
+ * are referenced. Flags, dimensions and coefficient modes agree collectively.
+ *
+ * @tparam Backend CPU or GPU; must match the handle.
+ * @tparam T float, double, complex<float> or complex<double>.
+ * @param side 'L' or 'R' (case-insensitive).
+ * @param uplo 'U' or 'L' (case-insensitive), the stored triangle of A.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void phemm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
+    const T& alpha, const T* A, const int* descA,
+    const T* B, const int* descB, const T& beta, T* C, const int* descC);
+
+/**
+ * @brief Distributed symmetric product, with the same layout and collective
+ * contract as phemm. Complex symmetry uses transpose, not conjugate transpose;
+ * the diagonal is complex. Only uplo of A is read; C is fully updated.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void psymm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
+    const T& alpha, const T* A, const int* descA,
+    const T* B, const int* descB, const T& beta, T* C, const int* descC);
+
+/**
+ * @brief Distributed symmetric rank-k update of only uplo of C.
+ * C := alpha*A*A^T + beta*C (N), or alpha*A^T*A + beta*C (T).
+ * All descriptors use the same square block size; source coordinates may
+ * differ. Leading n-by-k (N) or k-by-n (T) input and n-by-n output regions
+ * are used. C must not overlap referenced inputs. Opposite triangle and
+ * padding remain untouched. alpha==0 or k==0 reads no inputs; beta==0 reads
+ * no old C. Flags are case-insensitive. Real types also accept C as T;
+ * complex symmetric operations accept N/T only. Validation is collective.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void psyrk(const DdlaHandle_t& handle, char uplo, char trans, int n, int k,
+    const T& alpha, const T* A, const int* descA,
+    const T& beta, T* C, const int* descC);
+
+/**
+ * @brief Symmetric rank-2k update, with psyrk's layout/storage contract.
+ * C := alpha*(A*B^T+B*A^T)+beta*C (N), or
+ * alpha*(A^T*B+B^T*A)+beta*C (T). A and B have the same logical shape.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void psyr2k(const DdlaHandle_t& handle, char uplo, char trans, int n, int k,
+    const T& alpha, const T* A, const int* descA, const T* B, const int* descB,
+    const T& beta, T* C, const int* descC);
+
+/**
+ * @brief Hermitian rank-k update of only uplo of C (complex types).
+ * C := alpha*A*A^H+beta*C (N), or alpha*A^H*A+beta*C (C).
+ * Layout, non-overlap and inactive-input rules are those of psyrk. alpha
+ * and beta are real; imaginary input diagonal components of C are ignored
+ * and the resulting diagonal is real. The opposite triangle is untouched.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void pherk(const DdlaHandle_t& handle, char uplo, char trans, int n, int k,
+    const typename real_type<T>::type& alpha, const T* A, const int* descA,
+    const typename real_type<T>::type& beta, T* C, const int* descC);
+
+/**
+ * @brief Hermitian rank-2k update, with pherk's layout/storage contract.
+ * C := alpha*A*B^H+conj(alpha)*B*A^H+beta*C (N), or
+ * alpha*A^H*B+conj(alpha)*B^H*A+beta*C (C). beta is real.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void pher2k(const DdlaHandle_t& handle, char uplo, char trans, int n, int k,
+    const T& alpha, const T* A, const int* descA, const T* B, const int* descB,
+    const typename real_type<T>::type& beta, T* C, const int* descC);
+
 /** @brief Local symmetric matrix product for real or complex scalars. */
 template <DdlaBackend Backend = default_backend_v, typename T>
 void symm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
