@@ -2,6 +2,7 @@
 # is identical on every backend; only trtrm.cpp, gemm_mixed.cpp and
 # gemm_vbatched.cpp carry device code and switch LANGUAGE under CUDA/HIP.
 target_sources(ddla_lib PRIVATE
+    dgmm.cpp
     gemm.cpp
     gemmt.cpp
     gemm_mixed.cpp
