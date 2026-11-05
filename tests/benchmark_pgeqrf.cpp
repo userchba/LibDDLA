@@ -87,22 +87,24 @@ char bench_uplo()
     return u;
 }
 
-// Backend dispatch (dual builds instantiate both arms; the handle decides).
-// The config header DEFINES DDLA_HAS_* to 0/1: value checks, not defined().
+template <DdlaBackend Backend, typename T>
+void factor_matrix(const DdlaHandle_t& handle, int m, int n,
+                   T* A, const int* desc, T* tau, int& info)
+{
+    if (bench_uplo() == 'L') pgeqlf<Backend, T>(handle, m, n, A, desc, tau, info);
+    else pgeqrf<Backend, T>(handle, m, n, A, desc, tau, info);
+}
+
 template <typename T>
 void call_pgeqrf(const DdlaHandle_t& handle, int m, int n,
-                 T* d_A, const int* desc, T* tau, int& info)
+                 T* A, const int* desc, T* tau, int& info)
 {
 #if DDLA_HAS_GPU
-    if (ddlaGetBackend(handle) == DdlaBackend::CPU)
-        pgeqrf<DdlaBackend::CPU, T>(handle, bench_uplo(), m, n, d_A, desc, tau, info);
+    if (ddlaGetBackend(handle) == DdlaBackend::GPU)
+        factor_matrix<DdlaBackend::GPU, T>(handle, m, n, A, desc, tau, info);
     else
-        pgeqrf<DdlaBackend::GPU, T>(handle, bench_uplo(), m, n, d_A, desc, tau, info);
-#elif DDLA_HAS_GPU
-    pgeqrf<DdlaBackend::GPU, T>(handle, bench_uplo(), m, n, d_A, desc, tau, info);
-#else
-    pgeqrf<DdlaBackend::CPU, T>(handle, bench_uplo(), m, n, d_A, desc, tau, info);
 #endif
+        factor_matrix<DdlaBackend::CPU, T>(handle, m, n, A, desc, tau, info);
 }
 
 const char* backend_name(const DdlaHandle_t& handle)

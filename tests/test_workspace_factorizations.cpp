@@ -107,7 +107,7 @@ template<DdlaBackend B,class T> void cases(DdlaHandle_t h)
         for(bool inplace:{false,true}){
             Env policy("DDLA_QR_PANEL",inplace?"inplace":"gather");const int ntau=std::max(1,num_loc(n,nb,h->mypcol_,da[DDLA_CSRC_],h->npcols_));std::vector<T> tau(ntau,scalar<T>(-19)),tauref=tau;
             qr_impl::pgeqrf_check<B>(h,uplo,n,n,da,tau.data());workspace_test::Scope qs(true);std::size_t bb=0,hb=0;qr_impl::pgeqrf_workspace_size<T>(h,uplo,inplace,n,n,a.ptr,da,a.ptr,&bb,&hb);query_clean(h,qs.finish());Guarded work(h,bb,hb);
-            for(int repeat=0;repeat<2;++repeat){upload(h,a.ptr,initial);upload(h,ref.ptr,initial);std::fill(tau.begin(),tau.end(),scalar<T>(-19));std::fill(tauref.begin(),tauref.end(),scalar<T>(-19));int info=0;pgeqrf<B,T>(h,uplo,n,n,ref.ptr,da,tauref.data(),info);workspace_test::Scope run;qr_impl::pgeqrf_run<B,T>(h,uplo,inplace,n,n,a.ptr,da,tau.data(),work.backend(),bb,work.host(),hb);run_clean(h,run.finish());same(h,download(h,ref.ptr,initial.size()),download(h,a.ptr,initial.size()));same(h,tauref,tau);work.verify();}
+            for(int repeat=0;repeat<2;++repeat){upload(h,a.ptr,initial);upload(h,ref.ptr,initial);std::fill(tau.begin(),tau.end(),scalar<T>(-19));std::fill(tauref.begin(),tauref.end(),scalar<T>(-19));int info=0;if(uplo=='L')pgeqlf<B,T>(h,n,n,ref.ptr,da,tauref.data(),info);else pgeqrf<B,T>(h,n,n,ref.ptr,da,tauref.data(),info);workspace_test::Scope run;qr_impl::pgeqrf_run<B,T>(h,uplo,inplace,n,n,a.ptr,da,tau.data(),work.backend(),bb,work.host(),hb);run_clean(h,run.finish());same(h,download(h,ref.ptr,initial.size()),download(h,a.ptr,initial.size()));same(h,tauref,tau);work.verify();}
         }
     }
     // RNG needs a prepared generator, with no empty workspace component.

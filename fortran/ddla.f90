@@ -56,28 +56,28 @@ module ddla
      ddla_s_pgetrs_bpiv, ddla_d_pgetrs_bpiv, ddla_c_pgetrs_bpiv, ddla_z_pgetrs_bpiv, &
      ddla_s_pgesv_bpiv, ddla_d_pgesv_bpiv, ddla_c_pgesv_bpiv, ddla_z_pgesv_bpiv, ddla_s_pgemm, &
      ddla_d_pgemm, ddla_c_pgemm, ddla_z_pgemm, ddla_s_pgeqrf, ddla_d_pgeqrf, ddla_c_pgeqrf, &
-     ddla_z_pgeqrf, ddla_s_pgeadd, ddla_d_pgeadd, ddla_c_pgeadd, ddla_z_pgeadd, ddla_s_pdam, &
-     ddla_d_pdam, ddla_c_pdam, ddla_z_pdam, ddla_s_ppotrf, ddla_d_ppotrf, ddla_c_ppotrf, &
-     ddla_z_ppotrf, ddla_s_potrf_bottom_right, ddla_d_potrf_bottom_right, &
-     ddla_c_potrf_bottom_right, ddla_z_potrf_bottom_right, ddla_s_ppotrf_bottom_right, &
-     ddla_d_ppotrf_bottom_right, ddla_c_ppotrf_bottom_right, ddla_z_ppotrf_bottom_right, &
-     ddla_s_ppotrs, ddla_d_ppotrs, ddla_c_ppotrs, ddla_z_ppotrs, ddla_s_pposv, ddla_d_pposv, &
-     ddla_c_pposv, ddla_z_pposv, ddla_s_gemm, ddla_d_gemm, ddla_c_gemm, ddla_z_gemm, ddla_s_gemv, &
-     ddla_d_gemv, ddla_c_gemv, ddla_z_gemv, ddla_s_trmv, ddla_d_trmv, ddla_c_trmv, ddla_z_trmv, &
-     ddla_s_trsm, ddla_d_trsm, ddla_c_trsm, ddla_z_trsm, ddla_s_trmm, ddla_d_trmm, ddla_c_trmm, &
-     ddla_z_trmm, ddla_s_syrk, ddla_d_syrk, ddla_s_trtrm, ddla_d_trtrm, ddla_c_trtrm, ddla_z_trtrm, &
-     ddla_s_geam, ddla_d_geam, ddla_c_geam, ddla_z_geam, ddla_s_herk, ddla_d_herk, ddla_c_herk, &
-     ddla_z_herk, ddla_s_her2k, ddla_d_her2k, ddla_c_her2k, ddla_z_her2k, ddla_s_hemv, ddla_d_hemv, &
-     ddla_c_hemv, ddla_z_hemv, ddla_s_hemm, ddla_d_hemm, ddla_c_hemm, ddla_z_hemm, ddla_s_her2, &
-     ddla_d_her2, ddla_c_her2, ddla_z_her2, ddla_s_scal, ddla_d_scal, ddla_c_scal, ddla_z_scal, &
-     ddla_s_axpy, ddla_d_axpy, ddla_c_axpy, ddla_z_axpy, ddla_s_swap, ddla_d_swap, ddla_c_swap, &
-     ddla_z_swap, ddla_s_geru, ddla_d_geru, ddla_c_geru, ddla_z_geru, ddla_s_gerc, ddla_d_gerc, &
-     ddla_c_gerc, ddla_z_gerc, ddla_s_iamax, ddla_d_iamax, ddla_c_iamax, ddla_z_iamax, ddla_s_nrm2, &
-     ddla_d_nrm2, ddla_c_nrm2, ddla_z_nrm2, ddla_s_dotc, ddla_d_dotc, ddla_c_dotc, ddla_z_dotc, &
-     ddla_s_getrf, ddla_d_getrf, ddla_c_getrf, ddla_z_getrf, ddla_s_potrf, ddla_d_potrf, &
-     ddla_c_potrf, ddla_z_potrf, ddla_s_laswp, ddla_d_laswp, ddla_c_laswp, ddla_z_laswp, &
-     ddla_s_geqrf, ddla_d_geqrf, ddla_c_geqrf, ddla_z_geqrf, ddla_s_larft, ddla_d_larft, &
-     ddla_c_larft, ddla_z_larft
+     ddla_z_pgeqrf, ddla_s_pgeqlf, ddla_d_pgeqlf, ddla_c_pgeqlf, ddla_z_pgeqlf, ddla_s_pgeadd, &
+     ddla_d_pgeadd, ddla_c_pgeadd, ddla_z_pgeadd, ddla_s_pdam, ddla_d_pdam, ddla_c_pdam, &
+     ddla_z_pdam, ddla_s_ppotrf, ddla_d_ppotrf, ddla_c_ppotrf, ddla_z_ppotrf, &
+     ddla_s_potrf_bottom_right, ddla_d_potrf_bottom_right, ddla_c_potrf_bottom_right, &
+     ddla_z_potrf_bottom_right, ddla_s_ppotrf_bottom_right, ddla_d_ppotrf_bottom_right, &
+     ddla_c_ppotrf_bottom_right, ddla_z_ppotrf_bottom_right, ddla_s_ppotrs, ddla_d_ppotrs, &
+     ddla_c_ppotrs, ddla_z_ppotrs, ddla_s_pposv, ddla_d_pposv, ddla_c_pposv, ddla_z_pposv, &
+     ddla_s_gemm, ddla_d_gemm, ddla_c_gemm, ddla_z_gemm, ddla_s_gemv, ddla_d_gemv, ddla_c_gemv, &
+     ddla_z_gemv, ddla_s_trmv, ddla_d_trmv, ddla_c_trmv, ddla_z_trmv, ddla_s_trsm, ddla_d_trsm, &
+     ddla_c_trsm, ddla_z_trsm, ddla_s_trmm, ddla_d_trmm, ddla_c_trmm, ddla_z_trmm, ddla_s_syrk, &
+     ddla_d_syrk, ddla_s_trtrm, ddla_d_trtrm, ddla_c_trtrm, ddla_z_trtrm, ddla_s_geam, ddla_d_geam, &
+     ddla_c_geam, ddla_z_geam, ddla_s_herk, ddla_d_herk, ddla_c_herk, ddla_z_herk, ddla_s_her2k, &
+     ddla_d_her2k, ddla_c_her2k, ddla_z_her2k, ddla_s_hemv, ddla_d_hemv, ddla_c_hemv, ddla_z_hemv, &
+     ddla_s_hemm, ddla_d_hemm, ddla_c_hemm, ddla_z_hemm, ddla_s_her2, ddla_d_her2, ddla_c_her2, &
+     ddla_z_her2, ddla_s_scal, ddla_d_scal, ddla_c_scal, ddla_z_scal, ddla_s_axpy, ddla_d_axpy, &
+     ddla_c_axpy, ddla_z_axpy, ddla_s_swap, ddla_d_swap, ddla_c_swap, ddla_z_swap, ddla_s_geru, &
+     ddla_d_geru, ddla_c_geru, ddla_z_geru, ddla_s_gerc, ddla_d_gerc, ddla_c_gerc, ddla_z_gerc, &
+     ddla_s_iamax, ddla_d_iamax, ddla_c_iamax, ddla_z_iamax, ddla_s_nrm2, ddla_d_nrm2, ddla_c_nrm2, &
+     ddla_z_nrm2, ddla_s_dotc, ddla_d_dotc, ddla_c_dotc, ddla_z_dotc, ddla_s_getrf, ddla_d_getrf, &
+     ddla_c_getrf, ddla_z_getrf, ddla_s_potrf, ddla_d_potrf, ddla_c_potrf, ddla_z_potrf, &
+     ddla_s_laswp, ddla_d_laswp, ddla_c_laswp, ddla_z_laswp, ddla_s_geqrf, ddla_d_geqrf, &
+     ddla_c_geqrf, ddla_z_geqrf, ddla_s_larft, ddla_d_larft, ddla_c_larft, ddla_z_larft
 
   ! Backend ids for ddla_init_backend / ddla_backend_available / ddla_get_backend.
   integer(c_int), parameter :: DDLA_BACKEND_CPU = 0_c_int
@@ -1185,13 +1185,12 @@ module ddla
       integer(c_int), intent(in) :: descc(9)
     end function ddla_z_pgemm
 
-    function ddla_s_pgeqrf(handle, uplo, m, n, a, desca, tau, info) &
+    function ddla_s_pgeqrf(handle, m, n, a, desca, tau, info) &
         result(status) bind(C, name="ddla_s_pgeqrf")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
       integer(c_int) :: status
       type(c_ptr), value :: handle
-      character(kind=c_char), value :: uplo
       integer(c_int), value :: m
       integer(c_int), value :: n
       type(c_ptr), value :: a
@@ -1200,13 +1199,12 @@ module ddla
       integer(c_int), intent(out) :: info
     end function ddla_s_pgeqrf
 
-    function ddla_d_pgeqrf(handle, uplo, m, n, a, desca, tau, info) &
+    function ddla_d_pgeqrf(handle, m, n, a, desca, tau, info) &
         result(status) bind(C, name="ddla_d_pgeqrf")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
       integer(c_int) :: status
       type(c_ptr), value :: handle
-      character(kind=c_char), value :: uplo
       integer(c_int), value :: m
       integer(c_int), value :: n
       type(c_ptr), value :: a
@@ -1215,13 +1213,12 @@ module ddla
       integer(c_int), intent(out) :: info
     end function ddla_d_pgeqrf
 
-    function ddla_c_pgeqrf(handle, uplo, m, n, a, desca, tau, info) &
+    function ddla_c_pgeqrf(handle, m, n, a, desca, tau, info) &
         result(status) bind(C, name="ddla_c_pgeqrf")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
       integer(c_int) :: status
       type(c_ptr), value :: handle
-      character(kind=c_char), value :: uplo
       integer(c_int), value :: m
       integer(c_int), value :: n
       type(c_ptr), value :: a
@@ -1230,13 +1227,12 @@ module ddla
       integer(c_int), intent(out) :: info
     end function ddla_c_pgeqrf
 
-    function ddla_z_pgeqrf(handle, uplo, m, n, a, desca, tau, info) &
+    function ddla_z_pgeqrf(handle, m, n, a, desca, tau, info) &
         result(status) bind(C, name="ddla_z_pgeqrf")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
       integer(c_int) :: status
       type(c_ptr), value :: handle
-      character(kind=c_char), value :: uplo
       integer(c_int), value :: m
       integer(c_int), value :: n
       type(c_ptr), value :: a
@@ -1244,6 +1240,62 @@ module ddla
       complex(c_double), intent(out) :: tau(*)
       integer(c_int), intent(out) :: info
     end function ddla_z_pgeqrf
+
+    function ddla_s_pgeqlf(handle, m, n, a, desca, tau, info) &
+        result(status) bind(C, name="ddla_s_pgeqlf")
+      import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
+      implicit none
+      integer(c_int) :: status
+      type(c_ptr), value :: handle
+      integer(c_int), value :: m
+      integer(c_int), value :: n
+      type(c_ptr), value :: a
+      integer(c_int), intent(in) :: desca(9)
+      real(c_float), intent(out) :: tau(*)
+      integer(c_int), intent(out) :: info
+    end function ddla_s_pgeqlf
+
+    function ddla_d_pgeqlf(handle, m, n, a, desca, tau, info) &
+        result(status) bind(C, name="ddla_d_pgeqlf")
+      import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
+      implicit none
+      integer(c_int) :: status
+      type(c_ptr), value :: handle
+      integer(c_int), value :: m
+      integer(c_int), value :: n
+      type(c_ptr), value :: a
+      integer(c_int), intent(in) :: desca(9)
+      real(c_double), intent(out) :: tau(*)
+      integer(c_int), intent(out) :: info
+    end function ddla_d_pgeqlf
+
+    function ddla_c_pgeqlf(handle, m, n, a, desca, tau, info) &
+        result(status) bind(C, name="ddla_c_pgeqlf")
+      import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
+      implicit none
+      integer(c_int) :: status
+      type(c_ptr), value :: handle
+      integer(c_int), value :: m
+      integer(c_int), value :: n
+      type(c_ptr), value :: a
+      integer(c_int), intent(in) :: desca(9)
+      complex(c_float), intent(out) :: tau(*)
+      integer(c_int), intent(out) :: info
+    end function ddla_c_pgeqlf
+
+    function ddla_z_pgeqlf(handle, m, n, a, desca, tau, info) &
+        result(status) bind(C, name="ddla_z_pgeqlf")
+      import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
+      implicit none
+      integer(c_int) :: status
+      type(c_ptr), value :: handle
+      integer(c_int), value :: m
+      integer(c_int), value :: n
+      type(c_ptr), value :: a
+      integer(c_int), intent(in) :: desca(9)
+      complex(c_double), intent(out) :: tau(*)
+      integer(c_int), intent(out) :: info
+    end function ddla_z_pgeqlf
 
     function ddla_s_pgeadd(handle, transa, transb, m, n, alpha, a, ia, ja, desca, beta, b, ib, jb, descb, c, ic, jc, descc) &
         result(status) bind(C, name="ddla_s_pgeadd")

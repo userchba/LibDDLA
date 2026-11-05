@@ -19,10 +19,9 @@
 
 // ---------------------------------------------------------------------------
 // Isolation test for the distributed Householder QL factorization, i.e.
-// pgeqrf with uplo = 'L' (ScaLAPACK PxGEQLF semantics, A = Q L), plus the uplo
-// dispatch itself (flag validation, case-insensitivity).
+// pgeqlf (ScaLAPACK PxGEQLF semantics, A = Q L), plus distinct QR/QL entries.
 //
-// The factored block is A(0:m, ja:ja+n) with ja = 0 (pgeqrf factors the leading
+// The factored block is A(0:m, ja:ja+n) with ja = 0 (pgeqlf factors the leading
 // block).  For every case:
 //   1. bitwise contract: tau replicated identically across process rows,
 //      sentinel-preserved tau entries of columns that carry no reflector,
@@ -299,7 +298,7 @@ void call_ql(const ddla::DdlaHandle_t& handle, const CaseGeom& g,
 {
     auto go = [&](auto backend_tag) {
         constexpr DdlaBackend B = decltype(backend_tag)::value;
-        ddla::pgeqrf<B, T>(handle, 'L', g.m, g.n, d_A, desc, tau, info);
+        ddla::pgeqlf<B, T>(handle, g.m, g.n, d_A, desc, tau, info);
     };
 #if DDLA_HAS_GPU
     if (ddlaGetBackend(handle) == DdlaBackend::CPU) go(std::integral_constant<DdlaBackend, DdlaBackend::CPU>{});
@@ -627,15 +626,14 @@ double bits_differ(const RunOut<T>& x, const RunOut<T>& y)
     return d;
 }
 
-// The uplo dispatch: invalid flags throw (before any collective), lowercase equals uppercase bit for bit,
-// and 'U' really differs from 'L'.
+// The two public entries produce distinct factorizations and repeat bit for bit.
 template <typename T>
-void check_uplo_dispatch(const ddla::DdlaHandle_t& handle)
+void check_factorization_entries(const ddla::DdlaHandle_t& handle)
 {
     int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
     ddlaGetGridDims(handle, nprows, npcols);
     ddlaGetGridCoords(handle, myprow, mypcol);
-    const std::string tag = std::string(type_tag<T>()) + " uplo-dispatch" + g_case_tag_suffix;
+    const std::string tag = std::string(type_tag<T>()) + " QR/QL entries" + g_case_tag_suffix;
     const int geoms[][4] = {{37, 6, 5, 8}, {41, 8, 3, 8}, {23, 7, 4, 16}};   // m, n, mb, nb
     for (const auto& gm : geoms) {
         const int m = gm[0], n = gm[1], mb = gm[2], nb = gm[3];
@@ -644,34 +642,29 @@ void check_uplo_dispatch(const ddla::DdlaHandle_t& handle)
         const CaseGeom g{m, n, 0, mb, nb, 0, 0, m, n, FILL_HASH};
         const int ntau = ddla::num_loc(n, nb, mypcol, 0, npcols);
         auto h_A = make_local<T>(handle, desc, [&](int i, int j) { return case_value<T>(g, i, j); });
-        auto full = [&](char u) {
+        auto full = [&](bool ql) {
             return run_call<T>(handle, h_A, ntau, [&](T* dA, T* tau, int& info) {
                 on_backend(handle, [&](auto bt) {
                     constexpr DdlaBackend B = decltype(bt)::value;
-                    ddla::pgeqrf<B, T>(handle, u, m, n, dA, desc, tau, info);
+                    if (ql) ddla::pgeqlf<B, T>(handle, m, n, dA, desc, tau, info);
+                    else ddla::pgeqrf<B, T>(handle, m, n, dA, desc, tau, info);
                 });
             });
         };
         const std::string t2 = tag + " " + std::to_string(m) + "x" + std::to_string(n) + "(" + std::to_string(mb)
                              + "," + std::to_string(nb) + ")";
-        double missing_throw = 0.0;
-        for (const char bad : {'X', ' ', 'N', 'A'})
-            if (!full(bad).threw) missing_throw += 1.0;
-        require_close(handle, t2 + " invalid-uplo-throws", missing_throw, 0.0);
-        const RunOut<T> qU = full('U'), qL = full('L');
-        require_close(handle, t2 + " valid-uplo-does-not-throw", (qU.threw || qL.threw) ? 1.0 : 0.0, 0.0);
-        require_close(handle, t2 + " lowercase-u-pgeqrf", bits_differ(qU, full('u')), 0.0);
-        require_close(handle, t2 + " lowercase-l-pgeqrf", bits_differ(qL, full('l')), 0.0);
-        // 'U' and 'L' must really differ (a dispatch that ignored uplo would pass the checks above).
-        // Judged over the whole grid: ranks that own no column of this narrow matrix hold empty data,
-        // where both results are trivially identical.
+        const RunOut<T> qU = full(false), qL = full(true);
+        require_close(handle, t2 + " QR/QL calls succeed", (qU.threw || qL.threw) ? 1.0 : 0.0, 0.0);
+        require_close(handle, t2 + " pgeqrf repeat", bits_differ(qU, full(false)), 0.0);
+        require_close(handle, t2 + " pgeqlf repeat", bits_differ(qL, full(true)), 0.0);
+        // Empty local pieces can be identical, so compare over the whole grid.
         double differs = bits_differ(qU, qL) > 0.0 ? 1.0 : 0.0;
         MPI_Allreduce(MPI_IN_PLACE, &differs, 1, MPI_DOUBLE, MPI_MAX, ddlaGetCommunicator(handle));
-        require_close(handle, t2 + " U-differs-from-L", differs > 0.0 ? 0.0 : 1.0, 0.0);
+        require_close(handle, t2 + " QR-differs-from-QL", differs > 0.0 ? 0.0 : 1.0, 0.0);
     }
 }
 
-// 1x1 grid, pgeqrf('L'): narrow and wide panels.  The panel is one block column, so the panel widths come
+// 1x1 grid, pgeqlf: narrow and wide panels.  The panel is one block column, so the panel widths come
 // from the descriptor nb (2 .. 256 below); every case runs the full run_case checks (LAPACK comparison,
 // A = Q L, orthogonality, bitwise repeat).
 template <typename T>
@@ -740,7 +733,7 @@ void check_pgeqlf(const ddla::DdlaHandle_t& handle)
     for (const CaseGeom& g : cases)
         run_case<T>(handle, g, std::string(type_tag<T>()) + " " + geom_tag(g) + fill_tag(g.fill)
                                    + g_case_tag_suffix);
-    check_uplo_dispatch<T>(handle);
+    check_factorization_entries<T>(handle);
     check_ql_1x1<T>(handle);
 }
 

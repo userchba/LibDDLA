@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
-// Distributed Householder QR (uplo = 'U', ScaLAPACK PxGEQRF semantics) and QL
-// (uplo = 'L', PxGEQLF) factorization -- ONE implementation, see the end of this
+// Distributed Householder QR (pgeqrf, ScaLAPACK PxGEQRF) and QL
+// (pgeqlf, PxGEQLF) factorization -- ONE implementation, see the end of this
 // header for the source layout.  The description below is written for QR; QL is
 // the same machinery run right to left.  Classic right-looking structure, the same
 // loop on every grid (a 1x1 grid included):
@@ -59,7 +59,7 @@
 //
 // Source layout: this file holds the shared block driver qr_impl::qr_block_run
 // (panel -> Row broadcast -> update) and its scratch size, plan / panel list, and
-// the public pgeqrf entry (checks, panel variant, scratch, driver, tau copy-out).
+// the public pgeqrf / pgeqlf entries (checks, scratch, driver, tau copy-out).
 // Every panel is one block column of the descriptor or the part inside the
 // reflector range.  Its gather/scatter stays on the owner column's communicator;
 // a wider panel on a 1x1 grid is obtained by passing a larger descriptor nb.
@@ -451,13 +451,15 @@ bool pgeqrf_check(const DdlaHandle_t& handle, char uplo, int m, int n, const int
 {
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "GPU pgeqrf is not available in this LibDDLA build");
-    return detail::agree_check(handle, "pgeqrf", [&](detail::Agree& agree) {
+    const char* name = uplo == 'L' || uplo == 'l' ? "pgeqlf" : "pgeqrf";
+    return detail::agree_check(handle, name, [&](detail::Agree& agree) {
         if (handle == nullptr)
-            throw std::runtime_error("pgeqrf: null handle");
-        uplo = normalize_uplo(uplo, "pgeqrf");
+            throw std::runtime_error(std::string(name) + ": null handle");
+        uplo = normalize_uplo(uplo, name);
+        agree.mode("QR/QL factorization", int(uplo));
         if (ddlaGetBackend(handle) != Backend)
-            throw std::runtime_error("pgeqrf: template backend does not match handle backend");
-        qr_check_args(handle, descA, m, n, /*ja=*/0, "pgeqrf");
+            throw std::runtime_error(std::string(name) + ": template backend does not match handle backend");
+        qr_check_args(handle, descA, m, n, /*ja=*/0, name);
         const QrPlan p = qr_geometry(handle, descA, uplo, m, n, /*ja=*/0);
         const int k = p.jr_hi - p.jr_lo;   // min(m, n) reflectors
         // Ranks that own no reflector column never write tau, so a caller sizing tau as
@@ -465,7 +467,7 @@ bool pgeqrf_check(const DdlaHandle_t& handle, char uplo, int m, int n, const int
         const int lo = num_loc(p.jr_lo, p.nb, p.mypcol, p.csrc, p.npcols);
         const int hi = num_loc(p.jr_hi, p.nb, p.mypcol, p.csrc, p.npcols);
         if (k > 0 && tau == nullptr && hi > lo)
-            throw std::runtime_error("pgeqrf: null tau array");
+            throw std::runtime_error(std::string(name) + ": null tau array");
         bool inplace = false;
         if (k != 0) {
             // The panel variant (DDLA_QR_PANEL).  Every rank must run the same collectives.
@@ -525,8 +527,10 @@ void pgeqrf_run(const DdlaHandle_t& handle, char uplo, bool inplace, int m, int 
 
 } // namespace qr_impl
 
+namespace {
+
 template <DdlaBackend Backend, typename T>
-void pgeqrf(
+void factorize(
     const DdlaHandle_t& handle, char uplo,
     int m, int n,
     T* A, const int* descA,
@@ -536,7 +540,6 @@ void pgeqrf(
     info = 0;
     const bool inplace = qr_impl::pgeqrf_check<Backend>(handle, uplo, m, n, descA, tau);
     if (m == 0 || n == 0) return;
-    uplo = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo)));
     std::size_t backend_bytes = 0, host_bytes = 0;
     qr_impl::pgeqrf_workspace_size<T>(handle, uplo, inplace, m, n, A, descA, tau, &backend_bytes, &host_bytes);
     vector<char> backend_work(handle, backend_bytes);
@@ -545,10 +548,27 @@ void pgeqrf(
                                     backend_work.data(), backend_bytes, host_work.data(), host_bytes);
 }
 
+} // namespace
+
+template <DdlaBackend Backend, typename T>
+void pgeqrf(const DdlaHandle_t& handle, int m, int n,
+            T* A, const int* descA, T* tau, int& info)
+{
+    factorize<Backend, T>(handle, 'U', m, n, A, descA, tau, info);
+}
+
+template <DdlaBackend Backend, typename T>
+void pgeqlf(const DdlaHandle_t& handle, int m, int n,
+            T* A, const int* descA, T* tau, int& info)
+{
+    factorize<Backend, T>(handle, 'L', m, n, A, descA, tau, info);
+}
+
 #define INSTANTIATE_PGEQRF(BACKEND, TYPE)                                          \
     template void pgeqrf<BACKEND, TYPE>(                                           \
-        const DdlaHandle_t&, char, int, int, TYPE*,           \
-        const int*, TYPE*, int&);                                                  \
+        const DdlaHandle_t&, int, int, TYPE*, const int*, TYPE*, int&);             \
+    template void pgeqlf<BACKEND, TYPE>(                                           \
+        const DdlaHandle_t&, int, int, TYPE*, const int*, TYPE*, int&);                                                  \
     template void qr_impl::pgeqrf_run<BACKEND, TYPE>(                              \
         const DdlaHandle_t&, char, bool, int, int, TYPE*,          \
         const int*, TYPE*, void*, std::size_t, void*, std::size_t)

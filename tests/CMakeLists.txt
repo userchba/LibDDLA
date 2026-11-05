@@ -227,7 +227,7 @@ if(TARGET test_api_grid_pgeqrf)
     set_tests_properties(test_api_grid_pgeqrf_mpi PROPERTIES
         ENVIRONMENT "GLIBC_TUNABLES=glibc.malloc.tcache_count=0")
 endif()
-# QL factorization (pgeqrf with uplo = 'L') and the uplo dispatch, same
+# QL factorization (pgeqlf) and the distinct QR/QL public entries, same
 # bitwise-repeat poisoning requirement as the pgeqrf grid test.
 add_test_executable(test_api_grid_pgeqrf_ql)
 if(TARGET test_api_grid_pgeqrf_ql)

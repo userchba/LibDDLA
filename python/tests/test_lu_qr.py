@@ -40,6 +40,28 @@ class TestLuQr(unittest.TestCase):
         self.assertEqual(len(tau), min(m, n))
         self.assertTrue(np.all(np.isfinite(tau)))
 
+    def test_pgeqlf(self):
+        rng = np.random.default_rng(71)
+        for dtype in (np.float32, np.float64, np.complex64, np.complex128):
+            for m, n in ((9, 5), (5, 9)):
+                with self.subTest(dtype=dtype, m=m, n=n):
+                    original = rng.standard_normal((m, n))
+                    if np.issubdtype(dtype, np.complexfloating):
+                        original = original + 1j * rng.standard_normal((m, n))
+                    original = original.astype(dtype)
+                    A = ddla.DistributedMatrix.from_global_matrix(self.handle, original, mb=2, nb=2)
+                    factored, tau, info = ddla.pgeqlf(A)
+                    self.assertEqual(info, 0)
+                    self.assertEqual(len(tau), A.n_loc)
+                    self.assertTrue(np.all(np.isfinite(tau)))
+                    result = factored.to_global_matrix(root=0)
+                    if self.handle.rank == 0:
+                        lower = np.tril(result, k=n-m)
+                        eps = np.finfo(np.empty((), dtype=dtype).real.dtype).eps
+                        np.testing.assert_allclose(lower.conj().T @ lower,
+                                                   original.conj().T @ original,
+                                                   rtol=100*m*eps, atol=100*m*eps)
+
     def test_pgeadd_and_pdam(self):
         np.random.seed(69)
         n = 20
