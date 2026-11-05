@@ -507,3 +507,13 @@ target_include_directories(test_gemmt_batched PRIVATE ${PROJECT_SOURCE_DIR}/src)
 
 add_test_executable(test_dgmm 1)
 target_include_directories(test_dgmm PRIVATE ${PROJECT_SOURCE_DIR}/src)
+
+# Hermitian products with selected-triangle output and reusable workspace.
+add_test_executable(test_hemmt 1)
+target_include_directories(test_hemmt PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(test_hemmt PRIVATE ${CMAKE_DL_LIBS})
+if(TARGET workspace_trace)
+    add_dependencies(test_hemmt workspace_trace)
+    set_tests_properties(test_hemmt_mpi PROPERTIES ENVIRONMENT
+        "LD_PRELOAD=$<TARGET_FILE:workspace_trace>;DDLA_WORKSPACE_TRACE_REQUIRED=1;OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+endif()

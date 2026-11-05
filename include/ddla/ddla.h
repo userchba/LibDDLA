@@ -162,6 +162,24 @@ void phemm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
     const T* B, const int* descB, const T& beta, T* C, const int* descC);
 
 /**
+ * @brief Hermitian product updating one triangle of a general square C.
+ * C(uploC) := (alpha*A*B + beta*C)(uploC) for side L, or
+ * (alpha*B*A + beta*C)(uploC) for side R. uploA selects the stored
+ * Hermitian triangle of A. Its complex imaginary diagonal is ignored.
+ * B and C are general matrices, and complex C diagonals are unrestricted.
+ * Only the leading n-by-n regions are used. All descriptors use matching
+ * square blocks. Source coordinates may differ and the grid may be rectangular.
+ * Opposite C triangle, padding and both inputs remain untouched. alpha=0
+ * reads no A/B, beta=0 reads no old C, and n=0 or alpha=0,beta=1 is a no-op.
+ * Flags are case-insensitive. Four real/complex scalar types are supported.
+ * All ranks call collectively and validation precedes matrix communication.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void phemmt(const DdlaHandle_t& handle,char side,char uploA,char uploC,int n,
+    const T& alpha,const T* A,const int* descA,const T* B,const int* descB,
+    const T& beta,T* C,const int* descC);
+
+/**
  * @brief Distributed symmetric product, with the same layout and collective
  * contract as phemm. Complex symmetry uses transpose, not conjugate transpose;
  * the diagonal is complex. Only uplo of A is read; C is fully updated.
@@ -1207,6 +1225,18 @@ void hemm(
     const T* B, int ldb,
     const T& beta,
     T* C, int ldc);
+
+/**
+ * @brief Local HEMM with only uploC of a general n-by-n C updated.
+ * Same input/output triangle and coefficient semantics as phemmt. A/B/C
+ * use column-major backend memory with leading dimensions at least max(1,n).
+ * Real scalar types use symmetric A. C must be disjoint from A/B. The call
+ * performs no rank communication. Temporary storage holds one bounded input
+ * panel and diagonal GEMMT scratch. Private check/query/run components allow reuse.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void hemmt(const DdlaHandle_t& handle,char side,char uploA,char uploC,int n,
+    const T& alpha,const T* A,int lda,const T* B,int ldb,const T& beta,T* C,int ldc);
 
 /**
  * @brief Hermitian rank-2 update: A := alpha*x*y**H + conj(alpha)*y*x**H + A.

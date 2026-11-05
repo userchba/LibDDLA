@@ -5,6 +5,7 @@
 #include "BLAS/blas_impl.h"
 #include "BLAS/gemmt_impl.h"
 #include "ddla_stream.h"
+#include "pblas_workspace.h"
 #include "plan_util.h"
 #include <algorithm>
 #include <cassert>
@@ -39,7 +40,8 @@ void output_tiles(const DdlaHandle_t& h,char uplo,int n,
     const int pr=h->nprows_,pc=h->npcols_;
     const int rs=dc[DDLA_RSRC_],cs=dc[DDLA_CSRC_];
     const int mr=num_loc(n,nb,r,rs,pr),nc=num_loc(n,nb,c,cs,pc);
-    const int block=std::max(nb,(512/nb)*nb);
+    const int tile=h->backend==DdlaBackend::CPU ? 256 : 512;
+    const int block=std::max(nb,(tile/nb)*nb);
     const bool upper_triangle=uplo=='U';
     for (int column=0;column<nc;) {
         const int columns=std::min(block,nc-column);
@@ -132,27 +134,35 @@ void workspace_size(const DdlaHandle_t& h,char uplo,int n,int k,int full,const i
 {
     *batch_bytes_out=*host_bytes=*triangle_bytes=0;
     if (n==0 || k==0) return;
-    if (h->backend==DdlaBackend::GPU) {
-        batch_bytes<T>(h,uplo,n,k,full,dc,*batch_bytes_out,*host_bytes);
-        std::size_t diagonals=0;
-        const std::size_t leaf=std::min(dc[DDLA_MB_],128);
-        diagonal_tiles(h,n,dc,[&](int,int,int width) {diagonals+=(width+leaf-1)/leaf;});
-        *triangle_bytes=detail::padded_bytes<T>(diagonals*leaf*leaf)
-            +detail::padded_bytes<T*>(diagonals)+detail::padded_bytes<int>(diagonals);
-    } else {
-        blas_impl::gemmt_workspace_size<T>(h,'N','N',std::min(n,dc[DDLA_MB_]),
-            std::min(k,full),triangle_bytes);
-    }
+    batch_bytes<T>(h,uplo,n,k,full,dc,*batch_bytes_out,*host_bytes);
+    std::size_t diagonals=0;
+    const std::size_t leaf=std::min(dc[DDLA_MB_],128);
+    diagonal_tiles(h,n,dc,[&](int,int,int width) {diagonals+=(width+leaf-1)/leaf;});
+    *triangle_bytes=detail::padded_bytes<T>(diagonals*leaf*leaf)
+        +detail::padded_bytes<T*>(diagonals)+detail::padded_bytes<int>(diagonals);
 }
 
-// Batch selected output rectangles and temporary diagonal blocks. The
-// communicated panels stay fixed in storage while each contraction is consumed.
+// Consume prepared panels with the caller's CPU schedule or GPU batching.
+// Batched products share the handle's thread budget on CPU; all communicated
+// panels keep stable addresses while each contraction is consumed.
 template <DdlaBackend Backend, typename T, typename Load>
 void run(const DdlaHandle_t& h, char uplo, int n, int k, int full,
     const T& alpha, const T& beta, T* C, const int* dc,
     const Load& load, T* a, T* b,
-    char* w, [[maybe_unused]] std::size_t backend_bytes, char* hw, [[maybe_unused]] std::size_t host_bytes,void* triangle_work,std::size_t triangle_bytes)
+    char* w, [[maybe_unused]] std::size_t backend_bytes, char* hw, [[maybe_unused]] std::size_t host_bytes,void* triangle_work,std::size_t triangle_bytes,bool cpu_batch=true)
 {
+    if constexpr (Backend==DdlaBackend::CPU) {
+        if (!cpu_batch) {
+            for (int g=0;g<k;) {
+                const int kw=std::min(full,k-g);
+                load(g,kw);
+                pblas::triangle_panel_run<Backend,T>(h,uplo,true,n,kw,alpha,a,b,
+                    g==0 ? beta : T(1),C,dc,triangle_work,triangle_bytes);
+                g+=kw;
+            }
+            return;
+        }
+    }
     const int nb=dc[DDLA_MB_],r=h->myprow_,c=h->mypcol_;
     const int mr=num_loc(n,nb,r,dc[DDLA_RSRC_],h->nprows_);
     const int ldc=dc[DDLA_LLD_];
@@ -272,6 +282,7 @@ void run(const DdlaHandle_t& h, char uplo, int n, int k, int full,
         g+=kw;
     }
 }
+
 
 }}}
 #endif

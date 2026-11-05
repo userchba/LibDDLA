@@ -2,6 +2,8 @@
 #include <ddla/ddla.h>
 #include <ddla/ddla_vector.h>
 #include "phemm_impl.h"
+#include "BLAS/hemmt_impl.h"
+#include "pgemmt_panel_impl.h"
 #include "pgeadd_impl.h"
 #include "pblas_workspace.h"
 #include "BLAS/blas_impl.h"
@@ -22,65 +24,6 @@
 #include <vector>
 
 namespace ddla { namespace phemm_impl { namespace {
-
-template <typename T> T diagonal_value(const T* x) { return *x; }
-template <typename R> std::complex<R> diagonal_value(const std::complex<R>* x) {
-    return {x->real(), R(0)};
-}
-
-#if DDLA_GPU_VENDOR
-// Load complex input by its real components. A Hermitian imaginary diagonal
-// may be uninitialized, so even a by-value complex load there is forbidden.
-template <typename T> struct DiagLoad {
-    __device__ static T get(const void* a, std::size_t p, bool) {
-        return static_cast<const T*>(a)[p];
-    }
-};
-template <typename R> struct DiagLoad<thrust::complex<R>> {
-    __device__ static thrust::complex<R> get(const void* a, std::size_t p, bool diagonal) {
-        const R* x = static_cast<const R*>(a) + 2*p;
-        const R re = x[0];
-        if (diagonal) return {re, R(0)};
-        return {re, x[1]};
-    }
-};
-
-template <typename T>
-__global__ void pack_diagonal(bool upper, bool hermitian, int width, const void* a, int lda, T* d)
-{
-    const int i = blockIdx.x*blockDim.x + threadIdx.x;
-    const int j = blockIdx.y*blockDim.y + threadIdx.y;
-    if (i >= width || j >= width) return;
-    const bool stored = upper ? i <= j : i >= j;
-    const int r = stored ? i : j, c = stored ? j : i;
-    const T v = DiagLoad<T>::get(a, r + std::size_t(c)*lda, hermitian && i == j);
-    d[i + std::size_t(j)*width] = detail::device_conj(v, hermitian && !stored);
-}
-#endif
-
-template <DdlaBackend Backend, typename T>
-void diagonal_block(const DdlaHandle_t& h, bool upper, bool hermitian, int width,
-                    const T* a, int lda, T* d)
-{
-    if constexpr (Backend == DdlaBackend::CPU) {
-        for (int j=0; j<width; ++j) for (int i=0; i<width; ++i) {
-            if (hermitian && i == j) d[i + std::size_t(j)*width] = diagonal_value(a+i+std::size_t(j)*lda);
-            else {
-                const bool stored = upper ? i <= j : i >= j;
-                const T v = stored ? a[i+std::size_t(j)*lda] : a[j+std::size_t(i)*lda];
-                d[i+std::size_t(j)*width] = hermitian && !stored ? detail::host_conj(v) : v;
-            }
-        }
-    } else {
-#if DDLA_GPU_VENDOR
-        using D = detail::DeviceScalarT<T>;
-        static_assert(sizeof(D) == sizeof(T));
-        const dim3 threads(16,16), blocks((width-1)/16+1,(width-1)/16+1);
-        pack_diagonal<D><<<blocks,threads,0,static_cast<gpuStream_t>(h->stream)>>>(upper,hermitian,width,a,lda,reinterpret_cast<D*>(d));
-        DDLA_CHECK(ddlaGetLastError(h));
-#endif
-    }
-}
 
 // The short panel dimension is replicated. Shift the long axis to C's
 // source coordinate without changing its global block phase.
@@ -106,7 +49,7 @@ const T* shift_panel(const DdlaHandle_t& h, bool rows, int block, int first, int
 // transposed into | grouped B panel (GPU groups only).
 template <typename T>
 int scratch_counts(const DdlaHandle_t& h, bool left, int m, int n,
-                    const int* da, const int* db, const int* dc, std::size_t (&count)[5])
+                    const int* da, const int* db, const int* dc, std::size_t (&count)[5], bool triangular=false)
 {
     const int order=left ? m : n,nb=da[DDLA_MB_];
     const int pr=h->nprows_,pc=h->npcols_,r=h->myprow_,c=h->mypcol_;
@@ -120,7 +63,7 @@ int scratch_counts(const DdlaHandle_t& h, bool left, int m, int n,
     const int kp=!std::is_arithmetic_v<T> && order<=1024 ? std::min(nb,order)
                                                        : pblas::contraction_width(h,nb,order);
     count[0]=std::size_t(kp)*std::max(1,along);
-    count[4]=kp>nb ? std::size_t(kp)*std::max(1,free_c) : 0;
+    count[4]=(kp>nb || triangular) ? std::size_t(kp)*std::max(1,free_c) : 0;
     count[1]=std::size_t(nb)*nb;
     count[2]=std::size_t(nb)*std::max({1,along,source,free_b,free_c});
     count[3]=count[2];
@@ -199,6 +142,122 @@ void off_diagonal(const DdlaHandle_t& h, T* panel, T* piece, T* work,
     }
 }
 
+// Prepare one Hermitian/symmetric A panel and one general B panel in C's
+// distribution. The triangular driver keeps B at a stable address for its
+// batched pointer lists. The full-output driver may consume the transfer buffer.
+template <DdlaBackend Backend, typename T>
+const T* prepare_panel(const DdlaHandle_t& h, bool left, char uplo, bool hermitian,
+    bool pack_b, int m, int n, int first, int kw,
+    const T* A, const int* da, const T* B, const int* db, const int* dc,
+    T* panel, T* diagonal, T* piece, T* work, T* b_panel,
+    void* add_work, std::size_t add_bytes, void* host_work, std::size_t host_bytes)
+{
+    const int nb=da[DDLA_MB_],order=left ? m : n;
+    const int pr=h->nprows_,pc=h->npcols_,r=h->myprow_,c=h->mypcol_;
+    const int ml=num_loc(m,dc[DDLA_MB_],r,dc[DDLA_RSRC_],pr);
+    const int nl=num_loc(n,dc[DDLA_NB_],c,dc[DDLA_CSRC_],pc);
+    const int along=left ? ml : nl;
+    const int panel_ld=left ? along : kw;
+    const T* b=b_panel;
+    for (int k=first;k<first+kw;) {
+        const int width=std::min(nb,first+kw-k),offset=k-first;
+        T* active=panel+(left ? std::size_t(offset)*along : std::size_t(offset));
+        const int ar=indxg2p(k,nb,da[DDLA_RSRC_],pr),ac=indxg2p(k,nb,da[DDLA_CSRC_],pc);
+        if (r==ar && c==ac) {
+            const int i=num_loc(k,nb,r,da[DDLA_RSRC_],pr),j=num_loc(k,nb,c,da[DDLA_CSRC_],pc);
+            blas_impl::diagonal_block_run<Backend,T>(h,uplo=='U',hermitian,width,A+i+std::size_t(j)*da[DDLA_LLD_],da[DDLA_LLD_],diagonal,width);
+        }
+        const bool direct_before=left ? uplo=='U' : uplo=='L';
+        bool grouped=false;
+#if defined(DDLA_USE_CCL) && !defined(DDLA_USE_GPU_CPU_TUNNEL)
+        if constexpr (Backend==DdlaBackend::GPU)
+            grouped=da[left ? DDLA_RSRC_ : DDLA_CSRC_]==dc[left ? DDLA_RSRC_ : DDLA_CSRC_]
+                && db[left ? DDLA_CSRC_ : DDLA_RSRC_]==dc[left ? DDLA_CSRC_ : DDLA_RSRC_]
+                && db[left ? DDLA_NB_ : DDLA_MB_]==dc[left ? DDLA_NB_ : DDLA_MB_];
+#endif
+        const int direct_first=direct_before ? 0 : k+width;
+        const int direct_length=direct_before ? k : order-direct_first;
+        bool group_active=false;
+        try {
+            if (grouped) {
+                const int reflected_first=direct_before ? k+width : 0;
+                const int reflected_length=direct_before ? order-reflected_first : k;
+                // Finish the dependent reflected transfer first. The
+                // remaining direct, diagonal and B broadcasts use
+                // distinct piece/diagonal/work buffers and can share
+                // one NCCL/RCCL launch without forwarding dependencies.
+                off_diagonal<Backend,T>(h,panel,piece,work,add_work,add_bytes,host_work,host_bytes,
+                    left,false,hermitian,k,width,reflected_first,reflected_length,along,panel_ld,
+                    offset,kw,order,A,da,dc);
+                commGroupStart<Backend>(h);group_active=true;
+                if (direct_length>0)
+                    pblas::broadcast_panel<Backend,T>(h, left, left ? direct_length : width,
+                        left ? width : direct_length, A, left ? direct_first : k,
+                        left ? k : direct_first, da, piece);
+            } else {
+                for (bool before : {true,false}) {
+                    const int row=before ? 0 : k+width,length=before ? k : order-row;
+                    off_diagonal<Backend,T>(h,panel,piece,work,add_work,add_bytes,host_work,host_bytes,
+                        left,direct_before==before,hermitian,k,width,row,length,along,panel_ld,
+                        offset,kw,order,A,da,dc);
+                }
+            }
+            commBcast<Backend>(h,CommScope::Grid,diagonal,std::size_t(width)*width,h->rc_to_rank(ar,ac));
+            pblas::broadcast_panel<Backend,T>(h, !left, left ? width : m, left ? n : width, B,
+                left ? k : 0, left ? 0 : k, db, grouped ? work : piece);
+            if (grouped) {group_active=false;commGroupEnd<Backend>(h);}
+        } catch (...) {
+            if (group_active) try {commGroupEnd<Backend>(h);} catch (...) {}
+            throw;
+        }
+        const int coord=left ? r : c,procs=left ? pr : pc,target=dc[left ? DDLA_RSRC_ : DDLA_CSRC_];
+        if (grouped && direct_length>0) {
+            const int start=num_loc(direct_first,nb,coord,target,procs);
+            const int count=num_loc(direct_first+direct_length,nb,coord,target,procs)-start;
+            if (count>0) {
+                if (left) DDLA_CHECK(ddlaMemcpy2D(h,active+start,std::size_t(along)*sizeof(T),
+                    piece,std::size_t(count)*sizeof(T),std::size_t(count)*sizeof(T),width));
+                else DDLA_CHECK(ddlaMemcpy2D(h,active+std::size_t(start)*panel_ld,std::size_t(panel_ld)*sizeof(T),
+                    piece,std::size_t(width)*sizeof(T),std::size_t(width)*sizeof(T),count));
+            }
+        }
+        if (coord==indxg2p(k,nb,target,procs)) {
+            const int start=num_loc(k,nb,coord,target,procs);
+            DDLA_CHECK(ddlaMemcpy2D(h,active+(left ? std::size_t(start) : std::size_t(start)*panel_ld),
+                std::size_t(panel_ld)*sizeof(T),diagonal,std::size_t(width)*sizeof(T),
+                std::size_t(width)*sizeof(T),width));
+        }
+        const T* local_b=grouped ? work : shift_panel<Backend>(h,!left,db[left ? DDLA_NB_ : DDLA_MB_],0,left ? n : m,
+            db[left ? DDLA_CSRC_ : DDLA_RSRC_],dc[left ? DDLA_CSRC_ : DDLA_RSRC_],width,piece,work);
+        if (kw>nb || pack_b) {
+            if (left && nl>0)
+                DDLA_CHECK(ddlaMemcpy2D(h,b_panel+offset,std::size_t(kw)*sizeof(T),local_b,
+                    std::size_t(width)*sizeof(T),std::size_t(width)*sizeof(T),nl));
+            else if (!left && ml>0)
+                DDLA_CHECK(ddlaMemcpy2D(h,b_panel+std::size_t(offset)*ml,std::size_t(ml)*sizeof(T),
+                    local_b,std::size_t(ml)*sizeof(T),std::size_t(ml)*sizeof(T),width));
+        } else b=local_b;
+        k+=width;
+    }
+    return b;
+}
+
+// Consume the common prepared panels with full local GEMM updates. Ranks
+// without local output still participate in every panel transfer.
+template <DdlaBackend Backend, typename T, typename Prepare>
+void gemm_driver(const DdlaHandle_t& h, bool left, int m, int n, int k, int full,
+    const T& alpha, const T& beta, T* C, int ldc, T* panel, const Prepare& prepare)
+{
+    for (int first=0;first<k;) {
+        const int kw=std::min(full,k-first);
+        const T* b=prepare(first,kw);
+        if (m>0 && n>0)
+            blas_impl::gemm_run<Backend,T>(h,'N','N',m,n,kw,alpha,left ? panel : b,m,
+                left ? b : panel,kw,first==0 ? beta : T(1),C,ldc);
+        first+=kw;
+    }
+}
+
 }} // namespace phemm_impl::<anonymous>
 
 namespace phemm_impl {
@@ -206,7 +265,7 @@ namespace phemm_impl {
 template <DdlaBackend Backend, typename T>
 bool phemm_check(const DdlaHandle_t& h, char side, char uplo, int m, int n,
     const T& alpha, const T* A, const int* da, const T* B, const int* db,
-    const T& beta, const T* C, const int* dc, bool hermitian)
+    const T& beta, const T* C, const int* dc, bool hermitian, char uploC)
 {
     const char* const routine=hermitian ? "phemm" : "psymm";
     return detail::agree_check(h,routine,[&](detail::Agree& agree) {
@@ -216,6 +275,11 @@ bool phemm_check(const DdlaHandle_t& h, char side, char uplo, int m, int n,
         uplo = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo)));
         if ((side!='L' && side!='R') || (uplo!='U' && uplo!='L'))
             throw std::invalid_argument(std::string(routine)+": expected side L/R and uplo U/L");
+        uploC=blas_impl::upper(uploC);
+        if (uploC!='F' && uploC!='U' && uploC!='L')
+            throw std::invalid_argument("phemm: expected output F/U/L");
+        if (uploC!='F' && (m!=n || dc[DDLA_MB_]!=dc[DDLA_NB_]))
+            throw std::invalid_argument("phemmt: square output and square matching blocks required");
         const bool left = side=='L';
         const int order = left ? m : n, nb = da[DDLA_MB_];
         if (m<0 || n<0 || order>da[DDLA_M_] || order>da[DDLA_N_] ||
@@ -224,7 +288,7 @@ bool phemm_check(const DdlaHandle_t& h, char side, char uplo, int m, int n,
         if (da[DDLA_NB_]!=nb || db[left ? DDLA_MB_ : DDLA_NB_]!=nb ||
             db[DDLA_MB_]!=dc[DDLA_MB_] || db[DDLA_NB_]!=dc[DDLA_NB_])
             throw std::invalid_argument(std::string(routine)+": square A blocks must match B/C's multiplied blocks; B/C blocks must match");
-        agree.mode("phemm/psymm structure/side/uplo",(hermitian ? 4 : 0)+(left ? 2 : 0)+(uplo=='U'));
+        agree.mode("phemm/psymm structure/side/uplo",(hermitian ? 4 : 0)+(left ? 2 : 0)+(uplo=='U')+8*(uploC=='F' ? 0 : uploC=='U' ? 1 : 2));
         agree.mode("phemm m",m); agree.mode("phemm n",n);
         agree.mode("phemm coefficient modes",(alpha==T(0) ? 4 : 0)+(beta==T(0) ? 2 : 0)+(beta==T(1)));
         const bool noop = m==0 || n==0 || (alpha==T(0) && beta==T(1));
@@ -232,7 +296,10 @@ bool phemm_check(const DdlaHandle_t& h, char side, char uplo, int m, int n,
             const int pr=h->nprows_,pc=h->npcols_,r=h->myprow_,c=h->mypcol_;
             const int mr=num_loc(m,dc[DDLA_MB_],r,dc[DDLA_RSRC_],pr);
             const int nc=num_loc(n,dc[DDLA_NB_],c,dc[DDLA_CSRC_],pc);
-            if (mr>0 && nc>0 && !C) throw std::invalid_argument(std::string(routine)+": null C");
+            const bool selected=mr>0 && nc>0 && (uploC=='F' || (uploC=='U'
+                ? indxl2g(0,dc[DDLA_MB_],r,dc[DDLA_RSRC_],pr)<=indxl2g(nc-1,dc[DDLA_NB_],c,dc[DDLA_CSRC_],pc)
+                : indxl2g(mr-1,dc[DDLA_MB_],r,dc[DDLA_RSRC_],pr)>=indxl2g(0,dc[DDLA_NB_],c,dc[DDLA_CSRC_],pc)));
+            if (selected && !C) throw std::invalid_argument(std::string(routine)+": null C");
             if (alpha!=T(0)) {
                 const int ar=num_loc(order,nb,r,da[DDLA_RSRC_],pr),ac=num_loc(order,nb,c,da[DDLA_CSRC_],pc);
                 const int br=num_loc(m,db[DDLA_MB_],r,db[DDLA_RSRC_],pr);
@@ -255,16 +322,20 @@ bool phemm_check(const DdlaHandle_t& h, char side, char uplo, int m, int n,
 template <typename T>
 void phemm_workspace_size(const DdlaHandle_t& h, char side, int m, int n,
     bool alpha_is_zero, const int* da, const int* db, const int* dc, bool hermitian,
-    std::size_t* backend_bytes, std::size_t* host_bytes)
+    std::size_t* backend_bytes, std::size_t* host_bytes, char uploC)
 {
     *backend_bytes=*host_bytes=0;
     if (alpha_is_zero || m==0 || n==0) return;
+    if (uploC!='F' && h->nprocs==1) {
+        blas_impl::hemmt_workspace_size<T>(h,m,true,backend_bytes);
+        return;
+    }
     // Native GPU SYMM/HEMM loses to packed GEMM on large padded matrices.
     if (h->nprocs==1 && ((h->backend==DdlaBackend::CPU && !hermitian) ||
                         (h->backend==DdlaBackend::GPU && std::max(m,n)<=1024))) return;
     const bool left=side=='L';const int order=left ? m : n;
     std::size_t count[5],add_bytes=0;
-    scratch_counts<T>(h,left,m,n,da,db,dc,count);
+    const int kp=scratch_counts<T>(h,left,m,n,da,db,dc,count,uploC!='F');
     int d[DDLA_DLEN_];
     // When the panel's replicated axis is trivial (one process column for
     // side 'L', one process row for 'R') the gated reflected region is one
@@ -277,22 +348,35 @@ void phemm_workspace_size(const DdlaHandle_t& h, char side, int m, int n,
         reflected_panel(h,left,left ? m : n,da[DDLA_MB_],d);
     if ((left ? h->npcols_ : h->nprows_)==1)
         pgeadd_impl::pgeadd_workspace_size<T>(h,hermitian?'C':'T','N',true,false,
-            d[DDLA_M_],d[DDLA_N_],d,&add_bytes,host_bytes);
+            uploC=='F' ? d[DDLA_M_] : left ? order : std::min(order,da[DDLA_MB_]),
+            uploC=='F' ? d[DDLA_N_] : left ? std::min(order,da[DDLA_MB_]) : order,
+            d,&add_bytes,host_bytes);
     else
         pblas::panel_workspace_size<T>(h,left,hermitian?'C':'T',
             left?da[DDLA_MB_]:order,left?order:da[DDLA_MB_],da,dc,&add_bytes,host_bytes);
     for (const std::size_t c : count) *backend_bytes+=detail::padded_bytes<T>(c);
     *backend_bytes+=add_bytes;
+    if (uploC!='F') {
+        std::size_t batch=0,host=0,triangle=0;
+        pgemmt_impl::panel::workspace_size<T>(h,uploC,m,order,kp,dc,&batch,&host,&triangle);
+        *backend_bytes+=detail::padded_bytes<char>(batch)+detail::padded_bytes<char>(triangle);
+        *host_bytes+=detail::padded_bytes<char>(host);
+    }
 }
 
 template <DdlaBackend Backend, typename T>
 void phemm_run(const DdlaHandle_t& h, char side, char uplo,
     int m, int n, const T& alpha, const T* A, const int* da,
     const T* B, const int* db, const T& beta, T* C, const int* dc, bool hermitian,
-    void* backend_work, [[maybe_unused]] std::size_t backend_bytes, void* host_work, std::size_t host_bytes)
+    void* backend_work, [[maybe_unused]] std::size_t backend_bytes, void* host_work, std::size_t host_bytes, char uploC)
 {
     try {
         if (m==0 || n==0 || (alpha==T(0) && beta==T(1))) return;
+        if (uploC!='F' && h->nprocs==1) {
+            blas_impl::hemmt_run<Backend,T>(h,side,uplo,uploC,m,alpha,A,da[DDLA_LLD_],B,db[DDLA_LLD_],
+                beta,C,dc[DDLA_LLD_],backend_work,backend_bytes);
+            return;
+        }
         if(h->nprocs==1 && alpha!=T(0) && ((Backend==DdlaBackend::CPU && !hermitian) ||
                                                (Backend==DdlaBackend::GPU && std::max(m,n)<=1024))) {
             if (hermitian)
@@ -301,11 +385,16 @@ void phemm_run(const DdlaHandle_t& h, char side, char uplo,
                 blas_impl::symm_run<Backend,T>(h,side,uplo,m,n,alpha,A,da[DDLA_LLD_],B,db[DDLA_LLD_],beta,C,dc[DDLA_LLD_]);
             return;
         }
-        const bool left=side=='L';const int nb=da[DDLA_MB_],order=left ? m : n;
+        const bool left=side=='L';const int order=left ? m : n;
         const int pr=h->nprows_,pc=h->npcols_,r=h->myprow_,c=h->mypcol_;
         const int ml=num_loc(m,dc[DDLA_MB_],r,dc[DDLA_RSRC_],pr);
         const int nl=num_loc(n,dc[DDLA_NB_],c,dc[DDLA_CSRC_],pc),ldc=dc[DDLA_LLD_];
         if (alpha==T(0)) {
+            if (uploC!='F') {
+                pblas::triangle_panel_run<Backend,T>(h,uploC,false,m,0,T(0),nullptr,nullptr,beta,C,dc,nullptr,0);
+                return;
+            }
+
             if (ml>0 && nl>0) {
                 if (beta==T(0)) for (int j=0;j<nl;++j)
                     DDLA_CHECK(ddlaMemset(h,C+std::size_t(j)*ldc,0,std::size_t(ml)*sizeof(T)));
@@ -313,11 +402,19 @@ void phemm_run(const DdlaHandle_t& h, char side, char uplo,
             }
             return;
         }
-        const int along=left ? ml : nl;
         // The scratch, in the order phemm_workspace_size counts it; the rest is
         // the reflected panel's pgeadd.
         std::size_t count[5];
-        const int kp=scratch_counts<T>(h,left,m,n,da,db,dc,count);
+        const int kp=scratch_counts<T>(h,left,m,n,da,db,dc,count,uploC!='F');
+        std::size_t batch_bytes=0,batch_host_bytes=0,triangle_bytes=0;
+        if (uploC!='F') {
+            pgemmt_impl::panel::workspace_size<T>(h,uploC,m,order,kp,dc,&batch_bytes,&batch_host_bytes,&triangle_bytes);
+            backend_bytes-=detail::padded_bytes<char>(batch_bytes)+detail::padded_bytes<char>(triangle_bytes);
+            host_bytes-=detail::padded_bytes<char>(batch_host_bytes);
+        }
+        char* batch_work=uploC!='F' ? static_cast<char*>(backend_work)+backend_bytes : nullptr;
+        char* batch_host=batch_host_bytes ? static_cast<char*>(host_work)+host_bytes : nullptr;
+        void* triangle_work=triangle_bytes ? batch_work+detail::padded_bytes<char>(batch_bytes) : nullptr;
         char* w=static_cast<char*>(backend_work);
         T* const panel=detail::take<T>(w,count[0]);
         T* const diagonal=detail::take<T>(w,count[1]);
@@ -328,94 +425,17 @@ void phemm_run(const DdlaHandle_t& h, char side, char uplo,
         assert(used<=backend_bytes);
         // All temporaries use the handle's queue. Only scratch contains reflected
         // entries; A itself is never completed or written.
-        for (int first=0;first<order;) {
-            const int kw=std::min(kp,order-first),panel_ld=left ? along : kw;
-            const T* b=b_panel;
-            for (int k=first;k<first+kw;) {
-                const int width=std::min(nb,first+kw-k),offset=k-first;
-                T* active=panel+(left ? std::size_t(offset)*along : std::size_t(offset));
-                const int ar=indxg2p(k,nb,da[DDLA_RSRC_],pr),ac=indxg2p(k,nb,da[DDLA_CSRC_],pc);
-                if (r==ar && c==ac) {
-                    const int i=num_loc(k,nb,r,da[DDLA_RSRC_],pr),j=num_loc(k,nb,c,da[DDLA_CSRC_],pc);
-                    diagonal_block<Backend>(h,uplo=='U',hermitian,width,A+i+std::size_t(j)*da[DDLA_LLD_],da[DDLA_LLD_],diagonal);
-                }
-                const bool direct_before=left ? uplo=='U' : uplo=='L';
-                bool grouped=false;
-#if defined(DDLA_USE_CCL) && !defined(DDLA_USE_GPU_CPU_TUNNEL)
-                if constexpr (Backend==DdlaBackend::GPU)
-                    grouped=da[left ? DDLA_RSRC_ : DDLA_CSRC_]==dc[left ? DDLA_RSRC_ : DDLA_CSRC_]
-                        && db[left ? DDLA_CSRC_ : DDLA_RSRC_]==dc[left ? DDLA_CSRC_ : DDLA_RSRC_]
-                        && db[left ? DDLA_NB_ : DDLA_MB_]==dc[left ? DDLA_NB_ : DDLA_MB_];
-#endif
-                const int direct_first=direct_before ? 0 : k+width;
-                const int direct_length=direct_before ? k : order-direct_first;
-                bool group_active=false;
-                try {
-                    if (grouped) {
-                        const int reflected_first=direct_before ? k+width : 0;
-                        const int reflected_length=direct_before ? order-reflected_first : k;
-                        // Finish the dependent reflected transfer first. The
-                        // remaining direct, diagonal and B broadcasts use
-                        // distinct piece/diagonal/work buffers and can share
-                        // one NCCL/RCCL launch without forwarding dependencies.
-                        off_diagonal<Backend,T>(h,panel,piece,work,w,backend_bytes-used,host_work,host_bytes,
-                            left,false,hermitian,k,width,reflected_first,reflected_length,along,panel_ld,
-                            offset,kw,order,A,da,dc);
-                        commGroupStart<Backend>(h);group_active=true;
-                        if (direct_length>0)
-                            pblas::broadcast_panel<Backend,T>(h, left, left ? direct_length : width,
-                                left ? width : direct_length, A, left ? direct_first : k,
-                                left ? k : direct_first, da, piece);
-                    } else {
-                        for (bool before : {true,false}) {
-                            const int row=before ? 0 : k+width,length=before ? k : order-row;
-                            off_diagonal<Backend,T>(h,panel,piece,work,w,backend_bytes-used,host_work,host_bytes,
-                                left,direct_before==before,hermitian,k,width,row,length,along,panel_ld,
-                                offset,kw,order,A,da,dc);
-                        }
-                    }
-                    commBcast<Backend>(h,CommScope::Grid,diagonal,std::size_t(width)*width,h->rc_to_rank(ar,ac));
-                    pblas::broadcast_panel<Backend,T>(h, !left, left ? width : m, left ? n : width, B,
-                        left ? k : 0, left ? 0 : k, db, grouped ? work : piece);
-                    if (grouped) {group_active=false;commGroupEnd<Backend>(h);}
-                } catch (...) {
-                    if (group_active) try {commGroupEnd<Backend>(h);} catch (...) {}
-                    throw;
-                }
-                const int coord=left ? r : c,procs=left ? pr : pc,target=dc[left ? DDLA_RSRC_ : DDLA_CSRC_];
-                if (grouped && direct_length>0) {
-                    const int start=num_loc(direct_first,nb,coord,target,procs);
-                    const int count=num_loc(direct_first+direct_length,nb,coord,target,procs)-start;
-                    if (count>0) {
-                        if (left) DDLA_CHECK(ddlaMemcpy2D(h,active+start,std::size_t(along)*sizeof(T),
-                            piece,std::size_t(count)*sizeof(T),std::size_t(count)*sizeof(T),width));
-                        else DDLA_CHECK(ddlaMemcpy2D(h,active+std::size_t(start)*panel_ld,std::size_t(panel_ld)*sizeof(T),
-                            piece,std::size_t(width)*sizeof(T),std::size_t(width)*sizeof(T),count));
-                    }
-                }
-                if (coord==indxg2p(k,nb,target,procs)) {
-                    const int start=num_loc(k,nb,coord,target,procs);
-                    DDLA_CHECK(ddlaMemcpy2D(h,active+(left ? std::size_t(start) : std::size_t(start)*panel_ld),
-                        std::size_t(panel_ld)*sizeof(T),diagonal,std::size_t(width)*sizeof(T),
-                        std::size_t(width)*sizeof(T),width));
-                }
-                const T* local_b=grouped ? work : shift_panel<Backend>(h,!left,db[left ? DDLA_NB_ : DDLA_MB_],0,left ? n : m,
-                    db[left ? DDLA_CSRC_ : DDLA_RSRC_],dc[left ? DDLA_CSRC_ : DDLA_RSRC_],width,piece,work);
-                if (kw>nb) {
-                    if (left && nl>0)
-                        DDLA_CHECK(ddlaMemcpy2D(h,b_panel+offset,std::size_t(kw)*sizeof(T),local_b,
-                            std::size_t(width)*sizeof(T),std::size_t(width)*sizeof(T),nl));
-                    else if (!left && ml>0)
-                        DDLA_CHECK(ddlaMemcpy2D(h,b_panel+std::size_t(offset)*ml,std::size_t(ml)*sizeof(T),
-                            local_b,std::size_t(ml)*sizeof(T),std::size_t(ml)*sizeof(T),width));
-                } else b=local_b;
-                k+=width;
-            }
-            if (ml>0 && nl>0)
-                blas_impl::gemm_run<Backend>(h,'N','N',ml,nl,kw,alpha,left ? panel : b,ml,
-                    left ? b : panel,kw,first==0 ? beta : T(1),C,ldc);
-            first+=kw;
-        }
+        const auto prepare=[&](int first,int kw) {
+            return prepare_panel<Backend,T>(h,left,uplo,hermitian,uploC!='F',m,n,first,kw,
+                A,da,B,db,dc,panel,diagonal,piece,work,b_panel,w,backend_bytes-used,
+                host_work,host_bytes);
+        };
+        if (uploC=='F')
+            gemm_driver<Backend,T>(h,left,ml,nl,order,kp,alpha,beta,C,ldc,panel,prepare);
+        else
+            pgemmt_impl::panel::run<Backend,T>(h,uploC,m,order,kp,alpha,beta,C,dc,prepare,
+                left ? panel : b_panel,left ? b_panel : panel,batch_work,batch_bytes,
+                batch_host,batch_host_bytes,triangle_work,triangle_bytes);
 
     } catch (...) {
         // Retire queued host reads before the caller reuses or releases scratch.
@@ -446,8 +466,8 @@ void phemm(const DdlaHandle_t& h, char side, char uplo, int m, int n,
 
 #define INSTANTIATE_PHEMM(B,T) \
  template void phemm<B,T>(const DdlaHandle_t&,char,char,int,int,const T&,const T*,const int*,const T*,const int*,const T&,T*,const int*); \
- template bool phemm_impl::phemm_check<B,T>(const DdlaHandle_t&,char,char,int,int,const T&,const T*,const int*,const T*,const int*,const T&,const T*,const int*,bool); \
- template void phemm_impl::phemm_run<B,T>(const DdlaHandle_t&,char,char,int,int,const T&,const T*,const int*,const T*,const int*,const T&,T*,const int*,bool,void*,std::size_t,void*,std::size_t)
+ template bool phemm_impl::phemm_check<B,T>(const DdlaHandle_t&,char,char,int,int,const T&,const T*,const int*,const T*,const int*,const T&,const T*,const int*,bool,char); \
+ template void phemm_impl::phemm_run<B,T>(const DdlaHandle_t&,char,char,int,int,const T&,const T*,const int*,const T*,const int*,const T&,T*,const int*,bool,void*,std::size_t,void*,std::size_t,char)
 #define INSTANTIATE_PHEMM_TYPES(B) \
  INSTANTIATE_PHEMM(B,float); INSTANTIATE_PHEMM(B,double); \
  INSTANTIATE_PHEMM(B,std::complex<float>); INSTANTIATE_PHEMM(B,std::complex<double>)
@@ -455,7 +475,7 @@ INSTANTIATE_PHEMM_TYPES(DdlaBackend::CPU);
 #if DDLA_HAS_GPU
 INSTANTIATE_PHEMM_TYPES(DdlaBackend::GPU);
 #endif
-#define INSTANTIATE_SIZE(T) template void phemm_impl::phemm_workspace_size<T>(const DdlaHandle_t&,char,int,int,bool,const int*,const int*,const int*,bool,std::size_t*,std::size_t*)
+#define INSTANTIATE_SIZE(T) template void phemm_impl::phemm_workspace_size<T>(const DdlaHandle_t&,char,int,int,bool,const int*,const int*,const int*,bool,std::size_t*,std::size_t*,char)
 INSTANTIATE_SIZE(float); INSTANTIATE_SIZE(double);
 INSTANTIATE_SIZE(std::complex<float>); INSTANTIATE_SIZE(std::complex<double>);
 #undef INSTANTIATE_SIZE
