@@ -1,10 +1,10 @@
 // One method, one size, one MPI process launch: tridiagonal eigensolver comparison.
 // Input restoration, warmups and validation are identical for every implementation.
-// pstedc and row-output use the same solver; the former includes descriptor transfer.
+// DDLA returns row slabs; optional references return block-cyclic vectors.
+// Output layouts are reported and are not normalized inside the timed solve.
 // Optional references are enabled only by the task-local comparison build.
 #include "api_grid_test_common.h"
 #include "Eigensolver/pstedc_impl.h"
-#include "Eigensolver/pstedc_workspace.h"
 #include "row_share.h"
 #include "mpi_datatype.h"
 #include <atomic>
@@ -113,7 +113,7 @@ void validate(const Options& o,ddla::DdlaHandle_t h,const std::vector<R>& local,
               const int* desc,const ddla::detail::RowShare& rows,const std::vector<R>& d0,
               const std::vector<R>& e0,const std::vector<R>& w)
 {
-    const int n=o.n,rank=ddla::ddlaGetRank(h);const bool slab=o.method=="row-output";
+    const int n=o.n,rank=ddla::ddlaGetRank(h);const bool slab=o.method=="pstedc";
     const double eps=std::numeric_limits<R>::epsilon();double normT=0,trace=0,squares=0;
     for(int i=0;i<n;++i){normT=std::max(normT,std::abs(double(d0[i]))+std::abs(double(e0[i]))+(i?std::abs(double(e0[i-1])):0));
         trace+=d0[i];squares+=double(d0[i])*d0[i]+2*double(e0[i])*e0[i];}
@@ -160,7 +160,7 @@ void validate(const Options& o,ddla::DdlaHandle_t h,const std::vector<R>& local,
 
 template<class R>void run(const Options& o,int rank,int P)
 {
-    const bool slab=o.method=="row-output",reference=o.method=="elpa"||o.method=="scalapack";
+    const bool slab=o.method=="pstedc",reference=o.method=="elpa"||o.method=="scalapack";
     const bool gpu=o.backend=="gpu";
     ddla::DdlaHandle_t h=nullptr;DDLA_CHECK(ddla::ddlaInit(h,gpu?ddla::DdlaBackend::GPU:ddla::DdlaBackend::CPU));
     DDLA_CHECK(ddla::ddlaSet(h,MPI_COMM_WORLD,o.pr,o.pc));
@@ -178,27 +178,22 @@ template<class R>void run(const Options& o,int rank,int P)
     std::vector<R> d0(o.n),e0(o.n,0),d(o.n),e(o.n),w(o.n);std::vector<double> times;
     for(int i=0;i<o.n;++i){d0[i]=R(o.kind=="toeplitz"?2:hash01(i,1));if(i+1<o.n)e0[i]=R(o.kind=="toeplitz"?-1:hash01(i,2));}
     std::size_t workspace_backend=0,workspace_host=0;bool workspace_known=false;
-    ddla::spectral_impl::PstedcVectorPlan rows_plan{};
-    if(slab){rows_plan=ddla::spectral_impl::pstedc_check<R>(h,o.n,d0.data(),e0.data(),w.data(),output,ld);
-        ddla::spectral_impl::pstedc_workspace_size<R>(h,rows_plan,&workspace_backend,&workspace_host);workspace_known=true;}
-    ddla::spectral_impl::PstedcPlan descriptor_plan{};
-    if(o.method=="pstedc"){descriptor_plan=ddla::spectral_impl::pstedc_check<R>(h,'V',o.n,d0.data(),e0.data(),w.data(),output,desc);
-        ddla::spectral_impl::pstedc_workspace_size<R>(h,descriptor_plan,&workspace_backend,&workspace_host);workspace_known=true;}
+    ddla::spectral_impl::PstedcPlan plan{};
+    if(!reference){plan=ddla::spectral_impl::pstedc_check<R>(h,'V',o.n,d0.data(),e0.data(),w.data(),output,ld);
+        ddla::spectral_impl::pstedc_workspace_size<R>(h,plan,&workspace_backend,&workspace_host);workspace_known=true;}
     std::unique_ptr<DeviceBuffer<unsigned char>> backend_arena;
     std::vector<std::max_align_t> host_arena;
     std::unique_ptr<ddla::spectral_impl::PstedcResources> rows_resources;
     if(!reference&&o.workspace=="reuse"){
         if(workspace_backend)backend_arena=std::make_unique<DeviceBuffer<unsigned char>>(h,workspace_backend);
         host_arena.resize((workspace_host+sizeof(std::max_align_t)-1)/sizeof(std::max_align_t));
-        rows_resources=std::make_unique<ddla::spectral_impl::PstedcResources>(h,slab?rows_plan:descriptor_plan.rows);
+        rows_resources=std::make_unique<ddla::spectral_impl::PstedcResources>(h,plan.rows);
     }
     auto ddla_reuse=[&](auto backend_tag){
         constexpr ddla::DdlaBackend B=decltype(backend_tag)::value;
         void* backend_work=backend_arena?backend_arena->ptr:nullptr;
         void* host_work=host_arena.empty()?nullptr:host_arena.data();
-        if(slab)ddla::spectral_impl::pstedc_run<B,R>(h,rows_plan,*rows_resources,d.data(),e.data(),w.data(),output,nullptr,
-            backend_work,workspace_backend,host_work,workspace_host);
-        else ddla::spectral_impl::pstedc_run<B,R>(h,descriptor_plan,d.data(),e.data(),w.data(),output,
+        ddla::spectral_impl::pstedc_run<B,R>(h,plan,d.data(),e.data(),w.data(),output,
             backend_work,workspace_backend,host_work,workspace_host,rows_resources.get());
     };
     int blacs=-1;std::vector<R> scawork;std::vector<int> scaiwork;
@@ -265,9 +260,8 @@ template<class R>void run(const Options& o,int rank,int P)
                 ddla_reuse(std::integral_constant<ddla::DdlaBackend,ddla::DdlaBackend::CPU>{});
             }
         }
-        else if(slab)ddla::pstedc<R>(h,o.n,d.data(),e.data(),w.data(),output,ld);
         else if(o.method=="pstedc"){
-            ddla::pstedc<R>(h,'V',o.n,d.data(),e.data(),w.data(),output,desc,info);
+            ddla::pstedc<R>(h,'V',o.n,d.data(),e.data(),w.data(),output,ld,info);
         }
 #ifdef DDLA_COMPARE_HAVE_SCALAPACK
         else if(o.method=="scalapack"){
@@ -306,6 +300,7 @@ template<class R>void run(const Options& o,int rank,int P)
     MPI_Allreduce(MPI_IN_PLACE,bytes,9,MPI_UNSIGNED_LONG_LONG,MPI_MAX,MPI_COMM_WORLD);
     auto sorted=times;std::sort(sorted.begin(),sorted.end());const double median=sorted.size()%2?sorted[sorted.size()/2]:0.5*(sorted[sorted.size()/2-1]+sorted[sorted.size()/2]);
     if(!rank)std::cout<<"PSTEDC_COMPARE method="<<o.method<<" workspace="<<o.workspace
+        <<" output_layout="<<(slab?"rows":"block_cyclic")
         <<" allocation_policy="<<(o.method=="elpa"?"library_managed":o.method=="scalapack"||o.workspace=="reuse"?"caller_reused":"per_call")
         <<" backend="<<o.backend<<" n="<<o.n<<" kind="<<o.kind<<" type="<<o.type
         <<" grid="<<o.pr<<'x'<<o.pc<<" nb="<<o.nb<<" ranks="<<P<<" warmups="<<o.warmups<<" reps="<<o.reps
@@ -354,7 +349,7 @@ int main(int argc,char** argv)
         }
         if(o.n<1||o.nb<1||o.warmups<1||o.reps<1||o.pr*o.pc!=P||
            (o.kind!="random"&&o.kind!="toeplitz")||(o.backend!="cpu"&&o.backend!="gpu")||
-           (o.method!="row-output"&&o.method!="pstedc"&&o.method!="elpa"&&o.method!="scalapack")||
+           (o.method!="pstedc"&&o.method!="elpa"&&o.method!="scalapack")||
            (o.type!="double"&&o.type!="float")||(o.method=="scalapack"&&o.backend!="cpu"))throw std::invalid_argument("invalid comparison options");
         if(o.workspace!="reuse"&&o.workspace!="public")throw std::invalid_argument("invalid workspace mode");
         if(provided<MPI_THREAD_FUNNELED)throw std::runtime_error("MPI_THREAD_FUNNELED unavailable");

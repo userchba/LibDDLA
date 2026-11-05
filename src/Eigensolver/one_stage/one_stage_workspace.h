@@ -5,7 +5,7 @@
 #include "pheevd_one_stage.h"
 #include "phetrd_impl.h"
 #include "Eigensolver/eig_workspace.h"
-#include "Eigensolver/pstedc_workspace.h"
+#include "Eigensolver/pstedc_impl.h"
 #include <optional>
 #include <array>
 #include <cstddef>
