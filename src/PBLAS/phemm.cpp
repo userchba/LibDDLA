@@ -267,7 +267,9 @@ bool phemm_check(const DdlaHandle_t& h, char side, char uplo, int m, int n,
     const T& alpha, const T* A, const int* da, const T* B, const int* db,
     const T& beta, const T* C, const int* dc, bool hermitian, char uploC)
 {
-    const char* const routine=hermitian ? "phemm" : "psymm";
+    uploC=blas_impl::upper(uploC);
+    const char* const routine=hermitian ? (uploC=='F' ? "phemm" : "phemmt")
+                                      : (uploC=='F' ? "psymm" : "psymmt");
     return detail::agree_check(h,routine,[&](detail::Agree& agree) {
         detail::require_backend<Backend>(h,routine);
         check_desc(da,h); check_desc(db,h); check_desc(dc,h);
@@ -275,11 +277,10 @@ bool phemm_check(const DdlaHandle_t& h, char side, char uplo, int m, int n,
         uplo = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo)));
         if ((side!='L' && side!='R') || (uplo!='U' && uplo!='L'))
             throw std::invalid_argument(std::string(routine)+": expected side L/R and uplo U/L");
-        uploC=blas_impl::upper(uploC);
         if (uploC!='F' && uploC!='U' && uploC!='L')
-            throw std::invalid_argument("phemm: expected output F/U/L");
+            throw std::invalid_argument(std::string(routine)+": expected output F/U/L");
         if (uploC!='F' && (m!=n || dc[DDLA_MB_]!=dc[DDLA_NB_]))
-            throw std::invalid_argument("phemmt: square output and square matching blocks required");
+            throw std::invalid_argument(std::string(routine)+": square output and square matching blocks required");
         const bool left = side=='L';
         const int order = left ? m : n, nb = da[DDLA_MB_];
         if (m<0 || n<0 || order>da[DDLA_M_] || order>da[DDLA_N_] ||
@@ -374,7 +375,7 @@ void phemm_run(const DdlaHandle_t& h, char side, char uplo,
         if (m==0 || n==0 || (alpha==T(0) && beta==T(1))) return;
         if (uploC!='F' && h->nprocs==1) {
             blas_impl::hemmt_run<Backend,T>(h,side,uplo,uploC,m,alpha,A,da[DDLA_LLD_],B,db[DDLA_LLD_],
-                beta,C,dc[DDLA_LLD_],backend_work,backend_bytes);
+                beta,C,dc[DDLA_LLD_],backend_work,backend_bytes,hermitian);
             return;
         }
         if(h->nprocs==1 && alpha!=T(0) && ((Backend==DdlaBackend::CPU && !hermitian) ||

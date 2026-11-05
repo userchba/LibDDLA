@@ -5,13 +5,16 @@
 namespace ddla { namespace blas_impl {
 template <DdlaBackend Backend,typename T>
 bool hemmt_check(const DdlaHandle_t& h,char side,char uploA,char uploC,int n,
-    const T& alpha,const T* A,int lda,const T* B,int ldb,const T& beta,T* C,int ldc);
+    const T& alpha,const T* A,int lda,const T* B,int ldb,const T& beta,T* C,int ldc,
+    const char* routine = "hemmt");
 template <typename T>
 void hemmt_workspace_size(const DdlaHandle_t& h,int n,bool product,std::size_t* bytes);
+// The same panel product serves HEMMT and SYMMT. Symmetric reflection uses
+// transpose and retains complex diagonal entries. Workspace geometry is shared.
 template <DdlaBackend Backend,typename T>
 void hemmt_run(const DdlaHandle_t& h,char side,char uploA,char uploC,int n,
     const T& alpha,const T* A,int lda,const T* B,int ldb,const T& beta,T* C,int ldc,
-    void* work,std::size_t bytes);
+    void* work,std::size_t bytes,bool hermitian = true);
 // Complete a stored diagonal block into scratch, preserving the source.
 template <DdlaBackend Backend,typename T>
 void diagonal_block_run(const DdlaHandle_t& h,bool upper,bool hermitian,int width,

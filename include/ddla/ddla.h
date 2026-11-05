@@ -190,6 +190,22 @@ void psymm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
     const T* B, const int* descB, const T& beta, T* C, const int* descC);
 
 /**
+ * @brief Symmetric product updating only uploC of a general square C.
+ * C(uploC) := (alpha*A*B + beta*C)(uploC) for side L, or
+ * (alpha*B*A + beta*C)(uploC) for side R. Only uploA of symmetric A is read.
+ * Complex A is reflected without conjugation and its full diagonal is used.
+ * B and C are general n-by-n matrices. Opposite C entries and padding are
+ * preserved. C must be disjoint from A/B when alpha is nonzero.
+ * Flags, descriptors, zero coefficients and collective checks follow phemmt.
+ * Only leading n-by-n regions are used. Backend and four scalar types follow
+ * psymm. side accepts L/R and both triangles accept U/L, case-insensitively.
+ */
+template <DdlaBackend Backend = default_backend_v,typename T>
+void psymmt(const DdlaHandle_t& handle,char side,char uploA,char uploC,int n,
+    const T& alpha,const T* A,const int* descA,const T* B,const int* descB,
+    const T& beta,T* C,const int* descC);
+
+/**
  * @brief Distributed general matrix product updating one output triangle.
  *
  * Compute uplo='U' or 'L' of C := alpha*op(A)*op(B) + beta*C.
@@ -1236,6 +1252,20 @@ void hemm(
  */
 template <DdlaBackend Backend = default_backend_v, typename T>
 void hemmt(const DdlaHandle_t& handle,char side,char uploA,char uploC,int n,
+    const T& alpha,const T* A,int lda,const T* B,int ldb,const T& beta,T* C,int ldc);
+
+/**
+ * @brief Local SYMM updating only uploC of a general n-by-n C.
+ * Same symmetric input, selected output and coefficient semantics as psymmt.
+ * A/B/C use column-major backend memory, with lda/ldb/ldc >= max(1,n).
+ * Complex A keeps its diagonal and reflects uploA without conjugation.
+ * alpha=0 reads no A/B, beta=0 reads no selected C, and n=0 or
+ * alpha=0,beta=1 permits null data pointers. Inputs and opposite C are preserved.
+ * The call uses the shared bounded HEMMT panel workspace and performs no MPI
+ * communication. Backend and four scalar types follow symm.
+ */
+template <DdlaBackend Backend = default_backend_v,typename T>
+void symmt(const DdlaHandle_t& handle,char side,char uploA,char uploC,int n,
     const T& alpha,const T* A,int lda,const T* B,int ldb,const T& beta,T* C,int ldc);
 
 /**

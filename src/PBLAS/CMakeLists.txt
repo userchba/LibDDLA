@@ -19,6 +19,7 @@ target_sources(ddla_lib PRIVATE
     phemm.cpp
     phemmt.cpp
     psymm.cpp
+    psymmt.cpp
     ptrtrm.cpp
     plapiv.cpp
     pswap.cpp

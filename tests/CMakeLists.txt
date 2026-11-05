@@ -41,8 +41,12 @@ function(add_test_executable test_name)
         set(_np "${ARGV1}")
     endif()
     set(test_source "${CMAKE_CURRENT_SOURCE_DIR}/${test_name}.cpp")
+    # A third argument reuses a fixture under a different compile-time mode.
+    if(ARGC GREATER 2)
+        set(test_source "${CMAKE_CURRENT_SOURCE_DIR}/${ARGV2}")
+    endif()
     if(EXISTS "${test_source}")
-        add_executable(${test_name} ${test_name}.cpp)
+        add_executable(${test_name} "${test_source}")
         target_link_libraries(${test_name} PRIVATE ddla_lib)
         apply_test_connector_defs(${test_name})
         add_test(NAME ${test_name}_mpi
@@ -532,4 +536,15 @@ if(TARGET workspace_trace)
     add_dependencies(test_workspace_pblas workspace_trace)
     set_tests_properties(test_workspace_pblas_mpi PROPERTIES ENVIRONMENT
         "LD_PRELOAD=$<TARGET_FILE:workspace_trace>;DDLA_WORKSPACE_TRACE_REQUIRED=1;OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+endif()
+
+# Symmetric mode shares the triangle-product fixture, including workspace guards.
+add_test_executable(test_symmt 1 test_hemmt.cpp)
+target_compile_definitions(test_symmt PRIVATE DDLA_TEST_SYMMT)
+target_include_directories(test_symmt PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(test_symmt PRIVATE ${CMAKE_DL_LIBS})
+if(TARGET workspace_trace)
+    add_dependencies(test_symmt workspace_trace)
+    set_tests_properties(test_symmt_mpi PROPERTIES ENVIRONMENT
+        "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1;DDLA_WORKSPACE_TRACE_REQUIRED=1;LD_PRELOAD=$<TARGET_FILE:workspace_trace>")
 endif()

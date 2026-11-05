@@ -389,6 +389,7 @@ must live in the handle's memory space, and GPU work uses the handle's stream.
 | `trmm` | Overwrite B with `α·op(A)·B` or `α·B·op(A)` |
 | `trtrm` | `C = α·op(A)·op(B) + β·C` with independent triangle and transpose flags for A and B |
 | `symm` / `hemm` | Symmetric / Hermitian matrix multiplication |
+| `symmt` / `hemmt` | Symmetric / Hermitian A times general B (or B times A), updating only the selected triangle of C |
 | `syrk` / `syr2k` / `herk` / `her2k` | Symmetric / Hermitian rank-k and rank-2k updates |
 | `gemmBatched` | Fixed-size GEMMs over arrays of pointers; arrays and matrices use the handle's memory space |
 
@@ -412,6 +413,21 @@ only that triangle of C; mixed effective triangles update all of C. The unused
 triangle of C and leading-dimension padding are preserved. A and B may coincide,
 but C must not overlap either input. The previous single-`uplo` interface is
 replaced by passing `uplo, 'N', uplo, 'N'`.
+
+`symmt(handle, side, uploA, uploC, n, alpha, A, lda, B, ldb, beta, C, ldc)`
+computes the selected `U` or `L` triangle of `C = alpha*A*B + beta*C`
+(`side='L'`) or `C = alpha*B*A + beta*C` (`side='R'`). All matrices are
+n-by-n. Only `uploA` of symmetric A is read; B is general. Complex symmetric
+A is reflected by transpose and retains its complex diagonal. `hemmt` uses
+conjugate reflection and a real Hermitian diagonal instead. The other triangle
+and padding of C are preserved. C must not overlap A or B.
+
+`psymmt(handle, side, uploA, uploC, n, alpha, A, descA, B, descB, beta, C, descC)`
+is the distributed counterpart, with block-cyclic descriptors and the same
+layout requirements as `psymm`; C uses square blocks. It shares `phemmt`'s
+triangle-only update schedule. Both routines support CPU and GPU backends and
+all four scalar types. Zero alpha skips A/B; zero beta skips reading the selected
+C entries; n=0 or alpha=0,beta=1 permits null data pointers.
 
 ### LU factorization, solve, and drivers
 
