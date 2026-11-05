@@ -6,6 +6,7 @@
 target_sources(ddla_lib PRIVATE
     pdgmm.cpp
     pgemm.cpp
+    pgemmt.cpp
     pgemm_select.cpp
     pgemm_stationary.cpp
     ptrtrs.cpp

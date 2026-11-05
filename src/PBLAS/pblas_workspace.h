@@ -6,6 +6,12 @@
 #include "ddla_stream.h"
 #include "comm_traits.h"
 #include "pgeadd_impl.h"
+#include "BLAS/blas_impl.h"
+#include "BLAS/gemmt_impl.h"
+#include "check_agree.h"
+#include "ddla_desc.h"
+#include "helpers.h"
+#include "require_backend.h"
 
 #include <algorithm>
 
@@ -121,6 +127,218 @@ void panel_run(const DdlaHandle_t& h, bool column_panel, char op, int m, int n,
         T(1), input, i + 1, j + 1, source, T(0), nullptr, 1, 1, d,
         output, 1, 1, d, work, bytes, host, host_bytes);
     broadcast_panel<Backend>(h, column_panel, d[DDLA_M_], d[DDLA_N_], output, 0, 0, d, output);
+}
+
+// Validate general product geometry and distinguish collective entry points.
+// The caller combines operation-specific checks in the same Agree instance.
+template <DdlaBackend Backend,typename T>
+bool product_check(const DdlaHandle_t& h, detail::Agree& agree, char uplo, char ta, char tb,
+    int n, int k, const T& alpha, const T* A, const int* da, const T* B, const int* db,
+    const T& beta, const T* C, const int* dc, int operation=0, bool force_output=false)
+{
+    detail::require_backend<Backend>(h,"pgemmt");
+    check_desc(da,h); check_desc(db,h); check_desc(dc,h);
+    uplo=blas_impl::upper(uplo); ta=blas_impl::upper(ta); tb=blas_impl::upper(tb);
+    if ((uplo!='U' && uplo!='L') ||
+        (ta!='N' && ta!='T' && ta!='C') || (tb!='N' && tb!='T' && tb!='C'))
+        throw std::invalid_argument("pgemmt: expected uplo U/L and N/T/C operations");
+    if (n<0 || k<0) throw std::invalid_argument("pgemmt: negative dimension");
+    const int ar=ta=='N' ? n : k, ac=ta=='N' ? k : n;
+    const int br=tb=='N' ? k : n, bc=tb=='N' ? n : k;
+    if (ar>da[DDLA_M_] || ac>da[DDLA_N_] || br>db[DDLA_M_] || bc>db[DDLA_N_] ||
+        n>dc[DDLA_M_] || n>dc[DDLA_N_])
+        throw std::invalid_argument("pgemmt: dimensions outside descriptors");
+    const int nb=dc[DDLA_MB_];
+    if (dc[DDLA_NB_]!=nb || da[DDLA_MB_]!=nb || da[DDLA_NB_]!=nb ||
+        db[DDLA_MB_]!=nb || db[DDLA_NB_]!=nb)
+        throw std::invalid_argument("pgemmt: all descriptors must use the same square blocks");
+    const bool product=alpha!=T(0) && k>0;
+    // Flags and zero-coefficient modes control collective participation.
+    const int flags=((uplo=='U')<<14)+(int(ta)<<7)+int(tb);
+    agree.mode("pgemmt flags/coefficient modes",flags*64+operation*8+(product ? 4 : 0)+(beta==T(0) ? 2 : 0)+(beta==T(1)));
+    agree.mode("pgemmt n",n); agree.mode("pgemmt k",k); agree.mode("pgemmt block size",nb);
+    if (n>0 && (force_output || product || beta!=T(1))) {
+        const int r=h->myprow_,c=h->mypcol_,pr=h->nprows_,pc=h->npcols_;
+        const int mr=num_loc(n,nb,r,dc[DDLA_RSRC_],pr);
+        const int nc=num_loc(n,nb,c,dc[DDLA_CSRC_],pc);
+        const bool selected=mr>0 && nc>0 && (uplo=='U'
+            ? indxl2g(0,nb,r,dc[DDLA_RSRC_],pr)<=indxl2g(nc-1,nb,c,dc[DDLA_CSRC_],pc)
+            : indxl2g(mr-1,nb,r,dc[DDLA_RSRC_],pr)>=indxl2g(0,nb,c,dc[DDLA_CSRC_],pc));
+        if (selected && !C) throw std::invalid_argument("pgemmt: null C");
+        if (product) {
+            const int alr=num_loc(ar,nb,r,da[DDLA_RSRC_],pr),alc=num_loc(ac,nb,c,da[DDLA_CSRC_],pc);
+            const int blr=num_loc(br,nb,r,db[DDLA_RSRC_],pr),blc=num_loc(bc,nb,c,db[DDLA_CSRC_],pc);
+            if ((alr>0 && alc>0 && !A) || (blr>0 && blc>0 && !B))
+                throw std::invalid_argument("pgemmt: null input");
+            if (detail::matrix_overlaps(A,da[DDLA_LLD_],alr,alc,C,dc[DDLA_LLD_],mr,nc) ||
+                detail::matrix_overlaps(B,db[DDLA_LLD_],blr,blc,C,dc[DDLA_LLD_],mr,nc))
+                throw std::invalid_argument("pgemmt: C must not overlap A or B");
+        }
+    }
+    return product;
+}
+
+// Reusable contraction-panel storage and transfers for triangular products.
+template <typename T>
+void product_workspace_size(const DdlaHandle_t& h, char ta, char tb, bool product, bool rank2, int n, int k,
+             const int* da, const int* db, const int* dc,
+             std::size_t (&count)[4], std::size_t (&add)[2][2])
+{
+    count[0]=count[1]=count[2]=count[3]=0;
+    add[0][0]=add[0][1]=add[1][0]=add[1][1]=0;
+    if (n==0 || !product || h->nprocs==1) return;
+    const int nb=dc[DDLA_MB_],kw=std::min(nb,k);
+    const int pr=h->nprows_,pc=h->npcols_,r=h->myprow_,c=h->mypcol_;
+    const int mr=num_loc(n,nb,r,dc[DDLA_RSRC_],pr),nc=num_loc(n,nb,c,dc[DDLA_CSRC_],pc);
+    const int sa=num_loc(n,nb,r,da[DDLA_RSRC_],pr);
+    const int sb=num_loc(n,nb,c,db[DDLA_CSRC_],pc);
+    const int swapped_a=rank2 ? num_loc(n,nb,r,db[DDLA_RSRC_],pr) : 0;
+    const int swapped_b=rank2 ? num_loc(n,nb,c,da[DDLA_CSRC_],pc) : 0;
+    count[0]=std::size_t(std::max(1,mr))*pblas::contraction_width(h,nb,k);
+    count[1]=std::size_t(std::max(1,nc))*pblas::contraction_width(h,nb,k);
+    count[3]=h->backend==DdlaBackend::GPU && pblas::contraction_width(h,nb,k)>kw
+        ? std::size_t(std::max(1,nc))*pblas::contraction_width(h,nb,k) : 0;
+    count[2]=std::size_t(std::max({1,mr,nc,sa,sb,swapped_a,swapped_b}))*kw;
+    if (ta!='N')
+        pblas::panel_workspace_size<T>(h,true,ta,kw,n,da,dc,&add[0][0],&add[0][1]);
+    if (tb!='N')
+        pblas::panel_workspace_size<T>(h,false,tb,n,kw,db,dc,&add[1][0],&add[1][1]);
+    if (rank2) {
+        std::size_t backend=0,host=0;
+        if (ta!='N') {
+            pblas::panel_workspace_size<T>(h,true,ta,kw,n,db,dc,&backend,&host);
+            add[0][0]=std::max(add[0][0],backend);add[0][1]=std::max(add[0][1],host);
+        }
+        if (tb!='N') {
+            pblas::panel_workspace_size<T>(h,false,tb,n,kw,da,dc,&backend,&host);
+            add[1][0]=std::max(add[1][0],backend);add[1][1]=std::max(add[1][1],host);
+        }
+    }
+}
+
+template <DdlaBackend Backend, typename T>
+void product_block_run(const DdlaHandle_t& h, bool left, char trans,
+           int n, int g, int width, const T* input, const int* di, const int* dc,
+           T* output, T* work, void* add_work, std::size_t add_bytes, void* add_host, std::size_t add_host_bytes)
+{
+    const int nb=dc[DDLA_MB_];
+    const int coord=left ? h->myprow_ : h->mypcol_;
+    const int procs=left ? h->nprows_ : h->npcols_;
+    const int target=dc[left ? DDLA_RSRC_ : DDLA_CSRC_];
+    if (trans=='N') {
+        const int source=di[left ? DDLA_RSRC_ : DDLA_CSRC_];
+        T* const packed=source==target ? output : work;
+        pblas::broadcast_panel<Backend,T>(h, left, left ? n : width, left ? width : n, input, left ? 0 : g,
+            left ? g : 0, di, packed);
+        if (source!=target) {
+            const int send=num_loc(n,nb,coord,source,procs);
+            const int recv=num_loc(n,nb,coord,target,procs);
+            const int shift=(target-source+procs)%procs;
+            commSendrecv<Backend>(h,left ? CommScope::Col : CommScope::Row,
+                packed,std::size_t(send)*width,(coord+shift)%procs,
+                output,std::size_t(recv)*width,(coord-shift+procs)%procs);
+        }
+        return;
+    }
+    pblas::panel_run<Backend,T>(h,left,trans,left?width:n,left?n:width,
+        input,left?g:0,left?0:g,di,dc,output,add_work,add_bytes,add_host,add_host_bytes);
+}
+
+template <DdlaBackend Backend, typename T>
+void product_panel_run(const DdlaHandle_t& h, bool left, char trans, int n, int g, int kw,
+    const T* input, const int* di, const int* dc, T* output, T* work, T* b_tile,
+    void* add_work, std::size_t add_bytes, void* add_host, std::size_t add_host_bytes)
+{
+    const int nb=dc[DDLA_MB_];
+    const int load_rows=num_loc(n,nb,h->myprow_,dc[DDLA_RSRC_],h->nprows_);
+    const int load_cols=num_loc(n,nb,h->mypcol_,dc[DDLA_CSRC_],h->npcols_);
+#if defined(DDLA_USE_CCL) && !defined(DDLA_USE_GPU_CPU_TUNNEL)
+    if constexpr (Backend==DdlaBackend::GPU) {
+        // These N broadcasts have distinct buffers and no intermediate
+        // receive-to-send dependency. One NCCL/RCCL group can enqueue
+        // the whole contraction panel; transposed/remapped transports
+        // retain their required ordering in the general path below.
+        const int source=di[left ? DDLA_RSRC_ : DDLA_CSRC_];
+        const int target=dc[left ? DDLA_RSRC_ : DDLA_CSRC_];
+        if (kw>nb && trans=='N' && source==target) {
+            commGroupStart<Backend>(h);
+            bool active=true;
+            try {
+                for (int offset=0;offset<kw;) {
+                    const int width=std::min(nb,kw-offset);
+                    T* out=left ? output+std::size_t(offset)*load_rows : b_tile+std::size_t(offset)*load_cols;
+                    product_block_run<Backend,T>(h,left,trans,n,g+offset,width,input,di,dc,out,work,
+                        add_work,add_bytes,add_host,add_host_bytes);
+                    offset+=width;
+                }
+                active=false;
+                commGroupEnd<Backend>(h);
+            } catch (...) {
+                if (active) try {commGroupEnd<Backend>(h);} catch (...) {}
+                throw;
+            }
+            if (!left && load_cols>0) for (int offset=0;offset<kw;) {
+                const int width=std::min(nb,kw-offset);
+                DDLA_CHECK(ddlaMemcpy2D(h,output+offset,std::size_t(kw)*sizeof(T),
+                    b_tile+std::size_t(offset)*load_cols,std::size_t(width)*sizeof(T),
+                    std::size_t(width)*sizeof(T),load_cols));
+                offset+=width;
+            }
+            return;
+        }
+    }
+#endif
+    for (int offset=0;offset<kw;) {
+        const int width=std::min(nb,kw-offset);
+        T* target=left ? output+std::size_t(offset)*load_rows : (kw>nb ? b_tile : output);
+        product_block_run<Backend,T>(h,left,trans,n,g+offset,width,input,di,dc,target,work,
+            add_work,add_bytes,add_host,add_host_bytes);
+        if (!left && kw>nb && load_cols>0)
+            DDLA_CHECK(ddlaMemcpy2D(h,output+offset,std::size_t(kw)*sizeof(T),
+                b_tile,std::size_t(width)*sizeof(T),std::size_t(width)*sizeof(T),load_cols));
+        offset+=width;
+    }
+}
+
+// Update one contraction panel, preserving the unselected triangle.
+template <DdlaBackend Backend, typename T>
+void triangle_panel_run(const DdlaHandle_t& h, char uplo, bool product, int n, int kw,
+    const T& alpha, const T* a, const T* b, const T& beta, T* C, const int* dc,
+    void* triangle_work, std::size_t triangle_bytes)
+{
+    const int nb=dc[DDLA_MB_],ldc=dc[DDLA_LLD_];
+    const int r=h->myprow_,c=h->mypcol_,pr=h->nprows_,pc=h->npcols_;
+    const int mr=num_loc(n,nb,r,dc[DDLA_RSRC_],pr);
+    const bool upper_triangle=uplo=='U';
+    for (int j=0;j<n;) {
+        const int width=std::min(nb,n-j);
+        if (c==indxg2p(j,nb,dc[DDLA_CSRC_],pc)) {
+            const int jl=num_loc(j,nb,c,dc[DDLA_CSRC_],pc);
+            const int start=upper_triangle ? 0 : num_loc(j+width,nb,r,dc[DDLA_RSRC_],pr);
+            const int end=upper_triangle ? num_loc(j,nb,r,dc[DDLA_RSRC_],pr) : mr;
+            if (end>start) {
+                T* out=C+start+std::size_t(jl)*ldc;
+                if (product)
+                    blas_impl::gemm_run<Backend,T>(h,'N','N',end-start,width,kw,alpha,
+                        a+start,mr,b+std::size_t(jl)*kw,kw,beta,out,ldc);
+                else if (beta==T(0)) {
+                    for (int col=0;col<width;++col)
+                        DDLA_CHECK(ddlaMemset(h,out+std::size_t(col)*ldc,0,
+                            std::size_t(end-start)*sizeof(T)));
+                } else if (beta!=T(1))
+                    blas_impl::geam_run<Backend,T>(h,'N','N',end-start,width,beta,out,ldc,
+                        T(0),static_cast<const T*>(nullptr),1,out,ldc);
+            }
+            if (r==indxg2p(j,nb,dc[DDLA_RSRC_],pr)) {
+                const int il=num_loc(j,nb,r,dc[DDLA_RSRC_],pr);
+                blas_impl::gemmt_run<Backend,T>(h,uplo,'N','N',width,kw,
+                    product ? alpha : T(0),product ? a+il : nullptr,std::max(1,mr),
+                    product ? b+std::size_t(jl)*kw : nullptr,std::max(1,kw),
+                    beta,C+il+std::size_t(jl)*ldc,ldc,triangle_work,triangle_bytes);
+            }
+        }
+        j+=width;
+    }
 }
 
 }}
