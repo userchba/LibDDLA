@@ -123,29 +123,17 @@ void run(const DdlaHandle_t& h, char uplo, char ta, char tb, bool product,
             pblas::product_panel_run<Backend,T>(h,left,trans,n,g,kw,input,di,dc,output,work,b_tile,
                 add_work[i],add[i][0],add_host[i],add[i][1]);
         };
-        if constexpr (Backend==DdlaBackend::GPU) {
-            if (product) {
-                const auto load_panels=[&](int g,int kw) {
-                    load(true,ta,g,kw,A,da,a);
-                    load(false,tb,g,kw,B,db,b);
-                };
-                panel::run<Backend,T>(h,uplo,n,k,pblas::contraction_width(h,dc[DDLA_MB_],k),
-                    alpha,beta,C,dc,load_panels,a,b,w,backend_bytes-used,hw,host_bytes-host_used,
-                    triangle_work,triangle_bytes);
-                return;
-            }
-        }
-        for (int g=0;g<(product ? k : 1);) {
-            const int kw=product ? std::min(pblas::contraction_width(h,dc[DDLA_MB_],k),k-g) : 0;
-            if (product) {
+        if (product) {
+            const auto prepare=[&](int g,int kw) {
                 load(true,ta,g,kw,A,da,a);
                 load(false,tb,g,kw,B,db,b);
-            }
-            pblas::triangle_panel_run<Backend,T>(h,uplo,product,n,kw,alpha,a,b,g==0 ? beta : T(1),
+            };
+            panel::run<Backend,T>(h,uplo,n,k,pblas::contraction_width(h,dc[DDLA_MB_],k),
+                alpha,beta,C,dc,prepare,a,b,w,backend_bytes-used,hw,host_bytes-host_used,
+                triangle_work,triangle_bytes,/*cpu_batch=*/false);
+        } else
+            pblas::triangle_panel_run<Backend,T>(h,uplo,false,n,0,alpha,a,b,beta,
                 C,dc,triangle_work,triangle_bytes);
-            if (!product) break;
-            g+=kw;
-        }
 
     } catch (...) {
         // Retire queued host reads before the caller reuses or releases scratch.

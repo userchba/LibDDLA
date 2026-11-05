@@ -10,6 +10,7 @@ target_sources(ddla_lib PRIVATE
     her2k.cpp
     hemv.cpp
     hemm.cpp
+    hemmt.cpp
     her2.cpp
     gemv.cpp
     trmv.cpp
@@ -43,12 +44,12 @@ set_source_files_properties(geam.cpp gemmBatched.cpp TARGET_DIRECTORY ddla_lib
 
 if(DDLA_USE_CUDA)
     target_sources(ddla_lib PRIVATE gemm_vbatched.cpp)
-    set_source_files_properties(trtrm.cpp gemmt.cpp gemm_mixed.cpp gemm_vbatched.cpp TARGET_DIRECTORY ddla_lib
+    set_source_files_properties(trtrm.cpp gemmt.cpp hemmt.cpp gemm_mixed.cpp gemm_vbatched.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES LANGUAGE CUDA)
 endif()
 if(DDLA_USE_HIP)
     target_sources(ddla_lib PRIVATE gemm_vbatched.cpp)
-    set_source_files_properties(trtrm.cpp gemmt.cpp gemm_mixed.cpp gemm_vbatched.cpp TARGET_DIRECTORY ddla_lib
+    set_source_files_properties(trtrm.cpp gemmt.cpp hemmt.cpp gemm_mixed.cpp gemm_vbatched.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES LANGUAGE HIP)
 endif()
 
