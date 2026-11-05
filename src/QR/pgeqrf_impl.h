@@ -129,9 +129,9 @@ void qr_panel_distributed(const DdlaHandle_t& handle, T* A, const int* descA, Qr
 // small allreduces, the stage-1 panel reads it per call without a check.
 bool qr_panel_inplace_env();
 
-// uplo flag of the public pgeqrf: 'U'/'u' -> 'U' (A = Q R), 'L'/'l' -> 'L'
-// (A = Q L); anything else throws.  Every rank sees the same flag, so the throw
-// happens on all ranks before any collective.
+// Private QR/QL selector: 'U'/'u' -> 'U' (A = Q R), 'L'/'l' -> 'L'
+// (A = Q L); anything else throws. The public entries supply a fixed selector,
+// which the collective check agrees before choosing a communication schedule.
 inline char normalize_uplo(char uplo, const char* who)
 {
     const char u = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo)));

@@ -126,22 +126,35 @@ def pposv(A: DistributedMatrix, B: DistributedMatrix, uplo: str = 'L') -> Tuple[
         ppotrs(A, B, uplo=uplo, is_nega=is_nega, location=-1)
     return B, info, is_nega
 
-def pgeqrf(A: DistributedMatrix, tau: Optional[np.ndarray] = None) -> Tuple[DistributedMatrix, np.ndarray, int]:
-    """Distributed Householder QR factorization: A = Q * R."""
-    min_dim = min(A.m, A.n)
+def _qr_factor(A: DistributedMatrix, tau: Optional[np.ndarray], routine: str,
+               default_tau_size: int) -> Tuple[DistributedMatrix, np.ndarray, int]:
     if tau is None:
-        tau = np.zeros(min_dim, dtype=A.dtype)
+        tau = np.zeros(default_tau_size, dtype=A.dtype)
     info = ctypes.c_int(0)
-    func = getattr(lib, f"ddla_{A.type_char}_pgeqrf")
+    func = getattr(lib, f"ddla_{A.type_char}_{routine}")
     st = func(
-        A.handle.ptr, b'U', A.m, A.n,
+        A.handle.ptr, A.m, A.n,
         ctypes.c_void_p(A.data_ptr),
         ctypes.c_void_p(A.desc.ctypes.data),
         ctypes.c_void_p(tau.ctypes.data),
         ctypes.byref(info)
     )
-    check_status(st, f"ddla_{A.type_char}_pgeqrf")
+    check_status(st, f"ddla_{A.type_char}_{routine}")
     return A, tau, info.value
+
+
+def pgeqrf(A: DistributedMatrix, tau: Optional[np.ndarray] = None) -> Tuple[DistributedMatrix, np.ndarray, int]:
+    """Distributed Householder QR factorization, A = Q * R, overwriting A."""
+    return _qr_factor(A, tau, "pgeqrf", min(A.m, A.n))
+
+
+def pgeqlf(A: DistributedMatrix, tau: Optional[np.ndarray] = None) -> Tuple[DistributedMatrix, np.ndarray, int]:
+    """Distributed Householder QL factorization, A = Q * L, overwriting A.
+
+    tau uses A.n_loc entries indexed by local column. Wide matrices store
+    their reflector scalars in the final columns.
+    """
+    return _qr_factor(A, tau, "pgeqlf", A.n_loc)
 
 def ptrtrs(A: DistributedMatrix, B: DistributedMatrix, side: str = 'L',
            uplo: str = 'U', trans: str = 'N', diag: str = 'N') -> DistributedMatrix:

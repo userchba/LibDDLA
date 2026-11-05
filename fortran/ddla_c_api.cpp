@@ -969,42 +969,82 @@ extern "C" int ddla_z_pgemm(void* handle, char transa, char transb, int m, int n
     });
 }
 
-extern "C" int ddla_s_pgeqrf(void* handle, char uplo, int m, int n, void* A, const int* descA, void* tau, int* info)
+extern "C" int ddla_s_pgeqrf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgeqrf<BE::value, float>(hh, uplo, m, n, static_cast<float*>(A), descA, static_cast<float*>(tau), *info);
+        ddla::pgeqrf<BE::value, float>(hh, m, n, static_cast<float*>(A), descA, static_cast<float*>(tau), *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
-extern "C" int ddla_d_pgeqrf(void* handle, char uplo, int m, int n, void* A, const int* descA, void* tau, int* info)
+extern "C" int ddla_d_pgeqrf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgeqrf<BE::value, double>(hh, uplo, m, n, static_cast<double*>(A), descA, static_cast<double*>(tau), *info);
+        ddla::pgeqrf<BE::value, double>(hh, m, n, static_cast<double*>(A), descA, static_cast<double*>(tau), *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
-extern "C" int ddla_c_pgeqrf(void* handle, char uplo, int m, int n, void* A, const int* descA, void* tau, int* info)
+extern "C" int ddla_c_pgeqrf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgeqrf<BE::value, std::complex<float>>(hh, uplo, m, n, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(tau), *info);
+        ddla::pgeqrf<BE::value, std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(tau), *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
-extern "C" int ddla_z_pgeqrf(void* handle, char uplo, int m, int n, void* A, const int* descA, void* tau, int* info)
+extern "C" int ddla_z_pgeqrf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgeqrf<BE::value, std::complex<double>>(hh, uplo, m, n, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(tau), *info);
+        ddla::pgeqrf<BE::value, std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(tau), *info);
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_s_pgeqlf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
+{
+    return ddla_c_run(handle, [&](auto be) -> int {
+        using BE = decltype(be);
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::pgeqlf<BE::value, float>(hh, m, n, static_cast<float*>(A), descA, static_cast<float*>(tau), *info);
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_d_pgeqlf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
+{
+    return ddla_c_run(handle, [&](auto be) -> int {
+        using BE = decltype(be);
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::pgeqlf<BE::value, double>(hh, m, n, static_cast<double*>(A), descA, static_cast<double*>(tau), *info);
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_c_pgeqlf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
+{
+    return ddla_c_run(handle, [&](auto be) -> int {
+        using BE = decltype(be);
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::pgeqlf<BE::value, std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(tau), *info);
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_z_pgeqlf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
+{
+    return ddla_c_run(handle, [&](auto be) -> int {
+        using BE = decltype(be);
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::pgeqlf<BE::value, std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(tau), *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }

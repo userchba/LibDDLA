@@ -465,7 +465,8 @@ method, and all ranks must use the same setting.
 
 | Function | Description |
 |----------|-------------|
-| `pgeqrf(handle, uplo, m, n, ...)` | Distributed Householder QR (`'U'`: `A = Q·R`) or QL (`'L'`: `A = Q·L`); all four scalar types, with host `tau` indexed by local column |
+| `pgeqrf(handle, m, n, ...)` | Distributed Householder QR, `A = Q·R`; all four scalar types, with host `tau` indexed by local column |
+| `pgeqlf(handle, m, n, ...)` | Distributed Householder QL, `A = Q·L`; host `tau` uses local-column indices, including the final reflector columns of wide matrices |
 
 Panels use a gathered local `geqrf` by default (`DDLA_QR_PANEL=gather`),
 or the distributed `inplace` variant. All ranks must use the same selector.

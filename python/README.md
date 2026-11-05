@@ -18,6 +18,7 @@ Designed with native **NumPy** array interoperability and **mpi4py** integration
   - `pgetrf` / `pgetrs` / `pgesv`: Distributed LU factorization and general linear system solve.
   - `ppotrf` / `ppotrs` / `pposv`: Distributed Cholesky factorization and symmetric/Hermitian positive-definite solve.
   - `pgeqrf`: Distributed Householder QR factorization.
+  - `pgeqlf`: Distributed Householder QL factorization.
   - `ptrtrs` / `ptrmm`: Distributed triangular solve and triangular matrix multiplication.
   - `pgeadd` / `pdam`: Distributed matrix addition and addition of a scalar to the diagonal.
 - **Four Standard Precision Types**:

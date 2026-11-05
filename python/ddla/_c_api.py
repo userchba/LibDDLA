@@ -895,9 +895,9 @@ except AttributeError:
 try:
     _fn = getattr(lib, "ddla_s_pgeqrf")
     _fn.restype = ctypes.c_int
-    _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    _fn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _TYPED_ROUTINES[("pgeqrf", "s")] = _fn
-    _ROUTINE_ARGS[("pgeqrf", "s")] = [('h', 'handle'), ('c', 'uplo'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('pt', 'tau'), ('ip', 'info')]
+    _ROUTINE_ARGS[("pgeqrf", "s")] = [('h', 'handle'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('pt', 'tau'), ('ip', 'info')]
 except AttributeError:
     pass
 
@@ -905,9 +905,9 @@ except AttributeError:
 try:
     _fn = getattr(lib, "ddla_d_pgeqrf")
     _fn.restype = ctypes.c_int
-    _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    _fn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _TYPED_ROUTINES[("pgeqrf", "d")] = _fn
-    _ROUTINE_ARGS[("pgeqrf", "d")] = [('h', 'handle'), ('c', 'uplo'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('pt', 'tau'), ('ip', 'info')]
+    _ROUTINE_ARGS[("pgeqrf", "d")] = [('h', 'handle'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('pt', 'tau'), ('ip', 'info')]
 except AttributeError:
     pass
 
@@ -915,9 +915,9 @@ except AttributeError:
 try:
     _fn = getattr(lib, "ddla_c_pgeqrf")
     _fn.restype = ctypes.c_int
-    _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    _fn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _TYPED_ROUTINES[("pgeqrf", "c")] = _fn
-    _ROUTINE_ARGS[("pgeqrf", "c")] = [('h', 'handle'), ('c', 'uplo'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('pt', 'tau'), ('ip', 'info')]
+    _ROUTINE_ARGS[("pgeqrf", "c")] = [('h', 'handle'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('pt', 'tau'), ('ip', 'info')]
 except AttributeError:
     pass
 
@@ -925,9 +925,49 @@ except AttributeError:
 try:
     _fn = getattr(lib, "ddla_z_pgeqrf")
     _fn.restype = ctypes.c_int
-    _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    _fn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _TYPED_ROUTINES[("pgeqrf", "z")] = _fn
-    _ROUTINE_ARGS[("pgeqrf", "z")] = [('h', 'handle'), ('c', 'uplo'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('pt', 'tau'), ('ip', 'info')]
+    _ROUTINE_ARGS[("pgeqrf", "z")] = [('h', 'handle'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('pt', 'tau'), ('ip', 'info')]
+except AttributeError:
+    pass
+
+
+try:
+    _fn = getattr(lib, "ddla_s_pgeqlf")
+    _fn.restype = ctypes.c_int
+    _fn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    _TYPED_ROUTINES[("pgeqlf", "s")] = _fn
+    _ROUTINE_ARGS[("pgeqlf", "s")] = [('h', 'handle'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('pt', 'tau'), ('ip', 'info')]
+except AttributeError:
+    pass
+
+
+try:
+    _fn = getattr(lib, "ddla_d_pgeqlf")
+    _fn.restype = ctypes.c_int
+    _fn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    _TYPED_ROUTINES[("pgeqlf", "d")] = _fn
+    _ROUTINE_ARGS[("pgeqlf", "d")] = [('h', 'handle'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('pt', 'tau'), ('ip', 'info')]
+except AttributeError:
+    pass
+
+
+try:
+    _fn = getattr(lib, "ddla_c_pgeqlf")
+    _fn.restype = ctypes.c_int
+    _fn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    _TYPED_ROUTINES[("pgeqlf", "c")] = _fn
+    _ROUTINE_ARGS[("pgeqlf", "c")] = [('h', 'handle'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('pt', 'tau'), ('ip', 'info')]
+except AttributeError:
+    pass
+
+
+try:
+    _fn = getattr(lib, "ddla_z_pgeqlf")
+    _fn.restype = ctypes.c_int
+    _fn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    _TYPED_ROUTINES[("pgeqlf", "z")] = _fn
+    _ROUTINE_ARGS[("pgeqlf", "z")] = [('h', 'handle'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('pt', 'tau'), ('ip', 'info')]
 except AttributeError:
     pass
 
