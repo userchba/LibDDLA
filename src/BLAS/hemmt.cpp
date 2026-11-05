@@ -1,4 +1,5 @@
 #include "hemmt_impl.h"
+#include <string>
 #include "blas_impl.h"
 #include "gemmt_impl.h"
 #include "helpers.h"
@@ -73,21 +74,22 @@ void diagonal_block_run(const DdlaHandle_t& h, bool upper, bool hermitian, int w
 
 template <DdlaBackend Backend,typename T>
 bool hemmt_check(const DdlaHandle_t& h,char side,char uploA,char uploC,int n,
-    const T& alpha,const T* A,int lda,const T* B,int ldb,const T& beta,T* C,int ldc)
+    const T& alpha,const T* A,int lda,const T* B,int ldb,const T& beta,T* C,int ldc,
+    const char* routine)
 {
-    detail::require_backend<Backend>(h,"hemmt");
+    detail::require_backend<Backend>(h,routine);
     side=upper(side);uploA=upper(uploA);uploC=upper(uploC);
     if ((side!='L' && side!='R') || (uploA!='U' && uploA!='L') || (uploC!='U' && uploC!='L'))
-        throw std::invalid_argument("hemmt: expected side L/R and input/output triangles U/L");
+        throw std::invalid_argument(std::string(routine)+": expected side L/R and input/output triangles U/L");
     if (n<0 || lda<std::max(1,n) || ldb<std::max(1,n) || ldc<std::max(1,n))
-        throw std::invalid_argument("hemmt: invalid dimensions or leading dimensions");
+        throw std::invalid_argument(std::string(routine)+": invalid dimensions or leading dimensions");
     const bool noop=n==0 || (alpha==T(0) && beta==T(1));
     if (!noop) {
-        if (!C) throw std::invalid_argument("hemmt: null C");
+        if (!C) throw std::invalid_argument(std::string(routine)+": null C");
         if (alpha!=T(0)) {
-            if (!A || !B) throw std::invalid_argument("hemmt: null input");
+            if (!A || !B) throw std::invalid_argument(std::string(routine)+": null input");
             if (detail::matrix_overlaps(A,lda,n,n,C,ldc,n,n) || detail::matrix_overlaps(B,ldb,n,n,C,ldc,n,n))
-                throw std::invalid_argument("hemmt: C must not overlap A or B");
+                throw std::invalid_argument(std::string(routine)+": C must not overlap A or B");
         }
     }
     return noop;
@@ -107,7 +109,7 @@ void hemmt_workspace_size(const DdlaHandle_t& h,int n,bool product,std::size_t* 
 template <DdlaBackend Backend,typename T>
 void hemmt_run(const DdlaHandle_t& h,char side,char uploA,char uploC,int n,
     const T& alpha,const T* A,int lda,const T* B,int ldb,const T& beta,T* C,int ldc,
-    void* work,std::size_t bytes)
+    void* work,std::size_t bytes,bool hermitian)
 {
     if (n==0 || (alpha==T(0) && beta==T(1))) return;
     if (alpha==T(0)) {
@@ -116,6 +118,7 @@ void hemmt_run(const DdlaHandle_t& h,char side,char uploA,char uploC,int n,
     }
     const bool left=side=='L',upper_input=uploA=='U',upper_output=uploC=='U';
     const int block=std::min(n,hemmt_panel_size);
+    const char reflection=hermitian ? 'C' : 'T';
     char* cursor=static_cast<char*>(work);
     T* panel=detail::take<T>(cursor,std::size_t(n)*block);
     const std::size_t triangle_bytes=bytes-std::size_t(cursor-static_cast<char*>(work));
@@ -128,12 +131,12 @@ void hemmt_run(const DdlaHandle_t& h,char side,char uploA,char uploC,int n,
                 ? (direct ? A+first+std::size_t(begin)*lda : A+begin+std::size_t(first)*lda)
                 : (direct ? A+begin+std::size_t(first)*lda : A+first+std::size_t(begin)*lda);
             T* target=left ? panel+std::size_t(begin)*width : panel+begin;
-            geam_run<Backend,T>(h,direct ? 'N' : 'C','N',left ? width : length,left ? length : width,
+            geam_run<Backend,T>(h,direct ? 'N' : reflection,'N',left ? width : length,left ? length : width,
                 T(1),source,lda,T(0),nullptr,1,target,ldp);
         };
         copy(0,first,left ? !upper_input : upper_input);
         copy(after,n-after,left ? upper_input : !upper_input);
-        diagonal_block_run<Backend,T>(h,upper_input,true,width,A+first+std::size_t(first)*lda,lda,
+        diagonal_block_run<Backend,T>(h,upper_input,hermitian,width,A+first+std::size_t(first)*lda,lda,
             left ? panel+std::size_t(first)*width : panel+first,ldp);
         const int begin=upper_output ? (left ? after : 0) : (left ? 0 : after);
         const int length=upper_output ? (left ? n-after : first) : (left ? first : n-after);
@@ -163,8 +166,8 @@ void hemmt(const DdlaHandle_t& h,char side,char uploA,char uploC,int n,
 }
 #define INSTANTIATE(B,T) \
  template void hemmt<B,T>(const DdlaHandle_t&,char,char,char,int,const T&,const T*,int,const T*,int,const T&,T*,int); \
- template bool blas_impl::hemmt_check<B,T>(const DdlaHandle_t&,char,char,char,int,const T&,const T*,int,const T*,int,const T&,T*,int); \
- template void blas_impl::hemmt_run<B,T>(const DdlaHandle_t&,char,char,char,int,const T&,const T*,int,const T*,int,const T&,T*,int,void*,std::size_t); \
+ template bool blas_impl::hemmt_check<B,T>(const DdlaHandle_t&,char,char,char,int,const T&,const T*,int,const T*,int,const T&,T*,int,const char*); \
+ template void blas_impl::hemmt_run<B,T>(const DdlaHandle_t&,char,char,char,int,const T&,const T*,int,const T*,int,const T&,T*,int,void*,std::size_t,bool); \
  template void blas_impl::diagonal_block_run<B,T>(const DdlaHandle_t&,bool,bool,int,const T*,int,T*,int)
 #define TYPES(B) \
  INSTANTIATE(B,float); INSTANTIATE(B,double); INSTANTIATE(B,std::complex<float>); INSTANTIATE(B,std::complex<double>)
