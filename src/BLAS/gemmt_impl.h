@@ -21,6 +21,14 @@ void gemmt_run(const DdlaHandle_t& h,
     const T& alpha, const T* A, int lda, const T* B, int ldb,
     const T& beta, T* C, int ldc, void* backend_work, std::size_t backend_bytes);
 
+// Copy full diagonal products from uniformly pitched temporary blocks into
+// selected triangles, applying beta only to those output entries. targets is
+// a backend pointer table, or null for consecutive diagonal blocks of C.
+template <DdlaBackend Backend, typename T>
+void gemmt_copy_run(const DdlaHandle_t& h, char uplo, int block_size, int full_blocks,
+    int tail_width, const T& beta, const T* temporary, T* C, int ldc, T* const* targets,
+    const int* widths = nullptr);
+
 // Hermitian diagonal input uses only its real component, including when its
 // imaginary storage has never been initialized.
 template <DdlaBackend Backend, typename T>

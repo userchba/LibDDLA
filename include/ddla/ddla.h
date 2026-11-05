@@ -172,6 +172,30 @@ void psymm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
     const T* B, const int* descB, const T& beta, T* C, const int* descC);
 
 /**
+ * @brief Distributed general matrix product updating one output triangle.
+ *
+ * Compute uplo='U' or 'L' of C := alpha*op(A)*op(B) + beta*C.
+ * op(A) is n-by-k and op(B) is k-by-n. A and B are general matrices;
+ * no symmetry or Hermitian structure is assumed. The opposite triangle,
+ * entries outside the leading logical regions, and padding are untouched.
+ *
+ * All descriptors use the same square block size; source coordinates may
+ * differ and the process grid may be rectangular. C must not overlap A/B.
+ * All ranks call collectively with the same global arguments and descriptors
+ * (except local leading dimensions). CPU/GPU pointers match the handle.
+ *
+ * beta=0 reads no old C; alpha=0 or k=0 reads no A/B. n=0 and
+ * alpha=0,beta=1 are no-ops. Complex alpha, beta and diagonal entries are
+ * unrestricted. Flags are case-insensitive; transa/transb are N/T/C.
+ * Invalid arguments are rejected collectively before matrix communication.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void pgemmt(const DdlaHandle_t& handle, char uplo,
+    char transa, char transb, int n, int k,
+    const T& alpha, const T* A, const int* descA,
+    const T* B, const int* descB, const T& beta, T* C, const int* descC);
+
+/**
  * @brief Distributed symmetric rank-k update of only uplo of C.
  * C := alpha*A*A^T + beta*C (N), or alpha*A^T*A + beta*C (T).
  * All descriptors use the same square block size; source coordinates may

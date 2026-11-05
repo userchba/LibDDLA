@@ -20,6 +20,27 @@ namespace ddla { namespace blas_impl { namespace {
 constexpr int tile_size = 128;
 
 template <typename T>
+int output_tile_size(const DdlaHandle_t& h)
+{
+    return h->backend==DdlaBackend::GPU && std::is_arithmetic_v<T> ? 2*tile_size : tile_size;
+}
+
+// Large rectangles cover the strictly selected coarse blocks. Their narrow
+// diagonal boundary stays in 128-wide batches, so coalescing does not add
+// discarded diagonal products or enlarge the temporary matrices.
+void local_batch_counts(int n, int block, std::size_t (&counts)[6])
+{
+    const int full=n/block,edge=n%block,ratio=block/tile_size;
+    const int small=edge/tile_size,tail=edge%tile_size;
+    counts[0]=std::size_t(full)*(full-1)/2;
+    counts[1]=edge ? full : 0;
+    counts[2]=std::size_t(full)*ratio*(ratio-1)/2+std::size_t(small)*(small-1)/2;
+    counts[3]=tail ? small : 0;
+    counts[4]=n/tile_size;
+    counts[5]=tail!=0;
+}
+
+template <typename T>
 const T* a_rows(const T* a, int lda, char trans, int first)
 { return a + (trans == 'N' ? std::size_t(first) : std::size_t(first)*lda); }
 
@@ -69,48 +90,70 @@ __global__ void real_diagonal_kernel(int n, R* c, int ldc)
 // partial diagonal tile. Build their pointer tables on the device so the
 // public wrapper needs no temporary host storage or extra synchronization.
 template <typename T>
-__global__ void triangular_pointers(bool upper,int n,char ta,char tb,
+__global__ void triangular_pointers(bool upper,int n,int block,char ta,char tb,
     const T* a,int lda,const T* b,int ldb,T* c,int ldc,T* temporary,
     T** pointers,std::size_t count)
 {
+    const int full=n/block,edge=n%block,ratio=block/tile_size;
+    const int small=edge/tile_size,tail=edge%tile_size;
+    const std::size_t big_rectangles=std::size_t(full)*(full-1)/2;
+    const std::size_t big_edges=edge ? full : 0;
+    const std::size_t per_block=std::size_t(ratio)*(ratio-1)/2;
+    const std::size_t small_rectangles=std::size_t(full)*per_block+std::size_t(small)*(small-1)/2;
+    const std::size_t small_edges=tail ? small : 0;
     for (std::size_t at=std::size_t(blockIdx.x)*blockDim.x+threadIdx.x;
          at<count;at+=std::size_t(blockDim.x)*gridDim.x) {
-        const int full=n/tile_size,tail=n%tile_size;
-        const std::size_t rectangles=std::size_t(full)*(full-1)/2;
-        const std::size_t edge=tail ? full : 0;
+        std::size_t index=at;
         int i,j;
         T* output;
-        if (at<rectangles) {
-            j=int((1+sqrt(1+8.0*double(at)))/2);
-            while (std::size_t(j)*(j-1)/2>at) --j;
-            while (std::size_t(j)*(j+1)/2<=at) ++j;
-            i=int(at-std::size_t(j)*(j-1)/2);
-            if (!upper) {const int t=i;i=j;j=t;}
-            output=c+i*tile_size+std::size_t(j*tile_size)*ldc;
-        } else if (at<rectangles+edge) {
-            const int t=int(at-rectangles);
-            i=upper ? t : full;j=upper ? full : t;
-            output=c+i*tile_size+std::size_t(j*tile_size)*ldc;
+        if (index<big_rectangles) {
+            j=int((1+sqrt(1+8.0*double(index)))/2);
+            while (std::size_t(j)*(j-1)/2>index) --j;
+            while (std::size_t(j)*(j+1)/2<=index) ++j;
+            i=int(index-std::size_t(j)*(j-1)/2);
+            i*=block;j*=block;
+        } else if ((index-=big_rectangles)<big_edges) {
+            i=int(index)*block;j=full*block;
+        } else if ((index-=big_edges)<small_rectangles) {
+            const int base=int(index/per_block)*block;
+            index%=per_block;
+            j=int((1+sqrt(1+8.0*double(index)))/2);
+            while (std::size_t(j)*(j-1)/2>index) --j;
+            while (std::size_t(j)*(j+1)/2<=index) ++j;
+            i=int(index-std::size_t(j)*(j-1)/2);
+            i=base+i*tile_size;j=base+j*tile_size;
+        } else if ((index-=small_rectangles)<small_edges) {
+            i=full*block+int(index)*tile_size;j=n-tail;
         } else {
-            i=j=int(at-rectangles-edge);
-            output=temporary+std::size_t(i)*tile_size*tile_size;
+            index-=small_edges;
+            i=j=int(index)*tile_size;
+            output=temporary+index*tile_size*tile_size;
+            pointers[at]=const_cast<T*>(a+(ta=='N' ? std::size_t(i) : std::size_t(i)*lda));
+            pointers[count+at]=const_cast<T*>(b+(tb=='N' ? std::size_t(j)*ldb : std::size_t(j)));
+            pointers[2*count+at]=output;
+            continue;
         }
-        pointers[at]=const_cast<T*>(a+(ta=='N' ? std::size_t(i)*tile_size : std::size_t(i)*tile_size*lda));
-        pointers[count+at]=const_cast<T*>(b+(tb=='N' ? std::size_t(j)*tile_size*ldb : std::size_t(j)*tile_size));
+        if (!upper) {const int swap=i;i=j;j=swap;}
+        output=c+i+std::size_t(j)*ldc;
+        pointers[at]=const_cast<T*>(a+(ta=='N' ? std::size_t(i) : std::size_t(i)*lda));
+        pointers[count+at]=const_cast<T*>(b+(tb=='N' ? std::size_t(j)*ldb : std::size_t(j)));
         pointers[2*count+at]=output;
     }
 }
 
 template <typename T,bool ReadC>
-__global__ void copy_diagonal_triangle(bool upper,int n,int first_tile,const void* temporary,T beta,void* c,int ldc)
+__global__ void copy_diagonal_triangle(bool upper,int block,int full,int tail,int first_tile,
+    const void* temporary,T beta,void* c,int ldc,void* const* targets,const int* widths)
 {
-    const int tile=first_tile+blockIdx.z,first=tile*tile_size;
+    const int tile=first_tile+blockIdx.z;
+    const int width=widths ? widths[tile] : tile<full ? block : tail;
     const int i=blockIdx.x*16+threadIdx.x,j=blockIdx.y*16+threadIdx.y;
-    if (first+i>=n || first+j>=n || (upper ? i>j : i<j)) return;
-    const std::size_t to=first+i+std::size_t(first+j)*ldc;
-    T value=Global<T>::load(temporary,std::size_t(tile)*tile_size*tile_size+i+std::size_t(j)*tile_size);
-    if constexpr (ReadC) value+=beta*Global<T>::load(c,to);
-    Global<T>::store(c,to,value);
+    if (i>=width || j>=width || (upper ? i>j : i<j)) return;
+    void* output=targets ? targets[tile] : static_cast<char*>(c)+std::size_t(tile)*block*(std::size_t(ldc)+1)*sizeof(T);
+    const std::size_t to=i+std::size_t(j)*ldc;
+    T value=Global<T>::load(temporary,std::size_t(tile)*block*block+i+std::size_t(j)*block);
+    if constexpr (ReadC) value+=beta*Global<T>::load(output,to);
+    Global<T>::store(output,to,value);
 }
 
 #endif
@@ -148,44 +191,52 @@ void batched_triangle(const DdlaHandle_t& h,char uplo,char ta,char tb,int n,int 
     const T& alpha,const T* a,int lda,const T* b,int ldb,const T& beta,T* c,int ldc,void* workspace)
 {
     const bool upper_triangle=uplo=='U';
-    const int full=n/tile_size,tail=n%tile_size;
-    const std::size_t tiles=std::size_t(full)+(tail!=0),count=tiles*(tiles+1)/2;
+    const int block=output_tile_size<T>(h),full=n/block,edge=n%block;
+    const int ratio=block/tile_size,small=edge/tile_size,tail=n%tile_size;
+    std::size_t counts[6];local_batch_counts(n,block,counts);
+    std::size_t count=0;for (auto size:counts) count+=size;
+    const std::size_t diagonals=(std::size_t(n)+tile_size-1)/tile_size;
     char* cursor=static_cast<char*>(workspace);
     T** pointers=detail::take<T*>(cursor,3*count);
-    T* temporary=detail::take<T>(cursor,tiles*tile_size*tile_size);
+    T* temporary=detail::take<T>(cursor,diagonals*tile_size*tile_size);
     if constexpr (Backend==DdlaBackend::GPU) {
 #if DDLA_GPU_VENDOR
         triangular_pointers<T><<<static_cast<unsigned>(std::min<std::size_t>((count+255)/256,65535)),256,0,static_cast<gpuStream_t>(h->stream)>>>(
-            upper_triangle,n,ta,tb,a,lda,b,ldb,c,ldc,temporary,pointers,count);
+            upper_triangle,n,block,ta,tb,a,lda,b,ldb,c,ldc,temporary,pointers,count);
         DDLA_CHECK(ddlaGetLastError(h));
 #endif
     } else {
         std::size_t at=0;
-        auto put=[&](int i,int j,T* output) {
-            pointers[at]=const_cast<T*>(a_rows(a,lda,ta,i*tile_size));
-            pointers[count+at]=const_cast<T*>(b_cols(b,ldb,tb,j*tile_size));
+        auto put=[&](int row,int column,T* output) {
+            pointers[at]=const_cast<T*>(a_rows(a,lda,ta,row));
+            pointers[count+at]=const_cast<T*>(b_cols(b,ldb,tb,column));
             pointers[2*count+at]=output;++at;
         };
-        for (int j=0;j<full;++j)
-            for (int i=upper_triangle ? 0 : j+1;i<(upper_triangle ? j : full);++i)
-                put(i,j,c+i*tile_size+std::size_t(j*tile_size)*ldc);
-        if (tail) for (int q=0;q<full;++q) {
-            const int i=upper_triangle ? q : full,j=upper_triangle ? full : q;
-            put(i,j,c+i*tile_size+std::size_t(j*tile_size)*ldc);
+        auto rectangle=[&](int row,int column) {
+            if (!upper_triangle) std::swap(row,column);
+            put(row,column,c+row+std::size_t(column)*ldc);
+        };
+        for (int j=0;j<full;++j) for (int i=0;i<j;++i) rectangle(i*block,j*block);
+        if (edge) for (int i=0;i<full;++i) rectangle(i*block,full*block);
+        for (int q=0;q<=full;++q) {
+            const int width=q<full ? ratio : small;
+            for (int j=0;j<width;++j) for (int i=0;i<j;++i)
+                rectangle(q*block+i*tile_size,q*block+j*tile_size);
         }
-        for (int q=0;q<full;++q) put(q,q,temporary+std::size_t(q)*tile_size*tile_size);
-        if (tail) put(full,full,temporary+std::size_t(full)*tile_size*tile_size);
+        if (tail) for (int i=0;i<small;++i) rectangle(full*block+i*tile_size,n-tail);
+        for (std::size_t i=0;i<diagonals;++i)
+            put(int(i)*tile_size,int(i)*tile_size,temporary+i*tile_size*tile_size);
     }
-    const std::size_t counts[4]={std::size_t(full)*(full-1)/2,tail ? std::size_t(full) : 0,std::size_t(full),std::size_t(tail!=0)};
     std::size_t first=0;
-    for (int group=0;group<4;++group) {
+    for (int group=0;group<6;++group) {
         if (counts[group]==0) continue;
-        const int rows=group==1 ? (upper_triangle ? tile_size : tail) : group==3 ? tail : tile_size;
-        const int cols=group==1 ? (upper_triangle ? tail : tile_size) : group==3 ? tail : tile_size;
-        const int ldout=group<2 ? ldc : tile_size;
-        const T scale=group<2 ? beta : T(0);
-        // Pointer tables reside in backend memory, including for a single
-        // product, so no host read or device-to-host synchronization is needed.
+        const int size=group<2 ? block : tile_size;
+        const int partial=group==1 ? edge : tail;
+        const bool edge_group=group==1 || group==3;
+        const int rows=edge_group ? (upper_triangle ? size : partial) : group==5 ? tail : size;
+        const int cols=edge_group ? (upper_triangle ? partial : size) : group==5 ? tail : size;
+        const int ldout=group<4 ? ldc : tile_size;
+        const T scale=group<4 ? beta : T(0);
         for (std::size_t done=0;done<counts[group];) {
             const int batch=static_cast<int>(std::min<std::size_t>(counts[group]-done,std::numeric_limits<int>::max()));
             blas_impl::gemmBatched_run<Backend,T>(h,ta,tb,rows,cols,k,alpha,
@@ -194,40 +245,61 @@ void batched_triangle(const DdlaHandle_t& h,char uplo,char ta,char tb,int n,int 
         }
         first+=counts[group];
     }
-    if constexpr (Backend==DdlaBackend::GPU) {
-#if DDLA_GPU_VENDOR
-        using D=detail::DeviceScalarT<T>;
-        for (std::size_t first=0;first<tiles;first+=65535) {
-            const dim3 grid(tile_size/16,tile_size/16,static_cast<unsigned>(std::min<std::size_t>(tiles-first,65535))),block(16,16);
-            if (beta==T(0)) copy_diagonal_triangle<D,false><<<grid,block,0,static_cast<gpuStream_t>(h->stream)>>>(upper_triangle,n,int(first),temporary,D(0),c,ldc);
-            else copy_diagonal_triangle<D,true><<<grid,block,0,static_cast<gpuStream_t>(h->stream)>>>(upper_triangle,n,int(first),temporary,detail::to_device_scalar(beta),c,ldc);
-            DDLA_CHECK(ddlaGetLastError(h));
-        }
-#endif
-    } else {
-        for (int column=0;column<n;++column) {
-            const int first_row=column/tile_size*tile_size,j=column%tile_size;
-            const int width=std::min(tile_size,n-first_row),begin=upper_triangle ? 0 : j,end=upper_triangle ? j+1 : width;
-            for (int i=begin;i<end;++i) {
-                T value=temporary[std::size_t(column/tile_size)*tile_size*tile_size+i+std::size_t(j)*tile_size];
-                T& output=c[first_row+i+std::size_t(column)*ldc];
-                if (beta!=T(0)) value+=beta*output;
-                output=value;
-            }
-        }
-    }
+    blas_impl::gemmt_copy_run<Backend,T>(h,uplo,tile_size,n/tile_size,tail,
+        beta,temporary,c,ldc,nullptr);
+
 }
 
 }} // namespace blas_impl::<anonymous>
 
 namespace blas_impl {
 
+template <DdlaBackend Backend, typename T>
+void gemmt_copy_run(const DdlaHandle_t& h,char uplo,int block,int full,int tail,
+    const T& beta,const T* temporary,T* C,int ldc,T* const* targets,const int* widths)
+{
+    const int count=full+(tail!=0);
+    if (count==0) return;
+    const bool upper_triangle=upper(uplo)=='U';
+    if constexpr (Backend==DdlaBackend::CPU) {
+        for (int tile=0;tile<count;++tile) {
+            const int width=widths ? widths[tile] : tile<full ? block : tail;
+            T* output=targets ? targets[tile] : C+std::size_t(tile)*block*(std::size_t(ldc)+1);
+            const T* input=temporary+std::size_t(tile)*block*block;
+            for (int column=0;column<width;++column) {
+                const int first=upper_triangle ? 0 : column;
+                const int last=upper_triangle ? column+1 : width;
+                for (int row=first;row<last;++row) {
+                    T value=input[row+std::size_t(column)*block];
+                    T& out=output[row+std::size_t(column)*ldc];
+                    if (beta!=T(0)) value+=beta*out;
+                    out=value;
+                }
+            }
+        }
+    } else {
+#if DDLA_GPU_VENDOR
+        using D=detail::DeviceScalarT<T>;
+        for (int first=0;first<count;) {
+            const int batch=std::min(count-first,65535);
+            const dim3 grid((block-1)/16+1,(block-1)/16+1,batch),threads(16,16);
+            if (beta==T(0)) copy_diagonal_triangle<D,false><<<grid,threads,0,static_cast<gpuStream_t>(h->stream)>>>(upper_triangle,block,full,tail,first,temporary,D(0),C,ldc,reinterpret_cast<void* const*>(targets),widths);
+            else copy_diagonal_triangle<D,true><<<grid,threads,0,static_cast<gpuStream_t>(h->stream)>>>(upper_triangle,block,full,tail,first,temporary,detail::to_device_scalar(beta),C,ldc,reinterpret_cast<void* const*>(targets),widths);
+            DDLA_CHECK(ddlaGetLastError(h));
+            first+=batch;
+        }
+#endif
+    }
+}
+
 template <typename T>
-void gemmt_workspace_size(const DdlaHandle_t&,char,char,int n,int k,std::size_t* backend_bytes)
+void gemmt_workspace_size(const DdlaHandle_t& h,char,char,int n,int k,std::size_t* backend_bytes)
 {
     *backend_bytes=0;
     if (n==0 || k==0) return;
-    const std::size_t tiles=(std::size_t(n)+tile_size-1)/tile_size,count=tiles*(tiles+1)/2;
+    const std::size_t tiles=(std::size_t(n)+tile_size-1)/tile_size;
+    std::size_t counts[6];local_batch_counts(n,output_tile_size<T>(h),counts);
+    std::size_t count=0;for (auto size:counts) count+=size;
     *backend_bytes=detail::padded_bytes<T*>(3*count)+detail::padded_bytes<T>(tiles*tile_size*tile_size);
 }
 
@@ -302,7 +374,8 @@ void gemmt(const DdlaHandle_t& h, char uplo, char ta, char tb,
 template void gemmt<B,T>(const DdlaHandle_t&,char,char,char,int,int,const T&,const T*,int,const T*,int,const T&,T*,int); \
 template void blas_impl::gemmt_check<B,T>(const DdlaHandle_t&,char,char,char,int,int,const T&,const T*,int,const T*,int,const T&,T*,int); \
 template void blas_impl::gemmt_run<B,T>(const DdlaHandle_t&,char,char,char,int,int,const T&,const T*,int,const T*,int,const T&,T*,int,void*,std::size_t); \
-template void blas_impl::real_diagonal<B,T>(const DdlaHandle_t&,int,T*,int)
+template void blas_impl::real_diagonal<B,T>(const DdlaHandle_t&,int,T*,int); \
+template void blas_impl::gemmt_copy_run<B,T>(const DdlaHandle_t&,char,int,int,int,const T&,const T*,T*,int,T* const*,const int*)
 #define INSTANTIATE_TYPES(B) \
 INSTANTIATE(B,float); INSTANTIATE(B,double); \
 INSTANTIATE(B,std::complex<float>); INSTANTIATE(B,std::complex<double>)

@@ -3,6 +3,9 @@
 #include <cctype>
 #include <string>
 #include <utility>
+#include <array>
+#include <cstdlib>
+#include "PBLAS/pgemmt_impl.h"
 
 namespace {
 using Wide = std::complex<long double>;
@@ -163,10 +166,140 @@ void local_case(DdlaHandle_t h,char symmetry,char uplo,char ta,char tb,int n,int
 }
 
 template <DdlaBackend Backend,typename T>
+void distributed_case(DdlaHandle_t h,char symmetry,char uplo,char ta,char tb,int n,int k,
+                      int nb,int mode,bool shifted,int& cases,long double& worst) {
+    const auto coeff=coefficients<T>(mode);
+    const T alpha=coeff.first,beta=coeff.second;
+    int pr,pc;ddlaGetGridDims(h,pr,pc);
+    const int ar=ta=='N' ? n : k,ac=ta=='N' ? k : n;
+    const int br=tb=='N' ? k : n,bc=tb=='N' ? n : k;
+    Matrix<T> a(h,ar,ac,nb,nb,shifted ? pr-1 : 0,0,1,false);
+    Matrix<T> b(h,br,bc,nb,nb,0,shifted ? pc-1 : 0,2,false);
+    Matrix<T> c(h,n,n,nb,nb,shifted ? pr/2 : 0,shifted ? pc/2 : 0,3,false);
+    const auto fill=[&](Matrix<T>& x,int rows,int cols,auto value_at) {
+        for(int j=0;j<x.nc;++j) for(int i=0;i<x.nr;++i) {
+            const int gi=indxl2g(i,nb,x.r,x.d[DDLA_RSRC_],pr);
+            const int gj=indxl2g(j,nb,x.c,x.d[DDLA_CSRC_],pc);
+            if(gi<rows && gj<cols) x.host[i+std::size_t(j)*x.d[DDLA_LLD_]]=value_at(gi,gj);
+        }
+        x.reset();
+    };
+    fill(a,ar,ac,[&](int i,int j){return stored_a<T>(ta,i,j);});
+    fill(b,br,bc,[&](int i,int j){return stored_b<T>(symmetry,tb,i,j,k);});
+    fill(c,n,n,[&](int i,int j){return mode==6 && (uplo=='U'?i>j:i<j) ? scalar<T>(-987.25,654.5) : poisoned_c<T>(symmetry,uplo,i,j,beta);});
+    const auto owns=[&](const Matrix<T>& x,int rows,int cols) {
+        return num_loc(rows,nb,x.r,x.d[DDLA_RSRC_],pr)>0 &&
+               num_loc(cols,nb,x.c,x.d[DDLA_CSRC_],pc)>0;
+    };
+    const bool product=n>0 && k>0 && alpha!=T(0);
+    const auto flag=[&](char x) { return mode==6 ? char(std::tolower(static_cast<unsigned char>(x))) : x; };
+    pgemmt<Backend,T>(h,flag(uplo),flag(ta),flag(tb),n,k,
+        alpha,product && owns(a,ar,ac) ? a.data : nullptr,a.d,
+        product && owns(b,br,bc) ? b.data : nullptr,b.d,beta,owns(c,n,n) ? c.data : nullptr,c.d);
+    const auto out=c.download(),aa=a.download(),bb=b.download();
+    int bad=std::memcmp(aa.data(),a.host.data(),aa.size()*sizeof(T)) ||
+            std::memcmp(bb.data(),b.host.data(),bb.size()*sizeof(T));
+    long double error=0;
+    for(std::size_t p=0;p<out.size();++p) {
+        const int i=p%c.d[DDLA_LLD_],j=p/c.d[DDLA_LLD_];
+        const int gi=indxl2g(i,nb,c.r,c.d[DDLA_RSRC_],pr);
+        const int gj=indxl2g(j,nb,c.c,c.d[DDLA_CSRC_],pc);
+        if(i<c.nr && j<c.nc && gi<n && gj<n && (uplo=='U' ? gi<=gj : gi>=gj)) {
+            verify_value<T>(symmetry,gi,gj,k,alpha,beta,out[p],error,bad);
+        } else if(std::memcmp(&out[p],&c.host[p],sizeof(T))) bad=1;
+    }
+    finish_check<T>(h,true,symmetry,uplo,ta,tb,n,k,mode,error,bad,cases,worst);
+}
+
+// A rank-two X makes X D X^(T/H) admit a full O(n^2+k) independent
+// oracle. Pairwise column mixing makes partial k panels unstructured, so the
+// large batched path cannot accidentally rely on rank-k input identities.
+template <DdlaBackend Backend,typename T>
+void analytic_large(DdlaHandle_t h,char symmetry,char uplo,int& cases,long double& worst,
+    int n=1057,int k=1031,int nb=128,bool borrowed=false)
+{
+    int pr,pc;ddlaGetGridDims(h,pr,pc);
+    const char ta=uplo=='U' ? 'N' : 'C',tb=ta;
+    const auto coeff=coefficients<T>(uplo=='U' ? 1 : 0);
+    const T alpha=coeff.first,beta=coeff.second;
+    const auto feature=[](int i,int axis) {
+        return axis==0 ? scalar<T>((i%7-3)/8.,(i%5-2)/8.) : scalar<T>((i%11-5)/16.,(i%3-1)/8.);
+    };
+    const auto x=[&](int i,int l){return feature(i,0)*feature(l+5,0)+feature(i,1)*feature(l+5,1);};
+    const auto row=[&](int l,int j){const T v=x(j+(symmetry=='G'?3:0),l);return T((l%3+1)/4.)*(symmetry=='H' ? conjugate(v) : v);};
+    const auto av=[&](int i,int l){return x(i,l)+(l%2 ? T(.5)*x(i,l-1) : T(0));};
+    const auto bv=[&](int l,int j){return row(l,j)-(l%2==0 && l+1<k ? T(.5)*row(l+1,j) : T(0));};
+    Matrix<T> a(h,ta=='N'?n:k,ta=='N'?k:n,nb,nb,pr-1,0,1,false);
+    Matrix<T> b(h,tb=='N'?k:n,tb=='N'?n:k,nb,nb,0,pc-1,2,false);
+    Matrix<T> c(h,n,n,nb,nb,0,0,3,false);
+    const auto fill=[&](Matrix<T>& z,int rows,int cols,auto value_at) {
+        for(int j=0;j<z.nc;++j)for(int i=0;i<z.nr;++i) {
+            const int gi=indxl2g(i,nb,z.r,z.d[DDLA_RSRC_],pr),gj=indxl2g(j,nb,z.c,z.d[DDLA_CSRC_],pc);
+            if(gi<rows&&gj<cols)z.host[i+std::size_t(j)*z.d[DDLA_LLD_]]=value_at(gi,gj);
+        }
+        z.reset();
+    };
+    fill(a,ta=='N'?n:k,ta=='N'?k:n,[&](int i,int j){const T v=ta=='N'?av(i,j):av(j,i);return ta=='C'?conjugate(v):v;});
+    fill(b,tb=='N'?k:n,tb=='N'?n:k,[&](int i,int j){const T v=tb=='N'?bv(i,j):bv(j,i);return tb=='C'?conjugate(v):v;});
+    fill(c,n,n,[&](int i,int j){return poisoned_c<T>(symmetry,uplo,i,j,beta);});
+    Wide sigma[2][2]={};long double bound[2][2]={};
+    for(int l=0;l<k;++l)for(int i=0;i<2;++i)for(int j=0;j<2;++j) {
+        const T v=feature(l+5,j);
+        const Wide term=extended(T((l%3+1)/4.))*extended(feature(l+5,i))*extended(symmetry=='H'?conjugate(v):v);
+        sigma[i][j]+=term;bound[i][j]+=std::abs(term);
+    }
+    if (!borrowed) {
+        pgemmt<Backend,T>(h,uplo,ta,tb,n,k,alpha,a.data,a.d,b.data,b.d,beta,c.data,c.d);
+    } else {
+        std::size_t backend_bytes=0,host_bytes=0;
+        pgemmt_impl::workspace_size<T>(h,uplo,ta,tb,true,n,k,a.d,b.d,c.d,&backend_bytes,&host_bytes);
+        ddla::vector<char> backend_work(h,backend_bytes+512);
+        std::vector<char> host_work(host_bytes+512,char(0x5a));
+        std::array<char,256> guard;guard.fill(char(0x5a));
+        DDLA_CHECK(ddlaMemcpy(h,backend_work.data(),guard.data(),256));
+        DDLA_CHECK(ddlaMemcpy(h,backend_work.data()+256+backend_bytes,guard.data(),256));
+        for (int repeat=0;repeat<2;++repeat) {
+            c.reset();
+            pgemmt_impl::run<Backend,T>(h,uplo,ta,tb,true,n,k,alpha,a.data,a.d,b.data,b.d,beta,c.data,c.d,
+                backend_work.data()+256,backend_bytes,host_work.data()+256,host_bytes);
+        }
+        std::array<char,256> first,last;
+        DDLA_CHECK(ddlaMemcpy(h,first.data(),backend_work.data(),256));
+        DDLA_CHECK(ddlaMemcpy(h,last.data(),backend_work.data()+256+backend_bytes,256));
+        DDLA_CHECK(ddlaSynchronize(h));
+        const bool guards=first==guard && last==guard &&
+            std::all_of(host_work.begin(),host_work.begin()+256,[](char c){return c==char(0x5a);}) &&
+            std::all_of(host_work.end()-256,host_work.end(),[](char c){return c==char(0x5a);});
+        int any=guards ? 0 : 1;
+        MPI_Allreduce(MPI_IN_PLACE,&any,1,MPI_INT,MPI_MAX,ddlaGetCommunicator(h));
+        if (any) throw std::runtime_error("PGEMMT reusable workspace bounds");
+    }
+    const auto out=c.download(),aa=a.download(),bb=b.download();
+    int bad=std::memcmp(aa.data(),a.host.data(),aa.size()*sizeof(T)) || std::memcmp(bb.data(),b.host.data(),bb.size()*sizeof(T));
+    long double error=0;
+    for(std::size_t p=0;p<out.size();++p) {
+        const int i=p%c.d[DDLA_LLD_],j=p/c.d[DDLA_LLD_];
+        const int gi=indxl2g(i,nb,c.r,0,pr),gj=indxl2g(j,nb,c.c,0,pc);
+        if(i<c.nr&&j<c.nc&&gi<n&&gj<n && (uplo=='U' ? gi<=gj : gi>=gj)) {
+            Wide sum=0;long double scale=0;
+            for(int q=0;q<2;++q)for(int r=0;r<2;++r) {
+                const T v=feature(gj+(symmetry=='G'?3:0),r);const Wide xi=extended(feature(gi,q)),xj=extended(symmetry=='H'?conjugate(v):v);
+                sum+=xi*sigma[q][r]*xj;scale+=std::abs(xi)*bound[q][r]*std::abs(xj);
+            }
+            Wide old=beta==T(0)?Wide(0):extended(beta)*extended(initial_c<T>(symmetry,gi,gj));
+            const Wide want=extended(alpha)*sum+old;
+            const long double e=std::abs(extended(out[p])-want)/std::max(1.L,std::abs(extended(alpha))*scale+std::abs(old));
+            if(!std::isfinite(e))bad=1;else error=std::max(error,e);
+        } else if(std::memcmp(&out[p],&c.host[p],sizeof(T)))bad=1;
+    }
+    finish_check<T>(h,true,symmetry,uplo,ta,tb,n,k,1,error,bad,cases,worst);
+}
+
+template <DdlaBackend Backend,typename T>
 void scalar_cases(DdlaHandle_t h,bool local,int& cases,long double& worst) {
-    if(!local) return;
     const auto one=[&](char s,char u,char ta,char tb,int n,int k,int nb,int mode,bool shifted) {
         if(local) local_case<Backend,T>(h,s,u,ta,tb,n,k,mode,cases,worst);
+        distributed_case<Backend,T>(h,s,u,ta,tb,n,k,nb,mode,shifted,cases,worst);
     };
     for(char s:{'G','S','H'}) for(char u:{'U','L'}) {
         for(char ta:{'N','T','C'}) for(char tb:{'N','T','C'}) {
@@ -187,28 +320,53 @@ void scalar_cases(DdlaHandle_t h,bool local,int& cases,long double& worst) {
 }
 
 template <DdlaBackend Backend> void invalid_cases(DdlaHandle_t h,bool local) {
-    if(!local) return;
-    ddla::vector<double> x(h,64),y(h,64),z(h,64);
+    Matrix<double> a(h,8,8,4,4,0,0,1,false),b(h,8,8,4,4,0,0,2,false),c(h,8,8,4,4,0,0,3,false);
+    const bool root=ddlaGetRank(h)==0;
     const auto reject=[&](auto fn) {
         int caught=0;try { fn(); } catch(const std::exception&) { caught=1; }
         int all=0;MPI_Allreduce(&caught,&all,1,MPI_INT,MPI_MIN,ddlaGetCommunicator(h));
-        if(!all) throw std::runtime_error("GEMMT invalid argument not rejected on every rank");
+        if(!all) throw std::runtime_error("triangular product invalid argument not rejected on every rank");
     };
-    const auto call=[&](char u,char ta,char tb,int n,int k,int lda,double* cp) {
-        gemmt<Backend,double>(h,u,ta,tb,n,k,1.,x.data(),lda,y.data(),8,0.,cp,8);
+    const auto call=[&](char u,char ta,char tb,int n,int k,const int* dc,const double* ap,double* cp) {
+        pgemmt<Backend,double>(h,u,ta,tb,n,k,1.,ap,a.d,b.data,b.d,0.,cp,dc);
     };
-    reject([&]{call('?','N','N',8,8,8,z.data());});
-    reject([&]{call('U','?','N',8,8,8,z.data());});
-    reject([&]{call('U','N','?',8,8,8,z.data());});
-    reject([&]{call('U','N','N',-1,8,8,z.data());});
-    reject([&]{call('U','N','N',8,-1,8,z.data());});
-    reject([&]{call('U','N','N',8,8,7,z.data());});
-    reject([&]{call('U','N','N',8,8,8,nullptr);});
-    reject([&]{call('U','N','N',8,8,8,x.data());});
+    reject([&]{call(root ? '?' : 'U','N','N',8,8,c.d,a.data,c.data);});
+    reject([&]{call('U',root ? '?' : 'N','N',8,8,c.d,a.data,c.data);});
+    reject([&]{call('U','N',root ? '?' : 'N',8,8,c.d,a.data,c.data);});
+    reject([&]{call('U','N','N',-1,8,c.d,a.data,c.data);});
+    reject([&]{call('U','N','N',8,-1,c.d,a.data,c.data);});
+    reject([&]{call('U','N','N',a.d[DDLA_M_]+1,8,c.d,a.data,c.data);});
+    int bad_desc[DDLA_DLEN_];std::copy(c.d,c.d+DDLA_DLEN_,bad_desc);
+    if(root) bad_desc[DDLA_LLD_]=0;
+    reject([&]{call('U','N','N',8,8,bad_desc,a.data,c.data);});
+    reject([&]{call('U','N','N',8,8,c.d,root ? nullptr : a.data,c.data);});
+    reject([&]{call('U','N','N',8,8,c.d,a.data,root ? nullptr : c.data);});
+    reject([&]{call('U','N','N',8,8,c.d,a.data,root ? a.data : c.data);});
 #if DDLA_HAS_GPU
     constexpr DdlaBackend other=Backend==DdlaBackend::CPU ? DdlaBackend::GPU : DdlaBackend::CPU;
-    reject([&]{gemmt<other,double>(h,'U','N','N',0,0,1.,nullptr,1,nullptr,1,0.,nullptr,1);});
+    reject([&]{pgemmt<other,double>(h,'U','N','N',0,0,1.,nullptr,a.d,nullptr,b.d,0.,nullptr,c.d);});
+    if(local) reject([&]{gemmt<other,double>(h,'U','N','N',0,0,1.,nullptr,1,nullptr,1,0.,nullptr,1);});
 #endif
+    if(local) {
+        ddla::vector<double> x(h,64),y(h,64),z(h,64);
+        const auto lc=[&](char u,char ta,char tb,int n,int k,int lda,double* cp) {
+            gemmt<Backend,double>(h,u,ta,tb,n,k,1.,x.data(),lda,y.data(),8,0.,cp,8);
+        };
+        reject([&]{lc('?','N','N',8,8,8,z.data());});
+        reject([&]{lc('U','?','N',8,8,8,z.data());});
+        reject([&]{lc('U','N','?',8,8,8,z.data());});
+        reject([&]{lc('U','N','N',-1,8,8,z.data());});
+        reject([&]{lc('U','N','N',8,-1,8,z.data());});
+        reject([&]{lc('U','N','N',8,8,7,z.data());});
+        reject([&]{lc('U','N','N',8,8,8,nullptr);});
+        reject([&]{lc('U','N','N',8,8,8,x.data());});
+    }
+    if(ddlaGetSize(h)>1) {
+        reject([&]{call(root?'L':'U','N','N',8,8,c.d,a.data,c.data);});
+        reject([&]{call('U',root?'T':'N','N',8,8,c.d,a.data,c.data);});
+        reject([&]{call('U','N','N',root?7:8,8,c.d,a.data,c.data);});
+    }
+
 }
 
 template <DdlaBackend Backend>
@@ -219,6 +377,29 @@ void run(MPI_Comm comm,int pr,int pc,char major,bool local) {
     scalar_cases<Backend,double>(h,local,cases,worst);
     scalar_cases<Backend,std::complex<float>>(h,local,cases,worst);
     scalar_cases<Backend,std::complex<double>>(h,local,cases,worst);
+    if(local)
+        for(char symmetry:{'G','S','H'})for(char uplo:{'U','L'}) {
+            analytic_large<Backend,float>(h,symmetry,uplo,cases,worst);
+            analytic_large<Backend,double>(h,symmetry,uplo,cases,worst);
+            analytic_large<Backend,std::complex<float>>(h,symmetry,uplo,cases,worst);
+            analytic_large<Backend,std::complex<double>>(h,symmetry,uplo,cases,worst);
+        }
+    if (const char* text=std::getenv("DDLA_GEMMT_EXTRA_LAYOUTS")) {
+        const int requested=std::atoi(text);
+        const int order=requested>1 ? requested : 1567;
+        for (int block : {129,200,256}) for (char uplo : {'U','L'}) {
+            analytic_large<Backend,float>(h,'G',uplo,cases,worst,order,1031,block);
+            analytic_large<Backend,double>(h,'G',uplo,cases,worst,order,1031,block);
+            analytic_large<Backend,std::complex<float>>(h,'G',uplo,cases,worst,order,1031,block);
+            analytic_large<Backend,std::complex<double>>(h,'G',uplo,cases,worst,order,1031,block);
+            if (block==200) {
+                analytic_large<Backend,float>(h,'G',uplo,cases,worst,order,1031,block,true);
+                analytic_large<Backend,double>(h,'G',uplo,cases,worst,order,1031,block,true);
+                analytic_large<Backend,std::complex<float>>(h,'G',uplo,cases,worst,order,1031,block,true);
+                analytic_large<Backend,std::complex<double>>(h,'G',uplo,cases,worst,order,1031,block,true);
+            }
+        }
+    }
     invalid_cases<Backend>(h,local);
     if(ddlaGetRank(h)==0) std::cout<<"GEMMT_PASS backend="<<int(Backend)<<" grid="<<pr<<'x'<<pc
         <<" major="<<major<<" local_tested="<<local<<" cases="<<cases
