@@ -1,6 +1,6 @@
 #include "api_grid_test_common.h"
 #include "workspace_test_common.h"
-#include "Eigensolver/pstedc_workspace.h"
+#include "Eigensolver/pstedc_impl.h"
 #include "Eigensolver/pstedc_numeric.h"
 #include "ddla_stream.h"
 #include <array>
@@ -33,16 +33,15 @@ public:
     void* host(){return host_.data()+guard;}
     void check(){const auto all=download(h_,backend_.ptr,b_+2*guard);bool okay=true;
         for(int i=0;i<guard;++i)okay=okay&&all[i]==0x69&&all[guard+b_+i]==0x69&&host_[i]==0x69&&host_[guard+hbytes_+i]==0x69;
-        require_close(h_,"descriptor workspace exact-size guards",okay?0:1,0);}
+        require_close(h_,"row workspace exact-size guards",okay?0:1,0);}
 };
 
 template<DdlaBackend B,class R>
-void solve(DdlaHandle_t h,int n,int mb,int nb,const char* kind,bool borrowed,R scale=R(1))
+void solve(DdlaHandle_t h,int n,int padding,const char* kind,bool borrowed,R scale=R(1))
 {
-    const int rs=h->nprows_-1,cs=h->npcols_-1;
-    int desc[9];DDLA_CHECK(ddlaDescInit(desc,h,n+3,n+5,mb,nb,rs,cs));desc[DDLA_LLD_]+=3;
-    const int nr=num_loc(n,mb,h->myprow_,rs,h->nprows_),nc=num_loc(n,nb,h->mypcol_,cs,h->npcols_);
-    const int parentcols=num_loc(n+5,nb,h->mypcol_,cs,h->npcols_),ld=desc[DDLA_LLD_];
+    const ddla::detail::RowShare share(n,h->nprocs);
+    const int nr=share.count(h->myid),lo=share.lo(h->myid);
+    const int parentcols=n+5,ld=std::max(1,nr)+padding;
     const R sentinel=R(-731);
     std::vector<R> d(n+2,sentinel),e(n+2,sentinel),w(n+2,sentinel);
     for(int i=0;i<n;++i){
@@ -58,7 +57,7 @@ void solve(DdlaHandle_t h,int n,int mb,int nb,const char* kind,bool borrowed,R s
     const auto original_d=d,original_e=e;
     const std::vector<R> initial(std::size_t(ld)*parentcols+2,sentinel);
     DeviceBuffer<R> output(h,initial.size());upload(h,output.ptr,initial);
-    const auto plan=pstedc_check<R>(h,'V',n,d.data()+1,e.data()+1,w.data()+1,nr&&nc?output.ptr+1:nullptr,desc);
+    const auto plan=pstedc_check<R>(h,'V',n,d.data()+1,e.data()+1,w.data()+1,nr?output.ptr+1:nullptr,ld);
     if(h->nprocs>1&&n>1)
         require_close(h,"pstedc nontrivial multi-rank solve never has a full-size leaf",pstedc_leaves(n,plan.rows.leaf)>1&&plan.rows.leaf<n?0:1,0);
     if(h->nprocs>1&&n>1){
@@ -68,7 +67,7 @@ void solve(DdlaHandle_t h,int n,int mb,int nb,const char* kind,bool borrowed,R s
     }
     std::size_t bytes=0,hostbytes=0;
     workspace_test::Scope query(true);pstedc_workspace_size<R>(h,plan,&bytes,&hostbytes);
-    const auto queried=query.finish();require_close(h,"descriptor workspace query pure",pure(queried)?0:1,0);
+    const auto queried=query.finish();require_close(h,"row workspace query pure",pure(queried)?0:1,0);
     if(B==DdlaBackend::CPU)require_close(h,"pstedc CPU host region belongs to backend arena",hostbytes,0);
     // The query is rank-local and must also be callable on rank zero alone.
     bool alone=true;if(h->myid==0){workspace_test::Scope one(true);std::size_t b=0,hb=0;pstedc_workspace_size<R>(h,plan,&b,&hb);alone=pure(one.finish())&&b==bytes&&hb==hostbytes;}
@@ -78,19 +77,19 @@ void solve(DdlaHandle_t h,int n,int mb,int nb,const char* kind,bool borrowed,R s
     for(int repeat=0;repeat<(borrowed?2:1);++repeat){
         d=original_d;e=original_e;upload(h,output.ptr,initial);int info=0;
         if(borrowed){workspace_test::Scope run;
-            pstedc_run<B,R>(h,plan,d.data()+1,e.data()+1,w.data()+1,nr&&nc?output.ptr+1:nullptr,scratch.backend(),bytes,scratch.host(),hostbytes,&resources);
+            pstedc_run<B,R>(h,plan,d.data()+1,e.data()+1,w.data()+1,nr?output.ptr+1:nullptr,scratch.backend(),bytes,scratch.host(),hostbytes,&resources);
             const auto snapshot=run.finish();require_close(h,"pstedc borrowed run has no scratch growth or query",no_growth(snapshot)?0:1,0);
-        }else pstedc<R>(h,'V',n,d.data()+1,e.data()+1,w.data()+1,nr&&nc?output.ptr+1:nullptr,desc,info);
+        }else pstedc<R>(h,'V',n,d.data()+1,e.data()+1,w.data()+1,nr?output.ptr+1:nullptr,ld,info);
         require_close(h,"pstedc solver info",info,0);
         const auto local=download(h,output.ptr,initial.size());std::vector<double> full(std::size_t(n)*n,0);
         bool padding=local.front()==sentinel&&local.back()==sentinel;
         for(int c=0;c<parentcols;++c)for(int r=0;r<ld;++r){
-            const bool active=r<nr&&c<nc;const R value=local[1+r+std::size_t(c)*ld];
-            if(active){const int i=indxl2g(r,mb,h->myprow_,rs,h->nprows_),j=indxl2g(c,nb,h->mypcol_,cs,h->npcols_);full[i+std::size_t(j)*n]=value;}
+            const bool active=r<nr&&c<n;const R value=local[1+r+std::size_t(c)*ld];
+            if(active)full[lo+r+std::size_t(c)*n]=value;
             else padding=padding&&value==sentinel;
         }
         if(n)MPI_Allreduce(MPI_IN_PLACE,full.data(),n*n,MPI_DOUBLE,MPI_SUM,h->comm);
-        require_close(h,"pstedc output padding and parent matrix",padding?0:1,0);
+        require_close(h,"pstedc row padding and extra columns",padding?0:1,0);
         require_close(h,"pstedc host guards",d.front()==sentinel&&d.back()==sentinel&&e.front()==sentinel&&e.back()==sentinel&&w.front()==sentinel&&w.back()==sentinel?0:1,0);
         double residual=0,orthogonality=0,norm=0;
         for(int i=0;i<n;++i)norm=std::max(norm,std::abs(double(original_d[i+1]))+(i?std::abs(double(original_e[i])):0)+(i+1<n?std::abs(double(original_e[i+1])):0));
@@ -116,41 +115,53 @@ void solve(DdlaHandle_t h,int n,int mb,int nb,const char* kind,bool borrowed,R s
         }
         scratch.check();
     }
-    if(h->myid==0)std::cout<<"PSTEDC_CASE type="<<(std::is_same<R,float>::value?"s":"d")<<" n="<<n<<" mb="<<mb<<" nb="<<nb<<" case="<<kind
+    if(h->myid==0)std::cout<<"PSTEDC_CASE type="<<(std::is_same<R,float>::value?"s":"d")<<" n="<<n<<" padding="<<padding<<" case="<<kind
         <<" borrowed_run="<<borrowed<<" leaves="<<pstedc_leaves(n,plan.rows.leaf)<<" backend_bytes="<<bytes<<" host_bytes="<<hostbytes<<" PASS"<<std::endl;
 }
 
 template<DdlaBackend B,class R>void cases(DdlaHandle_t h)
 {
     Env leaf("DDLA_EIG_DC_LEAF","8");Env threads("DDLA_EIG_THREADS","2");
-    for(int n:{0,1,2,3,7,33})solve<B,R>(h,n,3,3,"random",true);
-    solve<B,R>(h,2,16,16,"random",true);solve<B,R>(h,7,16,16,"random",true);
-    solve<B,R>(h,73,3,5,"random",true);solve<B,R>(h,73,3,3,"split",true);
-    solve<B,R>(h,33,3,3,"zero",true);solve<B,R>(h,33,3,3,"diagonal",true);
-    solve<B,R>(h,73,3,3,"cluster",true);solve<B,R>(h,131,3,3,"toeplitz",false);
-    solve<B,R>(h,257,3,3,"toeplitz",true);
-    {Env wider_leaves("DDLA_EIG_DC_LEAF","64");solve<B,R>(h,36,9,9,"random",true);}
-    solve<B,R>(h,33,3,3,"random",false,std::is_same<R,float>::value?R(1e25):R(1e200));
-    solve<B,R>(h,33,3,5,"random",true,std::is_same<R,float>::value?R(1e-25):R(1e-200));
+    for(int n:{0,1,2,3,7,33})solve<B,R>(h,n,3,"random",true);
+    solve<B,R>(h,2,0,"random",true);solve<B,R>(h,7,0,"random",true);
+    solve<B,R>(h,73,5,"random",true);solve<B,R>(h,73,3,"split",true);
+    solve<B,R>(h,33,3,"zero",true);solve<B,R>(h,33,3,"diagonal",true);
+    solve<B,R>(h,73,3,"cluster",true);solve<B,R>(h,131,3,"toeplitz",false);
+    solve<B,R>(h,257,3,"toeplitz",true);
+    {Env wider_leaves("DDLA_EIG_DC_LEAF","64");solve<B,R>(h,36,0,"random",true);}
+    solve<B,R>(h,33,3,"random",false,std::is_same<R,float>::value?R(1e25):R(1e200));
+    solve<B,R>(h,33,5,"random",true,std::is_same<R,float>::value?R(1e-25):R(1e-200));
     // A large leaf override must not create replicated full-size matrices.
-    {Env large("DDLA_EIG_DC_LEAF","20000");int desc[9];ddlaDescInit(desc,h,20000,20000,128,128,0,0);
-        R dummy=0;auto plan=pstedc_check<R>(h,'V',20000,&dummy,&dummy,&dummy,&dummy,desc);std::size_t b=0,hb=0;pstedc_workspace_size<R>(h,plan,&b,&hb);
+    {Env large("DDLA_EIG_DC_LEAF","20000");
+        const int ld=std::max(1,ddla::detail::RowShare(20000,h->nprocs).count(h->myid));
+        auto plan=pstedc_policy<R>(h,'V',20000,ld);std::size_t b=0,hb=0;pstedc_workspace_size<R>(h,plan,&b,&hb);
         require_close(h,"nontrivial multi-rank leaf smaller than matrix",h->nprocs==1||plan.rows.leaf<20000?0:1,0);
         if(h->myid==0)std::cout<<"PSTEDC_WORKSPACE n=20000 scalar="<<sizeof(R)<<" ranks="<<h->nprocs<<" backend_bytes="<<b<<" host_bytes="<<hb<<std::endl;}
-    // The descriptor form also preserves the linear-memory values-only path.
+    // The public values-only call ignores z and ldz.
     {std::vector<R> d(7,R(2)),e(7,R(-1)),w(7),ref=d,off=e,work(1);int iw=0,info=0;
-        pstedc<R>(h,'N',7,d.data(),e.data(),w.data(),nullptr,static_cast<const int*>(nullptr),info);
+        pstedc<R>(h,'N',7,d.data(),e.data(),w.data(),nullptr,0,info);
         stedc('N',7,ref.data(),off.data(),static_cast<R*>(nullptr),1,work.data(),1,&iw,1,info);
         double error=0;for(int i=0;i<7;++i)error=std::max(error,workspace_test::finite_error(std::abs(double(w[i]-ref[i]))));
-        require_close(h,"descriptor values-only reference",error,100*std::numeric_limits<R>::epsilon());}
-    // Missing output or mismatched metadata on one rank must fail on all ranks.
-    std::vector<R> d(7,R(2)),e(7,R(-1)),w(7);int desc[9];ddlaDescInit(desc,h,7,7,1,1,0,0);
-    DeviceBuffer<R> output(h,std::size_t(std::max(1,num_loc(7,1,h->myprow_,0,h->nprows_)))*std::max(1,num_loc(7,1,h->mypcol_,0,h->npcols_)));
-    bool caught=false;try{auto bad=std::array<int,9>{};std::copy_n(desc,9,bad.data());if(h->myid==0)bad[DDLA_LLD_]=0;
-        (void)pstedc_check<R>(h,'V',7,d.data(),e.data(),w.data(),output.ptr,bad.data());}catch(const std::invalid_argument&){caught=true;}
-    require_close(h,"pstedc one-rank invalid descriptor agreed",caught?0:1,0);
-    if(h->nprocs>1){caught=false;try{(void)pstedc_check<R>(h,'V',h->myid==0?6:7,d.data(),e.data(),w.data(),output.ptr,desc);}catch(const std::invalid_argument&){caught=true;}
-        require_close(h,"pstedc dimension disagreement rejected",caught?0:1,0);}
+        require_close(h,"values-only reference",error,100*std::numeric_limits<R>::epsilon());}
+    // A bad stride, missing local output or inconsistent mode must fail collectively.
+    std::vector<R> d(7,R(2)),e(7,R(-1)),w(7);
+    const int nr=ddla::detail::RowShare(7,h->nprocs).count(h->myid),ld=std::max(1,nr);
+    DeviceBuffer<R> output(h,std::size_t(ld)*7);
+    const auto reject=[&](auto call,const char* label){
+        bool caught=false;try{call();}catch(const std::invalid_argument&){caught=true;}
+        require_close(h,label,caught?0:1,0);
+    };
+    reject([&]{(void)pstedc_check<R>(h,'V',7,d.data(),e.data(),w.data(),output.ptr,h->myid==0?0:ld);},
+        "pstedc one-rank invalid row stride agreed");
+    reject([&]{(void)pstedc_check<R>(h,'V',7,d.data(),e.data(),w.data(),h->myid==0?nullptr:output.ptr,ld);},
+        "pstedc one-rank missing row output agreed");
+    if(h->nprocs>1){
+        reject([&]{(void)pstedc_check<R>(h,'V',h->myid==0?6:7,d.data(),e.data(),w.data(),output.ptr,7);},
+            "pstedc dimension disagreement rejected");
+        reject([&]{(void)pstedc_check<R>(h,h->myid==0?'N':'V',7,d.data(),e.data(),w.data(),output.ptr,ld);},
+            "pstedc mode disagreement rejected");
+    }
+
 }
 template<DdlaBackend B>void run(int pr,int pc,char major)
 {

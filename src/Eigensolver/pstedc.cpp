@@ -1,5 +1,5 @@
 // Tridiagonal diagonalization by Cuppen divide and conquer. Eigenvector rows
-// stay distributed throughout the tree; descriptor output uses bounded panels.
+// stay distributed as contiguous row slabs throughout the tree.
 // d, e and the ascending eigenvalues remain replicated host vectors.
 // pstedc('N') retains only first/last eigenvector rows needed by later merges.
 
@@ -10,7 +10,6 @@
 #include "comm_traits.h"
 #include "dc_common.h"
 #include "ddla_stream.h"
-#include "ddla_desc.h"
 #include "host_parallel.h"
 #include "eig_memprof.h"
 #include "eig_params.h"
@@ -19,15 +18,14 @@
 #include "mpi_datatype.h"
 #include "plan_util.h"
 #include "pstedc_impl.h"
-#include "pstedc_workspace.h"
 #include "pstedc_numeric.h"
-#include "matrix_transfer.h"
 #include "check_agree.h"
 #include "BLAS/blas_impl.h"
 
 #include <algorithm>
 #include <cassert>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -591,7 +589,7 @@ PstedcPlan pstedc_policy(const DdlaHandle_t& h, char jobz, int n, int ldz)
     PstedcPlan p;
     p.rows = pstedc_policy<R>(h, n);
     p.rows.ldy = ldz;
-    p.mode = jobz == 'N' ? PstedcMode::values : PstedcMode::rows;
+    p.mode = jobz == 'N' ? PstedcMode::values : PstedcMode::vectors;
     if (n && jobz == 'N') {
         int knobs[2]{};
         if (p.rows.rank == 0) {
@@ -625,57 +623,14 @@ PstedcPlan pstedc_check(const DdlaHandle_t& h, char jobz, int n, const R* d, con
     detail::agree_signature(h, "pstedc", signature);
     if (jobz == 'V') {
         PstedcPlan p;
-        p.mode = PstedcMode::rows;
+        p.mode = PstedcMode::vectors;
         p.rows = pstedc_check<R>(h, n, d, e, w, z, ldz);
         return p;
     }
     return pstedc_policy<R>(h, jobz, n, ldz);
 }
 
-template <class R>
-PstedcPlan pstedc_check(const DdlaHandle_t& h, char jobz, int n, const R* d, const R* e, const R* w,
-                      const R* Z, const int* desc)
-{
-    detail::agree_check(h, "pstedc", [&](detail::Agree& agreement) {
-        agreement.mode("spectral operation", 3113);
-        if (!h || h->comm == MPI_COMM_NULL || h->nprocs < 1 || h->nprows_ < 1 || h->npcols_ < 1 ||
-            static_cast<long long>(h->nprows_) * h->npcols_ != h->nprocs || n < 0 ||
-            (jobz != 'N' && jobz != 'V'))
-            throw std::invalid_argument("pstedc: invalid handle, jobz or order");
-        if (!ddlaBackendAvailable(h->backend))
-            throw std::invalid_argument("pstedc: backend not built");
-        if (n && (!d || !w || (n > 1 && !e)))
-            throw std::invalid_argument("pstedc: missing host input/output");
-        if (jobz == 'N') return;
-        if (!desc || desc[DDLA_MB_] < 1 || desc[DDLA_NB_] < 1 ||
-            desc[DDLA_MB_] > INT_MAX / h->nprows_ || desc[DDLA_NB_] > INT_MAX / h->npcols_)
-            throw std::invalid_argument("pstedc: descriptor arithmetic exceeds int");
-        check_desc(desc, h);
-        if (n > desc[DDLA_M_] || n > desc[DDLA_N_])
-            throw std::invalid_argument("pstedc: order exceeds output descriptor");
-        const int nr = num_loc(n, desc[DDLA_MB_], h->myprow_, desc[DDLA_RSRC_], h->nprows_);
-        const int nc = num_loc(n, desc[DDLA_NB_], h->mypcol_, desc[DDLA_CSRC_], h->npcols_);
-        if (nr && nc && !Z)
-            throw std::invalid_argument("pstedc: missing local eigenvector output");
-        if (std::size_t(desc[DDLA_LLD_]) > std::numeric_limits<std::size_t>::max() /
-                                                  sizeof(R) / std::size_t(std::max(1, nc)))
-            throw std::overflow_error("pstedc: output span exceeds size_t");
-    });
-    int signature[14] = {3113, int(h->backend), int(jobz), n, int(sizeof(R)), h->nprows_, h->npcols_};
-    if (jobz == 'V') detail::descriptor_signature(signature + 7, desc);
-    detail::agree_signature(h, "pstedc", signature);
-    const int count = detail::RowShare(n, h->nprocs).count(h->myid);
-    auto p = pstedc_policy<R>(h, jobz, n, std::max(1, count));
-    if (jobz == 'V') {
-        p.mode = PstedcMode::distributed;
-        p.rows.borrow_q2 = count > 0; // separate, compact internal row output
-        std::copy_n(desc, DDLA_DLEN_, p.destination.begin());
-        matrix_impl::scatter_rows_workspace_size<R>(h, n, &p.transfer_backend, &p.transfer_host);
-    }
-    return p;
-}
-
-// The buffers of pstedc_run in its carving order (listed in pstedc_workspace.h).
+// The buffers of pstedc_run in its carving order (listed in pstedc_impl.h).
 template <class R>
 void pstedc_workspace_size(const DdlaHandle_t&, const PstedcVectorPlan& p, std::size_t* backend_bytes,
                                 std::size_t* host_bytes)
@@ -742,14 +697,6 @@ void pstedc_workspace_size(const DdlaHandle_t& h, const PstedcPlan& p, std::size
     using detail::padded_bytes;
     if (p.mode != PstedcMode::values) {
         pstedc_workspace_size<R>(h, p.rows, backend_bytes, host_bytes);
-        if (p.mode == PstedcMode::distributed && p.rows.n) {
-            const auto transfer = p.rows.backend == DdlaBackend::CPU ?
-                padded_bytes<char>(p.transfer_backend) + p.transfer_host : p.transfer_backend;
-            *backend_bytes = padded_bytes<R>(std::size_t(p.rows.ldy) * p.rows.n) +
-                             std::max(*backend_bytes, transfer);
-            if (p.rows.backend == DdlaBackend::GPU)
-                *host_bytes = std::max(*host_bytes, p.transfer_host);
-        }
         return;
     }
     *backend_bytes = 0;
@@ -1480,22 +1427,8 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcPlan& policy, rt* d, rt*
             return;
         if (policy.mode != PstedcMode::values) {
             assert(rows);
-            char* work = static_cast<char*>(backend_work);
-            rt* Y = vectors;
-            if (policy.mode == PstedcMode::distributed)
-                Y = detail::take<rt>(work, std::size_t(policy.rows.ldy) * policy.rows.n);
-            const auto used = static_cast<std::size_t>(work - static_cast<char*>(backend_work));
-            assert(used <= backend_bytes);
-            pstedc_run<B, rt>(handle, policy.rows, *rows, d, e, w, Y, nullptr, work,
-                             backend_bytes - used, host_work, host_bytes);
-            if (policy.mode == PstedcMode::distributed) {
-                void* transfer_host = host_work;
-                if constexpr (B == DdlaBackend::CPU)
-                    transfer_host = work + detail::padded_bytes<char>(policy.transfer_backend);
-                matrix_impl::scatter_rows_run<B, rt>(handle, policy.rows.n, Y, policy.rows.ldy, false,
-                    policy.rows.n, policy.rows.n, vectors, policy.destination.data(), work,
-                    policy.transfer_backend, transfer_host, policy.transfer_host);
-            }
+            pstedc_run<B, rt>(handle, policy.rows, *rows, d, e, w, vectors, nullptr, backend_work,
+                             backend_bytes, host_work, host_bytes);
             return;
         }
 
@@ -1846,8 +1779,6 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcPlan& policy, rt* d, rt*
     template PstedcPlan pstedc_policy<R>(const DdlaHandle_t&, char, int, int);                               \
     template PstedcPlan pstedc_check<R>(const DdlaHandle_t&, char, int, const R*, const R*, const R*,        \
                                         const R*, int); \
-    template PstedcPlan pstedc_check<R>(const DdlaHandle_t&, char, int, const R*, const R*, const R*,        \
-                                        const R*, const int*);                                                      \
     template void pstedc_workspace_size<R>(const DdlaHandle_t&, const PstedcPlan&, std::size_t*, std::size_t*)
 PSTEDC_CHECK_SIZE(float);
 PSTEDC_CHECK_SIZE(double);
@@ -1915,6 +1846,8 @@ void pstedc(const DdlaHandle_t& handle, char jobz, int n, typename real_type<T>:
             typename real_type<T>::type* e, typename real_type<T>::type* w,
             typename real_type<T>::type* z, int ldz, int& info)
 {
+    static_assert(std::is_same<T, float>::value || std::is_same<T, double>::value,
+                  "pstedc operates on real scalar types");
     info = 0;
     const auto p = spectral_impl::pstedc_check<typename real_type<T>::type>(handle, jobz, n, d, e, w, z, ldz);
     pstedc_allocate(handle, p, d, e, w, z);
@@ -1924,22 +1857,6 @@ template void pstedc<float>(const DdlaHandle_t&, char, int, float*, float*, floa
                                        int&);
 template void pstedc<double>(const DdlaHandle_t&, char, int, double*, double*, double*, double*,
                                         int, int&);
-
-template <class T>
-void pstedc(const DdlaHandle_t& handle, char jobz, int n, typename real_type<T>::type* d,
-            typename real_type<T>::type* e, typename real_type<T>::type* w, typename real_type<T>::type* Z,
-            const int* descZ, int& info)
-{
-    static_assert(std::is_same<T, float>::value || std::is_same<T, double>::value,
-                  "pstedc operates on real scalar types");
-    info = 0;
-    const auto p = spectral_impl::pstedc_check<typename real_type<T>::type>(handle, jobz, n, d, e, w, Z, descZ);
-    pstedc_allocate(handle, p, d, e, w, Z);
-}
-
-template void pstedc<float>(const DdlaHandle_t&, char, int, float*, float*, float*, float*, const int*, int&);
-template void pstedc<double>(const DdlaHandle_t&, char, int, double*, double*, double*, double*, const int*,
-                             int&);
 
 template <typename rt>
 void pstedc(const DdlaHandle_t& handle, int n, rt* d, rt* e, rt* w, rt* Y, int ldy)

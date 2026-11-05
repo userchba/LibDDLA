@@ -585,18 +585,21 @@ major version.
 
 LGPL v3.  See [LICENSE](./LICENSE).
 
-`pstedc<T>(handle, 'V', n, d, e, w, z, descZ, info)` returns eigenvectors
-in the descriptor's 2D block-cyclic layout in backend memory. The leading
-`n × n` region contains the eigenvectors in ascending eigenvalue order;
-parent-matrix entries and local leading-dimension padding remain untouched.
-The replicated host vectors `d` and `e` are destroyed, and `w` receives the
-eigenvalues on every rank. `'N'` keeps only the boundary rows needed by its
-eigenvalue-only tree and accepts null `z` and `descZ`.
+`pstedc<T>(handle, jobz, n, d, e, w, z, ldz, info)` has two modes:
+`jobz='N'` computes eigenvalues only; `jobz='V'` also returns eigenvectors as
+contiguous row slabs in backend memory. For communicator rank q among P ranks,
+`local_rows = n/P + (q < n%P)` and the first global row is
+`q*(n/P) + min(q,n%P)`. Each rank stores all n columns with
+`ldz >= max(1,local_rows)`. Column j corresponds to w[j]. Leading-dimension
+padding and columns beyond n are preserved; zero-row ranks may pass null z.
+The replicated host vectors d and e are destroyed, and w receives ascending
+eigenvalues on every rank. For 'N', z and ldz are ignored and z may be null.
 
-`pstedc` uses one row-distributed divide-and-conquer implementation. Each
-rank owns contiguous eigenvector rows and all columns throughout the tree;
-secular factors are generated in bounded strips. The descriptor interface
-transfers bounded panels to the requested 2D output after the solve.
+The former `descZ` overload and its automatic row-to-2D redistribution have
+been removed. Callers must allocate the row layout described above.
+`pstedc` uses the existing row-distributed divide-and-conquer engine, with
+secular factors generated in bounded strips. The eigenvalues-only tree keeps
+only the boundary rows needed by later merges.
 
 The explicit `pheevd_one_stage(handle, jobz, uplo, n, A, descA, w, Z, descZ, info)`
 entry solves real symmetric or complex Hermitian eigenproblems on CPU and GPU

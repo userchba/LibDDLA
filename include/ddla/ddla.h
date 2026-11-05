@@ -1872,19 +1872,20 @@ void gemm(
 /**
  * @brief Diagonalize a replicated real symmetric tridiagonal matrix collectively.
  * @tparam T float or double. d, e and w are host vectors on every rank.
- * @param jobz 'N': eigenvalues only; 'V': eigenvalues and 2D block-cyclic vectors.
+ * @param jobz 'N': eigenvalues only; 'V': eigenvalues and row-distributed vectors.
  * @param diag_in Length n diagonal, destroyed on exit.
  * @param e_in Length max(0,n-1) off-diagonal, destroyed on exit.
  * @param w Length n eigenvalues in ascending order, replicated on every rank.
- * @param z Local backend-memory part of the n-by-n eigenvector matrix.
- * Column j corresponds to w[j]. May be null on ranks without active entries.
- * @param descZ Descriptor of z. The leading n-by-n region is written; parent
- * entries and local leading-dimension padding are preserved. Ignored for 'N'.
+ * @param z This rank's contiguous rows of all n eigenvector columns, column-major
+ * in backend memory. For communicator rank q among P ranks, rows start at
+ * q*(n/P)+min(q,n%P), with n/P+(q<n%P) rows. Column j corresponds to w[j].
+ * May be null on ranks owning no rows. Ignored for 'N'.
+ * @param ldz Local leading dimension, at least max(1, local row count) for 'V'.
+ * Padding and storage beyond the first n columns are preserved. Ignored for 'N'.
  * @param info Zero on success. Invalid arguments or numerical failure throw.
- * The divide-and-conquer tree distributes contiguous eigenvector rows, then
- * transfers bounded panels into the output descriptor.
- * For multiple ranks and n > 1, no full eigenvector or secular-factor
- * matrix is gathered or replicated.
+ * All ranks participate, including ranks without rows. Eigenvectors remain
+ * row-distributed throughout the divide-and-conquer tree and on return.
+ * There is no descriptor-output overload or implicit 2D redistribution.
  */
 template <typename T>
 void pstedc(
@@ -1893,7 +1894,7 @@ void pstedc(
     typename real_type<T>::type* diag_in,
     typename real_type<T>::type* e_in,
     typename real_type<T>::type* w,
-    typename real_type<T>::type* z, const int* descZ,
+    typename real_type<T>::type* z, int ldz,
     int& info
 );
 

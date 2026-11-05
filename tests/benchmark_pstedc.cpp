@@ -5,7 +5,6 @@
 // mpirun -n 4 ./benchmark_pstedc [--kind 0|1|5] [--reps R] [--check-max N] n ...
 #include "api_grid_test_common.h"
 #include "row_share.h"
-#include "Eigensolver/pstedc_workspace.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>

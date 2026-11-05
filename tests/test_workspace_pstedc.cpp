@@ -1,7 +1,6 @@
 #include "Eigensolver/pstedc_impl.h"
 #include "api_grid_test_common.h"
 #include "ddla_stream.h"
-#include "Eigensolver/pstedc_workspace.h"
 #include "workspace_test_common.h"
 #include <array>
 #include <optional>
@@ -81,7 +80,7 @@ void solve_case(DdlaHandle_t h,char jobz,int n,bool split_e=false)
     if(jobz=='N'&&h->backend==DdlaBackend::GPU)require_close(h,"values-only pstedc has no device workspace",double(backend_bytes),0);
     if(h->backend==DdlaBackend::CPU)require_close(h,"CPU pstedc keeps its host arrays in backend memory",double(host_bytes),0);
     Guarded arena(h,backend_bytes,host_bytes);std::optional<PstedcResources> rows;
-    if(plan.mode==PstedcMode::rows)rows.emplace(h,plan.rows);
+    if(plan.mode==PstedcMode::vectors)rows.emplace(h,plan.rows);
     for(int repeat=0;repeat<2;++repeat){
         diag=original_d;off=original_e;std::fill(values.begin(),values.end(),sentinel);upload(h,z.ptr,initial);
         workspace_test::Scope run_scope;
@@ -133,7 +132,7 @@ void solve_case(DdlaHandle_t h,char jobz,int n,bool split_e=false)
 
 template<class R>void check_scaling(DdlaHandle_t h)
 {
-    PstedcPlan p;p.mode=PstedcMode::rows;p.rows.backend=h->backend;
+    PstedcPlan p;p.mode=PstedcMode::vectors;p.rows.backend=h->backend;
     p.rows.leaf=64;p.rows.strip=16;p.rows.root_chunk=32;p.rows.threads=1;
     p.rows.borrow_q2=true;
     for(int n:{20000,40000}){
