@@ -110,6 +110,8 @@ if(DDLA_USE_CUDA)
 endif()
 if(DDLA_USE_HIP)
     target_compile_definitions(ddla_lib PRIVATE DDLA_USE_HIP __HIP_PLATFORM_AMD__ HIPBLAS_V1)
+    # Host C++ sources and dependent targets also include rocThrust headers.
+    target_compile_definitions(ddla_lib PUBLIC THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
 endif()
 if(DDLA_USE_CPU AND NOT DDLA_DUAL_BUILD)
     target_compile_definitions(ddla_lib PRIVATE DDLA_USE_CPU)
