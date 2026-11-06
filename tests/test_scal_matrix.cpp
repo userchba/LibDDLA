@@ -23,8 +23,8 @@ template <typename T> bool close(T actual,T expected) {
     const double error=std::abs(wide(actual)-wide(expected))/(1+std::abs(wide(expected)));
     return std::isfinite(error)&&error<(std::is_same_v<R,float>?3e-5:3e-12);
 }
-template <DdlaBackend B,typename T>
-void local(DdlaHandle_t h,int m,int n,int count,T alpha,bool batched,int& cases) {
+template <DdlaBackend B,typename T,typename Alpha=T>
+void local(DdlaHandle_t h,int m,int n,int count,Alpha alpha,bool batched,int& cases) {
     const int lda=std::max(1,m+3);
     const std::size_t stride=std::size_t(lda)*(n+2);
     std::vector<T> seed(stride*count,scalar<T>(77,66));
@@ -37,8 +37,8 @@ void local(DdlaHandle_t h,int m,int n,int count,T alpha,bool batched,int& cases)
     DDLA_CHECK(ddlaMemcpy(h,arrays.data(),pointers.data(),count*sizeof(T*)));
     auto reset=[&]{DDLA_CHECK(ddlaMemcpy(h,data.data(),seed.data(),seed.size()*sizeof(T)));};
     auto call=[&]{
-        if(batched)scalBatched<B,T>(h,m,n,alpha,arrays.data(),lda,count);
-        else scal<B,T>(h,m,n,alpha,data.data(),lda);
+        if(batched)scalBatched<B>(h,m,n,alpha,arrays.data(),lda,count);
+        else scal<B>(h,m,n,alpha,data.data(),lda);
     };
     reset();call();DDLA_CHECK(ddlaSynchronize(h));reset();
     {workspace_test::Scope scope;call();no_workspace(h,scope.finish());}
@@ -53,15 +53,15 @@ void local(DdlaHandle_t h,int m,int n,int count,T alpha,bool batched,int& cases)
     }
     require(h,ok,"matrix scaling changed a guard or produced a wrong value");++cases;
 }
-template <DdlaBackend B,typename T>
-void distributed(DdlaHandle_t h,int m,int n,T alpha,int& cases) {
+template <DdlaBackend B,typename T,typename Alpha=T>
+void distributed(DdlaHandle_t h,int m,int n,Alpha alpha,int& cases) {
     int pr,pc;ddlaGetGridDims(h,pr,pc);
     structured_test::Matrix<T> a(h,m,n,4,pr-1,pc-1,true);
     const double nan=std::numeric_limits<double>::quiet_NaN();
     a.fill(m,n,[&](int i,int j){return alpha==T(0)?scalar<T>(nan,nan):structured_test::value<T>(i,j,3);});
     const int rows=num_loc(m,4,a.r,pr-1,pr),cols=num_loc(n,4,a.c,pc-1,pc);
     T* input=rows&&cols?a.data.data():nullptr;
-    auto call=[&]{pscal<B,T>(h,m,n,alpha,input,a.d);};
+    auto call=[&]{pscal<B>(h,m,n,alpha,input,a.d);};
     a.upload();call();DDLA_CHECK(ddlaSynchronize(h));a.upload();
     {workspace_test::Scope scope;call();no_workspace(h,scope.finish());}
     const auto out=a.download();bool ok=true;
@@ -74,7 +74,7 @@ void distributed(DdlaHandle_t h,int m,int n,T alpha,int& cases) {
     require(h,ok,"distributed scaling changed padding or an entry outside the region");++cases;
 }
 // Initcheck must see stores, with no prior read of freshly allocated data.
-template <DdlaBackend B,typename T>
+template <DdlaBackend B,typename T,typename Alpha=T>
 void zero_uninitialized(DdlaHandle_t h,bool batched,int& cases) {
     const int m=17,n=13,count=batched?3:1;
     const std::size_t stride=std::size_t(m)*n;
@@ -83,8 +83,8 @@ void zero_uninitialized(DdlaHandle_t h,bool batched,int& cases) {
     for(int q=0;q<count;++q)pointers[q]=data.data()+q*stride;
     vector<T*> arrays(h,count);
     DDLA_CHECK(ddlaMemcpy(h,arrays.data(),pointers.data(),count*sizeof(T*)));
-    if(batched)scalBatched<B,T>(h,m,n,T(0),arrays.data(),m,count);
-    else scal<B,T>(h,m,n,T(0),data.data(),m);
+    if(batched)scalBatched<B>(h,m,n,Alpha(0),arrays.data(),m,count);
+    else scal<B>(h,m,n,Alpha(0),data.data(),m);
     std::vector<T> out(stride*count);
     DDLA_CHECK(ddlaMemcpy(h,out.data(),data.data(),out.size()*sizeof(T)));
     DDLA_CHECK(ddlaSynchronize(h));
@@ -103,19 +103,75 @@ template <DdlaBackend B,typename T> void types(DdlaHandle_t h,int& cases) {
     zero_uninitialized<B,T>(h,true,cases);
     distributed<B,T>(h,0,2,T(0),cases);
     local<B,T>(h,1,1,65537,scalar<T>(.5,.25),true,cases);
-    scal<B,T>(h,0,3,T(0),nullptr,1);
-    scalBatched<B,T>(h,2,3,T(0),nullptr,2,0);
+    scal<B>(h,0,3,T(0),static_cast<T*>(nullptr),1);
+    scalBatched<B>(h,2,3,T(0),static_cast<T* const*>(nullptr),2,0);
     // The existing vector overload and stride contract remain unchanged.
     std::vector<T> seed(15,scalar<T>(9,8));for(int i=0;i<7;++i)seed[2*i]=scalar<T>(i+1,-i);
     vector<T> x(h,seed.size());DDLA_CHECK(ddlaMemcpy(h,x.data(),seed.data(),seed.size()*sizeof(T)));
-    const T alpha=scalar<T>(.75,.125);scal<B,T>(h,7,alpha,x.data(),2);
+    const T alpha=scalar<T>(.75,.125);scal<B>(h,7,alpha,x.data(),2);
     std::vector<T> out(seed.size());DDLA_CHECK(ddlaMemcpy(h,out.data(),x.data(),out.size()*sizeof(T)));DDLA_CHECK(ddlaSynchronize(h));
     bool ok=true;for(int i=0;i<15;++i)ok=ok&&close(out[i],i<14&&i%2==0?alpha*seed[i]:seed[i]);
     require(h,ok,"vector scal overload or stride regressed");++cases;
 }
+template <DdlaBackend B,typename R> void mixed_types(DdlaHandle_t h,int& cases) {
+    using T=std::complex<R>;
+    for(R alpha:{R(0),R(1),R(-.75)}) {
+        local<B,T>(h,17,11,1,alpha,false,cases);
+        local<B,T>(h,17,11,35,alpha,true,cases);
+        distributed<B,T>(h,17,11,alpha,cases);
+        distributed<B,T>(h,1,2,alpha,cases);
+    }
+    zero_uninitialized<B,T,R>(h,false,cases);
+    zero_uninitialized<B,T,R>(h,true,cases);
+    local<B,T>(h,1,1,65537,R(.5),true,cases);
+    // Real coefficients scale components independently, including NaNs.
+    const R nan=std::numeric_limits<R>::quiet_NaN();
+    T seed[2]={{nan,R(4)},{R(3),nan}};vector<T> data(h,2);
+    DDLA_CHECK(ddlaMemcpy(h,data.data(),seed,sizeof(seed)));
+    scal<B,T>(h,2,1,R(.5),data.data(),2);
+    T out[2];DDLA_CHECK(ddlaMemcpy(h,out,data.data(),sizeof(out)));DDLA_CHECK(ddlaSynchronize(h));
+    require(h,std::isnan(out[0].real())&&out[0].imag()==R(2)&&out[1].real()==R(1.5)&&std::isnan(out[1].imag()),
+        "mixed scaling contaminated the other component with NaN");++cases;
+    DDLA_CHECK(ddlaMemcpy(h,data.data(),seed,sizeof(seed)));
+    T* pointer=data.data();vector<T*> one_array(h,1);
+    DDLA_CHECK(ddlaMemcpy(h,one_array.data(),&pointer,sizeof(pointer)));
+    scalBatched<B,T>(h,2,1,R(.5),one_array.data(),2,1);
+    DDLA_CHECK(ddlaMemcpy(h,out,data.data(),sizeof(out)));DDLA_CHECK(ddlaSynchronize(h));
+    require(h,std::isnan(out[0].real())&&out[0].imag()==R(2)&&out[1].real()==R(1.5)&&std::isnan(out[1].imag()),
+        "mixed batch scaling contaminated the other component with NaN");++cases;
+    structured_test::Matrix<T> distributed_nan(h,2,1,4);
+    distributed_nan.fill(2,1,[&](int i,int){return seed[i];});distributed_nan.upload();
+    pscal<B,T>(h,2,1,R(.5),distributed_nan.data.data(),distributed_nan.d);
+    const auto nan_result=distributed_nan.download();bool nan_ok=true;
+    for(int j=0;j<distributed_nan.nc;++j)for(int i=0;i<distributed_nan.nr;++i) {
+        if(distributed_nan.gi(i)>=2||distributed_nan.gj(j)>=1)continue;
+        const T value=nan_result[i+std::size_t(j)*distributed_nan.d[DDLA_LLD_]];
+        if(distributed_nan.gi(i)==0)nan_ok=nan_ok&&std::isnan(value.real())&&value.imag()==R(2);
+        else nan_ok=nan_ok&&value.real()==R(1.5)&&std::isnan(value.imag());
+    }
+    require(h,nan_ok,"mixed distributed scaling contaminated the other component with NaN");++cases;
+    // A one-column region may have a pitch that cannot be doubled in int.
+    const int m=17,stride=20,count=2;
+    std::vector<T> original(stride*count,T(9,8));
+    for(int q=0;q<count;++q)for(int i=0;i<m;++i)original[q*stride+i]=T(R(i+1),R(-i));
+    vector<T> x(h,original.size());T* host[count]={x.data(),x.data()+stride};vector<T*> arrays(h,count);
+    DDLA_CHECK(ddlaMemcpy(h,arrays.data(),host,sizeof(host)));
+    for(bool batch:{false,true}) {
+        DDLA_CHECK(ddlaMemcpy(h,x.data(),original.data(),original.size()*sizeof(T)));
+        if(batch)scalBatched<B>(h,m,1,R(.5),arrays.data(),std::numeric_limits<int>::max(),count);
+        else scal<B>(h,m,1,R(.5),x.data(),std::numeric_limits<int>::max());
+        std::vector<T> result(original.size());DDLA_CHECK(ddlaMemcpy(h,result.data(),x.data(),result.size()*sizeof(T)));DDLA_CHECK(ddlaSynchronize(h));
+        bool ok=true;for(int q=0;q<count;++q)for(int i=0;i<stride;++i) {
+            const T expected=i<m&&(batch||q==0)?original[q*stride+i]*R(.5):original[q*stride+i];
+            ok=ok&&close(result[q*stride+i],expected);
+        }
+        require(h,ok,"mixed scaling large-pitch fallback or guard failed");++cases;
+    }
+}
 template <DdlaBackend B> void run(int pr,int pc) {
     DdlaHandle_t h=nullptr;DDLA_CHECK(ddlaInit(h,B));DDLA_CHECK(ddlaSet(h,MPI_COMM_WORLD,pr,pc));
-    int cases=0;types<B,float>(h,cases);types<B,double>(h,cases);
+    int cases=0;mixed_types<B,float>(h,cases);mixed_types<B,double>(h,cases);
+    types<B,float>(h,cases);types<B,double>(h,cases);
     types<B,std::complex<float>>(h,cases);types<B,std::complex<double>>(h,cases);
     bool rejected=false;try{scalBatched<B,double>(h,2,3,1.,nullptr,1,1);}catch(const std::exception&){rejected=true;}
     require(h,rejected,"invalid batched leading dimension accepted");

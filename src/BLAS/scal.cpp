@@ -3,6 +3,7 @@
 #include <ddla/ddla_handle_t.h>
 
 #include <complex>
+#include <climits>
 #include <stdexcept>
 #include <string>
 
@@ -17,6 +18,8 @@ void sscal_(const int*, const float*, float*, const int*);
 void dscal_(const int*, const double*, double*, const int*);
 void cscal_(const int*, const std::complex<float>*, std::complex<float>*, const int*);
 void zscal_(const int*, const std::complex<double>*, std::complex<double>*, const int*);
+void csscal_(const int*, const float*, std::complex<float>*, const int*);
+void zdscal_(const int*, const double*, std::complex<double>*, const int*);
 }
 
 namespace ddla {
@@ -134,25 +137,75 @@ void scal(const DdlaHandle_t& handle, int n, const T& alpha, T* x, int incx)
     blas_impl::scal_run<Backend, T>(handle, n, alpha, x, incx);
 }
 
-// Matrix overload: GEAM already supports in-place scaling and padding.
-template <DdlaBackend Backend, typename T>
-void scal(const DdlaHandle_t& h, int m, int n, const T& alpha, T* a, int lda)
+namespace blas_impl {
+template <DdlaBackend Backend, typename T, typename Alpha>
+void matrix_scal_run(const DdlaHandle_t& h,int m,int n,const Alpha& alpha,T* a,int lda)
 {
-    if (m<0 || n<0 || lda<std::max(1,m))
-        throw std::invalid_argument("scal(matrix): invalid dimensions or leading dimension");
-    blas_impl::geam_check<Backend,T>(h,'N','N',m,n,alpha,a,lda,T(0),nullptr,1,a,lda);
-    if (m==0 || n==0 || alpha==T(1)) return;
+    if (m==0 || n==0 || alpha==Alpha(1)) return;
     if constexpr (Backend==DdlaBackend::GPU) {
 #if DDLA_HAS_GPU
-        // GEMM-compatible zero scaling must not read poisoned input.
-        if (alpha==T(0)) {
-            blas_impl::matrix_scal_gpu_run<T>(h,m,n,alpha,a,lda,nullptr,1);
+        if (alpha==Alpha(0) || !std::is_same_v<T,Alpha>) {
+            matrix_scal_gpu_run<T,Alpha>(h,m,n,alpha,a,lda,nullptr,1);
             return;
         }
 #endif
     }
-    blas_impl::geam_run<Backend,T>(h,'N','N',m,n,alpha,a,lda,T(0),nullptr,1,a,lda);
+    if constexpr (std::is_same_v<T,Alpha>) {
+        geam_run<Backend,T>(h,'N','N',m,n,alpha,a,lda,T(0),nullptr,1,a,lda);
+    } else if constexpr (Backend==DdlaBackend::CPU) {
+        using R=typename real_type<T>::type;
+        static_assert(std::is_same_v<Alpha,R>);
+        // std::complex components form a real matrix with twice the rows.
+        if (m<=INT_MAX/2 && lda<=INT_MAX/2) {
+            geam_run<Backend,R>(h,'N','N',2*m,n,alpha,reinterpret_cast<R*>(a),2*lda,
+                R(0),nullptr,1,reinterpret_cast<R*>(a),2*lda);
+        } else if (alpha==R(0)) {
+            geam_run<Backend,T>(h,'N','N',m,n,T(0),a,lda,T(0),nullptr,1,a,lda);
+        } else {
+            // Avoid overflowing BLAS integer dimensions for a large pitch.
+            const int one=1;
+            for (int j=0;j<n;++j) {
+                T* column=a+std::size_t(j)*lda;
+                if constexpr(std::is_same_v<R,float>)csscal_(&m,&alpha,column,&one);
+                else zdscal_(&m,&alpha,column,&one);
+            }
+        }
+    }
 }
+}
+
+// Matrix overloads share validation and a prechecked implementation.
+template <DdlaBackend Backend, typename T>
+void scal(const DdlaHandle_t& h,int m,int n,const T& alpha,T* a,int lda)
+{
+    if (m<0 || n<0 || lda<std::max(1,m))
+        throw std::invalid_argument("scal(matrix): invalid dimensions or leading dimension");
+    blas_impl::geam_check<Backend,T>(h,'N','N',m,n,alpha,a,lda,T(0),nullptr,1,a,lda);
+    blas_impl::matrix_scal_run<Backend,T>(h,m,n,alpha,a,lda);
+}
+template <DdlaBackend Backend,typename T,typename Alpha>
+std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void>
+scal(const DdlaHandle_t& h,int m,int n,const Alpha& alpha,T* a,int lda)
+{
+    if (m<0 || n<0 || lda<std::max(1,m))
+        throw std::invalid_argument("scal(matrix,mixed): invalid dimensions or leading dimension");
+    blas_impl::geam_check<Backend,T>(h,'N','N',m,n,T(alpha),a,lda,T(0),nullptr,1,a,lda);
+    blas_impl::matrix_scal_run<Backend,T,Alpha>(h,m,n,alpha,a,lda);
+}
+#define MIXED_SCAL(B,R) \
+ template void scal<B,std::complex<R>,R>(const DdlaHandle_t&,int,int,const R&,std::complex<R>*,int); \
+ template void blas_impl::matrix_scal_run<B,std::complex<R>,R>(const DdlaHandle_t&,int,int,const R&,std::complex<R>*,int)
+#define MATRIX_RUN(B,T) template void blas_impl::matrix_scal_run<B,T,T>(const DdlaHandle_t&,int,int,const T&,T*,int)
+#define MATRIX_RUN_TYPES(B) MATRIX_RUN(B,float);MATRIX_RUN(B,double); \
+ MATRIX_RUN(B,std::complex<float>);MATRIX_RUN(B,std::complex<double>); \
+ MIXED_SCAL(B,float);MIXED_SCAL(B,double)
+MATRIX_RUN_TYPES(DdlaBackend::CPU);
+#if DDLA_HAS_GPU
+MATRIX_RUN_TYPES(DdlaBackend::GPU);
+#endif
+#undef MATRIX_RUN_TYPES
+#undef MATRIX_RUN
+#undef MIXED_SCAL
 
 #define MATRIX_SCAL(B,T) template void scal<B,T>(const DdlaHandle_t&,int,int,const T&,T*,int)
 #define MATRIX_TYPES(B) MATRIX_SCAL(B,float); MATRIX_SCAL(B,double); \
