@@ -1,4 +1,7 @@
 #include "blas_impl.h"
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 // ---------------------------------------------------------------------------
 // Unified backend-templated batched matrix multiply over arrays of pointers:
 // for i in [0, batchCount):  C[i] := alpha*blas_impl::op(A[i])*blas_impl::op(B[i]) + beta*C[i].
@@ -30,6 +33,11 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 #include "host_threads.h"
+#include "plan_util.h"
+#include "gemm_mixed_cpu.h"
+#include "helpers.h"
+#include "require_backend.h"
+#include <cassert>
 
 extern "C" {
 // Fortran BLAS entry points for the CPU arm, available in every build.
@@ -204,14 +212,14 @@ namespace ddla {
 
 namespace blas_impl {
 
-template <DdlaBackend Backend, typename T>
+template <DdlaBackend Backend, typename T, typename TA, typename TB>
 void gemmBatched_check(
     const DdlaHandle_t& handle,
     char transa, char transb,
     int m, int n, int k,
     const T& alpha,
-    const T* const Aarray[], int lda,
-    const T* const Barray[], int ldb,
+    const TA* const Aarray[], int lda,
+    const TB* const Barray[], int ldb,
     const T& beta,
     T* const Carray[], int ldc,
     int batchCount)
@@ -231,24 +239,138 @@ void gemmBatched_check(
             (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
     }
 
+    if constexpr (!std::is_same_v<T,TA> || !std::is_same_v<T,TB>) {
+        const char ta=upper(transa),tb=upper(transb);
+        if ((ta!='N' && ta!='T' && ta!='C') || (tb!='N' && tb!='T' && tb!='C') ||
+            m<0 || n<0 || k<0 || batchCount<0 || lda<std::max(1,ta=='N'?m:k) ||
+            ldb<std::max(1,tb=='N'?k:n) || ldc<std::max(1,m))
+            throw std::invalid_argument("gemmBatched(mixed): invalid flags, dimensions or pitches");
+        const bool product=k>0 && alpha!=T(0);
+        if (m && n && batchCount && (product || beta!=T(1))) {
+            if (!Carray || (product && (!Aarray || !Barray)))
+                throw std::invalid_argument("gemmBatched(mixed): null pointer array");
+            if constexpr (Backend==DdlaBackend::CPU) for (int i=0;i<batchCount;++i) {
+                if (!Carray[i] || (product && (!Aarray[i] || !Barray[i])))
+                    throw std::invalid_argument("gemmBatched(mixed): null matrix");
+                if (product && (detail::matrix_overlaps(Aarray[i],lda,ta=='N'?m:k,ta=='N'?k:m,Carray[i],ldc,m,n) ||
+                    detail::matrix_overlaps(Barray[i],ldb,tb=='N'?k:n,tb=='N'?n:k,Carray[i],ldc,m,n)))
+                    throw std::invalid_argument("gemmBatched(mixed): output overlaps input");
+            }
+        }
+    }
+
     if constexpr (Backend == DdlaBackend::GPU) {
         (void)detail::to_blas_op(transa);
         (void)detail::to_blas_op(transb);
     }
 }
 
-template <DdlaBackend Backend, typename T>
+template <DdlaBackend Backend, typename T, typename TA, typename TB>
 void gemmBatched_run(
     const DdlaHandle_t& handle,
     char transa, char transb,
     int m, int n, int k,
     const T& alpha,
-    const T* const Aarray[], int lda,
-    const T* const Barray[], int ldb,
+    const TA* const Aarray[], int lda,
+    const TB* const Barray[], int ldb,
     const T& beta,
     T* const Carray[], int ldc,
-    int batchCount)
+    int batchCount, void* work, std::size_t bytes)
 {
+    if constexpr (!std::is_same_v<T,TA> || !std::is_same_v<T,TB>) {
+        using R=typename real_type<T>::type;
+        constexpr bool complex_left=std::is_same_v<T,TA>;
+        transa=upper(transa);transb=upper(transb);
+        if constexpr (std::is_arithmetic_v<TA>) if (transa=='C') transa='T';
+        if constexpr (std::is_arithmetic_v<TB>) if (transb=='C') transb='T';
+        if (m==0 || n==0 || batchCount==0) return;
+        const bool product=k>0 && alpha!=T(0);
+        if (!product && beta==T(1)) return;
+        if constexpr (Backend==DdlaBackend::GPU) {
+#if DDLA_HAS_GPU
+            mixed_gemmBatched_gpu_run<R,complex_left>(handle,transa,transb,m,n,k,alpha,
+                reinterpret_cast<const void* const*>(Aarray),lda,reinterpret_cast<const void* const*>(Barray),ldb,
+                beta,Carray,ldc,batchCount,work,bytes);
+#endif
+        } else {
+            if (!product) {
+                for_each_product(handle->host_threads,batchCount,[&](int q) {
+                    for (int j=0;j<n;++j) for (int i=0;i<m;++i) {
+                        T& out=Carray[q][i+std::size_t(j)*ldc];
+                        out=beta==T(0)?T(0):beta*out;
+                    }
+                });
+                return;
+            }
+            int depth=k;
+            std::size_t parallel=0;
+            if(m>=1024 && n>=1024 && batchCount<=std::max(1,handle->host_threads/2))
+                detail::mixed_gemm_cpu_workspace_size<R>(handle,m,n,k,complex_left,&parallel);
+            const int panel=std::min(n,512),cap=mixed_gemmBatched_capacity<R>(handle->host_threads,m,n,k,complex_left,batchCount,depth,parallel);
+            if(depth==0) {
+                for(int q=0;q<batchCount;++q)
+                    gemm_run<Backend,R>(handle,transa,transb,m,n,k,alpha,Aarray[q],lda,Barray[q],ldb,beta,Carray[q],ldc,work,bytes);
+                return;
+            }
+            const std::size_t packed=2*(complex_left ? std::size_t(m)*depth : std::size_t(depth)*panel);
+            const std::size_t result=2*std::size_t(m)*panel,stride=packed+result;
+            char* cursor=static_cast<char*>(work);
+            R* data=detail::take<R>(cursor,stride*cap);
+            const R** ap=detail::take<const R*>(cursor,cap);
+            const R** bp=detail::take<const R*>(cursor,cap);
+            R** cp=detail::take<R*>(cursor,cap);
+            assert(std::size_t(cursor-static_cast<char*>(work))<=bytes);
+            // Reuse one slot per worker across the entire batch. Chunking the
+            // product list would repeatedly wake OpenMP/BLAS teams and retain
+            // scratch for queued products that cannot execute concurrently.
+            for_each_product(cap,batchCount,[&](int product) {
+                int q=0;
+#ifdef _OPENMP
+                q=cap>1?omp_get_thread_num():0;
+#endif
+                R* p=data+q*stride;
+                if constexpr (complex_left) if(depth==k && transa!='N')
+                    detail::mixed_pack_left<R>(transa,m,k,Aarray[product],lda,p);
+                for (int j0=0;j0<n;) {
+                    const int nj=std::min(panel,n-j0);
+                    cp[q]=p+packed;
+                    if constexpr(complex_left) if(transa=='N') {
+                        // The complex row pairs can go straight to real BLAS.
+                        gemm_run<Backend,R>(handle,'N',transb,2*m,nj,k,R(1),
+                            reinterpret_cast<const R*>(Aarray[product]),2*lda,
+                            Barray[product]+(transb=='N'?std::size_t(j0)*ldb:std::size_t(j0)),ldb,
+                            R(0),cp[q],2*m);
+                        T* output=Carray[product]+std::size_t(j0)*ldc;
+                        geam_run<Backend,T>(handle,'N','N',m,nj,alpha,
+                            reinterpret_cast<const T*>(cp[q]),m,beta,output,ldc,output,ldc);
+                        j0+=nj;continue;
+                    }
+                    for(int l0=0;l0<k;) {
+                        const int kk=std::min(depth,k-l0);
+                        if constexpr (complex_left) {
+                            if(depth<k)detail::mixed_pack_left<R>(transa,m,kk,
+                                Aarray[product]+(transa=='N'?std::size_t(l0)*lda:std::size_t(l0)),lda,p);
+                            ap[q]=p;
+                            bp[q]=Barray[product]+(transb=='N'?std::size_t(l0)+std::size_t(j0)*ldb
+                                                                          :std::size_t(j0)+std::size_t(l0)*ldb);
+                        } else {
+                            const TB* input=Barray[product]+(transb=='N'?std::size_t(l0)+std::size_t(j0)*ldb
+                                                                                     :std::size_t(j0)+std::size_t(l0)*ldb);
+                            detail::mixed_pack_right<R>(transb,kk,nj,input,ldb,p);
+                            ap[q]=Aarray[product]+(transa=='N'?std::size_t(l0)*lda:std::size_t(l0));bp[q]=p;
+                        }
+                        gemm_run<Backend,R>(handle,complex_left?'N':transa,complex_left?transb:'N',
+                            complex_left?2*m:m,complex_left?nj:2*nj,kk,R(1),ap[q],complex_left?2*m:lda,
+                            bp[q],complex_left?ldb:kk,l0==0?R(0):R(1),cp[q],complex_left?2*m:m);
+                        l0+=kk;
+                    }
+                    detail::mixed_combine<R,complex_left>(m,nj,cp[q],alpha,beta,
+                        Carray[product]+std::size_t(j0)*ldc,ldc);
+                    j0+=nj;
+                }
+            });
+        }
+    } else
     if constexpr (Backend == DdlaBackend::CPU) {
         // One Fortran gemm per matrix, spread over the handle's host threads (see for_each_product).  The characters go to
         // the Fortran entry points unconverted.
@@ -340,7 +462,7 @@ INSTANTIATE_GEMM_BATCHED(DdlaBackend::GPU, std::complex<double>);
 
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::gemmBatched_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k, const TYPE& alpha, const TYPE* const Aarray[], int lda, const TYPE* const Barray[], int ldb, const TYPE& beta, TYPE* const Carray[], int ldc, int batchCount); \
-    template void blas_impl::gemmBatched_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k, const TYPE& alpha, const TYPE* const Aarray[], int lda, const TYPE* const Barray[], int ldb, const TYPE& beta, TYPE* const Carray[], int ldc, int batchCount);
+    template void blas_impl::gemmBatched_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k, const TYPE& alpha, const TYPE* const Aarray[], int lda, const TYPE* const Barray[], int ldb, const TYPE& beta, TYPE* const Carray[], int ldc, int batchCount, void*, std::size_t);
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
@@ -352,4 +474,22 @@ DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
 DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
 #endif
 #undef DDLA_INSTANTIATE_PHASES
+template void blas_impl::gemmBatched_check<DdlaBackend::CPU,std::complex<float>,float,std::complex<float>>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<float>&,const float* const*,int,const std::complex<float>* const*,int,const std::complex<float>&,std::complex<float>* const*,int,int);
+template void blas_impl::gemmBatched_run<DdlaBackend::CPU,std::complex<float>,float,std::complex<float>>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<float>&,const float* const*,int,const std::complex<float>* const*,int,const std::complex<float>&,std::complex<float>* const*,int,int,void*,std::size_t);
+template void blas_impl::gemmBatched_check<DdlaBackend::CPU,std::complex<float>,std::complex<float>,float>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<float>&,const std::complex<float>* const*,int,const float* const*,int,const std::complex<float>&,std::complex<float>* const*,int,int);
+template void blas_impl::gemmBatched_run<DdlaBackend::CPU,std::complex<float>,std::complex<float>,float>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<float>&,const std::complex<float>* const*,int,const float* const*,int,const std::complex<float>&,std::complex<float>* const*,int,int,void*,std::size_t);
+template void blas_impl::gemmBatched_check<DdlaBackend::CPU,std::complex<double>,double,std::complex<double>>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<double>&,const double* const*,int,const std::complex<double>* const*,int,const std::complex<double>&,std::complex<double>* const*,int,int);
+template void blas_impl::gemmBatched_run<DdlaBackend::CPU,std::complex<double>,double,std::complex<double>>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<double>&,const double* const*,int,const std::complex<double>* const*,int,const std::complex<double>&,std::complex<double>* const*,int,int,void*,std::size_t);
+template void blas_impl::gemmBatched_check<DdlaBackend::CPU,std::complex<double>,std::complex<double>,double>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<double>&,const std::complex<double>* const*,int,const double* const*,int,const std::complex<double>&,std::complex<double>* const*,int,int);
+template void blas_impl::gemmBatched_run<DdlaBackend::CPU,std::complex<double>,std::complex<double>,double>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<double>&,const std::complex<double>* const*,int,const double* const*,int,const std::complex<double>&,std::complex<double>* const*,int,int,void*,std::size_t);
+#if DDLA_HAS_GPU
+template void blas_impl::gemmBatched_check<DdlaBackend::GPU,std::complex<float>,float,std::complex<float>>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<float>&,const float* const*,int,const std::complex<float>* const*,int,const std::complex<float>&,std::complex<float>* const*,int,int);
+template void blas_impl::gemmBatched_run<DdlaBackend::GPU,std::complex<float>,float,std::complex<float>>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<float>&,const float* const*,int,const std::complex<float>* const*,int,const std::complex<float>&,std::complex<float>* const*,int,int,void*,std::size_t);
+template void blas_impl::gemmBatched_check<DdlaBackend::GPU,std::complex<float>,std::complex<float>,float>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<float>&,const std::complex<float>* const*,int,const float* const*,int,const std::complex<float>&,std::complex<float>* const*,int,int);
+template void blas_impl::gemmBatched_run<DdlaBackend::GPU,std::complex<float>,std::complex<float>,float>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<float>&,const std::complex<float>* const*,int,const float* const*,int,const std::complex<float>&,std::complex<float>* const*,int,int,void*,std::size_t);
+template void blas_impl::gemmBatched_check<DdlaBackend::GPU,std::complex<double>,double,std::complex<double>>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<double>&,const double* const*,int,const std::complex<double>* const*,int,const std::complex<double>&,std::complex<double>* const*,int,int);
+template void blas_impl::gemmBatched_run<DdlaBackend::GPU,std::complex<double>,double,std::complex<double>>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<double>&,const double* const*,int,const std::complex<double>* const*,int,const std::complex<double>&,std::complex<double>* const*,int,int,void*,std::size_t);
+template void blas_impl::gemmBatched_check<DdlaBackend::GPU,std::complex<double>,std::complex<double>,double>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<double>&,const std::complex<double>* const*,int,const double* const*,int,const std::complex<double>&,std::complex<double>* const*,int,int);
+template void blas_impl::gemmBatched_run<DdlaBackend::GPU,std::complex<double>,std::complex<double>,double>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<double>&,const std::complex<double>* const*,int,const double* const*,int,const std::complex<double>&,std::complex<double>* const*,int,int,void*,std::size_t);
+#endif
 } // namespace ddla
