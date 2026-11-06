@@ -15,7 +15,7 @@ template<class T>T entry(int i,int j,int kind) {
     if constexpr(std::is_same_v<T,R>)return T(r);
     else {const R im=R(0.09*((lo*5+hi*3)%11-5));return i<j?T(r,im):T(r,-im);}
 }
-template<class T>void run(const ddla::DdlaHandle_t& h,int n,int nb,char uplo,int kind,bool alias,bool stored_only=true,bool tight=false) {
+template<class T>void run(const ddla::DdlaHandle_t& h,int n,int nb,char uplo,int kind,bool alias,bool tight=false) {
     using R=typename ddla::real_type<T>::type;
     int da[ddla::DDLA_DLEN_],dz[ddla::DDLA_DLEN_];
     ddlaDescInit(da,h,tight?n:n+2,tight?n:n+3,nb,nb,0,0);ddlaDescInit(dz,h,tight?n:n+2,tight?n:n+3,nb,nb,0,0);
@@ -38,15 +38,14 @@ template<class T>void run(const ddla::DdlaHandle_t& h,int n,int nb,char uplo,int
         double changed=0;
         for(int j=0;j<ddla_test::n_loc(h,da);++j)for(int i=0;i<da[ddla::DDLA_LLD_];++i) {
             const int gi=ddla::indxl2g(i,nb,mr,0,pr),gj=ddla::indxl2g(j,nb,mc,0,pc);
-            if(i>=ddla_test::m_loc(h,da)||gi>=n||gj>=n||(stored_only&&(uplo=='U'?gi>gj:gi<gj))) {
+            if(i>=ddla_test::m_loc(h,da)||gi>=n||gj>=n) {
                 const auto at=i+static_cast<std::size_t>(j)*da[ddla::DDLA_LLD_];
                 if(std::memcmp(&after[at],&input[at],sizeof(T)))changed=1;
             }
         }
-        require_close(h,stored_only?"unused triangle and input padding unchanged":"full-method input padding unchanged",changed,0);
+        require_close(h,"full-method input padding unchanged",changed,0);
     };
-    if(stored_only)ddla::pheevd_one_stage_uplo(h,'V',uplo,n,a.ptr,da,w.data(),alias?a.ptr:z.ptr,alias?da:dz,info);
-    else ddla::pheevd_one_stage(h,'V',uplo,n,a.ptr,da,w.data(),alias?a.ptr:z.ptr,alias?da:dz,info);
+    ddla::pheevd_one_stage(h,'V',uplo,n,a.ptr,da,w.data(),alias?a.ptr:z.ptr,alias?da:dz,info);
     require_close(h,"one-stage info",info,0);
     check_ddla_sync(h);
     if(!alias)check_input();
@@ -68,8 +67,7 @@ template<class T>void run(const ddla::DdlaHandle_t& h,int n,int nb,char uplo,int
     }
     if(n)require_close(h,"one-stage orthogonality",eig_test::orthogonality_metric<T>(h,z.ptr,dz,n),50);
     upload(h,a.ptr,input);
-    if(stored_only)ddla::pheevd_one_stage_uplo(h,'N',uplo,n,a.ptr,da,wn.data(),static_cast<T*>(nullptr),nullptr,info);
-    else ddla::pheevd_one_stage(h,'N',uplo,n,a.ptr,da,wn.data(),static_cast<T*>(nullptr),nullptr,info);
+    ddla::pheevd_one_stage(h,'N',uplo,n,a.ptr,da,wn.data(),static_cast<T*>(nullptr),nullptr,info);
     check_ddla_sync(h);check_input();
     double error=0;
     for(int i=0;i<n;++i) {
@@ -79,22 +77,22 @@ template<class T>void run(const ddla::DdlaHandle_t& h,int n,int nb,char uplo,int
     }
     require_close(h,"one-stage N/V eigenvalues",error,50);
 }
-template<class T>void cases(const ddla::DdlaHandle_t& h,bool stored_only) {
-    for(int n:{0,1,2,3,17,65,137,257})for(char uplo:{'U','L'})run<T>(h,n,16,uplo,0,false,stored_only);
-    for(int kind:{1,2,3})for(char uplo:{'U','L'})run<T>(h,33,16,uplo,kind,false,stored_only);
+template<class T>void cases(const ddla::DdlaHandle_t& h) {
+    for(int n:{0,1,2,3,17,65,137,257})for(char uplo:{'U','L'})run<T>(h,n,16,uplo,0,false);
+    for(int kind:{1,2,3})for(char uplo:{'U','L'})run<T>(h,33,16,uplo,kind,false);
     // Tight, separate output can be lent to the solver; aliasing retains the
     // owned-workspace path. Existing parent/LLD cases above must never borrow.
     for(char uplo:{'U','L'}) {
-        for(int n:{0,1,137})run<T>(h,n,16,uplo,0,false,stored_only,true);
-        run<T>(h,65,16,uplo,0,true,stored_only,true);
+        for(int n:{0,1,137})run<T>(h,n,16,uplo,0,false,true);
+        run<T>(h,65,16,uplo,0,true,true);
     }
-    run<T>(h,65,16,'U',0,true,stored_only);run<T>(h,65,16,'L',0,true,stored_only);run<T>(h,41,1,'U',0,false,stored_only);run<T>(h,67,64,'U',0,false,stored_only);
+    run<T>(h,65,16,'U',0,true);run<T>(h,65,16,'L',0,true);run<T>(h,41,1,'U',0,false);run<T>(h,67,64,'U',0,false);
     // Descriptor-aligned reflector panels: exact boundaries, a short first
     // panel, nb == 1, and workspace capacity above the former fixed 128.
     for(char uplo:{'U','L'}) {
-        for(int n:{15,16,32})run<T>(h,n,16,uplo,0,false,stored_only);
-        run<T>(h,5,1,uplo,0,false,stored_only);
-        run<T>(h,139,129,uplo,0,false,stored_only);
+        for(int n:{15,16,32})run<T>(h,n,16,uplo,0,false);
+        run<T>(h,5,1,uplo,0,false);
+        run<T>(h,139,129,uplo,0,false);
     }
 }
 void body(const ddla::DdlaHandle_t& h,const Shape&) {
@@ -103,12 +101,11 @@ void body(const ddla::DdlaHandle_t& h,const Shape&) {
         int d[ddla::DDLA_DLEN_];ddlaDescInit(d,h,1,1,1,1,0,0);
         DeviceBuffer<double>a(h,std::max<std::size_t>(1,local_size(h,d)));double w=0;int info=0;bool caught=false;
         try {
-            if(rank==0)ddla::pheevd_one_stage(h,'N','U',1,a.ptr,d,&w,static_cast<double*>(nullptr),nullptr,info);
-            else ddla::pheevd_one_stage_uplo(h,'N','U',1,a.ptr,d,&w,static_cast<double*>(nullptr),nullptr,info);
+            ddla::pheevd_one_stage(h,'N',rank==0?'U':'L',1,a.ptr,d,&w,static_cast<double*>(nullptr),nullptr,info);
         }catch(const std::invalid_argument&){caught=true;}
-        require_close(h,"method mismatch rejected collectively",caught?0:1,0);
+        require_close(h,"input triangle mismatch rejected collectively",caught?0:1,0);
     }
-    for(bool stored_only:{false,true}){cases<float>(h,stored_only);cases<double>(h,stored_only);cases<std::complex<float>>(h,stored_only);cases<std::complex<double>>(h,stored_only);}
+    cases<float>(h);cases<double>(h);cases<std::complex<float>>(h);cases<std::complex<double>>(h);
 }
 }
 int main(int argc,char**argv) {return run_grid_test(argc,argv,"test_pheevd_one_stage",body);}

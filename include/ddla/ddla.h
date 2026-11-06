@@ -2055,7 +2055,7 @@ void pstedc(
  * Reads the input triangle selected by UPLO, then uses both halves of A as
  * workspace for full-matrix GEMV/GEMM. A is destroyed in both triangles;
  * padding outside the active leading block remains unchanged unless it
- * overlaps Z. Use pheevd_one_stage_uplo to preserve the unused triangle.
+ * overlaps Z.
  * w is a host array on every rank; Z remains distributed in descZ. Supports
  * N/V, U/L and all four scalar types. Requires square,
  * source-zero blocks for A and matching output row distribution. The direct
@@ -2070,21 +2070,6 @@ void pstedc(
  */
 template <DdlaBackend Backend = default_backend_v, typename T>
 void pheevd_one_stage(const DdlaHandle_t& handle, char jobz, char uplo, int n,
-    T* A, const int* descA, typename real_type<T>::type* w,
-    T* Z, const int* descZ, int& info);
-
-/**
- * @brief Triangle-preserving direct Hermitian eigensolver.
- *
- * Same arguments, descriptor requirements and cache policy as pheevd_one_stage.
- * Only UPLO is consumed and overwritten, including reflector packing and alias
- * backup. The opposite triangle and padding remain unchanged except where they
- * overlap active eigenvector output Z. A and Z remain distributed. This method
- * adds vector communication and selective updates; it need not be faster than
- * the full-matrix one-stage method. Ignores DDLA_EIGEN_METHOD.
- */
-template <DdlaBackend Backend = default_backend_v, typename T>
-void pheevd_one_stage_uplo(const DdlaHandle_t& handle, char jobz, char uplo, int n,
     T* A, const int* descA, typename real_type<T>::type* w,
     T* Z, const int* descZ, int& info);
 

@@ -611,8 +611,8 @@ values, and `Z` uses the caller's distributed output descriptor. Input blocks
 are square with zero source coordinates; output rows must match the input.
 
 `pheevd_one_stage` uses both triangles as workspace after reading the selected
-input triangle. `pheevd_one_stage_uplo` preserves the unused triangle except
-where it overlaps active eigenvector output. Padding is preserved unless it overlaps active eigenvector output; overlapping
+input triangle; `uplo` selects only which input triangle is read. Padding is
+preserved unless it overlaps active eigenvector output; overlapping
 input/output uses a reflector backup. Internal callers can reuse workspace
 across the reduction, solve, redistribution, and back-transform through check,
 byte-query, and no-check run components.

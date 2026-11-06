@@ -52,7 +52,7 @@ template<class T>T entry(int i,int j,int salt,bool diagonal)
     else {const R im=R((lo*5+hi*3+salt)%11-5)/R(90);return i<j?T(re,im):T(re,-im);}
 }
 template<DdlaBackend B,class T>
-void exercise(DdlaHandle_t h,bool stored,char uplo,char job,int n,bool alias=false,bool tight=false,int nb=4)
+void exercise(DdlaHandle_t h,char uplo,char job,int n,bool alias=false,bool tight=false,int nb=4)
 {
     using R=typename real_type<T>::type;
     int da[DDLA_DLEN_],dz[DDLA_DLEN_];
@@ -76,7 +76,7 @@ void exercise(DdlaHandle_t h,bool stored,char uplo,char job,int n,bool alias=fal
     auto before=input(0,false);upload(h,a.ptr,before);
     std::vector<T> output(local_size(h,dz),sentinel);upload(h,z.ptr,output);
     T* target=alias?a.ptr:z.ptr;const int* target_desc=alias?da:dz;
-    const auto p=spectral_impl::one_stage_check<T>(h,B,stored,job,uplo,n,a.ptr,da,eigenvalues.data(),
+    const auto p=spectral_impl::one_stage_check<T>(h,B,job,uplo,n,a.ptr,da,eigenvalues.data(),
         job=='V'?target:nullptr,job=='V'?target_desc:nullptr);
     if(n&&job=='V'){
         const detail::RowShare rows(n,h->nprocs);
@@ -116,12 +116,11 @@ void exercise(DdlaHandle_t h,bool stored,char uplo,char job,int n,bool alias=fal
         double changed=0;
         for(int j=0;j<ddla_test::n_loc(h,da);++j)for(int i=0;i<da[DDLA_LLD_];++i) {
             const auto at=i+std::size_t(j)*da[DDLA_LLD_];
-            const int gi=indxl2g(i,nb,h->myprow_,0,h->nprows_),gj=indxl2g(j,nb,h->mypcol_,0,h->npcols_);
             const bool padding=i>=ar||j>=ac;
-            if(padding||(!(job=='V'&&alias)&&stored&&(uplo=='U'?gi>gj:gi<gj)))
+            if(padding)
                 if(std::memcmp(&changed_input[at],&before[at],sizeof(T)))changed=1;
         }
-        require_close(h,"one-stage preserves unused input/padding",changed,0);
+        require_close(h,"one-stage preserves input padding",changed,0);
         if(job=='V') {
             const int nr=num_loc(n,nb,h->myprow_,0,h->nprows_),nc=num_loc(n,nb,h->mypcol_,target_desc[DDLA_CSRC_],h->npcols_);
             double pad=0,finite=0;
@@ -152,12 +151,12 @@ void exercise(DdlaHandle_t h,bool stored,char uplo,char job,int n,bool alias=fal
 }
 template<DdlaBackend B,class T>void cases(DdlaHandle_t h)
 {
-    for(bool stored:{false,true})for(char uplo:{'U','L'}) {
-        exercise<B,T>(h,stored,uplo,'V',9);
-        exercise<B,T>(h,stored,uplo,'N',9);
+    for(char uplo:{'U','L'}) {
+        exercise<B,T>(h,uplo,'V',9);
+        exercise<B,T>(h,uplo,'N',9);
     }
-    for(bool stored:{false,true})exercise<B,T>(h,stored,'L','V',9,true);
-    exercise<B,T>(h,true,'U','V',1);
+    exercise<B,T>(h,'L','V',9,true);
+    exercise<B,T>(h,'U','V',1);
 }
 #if defined(DDLA_GPUBLAS_HAS_HEURISTICS_CACHE) && DDLA_GPUBLAS_HAS_HEURISTICS_CACHE
 void cache_policy(DdlaHandle_t h)
@@ -167,7 +166,7 @@ void cache_policy(DdlaHandle_t h)
     if(version<111103||version>=120304)return;
     int d[DDLA_DLEN_];DDLA_CHECK(ddlaDescInit(d,h,1024,1024,32,32,0,0));
     DeviceBuffer<double>a(h,local_size(h,d)),z(h,local_size(h,d));std::array<double,1024>w{};
-    const auto p=spectral_impl::one_stage_check<double>(h,DdlaBackend::GPU,true,'V','U',1024,a.ptr,d,w.data(),z.ptr,d);
+    const auto p=spectral_impl::one_stage_check<double>(h,DdlaBackend::GPU,'V','U',1024,a.ptr,d,w.data(),z.ptr,d);
     spectral_impl::OneStageResources resources(h,p);
     std::size_t original=0;BLAS_CHECK(gpublasHeuristicsCacheGetCapacity(&original));
     struct Restore {std::size_t capacity;~Restore(){(void)gpublasHeuristicsCacheSetCapacity(capacity);}}restore{original};
@@ -192,11 +191,11 @@ template<DdlaBackend B>void run(MPI_Comm comm,int pr,int pc,char major)
 {
     DdlaHandle_t h=nullptr;ddlaInit(h,B);ddlaSet(h,comm,pr,pc,major);
     cases<B,float>(h);cases<B,double>(h);cases<B,std::complex<float>>(h);cases<B,std::complex<double>>(h);
-    exercise<B,double>(h,false,'U','V',37,false,true);
-    exercise<B,std::complex<double>>(h,true,'L','V',137);
-    for(char uplo:{'U','L'})for(bool stored:{false,true})
-        exercise<B,std::complex<double>>(h,stored,uplo,'V',139,false,false,129);
-    for(bool stored:{false,true})for(char job:{'N','V'})exercise<B,double>(h,stored,'U',job,0);
+    exercise<B,double>(h,'U','V',37,false,true);
+    exercise<B,std::complex<double>>(h,'L','V',137);
+    for(char uplo:{'U','L'})
+        exercise<B,std::complex<double>>(h,uplo,'V',139,false,false,129);
+    for(char job:{'N','V'})exercise<B,double>(h,'U',job,0);
 #if defined(DDLA_GPUBLAS_HAS_HEURISTICS_CACHE) && DDLA_GPUBLAS_HAS_HEURISTICS_CACHE
     if constexpr(B==DdlaBackend::GPU)cache_policy(h);
 #endif
