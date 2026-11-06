@@ -4,6 +4,7 @@ target_sources(ddla_lib PRIVATE
     geqrf.cpp
     larft.cpp
     pgeqrf.cpp
+    pgeqrs.cpp
     pgeqr2_panel.cpp
 )
 if(NOT ddla_cpu_only_build)
