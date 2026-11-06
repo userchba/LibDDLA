@@ -113,7 +113,7 @@ inline void batch_counts(const DdlaHandle_t& h, char uplo, int n, int k, int ful
 // Backend lists contain one pointer plane per full/tail pitch.
 // Host storage contains positions and those lists, plus diagonal destinations
 // on GPU handles. Matrix temporaries remain in scratch()'s reusable tail.
-template <typename T>
+template <typename T,typename TA=T,typename TB=T>
 void batch_bytes(const DdlaHandle_t& h, char uplo, int n, int k, int full, const int* dc,
                 std::size_t& backend_bytes, std::size_t& host_bytes)
 {
@@ -126,15 +126,31 @@ void batch_bytes(const DdlaHandle_t& h, char uplo, int n, int k, int full, const
         +2*detail::padded_bytes<const T*>(pointers)+detail::padded_bytes<T*>(pointers);
     if (h->backend==DdlaBackend::GPU)
         host_bytes+=detail::padded_bytes<T*>(diagonals)+detail::padded_bytes<int>(diagonals);
+    if constexpr (!std::is_same_v<T,TA> || !std::is_same_v<T,TB>) {
+        std::size_t counts[20]={};int rows[20]={},cols[20]={};
+        output_tiles(h,uplo,n,dc,[&](int group,int,int,int height,int width) {
+            ++counts[group];rows[group]=height;cols[group]=width;
+        });
+        std::size_t mixed=0;
+        for (int group=0;group<20;++group) if (counts[group]) {
+            for (int width : {std::min(full,k),k%full}) if (width>0) {
+                std::size_t bytes=0;
+                blas_impl::local_gemmBatched_workspace_size<T,TA,TB>(h,rows[group],cols[group],width,
+                    int(std::min<std::size_t>(counts[group],std::numeric_limits<int>::max())),&bytes);
+                mixed=std::max(mixed,bytes);
+            }
+        }
+        backend_bytes+=mixed;
+    }
 }
 
-template <typename T>
+template <typename T,typename TA=T,typename TB=T>
 void workspace_size(const DdlaHandle_t& h,char uplo,int n,int k,int full,const int* dc,
     std::size_t* batch_bytes_out,std::size_t* host_bytes,std::size_t* triangle_bytes)
 {
     *batch_bytes_out=*host_bytes=*triangle_bytes=0;
     if (n==0 || k==0) return;
-    batch_bytes<T>(h,uplo,n,k,full,dc,*batch_bytes_out,*host_bytes);
+    batch_bytes<T,TA,TB>(h,uplo,n,k,full,dc,*batch_bytes_out,*host_bytes);
     std::size_t diagonals=0;
     const std::size_t leaf=std::min(dc[DDLA_MB_],128);
     diagonal_tiles(h,n,dc,[&](int,int,int width) {diagonals+=(width+leaf-1)/leaf;});
@@ -145,10 +161,10 @@ void workspace_size(const DdlaHandle_t& h,char uplo,int n,int k,int full,const i
 // Consume prepared panels with the caller's CPU schedule or GPU batching.
 // Batched products share the handle's thread budget on CPU; all communicated
 // panels keep stable addresses while each contraction is consumed.
-template <DdlaBackend Backend, typename T, typename Load>
+template <DdlaBackend Backend, typename T,typename TA=T,typename TB=T,typename Load>
 void run(const DdlaHandle_t& h, char uplo, int n, int k, int full,
     const T& alpha, const T& beta, T* C, const int* dc,
-    const Load& load, T* a, T* b,
+    const Load& load, TA* a, TB* b,
     char* w, [[maybe_unused]] std::size_t backend_bytes, char* hw, [[maybe_unused]] std::size_t host_bytes,void* triangle_work,std::size_t triangle_bytes,bool cpu_batch=true)
 {
     if constexpr (Backend==DdlaBackend::CPU) {
@@ -156,7 +172,7 @@ void run(const DdlaHandle_t& h, char uplo, int n, int k, int full,
             for (int g=0;g<k;) {
                 const int kw=std::min(full,k-g);
                 load(g,kw);
-                pblas::triangle_panel_run<Backend,T>(h,uplo,true,n,kw,alpha,a,b,
+                pblas::triangle_panel_run<Backend,T,TA,TB>(h,uplo,true,n,kw,alpha,a,b,
                     g==0 ? beta : T(1),C,dc,triangle_work,triangle_bytes);
                 g+=kw;
             }
@@ -174,17 +190,17 @@ void run(const DdlaHandle_t& h, char uplo, int n, int k, int full,
     batch_counts(h,uplo,n,k,full,dc,count_tiles,pointers,diagonals);
     char* const w0=w;
     char* const hw0=hw;
-    const T** device_a=nullptr;
-    const T** device_b=nullptr;
+    const TA** device_a=nullptr;
+    const TB** device_b=nullptr;
     T** device_c=nullptr;
     if constexpr (Backend==DdlaBackend::GPU) {
-        device_a=detail::take<const T*>(w,pointers);
-        device_b=detail::take<const T*>(w,pointers);
+        device_a=detail::take<const TA*>(w,pointers);
+        device_b=detail::take<const TB*>(w,pointers);
         device_c=detail::take<T*>(w,pointers);
     }
     int* const positions=count_tiles ? detail::take<int>(hw,3*count_tiles) : nullptr;
-    const T** const host_a=pointers ? detail::take<const T*>(hw,pointers) : nullptr;
-    const T** const host_b=pointers ? detail::take<const T*>(hw,pointers) : nullptr;
+    const TA** const host_a=pointers ? detail::take<const TA*>(hw,pointers) : nullptr;
+    const TB** const host_b=pointers ? detail::take<const TB*>(hw,pointers) : nullptr;
     T** const host_c=pointers ? detail::take<T*>(hw,pointers) : nullptr;
     T* diagonal_work=nullptr;
     T** diagonal_targets=nullptr;
@@ -231,8 +247,8 @@ void run(const DdlaHandle_t& h, char uplo, int n, int k, int full,
     // are rebuilt on each run, permitting reuse with another output buffer.
     for (int pitch=0;pitch<pitches;++pitch) {
         const int kw=pitch==0 ? full : tail;
-        const T* pa=a;
-        const T* pb=b;
+        const TA* pa=a;
+        const TB* pb=b;
         const std::size_t base=pitch*count_tiles;
         for (std::size_t index=0;index<count_tiles;++index) {
             const int row=positions[3*index],column=positions[3*index+1];
@@ -242,13 +258,13 @@ void run(const DdlaHandle_t& h, char uplo, int n, int k, int full,
                 : diagonal_work+(index-diagonal_first)*std::size_t(leaf)*leaf;
         }
     }
-    const T* const* ap=host_a;
-    const T* const* bp=host_b;
+    const TA* const* ap=host_a;
+    const TB* const* bp=host_b;
     T* const* cp=host_c;
     if constexpr (Backend==DdlaBackend::GPU) {
         if (pointers>0) {
-            DDLA_CHECK(ddlaMemcpy(h,device_a,host_a,pointers*sizeof(const T*)));
-            DDLA_CHECK(ddlaMemcpy(h,device_b,host_b,pointers*sizeof(const T*)));
+            DDLA_CHECK(ddlaMemcpy(h,device_a,host_a,pointers*sizeof(const TA*)));
+            DDLA_CHECK(ddlaMemcpy(h,device_b,host_b,pointers*sizeof(const TB*)));
             DDLA_CHECK(ddlaMemcpy(h,device_c,host_c,pointers*sizeof(T*)));
             if (diagonals>0) {
                 DDLA_CHECK(ddlaMemcpy(h,diagonal_targets,host_targets,diagonals*sizeof(T*)));
@@ -273,7 +289,7 @@ void run(const DdlaHandle_t& h, char uplo, int n, int k, int full,
                 const int batch=static_cast<int>(std::min<std::size_t>(counts[group]-done,std::numeric_limits<int>::max()));
                 const std::size_t start=base+first[group]+done;
                 blas_impl::gemmBatched_run<Backend,T>(h,'N','N',rows[group],columns[group],kw,alpha,
-                    ap+start,std::max(1,mr),bp+start,kw,output_beta,cp+start,diagonal ? leaf : ldc,batch);
+                    ap+start,std::max(1,mr),bp+start,kw,output_beta,cp+start,diagonal ? leaf : ldc,batch,w,backend_bytes-std::size_t(w-w0));
                 done+=batch;
             }
         }

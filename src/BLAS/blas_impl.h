@@ -80,6 +80,14 @@ void geam_run(const DdlaHandle_t& handle, char transa, char transb, int m, int n
           const T& beta, const T* B, int ldb,
           T* C, int ldc);
 
+// Matrix-region scaling. GPU arrays remain backend-resident; no workspace.
+template <typename T>
+void matrix_scal_gpu_run(const DdlaHandle_t& h, int m, int n, const T& alpha,
+                         T* a, int lda, T* const* arrays, int count);
+template <DdlaBackend Backend, typename T>
+void scalBatched_run(const DdlaHandle_t& h, int m, int n, const T& alpha,
+                     T* const* arrays, int lda, int count);
+
 template <DdlaBackend Backend, typename T>
 void axpy_check(const DdlaHandle_t& handle, int n, const T& alpha,
           const T* x, int incx, T* y, int incy);
@@ -375,18 +383,45 @@ template <DdlaBackend Backend, typename T>
 void trtrm_run(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, char transb,
            int n, const T& alpha, const T* A, int lda, const T* B, int ldb,
            const T& beta, T* C, int ldc, void* backend_work, std::size_t backend_bytes);
-template <DdlaBackend Backend, typename T>
+template <DdlaBackend Backend, typename T, typename TA = T, typename TB = T>
 void gemmt_check(const DdlaHandle_t& h, char uplo, char ta, char tb,
-    int n, int k, const T& alpha, const T* a, int lda, const T* b, int ldb,
+    int n, int k, const T& alpha, const TA* a, int lda, const TB* b, int ldb,
     const T& beta, T* c, int ldc);
 // Backend scratch bytes only; this query performs no allocation.
-template <typename T>
+template <typename T, typename TA = T, typename TB = T>
 void gemmt_workspace_size(const DdlaHandle_t& h, char transa, char transb,
     int n, int k, std::size_t* backend_bytes);
-template <DdlaBackend Backend, typename T>
+template <DdlaBackend Backend, typename T, typename TA = T, typename TB = T>
 void gemmt_run(const DdlaHandle_t& h, char uplo, char ta, char tb,
-    int n, int k, const T& alpha, const T* a, int lda, const T* b, int ldb,
+    int n, int k, const T& alpha, const TA* a, int lda, const TB* b, int ldb,
     const T& beta, T* c, int ldc, void* backend_work, std::size_t backend_bytes);
+// Local products shared by distributed and structured operations.  A same-type product is the plain BLAS
+// call and needs no scratch; a mixed real/complex product takes its scratch
+// from work (bytes), sized with local_gemm_workspace_size for every shape the
+// caller runs on it (the largest wins).
+template <typename T, typename TA, typename TB>
+void local_gemm_workspace_size([[maybe_unused]] const DdlaHandle_t& h, [[maybe_unused]] int m,
+                               [[maybe_unused]] int n, [[maybe_unused]] int k, std::size_t* backend_bytes)
+{
+    *backend_bytes=0;
+    if constexpr (!std::is_same_v<T,TA> || !std::is_same_v<T,TB>)
+        mixed_gemm_workspace_size<typename real_type<T>::type>(
+            h,m,n,k,!std::is_same_v<TA,typename real_type<T>::type>,backend_bytes);
+}
+
+template <DdlaBackend Backend, typename T, typename TA, typename TB>
+void local_gemm_run(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k, const T& alpha,
+                    const TA* a, int lda, const TB* b, int ldb, const T& beta, T* c, int ldc,
+                    [[maybe_unused]] void* work, [[maybe_unused]] std::size_t bytes)
+{
+    if constexpr (std::is_same_v<T,TA> && std::is_same_v<T,TB>)
+        gemm_run<Backend,T>(h,ta,tb,m,n,k,alpha,a,lda,b,ldb,beta,c,ldc);
+    else
+        gemm_run<Backend,typename real_type<T>::type>(h,ta,tb,m,n,k,alpha,a,lda,b,ldb,beta,c,ldc,
+                                                                 work,bytes);
+}
+
+
 // Mixed batches keep device pointer tables on device and use bounded chunks.
 // Small GPU products reuse the existing fused mixed-GEMM tile kernel.
 template <typename R>
@@ -429,6 +464,15 @@ void mixed_gemmBatched_gpu_run(const DdlaHandle_t& h,char ta,char tb,int m,int n
     const std::complex<R>& alpha,const void* const* a,int lda,const void* const* b,int ldb,
     const std::complex<R>& beta,std::complex<R>* const* c,int ldc,int count,void* work,std::size_t bytes);
 
+
+// Extra arithmetic workspace is zero for same-type batches.
+template <typename T,typename TA=T,typename TB=T>
+void local_gemmBatched_workspace_size(const DdlaHandle_t& h,int m,int n,int k,int count,std::size_t* bytes)
+{
+    *bytes=0;
+    if constexpr (!std::is_same_v<T,TA> || !std::is_same_v<T,TB>)
+        mixed_gemmBatched_workspace_size<typename real_type<T>::type>(h,m,n,k,std::is_same_v<T,TA>,count,bytes);
+}
 
 }} // namespace ddla::blas_impl
 #endif

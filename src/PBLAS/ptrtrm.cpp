@@ -88,7 +88,7 @@ void clean_triangle(T* packed, int wk, bool upper, const DdlaHandle_t& h, int ld
     // The opposite strict triangle is a complete triangle of order wk-1
     // starting one row/column away. Reuse the triangular zero path so GPU
     // cleanup is one launch instead of wk separate memset launches.
-    blas_impl::gemmt_run<Backend,T>(h,upper ? 'L' : 'U','N','N',wk-1,0,
+    blas_impl::gemmt_run<Backend,T,T,T>(h,upper ? 'L' : 'U','N','N',wk-1,0,
         T(0),nullptr,1,nullptr,1,T(0),packed+(upper ? 1 : ld),ld,nullptr,0);
 }
 

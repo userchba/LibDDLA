@@ -5,6 +5,7 @@
 # under CUDA/HIP.
 target_sources(ddla_lib PRIVATE
     pdgmm.cpp
+    pscal.cpp
     pgemm.cpp
     pgemmt.cpp
     pherk.cpp

@@ -160,6 +160,22 @@ template <DdlaBackend Backend = default_backend_v, typename T>
 void phemm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
     const T& alpha, const T* A, const int* descA,
     const T* B, const int* descB, const T& beta, T* C, const int* descC);
+/** @brief Mixed real/complex product with matching float/double precision.
+ * Flags, storage and zero coefficients follow the same-type operation.
+ * Alpha, beta and C are complex. A real structured input is symmetric;
+ * a complex Hermitian input ignores its imaginary diagonal.
+ */
+template <DdlaBackend Backend = default_backend_v, typename R>
+void phemm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
+    const std::complex<R>& alpha, const R* A, const int* descA,
+    const std::complex<R>* B, const int* descB, const std::complex<R>& beta,
+    std::complex<R>* C, const int* descC);
+template <DdlaBackend Backend = default_backend_v, typename R>
+void phemm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
+    const std::complex<R>& alpha, const std::complex<R>* A, const int* descA,
+    const R* B, const int* descB, const std::complex<R>& beta,
+    std::complex<R>* C, const int* descC);
+
 
 /**
  * @brief Hermitian product updating one triangle of a general square C.
@@ -178,6 +194,22 @@ template <DdlaBackend Backend = default_backend_v, typename T>
 void phemmt(const DdlaHandle_t& handle,char side,char uploA,char uploC,int n,
     const T& alpha,const T* A,const int* descA,const T* B,const int* descB,
     const T& beta,T* C,const int* descC);
+/** @brief Mixed real/complex product with matching float/double precision.
+ * Flags, storage and zero coefficients follow the same-type operation.
+ * Alpha, beta and C are complex. A real structured input is symmetric;
+ * a complex Hermitian input ignores its imaginary diagonal.
+ */
+template <DdlaBackend Backend = default_backend_v, typename R>
+void phemmt(const DdlaHandle_t& handle, char side, char uploA, char uploC, int n,
+    const std::complex<R>& alpha, const R* A, const int* descA,
+    const std::complex<R>* B, const int* descB, const std::complex<R>& beta,
+    std::complex<R>* C, const int* descC);
+template <DdlaBackend Backend = default_backend_v, typename R>
+void phemmt(const DdlaHandle_t& handle, char side, char uploA, char uploC, int n,
+    const std::complex<R>& alpha, const std::complex<R>* A, const int* descA,
+    const R* B, const int* descB, const std::complex<R>& beta,
+    std::complex<R>* C, const int* descC);
+
 
 /**
  * @brief Distributed symmetric product, with the same layout and collective
@@ -228,6 +260,22 @@ void pgemmt(const DdlaHandle_t& handle, char uplo,
     char transa, char transb, int n, int k,
     const T& alpha, const T* A, const int* descA,
     const T* B, const int* descB, const T& beta, T* C, const int* descC);
+/** @brief Mixed real/complex product with matching float/double precision.
+ * Flags, storage and zero coefficients follow the same-type operation.
+ * Alpha, beta and C are complex. A real structured input is symmetric;
+ * a complex Hermitian input ignores its imaginary diagonal.
+ */
+template <DdlaBackend Backend = default_backend_v, typename R>
+void pgemmt(const DdlaHandle_t& handle, char uplo, char transa, char transb, int n, int k,
+    const std::complex<R>& alpha, const R* A, const int* descA,
+    const std::complex<R>* B, const int* descB, const std::complex<R>& beta,
+    std::complex<R>* C, const int* descC);
+template <DdlaBackend Backend = default_backend_v, typename R>
+void pgemmt(const DdlaHandle_t& handle, char uplo, char transa, char transb, int n, int k,
+    const std::complex<R>& alpha, const std::complex<R>* A, const int* descA,
+    const R* B, const int* descB, const std::complex<R>& beta,
+    std::complex<R>* C, const int* descC);
+
 
 /**
  * @brief Distributed symmetric rank-k update of only uplo of C.
@@ -1227,6 +1275,22 @@ void hemm(
     const T* B, int ldb,
     const T& beta,
     T* C, int ldc);
+/** @brief Mixed real/complex product with matching float/double precision.
+ * Flags, storage and zero coefficients follow the same-type operation.
+ * Alpha, beta and C are complex. A real structured input is symmetric;
+ * a complex Hermitian input ignores its imaginary diagonal.
+ */
+template <DdlaBackend Backend = default_backend_v, typename R>
+void hemm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
+    const std::complex<R>& alpha, const R* A, int lda,
+    const std::complex<R>* B, int ldb, const std::complex<R>& beta,
+    std::complex<R>* C, int ldc);
+template <DdlaBackend Backend = default_backend_v, typename R>
+void hemm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
+    const std::complex<R>& alpha, const std::complex<R>* A, int lda,
+    const R* B, int ldb, const std::complex<R>& beta,
+    std::complex<R>* C, int ldc);
+
 
 /**
  * @brief Local HEMM with only uploC of a general n-by-n C updated.
@@ -1239,6 +1303,22 @@ void hemm(
 template <DdlaBackend Backend = default_backend_v, typename T>
 void hemmt(const DdlaHandle_t& handle,char side,char uploA,char uploC,int n,
     const T& alpha,const T* A,int lda,const T* B,int ldb,const T& beta,T* C,int ldc);
+/** @brief Mixed real/complex product with matching float/double precision.
+ * Flags, storage and zero coefficients follow the same-type operation.
+ * Alpha, beta and C are complex. A real structured input is symmetric;
+ * a complex Hermitian input ignores its imaginary diagonal.
+ */
+template <DdlaBackend Backend = default_backend_v, typename R>
+void hemmt(const DdlaHandle_t& handle, char side, char uploA, char uploC, int n,
+    const std::complex<R>& alpha, const R* A, int lda,
+    const std::complex<R>* B, int ldb, const std::complex<R>& beta,
+    std::complex<R>* C, int ldc);
+template <DdlaBackend Backend = default_backend_v, typename R>
+void hemmt(const DdlaHandle_t& handle, char side, char uploA, char uploC, int n,
+    const std::complex<R>& alpha, const std::complex<R>* A, int lda,
+    const R* B, int ldb, const std::complex<R>& beta,
+    std::complex<R>* C, int ldc);
+
 
 /**
  * @brief Local SYMM updating only uploC of a general n-by-n C.
@@ -1720,6 +1800,29 @@ void write_matrix(const T* A, int m, int n, const char* filename);
 
 template <DdlaBackend Backend = default_backend_v, typename T>
 void scal(const DdlaHandle_t& handle, int n, const T& alpha, T* x, int incx);
+/** @brief Scale an m-by-n matrix region in place, preserving its padding.
+ * Alpha zero overwrites active entries without reading their old values.
+ * Unlike the vector overload, lda is a column-major leading dimension.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void scal(const DdlaHandle_t& handle, int m, int n, const T& alpha, T* A, int lda);
+
+/** @brief Collective matrix-region scaling in a block-cyclic descriptor.
+ * Scales the leading m-by-n region, with no redistribution or workspace.
+ * Alpha zero overwrites active entries without reading them.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void pscal(const DdlaHandle_t& handle, int m, int n, const T& alpha,
+           T* A, const int* descA);
+
+/** @brief Scale a batch of nonoverlapping m-by-n matrix regions in place.
+ * Pointer arrays reside in the handle backend. Padding is preserved, alpha
+ * zero never reads old entries, and the operation requires no workspace.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void scalBatched(const DdlaHandle_t& handle, int m, int n, const T& alpha,
+                 T* const Aarray[], int lda, int batchCount);
+
 
 template <DdlaBackend Backend = default_backend_v, typename T>
 void axpy(const DdlaHandle_t& handle, int n, const T& alpha,
@@ -1978,6 +2081,22 @@ void gemmt(const DdlaHandle_t& handle, char uplo,
     char transa, char transb, int n, int k,
     const T& alpha, const T* A, int lda, const T* B, int ldb,
     const T& beta, T* C, int ldc);
+/** @brief Mixed real/complex product with matching float/double precision.
+ * Flags, storage and zero coefficients follow the same-type operation.
+ * Alpha, beta and C are complex. A real structured input is symmetric;
+ * a complex Hermitian input ignores its imaginary diagonal.
+ */
+template <DdlaBackend Backend = default_backend_v, typename R>
+void gemmt(const DdlaHandle_t& handle, char uplo, char transa, char transb, int n, int k,
+    const std::complex<R>& alpha, const R* A, int lda,
+    const std::complex<R>* B, int ldb, const std::complex<R>& beta,
+    std::complex<R>* C, int ldc);
+template <DdlaBackend Backend = default_backend_v, typename R>
+void gemmt(const DdlaHandle_t& handle, char uplo, char transa, char transb, int n, int k,
+    const std::complex<R>& alpha, const std::complex<R>* A, int lda,
+    const R* B, int ldb, const std::complex<R>& beta,
+    std::complex<R>* C, int ldc);
+
 
 /**
  * @brief Distributed C := alpha*op(A)*op(B) + beta*C, aligned with trtrm.

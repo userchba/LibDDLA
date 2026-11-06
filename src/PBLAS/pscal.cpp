@@ -1,0 +1,44 @@
+#include <ddla/ddla.h>
+#include "BLAS/blas_impl.h"
+#include "check_agree.h"
+#include "ddla_desc.h"
+#include "ddla_stream.h"
+#include "require_backend.h"
+
+#include <complex>
+#include <stdexcept>
+
+namespace ddla {
+template <DdlaBackend Backend, typename T>
+void pscal(const DdlaHandle_t& h, int m, int n, const T& alpha,
+           T* a, const int* desc)
+{
+    int rows=0,columns=0;
+    detail::agree_check(h,"pscal",[&](detail::Agree&) {
+        detail::require_backend<Backend>(h,"pscal");
+        check_desc(desc,h);
+        if (m<0 || n<0 || m>desc[DDLA_M_] || n>desc[DDLA_N_])
+            throw std::invalid_argument("pscal: region exceeds descriptor dimensions");
+        rows=num_loc(m,desc[DDLA_MB_],h->myprow_,desc[DDLA_RSRC_],h->nprows_);
+        columns=num_loc(n,desc[DDLA_NB_],h->mypcol_,desc[DDLA_CSRC_],h->npcols_);
+        blas_impl::geam_check<Backend,T>(h,'N','N',rows,columns,alpha,a,desc[DDLA_LLD_],
+            T(0),nullptr,1,a,desc[DDLA_LLD_]);
+    });
+    int signature[9]={m,n};
+    detail::descriptor_signature(signature+2,desc);
+    detail::agree_signature(h,"pscal",signature);
+    // Each rank updates only its owned entries. PGEADD's general alias
+    // workspace is unnecessary for this identical-layout in-place operation.
+    scal<Backend,T>(h,rows,columns,alpha,a,desc[DDLA_LLD_]);
+}
+
+#define INSTANTIATE(B,T) template void pscal<B,T>(const DdlaHandle_t&,int,int,const T&,T*,const int*)
+#define TYPES(B) INSTANTIATE(B,float); INSTANTIATE(B,double); \
+    INSTANTIATE(B,std::complex<float>); INSTANTIATE(B,std::complex<double>)
+TYPES(DdlaBackend::CPU);
+#if DDLA_HAS_GPU
+TYPES(DdlaBackend::GPU);
+#endif
+#undef TYPES
+#undef INSTANTIATE
+}
