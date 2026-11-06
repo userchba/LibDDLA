@@ -134,6 +134,36 @@ void scal(const DdlaHandle_t& handle, int n, const T& alpha, T* x, int incx)
     blas_impl::scal_run<Backend, T>(handle, n, alpha, x, incx);
 }
 
+// Matrix overload: GEAM already supports in-place scaling and padding.
+template <DdlaBackend Backend, typename T>
+void scal(const DdlaHandle_t& h, int m, int n, const T& alpha, T* a, int lda)
+{
+    if (m<0 || n<0 || lda<std::max(1,m))
+        throw std::invalid_argument("scal(matrix): invalid dimensions or leading dimension");
+    blas_impl::geam_check<Backend,T>(h,'N','N',m,n,alpha,a,lda,T(0),nullptr,1,a,lda);
+    if (m==0 || n==0 || alpha==T(1)) return;
+    if constexpr (Backend==DdlaBackend::GPU) {
+#if DDLA_HAS_GPU
+        // GEMM-compatible zero scaling must not read poisoned input.
+        if (alpha==T(0)) {
+            blas_impl::matrix_scal_gpu_run<T>(h,m,n,alpha,a,lda,nullptr,1);
+            return;
+        }
+#endif
+    }
+    blas_impl::geam_run<Backend,T>(h,'N','N',m,n,alpha,a,lda,T(0),nullptr,1,a,lda);
+}
+
+#define MATRIX_SCAL(B,T) template void scal<B,T>(const DdlaHandle_t&,int,int,const T&,T*,int)
+#define MATRIX_TYPES(B) MATRIX_SCAL(B,float); MATRIX_SCAL(B,double); \
+    MATRIX_SCAL(B,std::complex<float>); MATRIX_SCAL(B,std::complex<double>)
+MATRIX_TYPES(DdlaBackend::CPU);
+#if DDLA_HAS_GPU
+MATRIX_TYPES(DdlaBackend::GPU);
+#endif
+#undef MATRIX_TYPES
+#undef MATRIX_SCAL
+
 #define INSTANTIATE_SCAL(BACKEND, TYPE)                                      \
     template void scal<BACKEND, TYPE>(                                       \
         const DdlaHandle_t&, int, const TYPE&, TYPE*, int)

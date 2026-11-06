@@ -20,10 +20,12 @@ constexpr const char* test_name="SYMMT";
 constexpr bool hermitian_structure=true;
 constexpr const char* test_name="HEMMT";
 #endif
+template <typename T> using LocalProduct=void(*)(const DdlaHandle_t&,char,char,char,int,const T&,const T*,int,const T*,int,const T&,T*,int);
 template <DdlaBackend Backend,typename T>
-constexpr auto local_product=hermitian_structure ? hemmt<Backend,T> : symmt<Backend,T>;
+constexpr LocalProduct<T> local_product=hermitian_structure ? static_cast<LocalProduct<T>>(hemmt<Backend,T>) : symmt<Backend,T>;
+template <typename T> using DistributedProduct=void(*)(const DdlaHandle_t&,char,char,char,int,const T&,const T*,const int*,const T*,const int*,const T&,T*,const int*);
 template <DdlaBackend Backend,typename T>
-constexpr auto distributed_product=hermitian_structure ? phemmt<Backend,T> : psymmt<Backend,T>;
+constexpr DistributedProduct<T> distributed_product=hermitian_structure ? static_cast<DistributedProduct<T>>(phemmt<Backend,T>) : psymmt<Backend,T>;
 using Wide=std::complex<long double>;
 template <typename T> Wide wide(T z) {
     if constexpr(std::is_arithmetic_v<T>) return {z,0};

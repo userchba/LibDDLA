@@ -89,10 +89,10 @@ __global__ void real_diagonal_kernel(int n, R* c, int ldc)
 // The selected output tiles have three uniform groups and at most one
 // partial diagonal tile. Build their pointer tables on the device so the
 // public wrapper needs no temporary host storage or extra synchronization.
-template <typename T>
+template <typename T, typename TA, typename TB>
 __global__ void triangular_pointers(bool upper,int n,int block,char ta,char tb,
-    const T* a,int lda,const T* b,int ldb,T* c,int ldc,T* temporary,
-    T** pointers,std::size_t count)
+    const TA* a,int lda,const TB* b,int ldb,T* c,int ldc,T* temporary,
+    const TA** ap,const TB** bp,T** cp,std::size_t count)
 {
     const int full=n/block,edge=n%block,ratio=block/tile_size;
     const int small=edge/tile_size,tail=edge%tile_size;
@@ -128,16 +128,16 @@ __global__ void triangular_pointers(bool upper,int n,int block,char ta,char tb,
             index-=small_edges;
             i=j=int(index)*tile_size;
             output=temporary+index*tile_size*tile_size;
-            pointers[at]=const_cast<T*>(a+(ta=='N' ? std::size_t(i) : std::size_t(i)*lda));
-            pointers[count+at]=const_cast<T*>(b+(tb=='N' ? std::size_t(j)*ldb : std::size_t(j)));
-            pointers[2*count+at]=output;
+            ap[at]=(a+(ta=='N' ? std::size_t(i) : std::size_t(i)*lda));
+            bp[at]=(b+(tb=='N' ? std::size_t(j)*ldb : std::size_t(j)));
+            cp[at]=output;
             continue;
         }
         if (!upper) {const int swap=i;i=j;j=swap;}
         output=c+i+std::size_t(j)*ldc;
-        pointers[at]=const_cast<T*>(a+(ta=='N' ? std::size_t(i) : std::size_t(i)*lda));
-        pointers[count+at]=const_cast<T*>(b+(tb=='N' ? std::size_t(j)*ldb : std::size_t(j)));
-        pointers[2*count+at]=output;
+        ap[at]=(a+(ta=='N' ? std::size_t(i) : std::size_t(i)*lda));
+        bp[at]=(b+(tb=='N' ? std::size_t(j)*ldb : std::size_t(j)));
+        cp[at]=output;
     }
 }
 
@@ -186,9 +186,9 @@ void scale_triangle(const DdlaHandle_t& h, char uplo, int n, const T& beta, T* c
 // Full diagonal products go to O(n*tile_size) scratch; only uplo is copied
 // back. Rectangles write C directly, and every selected entry receives beta
 // exactly once. This core allocates neither backend nor host memory.
-template <DdlaBackend Backend,typename T>
+template <DdlaBackend Backend, typename T, typename TA, typename TB>
 void batched_triangle(const DdlaHandle_t& h,char uplo,char ta,char tb,int n,int k,
-    const T& alpha,const T* a,int lda,const T* b,int ldb,const T& beta,T* c,int ldc,void* workspace)
+    const T& alpha,const TA* a,int lda,const TB* b,int ldb,const T& beta,T* c,int ldc,void* workspace,std::size_t bytes)
 {
     const bool upper_triangle=uplo=='U';
     const int block=output_tile_size<T>(h),full=n/block,edge=n%block;
@@ -197,20 +197,24 @@ void batched_triangle(const DdlaHandle_t& h,char uplo,char ta,char tb,int n,int 
     std::size_t count=0;for (auto size:counts) count+=size;
     const std::size_t diagonals=(std::size_t(n)+tile_size-1)/tile_size;
     char* cursor=static_cast<char*>(workspace);
-    T** pointers=detail::take<T*>(cursor,3*count);
+    char* pointers=detail::take<char>(cursor,3*count*sizeof(T*));
     T* temporary=detail::take<T>(cursor,diagonals*tile_size*tile_size);
+    const TA** ap=reinterpret_cast<const TA**>(pointers);
+    const TB** bp=reinterpret_cast<const TB**>(pointers+count*sizeof(T*));
+    T** cp=reinterpret_cast<T**>(pointers+2*count*sizeof(T*));
+    const std::size_t mixed_bytes=bytes-std::size_t(cursor-static_cast<char*>(workspace));
     if constexpr (Backend==DdlaBackend::GPU) {
 #if DDLA_GPU_VENDOR
-        triangular_pointers<T><<<static_cast<unsigned>(std::min<std::size_t>((count+255)/256,65535)),256,0,static_cast<gpuStream_t>(h->stream)>>>(
-            upper_triangle,n,block,ta,tb,a,lda,b,ldb,c,ldc,temporary,pointers,count);
+        triangular_pointers<T,TA,TB><<<static_cast<unsigned>(std::min<std::size_t>((count+255)/256,65535)),256,0,static_cast<gpuStream_t>(h->stream)>>>(
+            upper_triangle,n,block,ta,tb,a,lda,b,ldb,c,ldc,temporary,ap,bp,cp,count);
         DDLA_CHECK(ddlaGetLastError(h));
 #endif
     } else {
         std::size_t at=0;
         auto put=[&](int row,int column,T* output) {
-            pointers[at]=const_cast<T*>(a_rows(a,lda,ta,row));
-            pointers[count+at]=const_cast<T*>(b_cols(b,ldb,tb,column));
-            pointers[2*count+at]=output;++at;
+            ap[at]=a_rows(a,lda,ta,row);
+            bp[at]=b_cols(b,ldb,tb,column);
+            cp[at]=output;++at;
         };
         auto rectangle=[&](int row,int column) {
             if (!upper_triangle) std::swap(row,column);
@@ -240,7 +244,7 @@ void batched_triangle(const DdlaHandle_t& h,char uplo,char ta,char tb,int n,int 
         for (std::size_t done=0;done<counts[group];) {
             const int batch=static_cast<int>(std::min<std::size_t>(counts[group]-done,std::numeric_limits<int>::max()));
             blas_impl::gemmBatched_run<Backend,T>(h,ta,tb,rows,cols,k,alpha,
-                pointers+first+done,lda,pointers+count+first+done,ldb,scale,pointers+2*count+first+done,ldout,batch);
+                ap+first+done,lda,bp+first+done,ldb,scale,cp+first+done,ldout,batch,cursor,mixed_bytes);
             done+=batch;
         }
         first+=counts[group];
@@ -292,7 +296,7 @@ void gemmt_copy_run(const DdlaHandle_t& h,char uplo,int block,int full,int tail,
     }
 }
 
-template <typename T>
+template <typename T, typename TA, typename TB>
 void gemmt_workspace_size(const DdlaHandle_t& h,char,char,int n,int k,std::size_t* backend_bytes)
 {
     *backend_bytes=0;
@@ -301,18 +305,36 @@ void gemmt_workspace_size(const DdlaHandle_t& h,char,char,int n,int k,std::size_
     std::size_t counts[6];local_batch_counts(n,output_tile_size<T>(h),counts);
     std::size_t count=0;for (auto size:counts) count+=size;
     *backend_bytes=detail::padded_bytes<T*>(3*count)+detail::padded_bytes<T>(tiles*tile_size*tile_size);
+    if constexpr (!std::is_same_v<T,TA> || !std::is_same_v<T,TB>) {
+        std::size_t mixed=0;
+        const int block=output_tile_size<T>(h),edge=n%block,tail=n%tile_size;
+        for (int group=0;group<6;++group) if (counts[group]) {
+            const int size=group<2 ? block : tile_size;
+            const int partial=group==1 ? edge : tail;
+            // U/L swaps rectangle extents; include both in the bound.
+            const int a=group==1 || group==3 ? partial : group==5 ? tail : size;
+            const int b=group==5 ? tail : size;
+            for (bool swap : {false,true}) {
+                std::size_t bytes=0;
+                local_gemmBatched_workspace_size<T,TA,TB>(h,swap?a:b,swap?b:a,k,
+                    int(std::min<std::size_t>(counts[group],std::numeric_limits<int>::max())),&bytes);
+                mixed=std::max(mixed,bytes);
+            }
+        }
+        *backend_bytes+=mixed;
+    }
 }
 
-template <DdlaBackend Backend, typename T>
+template <DdlaBackend Backend, typename T, typename TA, typename TB>
 void gemmt_run(const DdlaHandle_t& h,
     char uplo, char ta, char tb, int n, int k,
-    const T& alpha, const T* a, int lda, const T* b, int ldb,
-    const T& beta, T* c, int ldc,void* backend_work,std::size_t)
+    const T& alpha, const TA* a, int lda, const TB* b, int ldb,
+    const T& beta, T* c, int ldc,void* backend_work,std::size_t bytes)
 {
     uplo=upper(uplo); ta=upper(ta); tb=upper(tb);
     if (n==0) return;
     if (alpha==T(0) || k==0) { scale_triangle<Backend,T>(h,uplo,n,beta,c,ldc); return; }
-    batched_triangle<Backend,T>(h,uplo,ta,tb,n,k,alpha,a,lda,b,ldb,beta,c,ldc,backend_work);
+    batched_triangle<Backend,T,TA,TB>(h,uplo,ta,tb,n,k,alpha,a,lda,b,ldb,beta,c,ldc,backend_work,bytes);
 }
 
 template <DdlaBackend Backend, typename T>
@@ -332,9 +354,9 @@ void real_diagonal(const DdlaHandle_t& h, int n, T* c, int ldc)
     }
 }
 
-template <DdlaBackend Backend, typename T>
+template <DdlaBackend Backend, typename T, typename TA, typename TB>
 void gemmt_check(const DdlaHandle_t& h, char uplo, char ta, char tb,
-    int n, int k, const T& alpha, const T* a, int lda, const T* b, int ldb,
+    int n, int k, const T& alpha, const TA* a, int lda, const TB* b, int ldb,
     const T& beta, T* c, int ldc)
 {
     detail::require_backend<Backend>(h,"gemmt");
@@ -348,8 +370,9 @@ void gemmt_check(const DdlaHandle_t& h, char uplo, char ta, char tb,
         ldb<std::max(1,tb=='N' ? k : n) || ldc<std::max(1,n))
         throw std::invalid_argument("gemmt: invalid dimensions or leading dimensions");
     if (n==0) return;
-    if (!c) throw std::invalid_argument("gemmt: null output");
     const bool product=alpha!=T(0) && k!=0;
+    if (!product && beta==T(1)) return;
+    if (!c) throw std::invalid_argument("gemmt: null output");
     if (product) {
         if (!a || !b) throw std::invalid_argument("gemmt: null input");
         if (detail::matrix_overlaps(a,lda,ta=='N' ? n : k,ta=='N' ? k : n,c,ldc,n,n) ||
@@ -389,4 +412,60 @@ INSTANTIATE_SIZE(std::complex<float>); INSTANTIATE_SIZE(std::complex<double>);
 #undef INSTANTIATE_SIZE
 #undef INSTANTIATE_TYPES
 #undef INSTANTIATE
+template <DdlaBackend Backend,typename R>
+void gemmt(const DdlaHandle_t& h,char uplo,char ta,char tb,int n,int k,
+    const std::complex<R>& alpha,const R* a,int lda,const std::complex<R>* b,int ldb,
+    const std::complex<R>& beta,std::complex<R>* c,int ldc)
+{
+    using T=std::complex<R>;
+    blas_impl::gemmt_check<Backend,T>(h,uplo,ta,tb,n,k,alpha,a,lda,b,ldb,beta,c,ldc);
+    std::size_t bytes=0;
+    if (alpha!=T(0) && k>0) blas_impl::gemmt_workspace_size<T,R,std::complex<R>>(h,ta,tb,n,k,&bytes);
+    vector<char> work(h,bytes);
+    blas_impl::gemmt_run<Backend,T>(h,uplo,ta,tb,n,k,alpha,a,lda,b,ldb,beta,c,ldc,work.data(),bytes);
+}
+
+template <DdlaBackend Backend,typename R>
+void gemmt(const DdlaHandle_t& h,char uplo,char ta,char tb,int n,int k,
+    const std::complex<R>& alpha,const std::complex<R>* a,int lda,const R* b,int ldb,
+    const std::complex<R>& beta,std::complex<R>* c,int ldc)
+{
+    using T=std::complex<R>;
+    blas_impl::gemmt_check<Backend,T>(h,uplo,ta,tb,n,k,alpha,a,lda,b,ldb,beta,c,ldc);
+    std::size_t bytes=0;
+    if (alpha!=T(0) && k>0) blas_impl::gemmt_workspace_size<T,std::complex<R>,R>(h,ta,tb,n,k,&bytes);
+    vector<char> work(h,bytes);
+    blas_impl::gemmt_run<Backend,T>(h,uplo,ta,tb,n,k,alpha,a,lda,b,ldb,beta,c,ldc,work.data(),bytes);
+}
+
+template void gemmt<DdlaBackend::CPU,float>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<float>&,const float*,int,const std::complex<float>*,int,const std::complex<float>&,std::complex<float>*,int);
+template void blas_impl::gemmt_check<DdlaBackend::CPU,std::complex<float>,float,std::complex<float>>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<float>&,const float*,int,const std::complex<float>*,int,const std::complex<float>&,std::complex<float>*,int);
+template void blas_impl::gemmt_run<DdlaBackend::CPU,std::complex<float>,float,std::complex<float>>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<float>&,const float*,int,const std::complex<float>*,int,const std::complex<float>&,std::complex<float>*,int,void*,std::size_t);
+template void gemmt<DdlaBackend::CPU,float>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<float>&,const std::complex<float>*,int,const float*,int,const std::complex<float>&,std::complex<float>*,int);
+template void blas_impl::gemmt_check<DdlaBackend::CPU,std::complex<float>,std::complex<float>,float>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<float>&,const std::complex<float>*,int,const float*,int,const std::complex<float>&,std::complex<float>*,int);
+template void blas_impl::gemmt_run<DdlaBackend::CPU,std::complex<float>,std::complex<float>,float>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<float>&,const std::complex<float>*,int,const float*,int,const std::complex<float>&,std::complex<float>*,int,void*,std::size_t);
+template void gemmt<DdlaBackend::CPU,double>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<double>&,const double*,int,const std::complex<double>*,int,const std::complex<double>&,std::complex<double>*,int);
+template void blas_impl::gemmt_check<DdlaBackend::CPU,std::complex<double>,double,std::complex<double>>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<double>&,const double*,int,const std::complex<double>*,int,const std::complex<double>&,std::complex<double>*,int);
+template void blas_impl::gemmt_run<DdlaBackend::CPU,std::complex<double>,double,std::complex<double>>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<double>&,const double*,int,const std::complex<double>*,int,const std::complex<double>&,std::complex<double>*,int,void*,std::size_t);
+template void gemmt<DdlaBackend::CPU,double>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<double>&,const std::complex<double>*,int,const double*,int,const std::complex<double>&,std::complex<double>*,int);
+template void blas_impl::gemmt_check<DdlaBackend::CPU,std::complex<double>,std::complex<double>,double>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<double>&,const std::complex<double>*,int,const double*,int,const std::complex<double>&,std::complex<double>*,int);
+template void blas_impl::gemmt_run<DdlaBackend::CPU,std::complex<double>,std::complex<double>,double>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<double>&,const std::complex<double>*,int,const double*,int,const std::complex<double>&,std::complex<double>*,int,void*,std::size_t);
+#if DDLA_HAS_GPU
+template void gemmt<DdlaBackend::GPU,float>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<float>&,const float*,int,const std::complex<float>*,int,const std::complex<float>&,std::complex<float>*,int);
+template void blas_impl::gemmt_check<DdlaBackend::GPU,std::complex<float>,float,std::complex<float>>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<float>&,const float*,int,const std::complex<float>*,int,const std::complex<float>&,std::complex<float>*,int);
+template void blas_impl::gemmt_run<DdlaBackend::GPU,std::complex<float>,float,std::complex<float>>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<float>&,const float*,int,const std::complex<float>*,int,const std::complex<float>&,std::complex<float>*,int,void*,std::size_t);
+template void gemmt<DdlaBackend::GPU,float>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<float>&,const std::complex<float>*,int,const float*,int,const std::complex<float>&,std::complex<float>*,int);
+template void blas_impl::gemmt_check<DdlaBackend::GPU,std::complex<float>,std::complex<float>,float>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<float>&,const std::complex<float>*,int,const float*,int,const std::complex<float>&,std::complex<float>*,int);
+template void blas_impl::gemmt_run<DdlaBackend::GPU,std::complex<float>,std::complex<float>,float>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<float>&,const std::complex<float>*,int,const float*,int,const std::complex<float>&,std::complex<float>*,int,void*,std::size_t);
+template void gemmt<DdlaBackend::GPU,double>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<double>&,const double*,int,const std::complex<double>*,int,const std::complex<double>&,std::complex<double>*,int);
+template void blas_impl::gemmt_check<DdlaBackend::GPU,std::complex<double>,double,std::complex<double>>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<double>&,const double*,int,const std::complex<double>*,int,const std::complex<double>&,std::complex<double>*,int);
+template void blas_impl::gemmt_run<DdlaBackend::GPU,std::complex<double>,double,std::complex<double>>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<double>&,const double*,int,const std::complex<double>*,int,const std::complex<double>&,std::complex<double>*,int,void*,std::size_t);
+template void gemmt<DdlaBackend::GPU,double>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<double>&,const std::complex<double>*,int,const double*,int,const std::complex<double>&,std::complex<double>*,int);
+template void blas_impl::gemmt_check<DdlaBackend::GPU,std::complex<double>,std::complex<double>,double>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<double>&,const std::complex<double>*,int,const double*,int,const std::complex<double>&,std::complex<double>*,int);
+template void blas_impl::gemmt_run<DdlaBackend::GPU,std::complex<double>,std::complex<double>,double>(const DdlaHandle_t&,char,char,char,int,int,const std::complex<double>&,const std::complex<double>*,int,const double*,int,const std::complex<double>&,std::complex<double>*,int,void*,std::size_t);
+#endif
+template void blas_impl::gemmt_workspace_size<std::complex<float>,float,std::complex<float>>(const DdlaHandle_t&,char,char,int,int,std::size_t*);
+template void blas_impl::gemmt_workspace_size<std::complex<float>,std::complex<float>,float>(const DdlaHandle_t&,char,char,int,int,std::size_t*);
+template void blas_impl::gemmt_workspace_size<std::complex<double>,double,std::complex<double>>(const DdlaHandle_t&,char,char,int,int,std::size_t*);
+template void blas_impl::gemmt_workspace_size<std::complex<double>,std::complex<double>,double>(const DdlaHandle_t&,char,char,int,int,std::size_t*);
 } // namespace ddla

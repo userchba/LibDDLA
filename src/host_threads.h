@@ -119,6 +119,30 @@ private:
     int openblas_saved_ = 0, mkl_saved_ = 0;
 };
 
+// Calls call(i) for every product i of the batch.  With fewer than two products or two threads there is nothing to spread and the loop is
+// serial with the BLAS keeping its own threads (one big product still gets a threaded BLAS); otherwise min(nthreads, count) OpenMP threads
+// each run whole products while the BLAS is pinned to one thread.  Without OpenMP the loop stays serial and the BLAS is left alone.
+template <typename Call>
+void for_each_product(int nthreads, int count, Call&& call)
+{
+#ifdef _OPENMP
+    const int nt = std::min(nthreads, count);
+#else
+    const int nt = 1;
+    (void)nthreads;
+#endif
+    if (nt < 2) {
+        for (int i = 0; i < count; ++i) call(i);
+        return;
+    }
+    detail::ScopedBlasThreads one_blas_thread(1);
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static) num_threads(nt)
+#endif
+    for (int i = 0; i < count; ++i) call(i);
+}
+
+
 } // namespace detail
 } // namespace ddla
 

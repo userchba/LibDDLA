@@ -18,8 +18,17 @@
 namespace ddla { namespace pblas {
 
 // Group local GPU updates without changing descriptor-block communication.
-inline int contraction_width(const DdlaHandle_t& h,int nb,int k) noexcept
-{return std::min(k,h->backend==DdlaBackend::GPU && k>=1024 ? std::max(nb,(1024/nb)*nb) : nb);}
+inline int contraction_width(const DdlaHandle_t& h,int nb,int k,bool mixed=false) noexcept
+{
+    int width=std::min(k,h->backend==DdlaBackend::GPU && k>=1024 ? std::max(nb,(1024/nb)*nb) : nb);
+    if (mixed && h->backend==DdlaBackend::GPU && h->nprocs>1) {
+        // Keep both operand panels within their block-rounded share of the
+        // global matrix, including 1 x P grids and k near the GPU panel size.
+        const int peers=std::max(h->nprows_,h->npcols_);
+        width=std::min(width,std::max(nb,(k/peers/nb)*nb));
+    }
+    return width;
+}
 
 // Derived descriptors in a trusted algorithm need index geometry only. The
 // public descriptor constructor remains responsible for validating user input.
@@ -131,9 +140,9 @@ void panel_run(const DdlaHandle_t& h, bool column_panel, char op, int m, int n,
 
 // Validate general product geometry and distinguish collective entry points.
 // The caller combines operation-specific checks in the same Agree instance.
-template <DdlaBackend Backend,typename T>
+template <DdlaBackend Backend,typename T,typename TA=T,typename TB=T>
 bool product_check(const DdlaHandle_t& h, detail::Agree& agree, char uplo, char ta, char tb,
-    int n, int k, const T& alpha, const T* A, const int* da, const T* B, const int* db,
+    int n, int k, const T& alpha, const TA* A, const int* da, const TB* B, const int* db,
     const T& beta, const T* C, const int* dc, int operation=0, bool force_output=false)
 {
     detail::require_backend<Backend>(h,"pgemmt");
@@ -179,7 +188,7 @@ bool product_check(const DdlaHandle_t& h, detail::Agree& agree, char uplo, char 
 }
 
 // Reusable contraction-panel storage and transfers for triangular products.
-template <typename T>
+template <typename T,typename TA=T,typename TB=T>
 void product_workspace_size(const DdlaHandle_t& h, char ta, char tb, bool product, bool rank2, int n, int k,
              const int* da, const int* db, const int* dc,
              std::size_t (&count)[4], std::size_t (&add)[2][2])
@@ -194,23 +203,23 @@ void product_workspace_size(const DdlaHandle_t& h, char ta, char tb, bool produc
     const int sb=num_loc(n,nb,c,db[DDLA_CSRC_],pc);
     const int swapped_a=rank2 ? num_loc(n,nb,r,db[DDLA_RSRC_],pr) : 0;
     const int swapped_b=rank2 ? num_loc(n,nb,c,da[DDLA_CSRC_],pc) : 0;
-    count[0]=std::size_t(std::max(1,mr))*pblas::contraction_width(h,nb,k);
-    count[1]=std::size_t(std::max(1,nc))*pblas::contraction_width(h,nb,k);
-    count[3]=h->backend==DdlaBackend::GPU && pblas::contraction_width(h,nb,k)>kw
-        ? std::size_t(std::max(1,nc))*pblas::contraction_width(h,nb,k) : 0;
+    count[0]=std::size_t(std::max(1,mr))*pblas::contraction_width(h,nb,k,!std::is_same_v<T,TA> || !std::is_same_v<T,TB>);
+    count[1]=std::size_t(std::max(1,nc))*pblas::contraction_width(h,nb,k,!std::is_same_v<T,TA> || !std::is_same_v<T,TB>);
+    count[3]=h->backend==DdlaBackend::GPU && pblas::contraction_width(h,nb,k,!std::is_same_v<T,TA> || !std::is_same_v<T,TB>)>kw
+        ? std::size_t(std::max(1,nc))*pblas::contraction_width(h,nb,k,!std::is_same_v<T,TA> || !std::is_same_v<T,TB>) : 0;
     count[2]=std::size_t(std::max({1,mr,nc,sa,sb,swapped_a,swapped_b}))*kw;
     if (ta!='N')
-        pblas::panel_workspace_size<T>(h,true,ta,kw,n,da,dc,&add[0][0],&add[0][1]);
+        pblas::panel_workspace_size<TA>(h,true,ta,kw,n,da,dc,&add[0][0],&add[0][1]);
     if (tb!='N')
-        pblas::panel_workspace_size<T>(h,false,tb,n,kw,db,dc,&add[1][0],&add[1][1]);
+        pblas::panel_workspace_size<TB>(h,false,tb,n,kw,db,dc,&add[1][0],&add[1][1]);
     if (rank2) {
         std::size_t backend=0,host=0;
         if (ta!='N') {
-            pblas::panel_workspace_size<T>(h,true,ta,kw,n,db,dc,&backend,&host);
+            pblas::panel_workspace_size<TA>(h,true,ta,kw,n,db,dc,&backend,&host);
             add[0][0]=std::max(add[0][0],backend);add[0][1]=std::max(add[0][1],host);
         }
         if (tb!='N') {
-            pblas::panel_workspace_size<T>(h,false,tb,n,kw,da,dc,&backend,&host);
+            pblas::panel_workspace_size<TB>(h,false,tb,n,kw,da,dc,&backend,&host);
             add[1][0]=std::max(add[1][0],backend);add[1][1]=std::max(add[1][1],host);
         }
     }
@@ -301,9 +310,9 @@ void product_panel_run(const DdlaHandle_t& h, bool left, char trans, int n, int 
 }
 
 // Update one contraction panel, preserving the unselected triangle.
-template <DdlaBackend Backend, typename T>
+template <DdlaBackend Backend, typename T,typename TA=T,typename TB=T>
 void triangle_panel_run(const DdlaHandle_t& h, char uplo, bool product, int n, int kw,
-    const T& alpha, const T* a, const T* b, const T& beta, T* C, const int* dc,
+    const T& alpha, const TA* a, const TB* b, const T& beta, T* C, const int* dc,
     void* triangle_work, std::size_t triangle_bytes)
 {
     const int nb=dc[DDLA_MB_],ldc=dc[DDLA_LLD_];
@@ -319,8 +328,8 @@ void triangle_panel_run(const DdlaHandle_t& h, char uplo, bool product, int n, i
             if (end>start) {
                 T* out=C+start+std::size_t(jl)*ldc;
                 if (product)
-                    blas_impl::gemm_run<Backend,T>(h,'N','N',end-start,width,kw,alpha,
-                        a+start,mr,b+std::size_t(jl)*kw,kw,beta,out,ldc);
+                    blas_impl::local_gemm_run<Backend,T,TA,TB>(h,'N','N',end-start,width,kw,alpha,
+                        a+start,mr,b+std::size_t(jl)*kw,kw,beta,out,ldc,triangle_work,triangle_bytes);
                 else if (beta==T(0)) {
                     for (int col=0;col<width;++col)
                         DDLA_CHECK(ddlaMemset(h,out+std::size_t(col)*ldc,0,
@@ -331,7 +340,7 @@ void triangle_panel_run(const DdlaHandle_t& h, char uplo, bool product, int n, i
             }
             if (r==indxg2p(j,nb,dc[DDLA_RSRC_],pr)) {
                 const int il=num_loc(j,nb,r,dc[DDLA_RSRC_],pr);
-                blas_impl::gemmt_run<Backend,T>(h,uplo,'N','N',width,kw,
+                blas_impl::gemmt_run<Backend,T,TA,TB>(h,uplo,'N','N',width,kw,
                     product ? alpha : T(0),product ? a+il : nullptr,std::max(1,mr),
                     product ? b+std::size_t(jl)*kw : nullptr,std::max(1,kw),
                     beta,C+il+std::size_t(jl)*ldc,ldc,triangle_work,triangle_bytes);

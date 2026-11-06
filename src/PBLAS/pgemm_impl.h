@@ -87,31 +87,8 @@ void stationary_run(const DdlaHandle_t& h, bool keep_a, char ta, char tb,
                     void* backend_work, std::size_t backend_bytes,
                     void* host_work, std::size_t host_bytes);
 
-// The local GEMM of both branches.  A same-type product is the plain BLAS
-// call and needs no scratch; a mixed real/complex product takes its scratch
-// from work (bytes), sized with local_gemm_workspace_size for every shape the
-// caller runs on it (the largest wins).
-template <typename T, typename TA, typename TB>
-void local_gemm_workspace_size([[maybe_unused]] const DdlaHandle_t& h, [[maybe_unused]] int m,
-                               [[maybe_unused]] int n, [[maybe_unused]] int k, std::size_t* backend_bytes)
-{
-    *backend_bytes=0;
-    if constexpr (!std::is_same_v<T,TA> || !std::is_same_v<T,TB>)
-        blas_impl::mixed_gemm_workspace_size<typename real_type<T>::type>(
-            h,m,n,k,!std::is_same_v<TA,typename real_type<T>::type>,backend_bytes);
-}
-
-template <DdlaBackend Backend, typename T, typename TA, typename TB>
-void local_gemm_run(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k, const T& alpha,
-                    const TA* a, int lda, const TB* b, int ldb, const T& beta, T* c, int ldc,
-                    [[maybe_unused]] void* work, [[maybe_unused]] std::size_t bytes)
-{
-    if constexpr (std::is_same_v<T,TA> && std::is_same_v<T,TB>)
-        blas_impl::gemm_run<Backend,T>(h,ta,tb,m,n,k,alpha,a,lda,b,ldb,beta,c,ldc);
-    else
-        blas_impl::gemm_run<Backend,typename real_type<T>::type>(h,ta,tb,m,n,k,alpha,a,lda,b,ldb,beta,c,ldc,
-                                                                 work,bytes);
-}
+using blas_impl::local_gemm_workspace_size;
+using blas_impl::local_gemm_run;
 
 }} // namespace ddla::pgemm_impl
 #endif

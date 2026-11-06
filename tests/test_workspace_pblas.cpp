@@ -169,7 +169,7 @@ template <DdlaBackend B,typename T> void cases(DdlaHandle_t h)
                 if(rank2)psyr2k<B,T>(h,'U','N',n,k,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d);
                 else psyrk<B,T>(h,'U','N',n,k,alpha,x.a.ptr,x.d,beta,x.c.ptr,x.d);});
     }
-    const bool empty_product=pgemmt_impl::check<B,T>(h,'U','N','N',1,0,T(0),
+    const bool empty_product=pgemmt_impl::check<B,T,T,T>(h,'U','N','N',1,0,T(0),
         nullptr,x.d,nullptr,x.d,T(1),nullptr,x.d);
     require_close(h,"GEMMT empty product accepts null output",empty_product ? 1 : 0,0);
     bool rejected=false;

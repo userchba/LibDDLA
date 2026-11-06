@@ -515,6 +515,30 @@ endif()
 add_test_executable(test_gemmt_batched 1)
 target_include_directories(test_gemmt_batched PRIVATE ${PROJECT_SOURCE_DIR}/src)
 
+# Matrix-region scaling and allocation-free distributed ownership checks.
+add_test_executable(test_scal_matrix 1)
+target_include_directories(test_scal_matrix PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(test_scal_matrix PRIVATE ${CMAKE_DL_LIBS})
+if(TARGET workspace_trace)
+    add_dependencies(test_scal_matrix workspace_trace)
+    set_tests_properties(test_scal_matrix_mpi PROPERTIES ENVIRONMENT
+        "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1;DDLA_WORKSPACE_TRACE_REQUIRED=1;LD_PRELOAD=$<TARGET_FILE:workspace_trace>")
+endif()
+
+
+# Mixed-domain local and distributed structured products.
+add_test_executable(test_mixed_products 1)
+target_include_directories(test_mixed_products PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(test_mixed_products PRIVATE ${CMAKE_DL_LIBS})
+if(TARGET workspace_trace)
+    add_dependencies(test_mixed_products workspace_trace)
+    set_tests_properties(test_mixed_products_mpi PROPERTIES ENVIRONMENT
+        "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1;DDLA_WORKSPACE_TRACE_REQUIRED=1;LD_PRELOAD=$<TARGET_FILE:workspace_trace>")
+endif()
+add_bench_executable(benchmark_mixed_products)
+target_include_directories(benchmark_mixed_products PRIVATE ${PROJECT_SOURCE_DIR}/src)
+
+
 # Mixed real/complex fixed-size pointer-array GEMM batches.
 add_test_executable(test_gemm_mixed_batched 1)
 target_include_directories(test_gemm_mixed_batched PRIVATE ${PROJECT_SOURCE_DIR}/src)

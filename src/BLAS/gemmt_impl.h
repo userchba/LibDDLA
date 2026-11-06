@@ -1,7 +1,7 @@
 #ifndef DDLA_GEMMT_IMPL_H
 #define DDLA_GEMMT_IMPL_H
 
-#include <ddla/ddla.h>
+#include "blas_impl.h"
 #include <cstddef>
 
 namespace ddla { namespace blas_impl {
@@ -12,15 +12,6 @@ namespace ddla { namespace blas_impl {
 // Product calls require the backend workspace returned by the query.
 // Empty products and pure triangle scaling require no workspace.
 // Backend scratch bytes only; this query performs no allocation.
-template <typename T>
-void gemmt_workspace_size(const DdlaHandle_t& h, char transa, char transb,
-    int n, int k, std::size_t* backend_bytes);
-template <DdlaBackend Backend, typename T>
-void gemmt_run(const DdlaHandle_t& h,
-    char uplo, char transa, char transb, int n, int k,
-    const T& alpha, const T* A, int lda, const T* B, int ldb,
-    const T& beta, T* C, int ldc, void* backend_work, std::size_t backend_bytes);
-
 // Copy full diagonal products from uniformly pitched temporary blocks into
 // selected triangles, applying beta only to those output entries. targets is
 // a backend pointer table, or null for consecutive diagonal blocks of C.

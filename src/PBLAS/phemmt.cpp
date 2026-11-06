@@ -28,4 +28,48 @@ TYPES(DdlaBackend::GPU);
 #endif
 #undef TYPES
 #undef INSTANTIATE
+template <DdlaBackend Backend,typename R>
+void phemmt(const DdlaHandle_t& h,char side,char ua,char uc,int n,
+    const std::complex<R>& alpha,const R* A,const int* da,const std::complex<R>* B,const int* db,
+    const std::complex<R>& beta,std::complex<R>* C,const int* dc)
+{
+    using T=std::complex<R>;
+    uc=blas_impl::upper(uc);
+    const char triangle=(uc=='U' || uc=='L')?uc:'?';
+    if (phemm_impl::phemm_check<Backend,T>(h,side,ua,n,n,alpha,A,da,B,db,beta,C,dc,true,triangle)) return;
+    side=blas_impl::upper(side);ua=blas_impl::upper(ua);
+    std::size_t bytes=0,host_bytes=0;
+    phemm_impl::phemm_workspace_size<T,R,std::complex<R>>(h,side,n,n,alpha==T(0),da,db,dc,true,&bytes,&host_bytes,uc);
+    vector<char> work(h,bytes);std::vector<char> host(host_bytes);
+    phemm_impl::phemm_run<Backend,T>(h,side,ua,n,n,alpha,A,da,B,db,beta,C,dc,true,
+        work.data(),bytes,host.data(),host_bytes,uc);
+}
+
+template <DdlaBackend Backend,typename R>
+void phemmt(const DdlaHandle_t& h,char side,char ua,char uc,int n,
+    const std::complex<R>& alpha,const std::complex<R>* A,const int* da,const R* B,const int* db,
+    const std::complex<R>& beta,std::complex<R>* C,const int* dc)
+{
+    using T=std::complex<R>;
+    uc=blas_impl::upper(uc);
+    const char triangle=(uc=='U' || uc=='L')?uc:'?';
+    if (phemm_impl::phemm_check<Backend,T>(h,side,ua,n,n,alpha,A,da,B,db,beta,C,dc,true,triangle)) return;
+    side=blas_impl::upper(side);ua=blas_impl::upper(ua);
+    std::size_t bytes=0,host_bytes=0;
+    phemm_impl::phemm_workspace_size<T,std::complex<R>,R>(h,side,n,n,alpha==T(0),da,db,dc,true,&bytes,&host_bytes,uc);
+    vector<char> work(h,bytes);std::vector<char> host(host_bytes);
+    phemm_impl::phemm_run<Backend,T>(h,side,ua,n,n,alpha,A,da,B,db,beta,C,dc,true,
+        work.data(),bytes,host.data(),host_bytes,uc);
+}
+
+template void phemmt<DdlaBackend::CPU,float>(const DdlaHandle_t&,char,char,char,int,const std::complex<float>&,const float*,const int*,const std::complex<float>*,const int*,const std::complex<float>&,std::complex<float>*,const int*);
+template void phemmt<DdlaBackend::CPU,float>(const DdlaHandle_t&,char,char,char,int,const std::complex<float>&,const std::complex<float>*,const int*,const float*,const int*,const std::complex<float>&,std::complex<float>*,const int*);
+template void phemmt<DdlaBackend::CPU,double>(const DdlaHandle_t&,char,char,char,int,const std::complex<double>&,const double*,const int*,const std::complex<double>*,const int*,const std::complex<double>&,std::complex<double>*,const int*);
+template void phemmt<DdlaBackend::CPU,double>(const DdlaHandle_t&,char,char,char,int,const std::complex<double>&,const std::complex<double>*,const int*,const double*,const int*,const std::complex<double>&,std::complex<double>*,const int*);
+#if DDLA_HAS_GPU
+template void phemmt<DdlaBackend::GPU,float>(const DdlaHandle_t&,char,char,char,int,const std::complex<float>&,const float*,const int*,const std::complex<float>*,const int*,const std::complex<float>&,std::complex<float>*,const int*);
+template void phemmt<DdlaBackend::GPU,float>(const DdlaHandle_t&,char,char,char,int,const std::complex<float>&,const std::complex<float>*,const int*,const float*,const int*,const std::complex<float>&,std::complex<float>*,const int*);
+template void phemmt<DdlaBackend::GPU,double>(const DdlaHandle_t&,char,char,char,int,const std::complex<double>&,const double*,const int*,const std::complex<double>*,const int*,const std::complex<double>&,std::complex<double>*,const int*);
+template void phemmt<DdlaBackend::GPU,double>(const DdlaHandle_t&,char,char,char,int,const std::complex<double>&,const std::complex<double>*,const int*,const double*,const int*,const std::complex<double>&,std::complex<double>*,const int*);
+#endif
 }

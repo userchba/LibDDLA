@@ -25,6 +25,7 @@ target_sources(ddla_lib PRIVATE
     trtrm.cpp
     gemmBatched.cpp
     scal.cpp
+    scalBatched.cpp
     geam.cpp
     swap.cpp
     axpy.cpp
@@ -41,6 +42,9 @@ target_sources(ddla_lib PRIVATE
 # rounded with -ffp-contract=off, like the eigensolver host kernels
 # (src/CMakeLists.txt computes ${_ddla_cpu_kernel_opts}).
 set_source_files_properties(geam.cpp gemmBatched.cpp TARGET_DIRECTORY ddla_lib
+    PROPERTIES COMPILE_OPTIONS "${_ddla_cpu_kernel_opts}")
+
+set_source_files_properties(scalBatched.cpp TARGET_DIRECTORY ddla_lib
     PROPERTIES COMPILE_OPTIONS "${_ddla_cpu_kernel_opts}")
 
 if(DDLA_USE_CUDA)
