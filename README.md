@@ -473,6 +473,15 @@ or the distributed `inplace` variant. All ranks must use the same selector.
 Only QR and QL are implemented; right-side LQ and RQ forms are not provided.
 
 
+### Singular value decomposition
+
+| Function | Description |
+|----------|-------------|
+| `pgesvd` | Driver: `A = U·diag(s)·V^H` (ScaLAPACK `PxGESVD` semantics: economy `U` m×k and `VT` k×n, `jobu`/`jobvt` = 'V'/'N', host `s` descending and replicated; U's rows aligned with A's, VT's columns aligned with A's; backend-templated, all four scalar types; the bidiagonal vector stage uses row-distributed divide and conquer on CPU and GPU, with O(k²/P) factor storage per rank and bounded leaf solves; `DDLA_SVD_DC_LEAF` selects the leaf size, default 128, capped at 256; values-only jobs use O(k) dqds storage. The obsolete `DDLA_SVD_BDSOLVER` selector is ignored; replicated `lapack`/`qr` modes have been removed) |
+| `pbdsdc` | Bidiagonal divide-and-conquer SVD `B = U·diag(s)·V^T`, upper/lower real bidiagonal, float/double, CPU/GPU. Host `d`, `e`, `s` are replicated; `s` is descending. Both `U` and `V` return contiguous row slabs over all communicator ranks with local leading dimension `ld`; no descriptor-output or replicated-factor variant. Matrix-sized storage is distributed; bounded panels and scalar vectors may be replicated. |
+| `pgebrd` | Householder bidiagonalization `A = Q·B·P^H` (ScaLAPACK `PxGEBRD`; upper bidiagonal for m >= n, lower for m < n; LAPACK `?GEBRD` storage; host `d`, `e`, `tauq`, `taup` of global length, replicated) |
+| `punmbr` | Apply `Q`/`Q^H` from the left or `P`/`P^H` from the right (ScaLAPACK `PxUNMBR`; vect='Q' with side='L', vect='P' with side='R') |
+
 **Solve semantics.** For `side='L'` the right-hand side B is `n × nrhs` and
 the system is `op(A)·X = B`; for `side='R'` B is `nrhs × n` and the system is
 `X·op(A) = B`.  The LU-family solves (`pgetrs`, `pgetrs_nopiv`, `pgetrs_bpiv`,
