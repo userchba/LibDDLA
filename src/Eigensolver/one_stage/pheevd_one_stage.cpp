@@ -24,12 +24,12 @@
 #include <vector>
 
 namespace ddla { namespace detail {
-template <bool StoredOnly, DdlaBackend B, class T>
-void one_stage_solve(const DdlaHandle_t& h, char job, char uplo, int n, T* a, const int* da,
+template <DdlaBackend B, class T>
+void pheevd_one_stage_timed(const DdlaHandle_t& h, char job, char uplo, int n, T* a, const int* da,
                      typename real_type<T>::type* eval, T* z, const int* dz, int& info,
                      OneStageTimes* times) {
     info = 0;
-    const auto p = spectral_impl::one_stage_check<T>(h, B, StoredOnly, job, uplo, n, a, da, eval, z, dz);
+    const auto p = spectral_impl::one_stage_check<T>(h, B, job, uplo, n, a, da, eval, z, dz);
     if (times)
         *times = {};
     if (!n)
@@ -49,25 +49,11 @@ void one_stage_solve(const DdlaHandle_t& h, char job, char uplo, int n, T* a, co
                                        backend_bytes, host_work.data(), host_bytes);
 }
 
-// Preserve the original private timing ABI as well as the public fast entry.
-template <DdlaBackend B, class T>
-void pheevd_one_stage_timed(const DdlaHandle_t& h, char job, char uplo, int n, T* a, const int* da,
-                            typename real_type<T>::type* eval, T* z, const int* dz, int& info,
-                            OneStageTimes* times) {
-    one_stage_solve<false, B, T>(h, job, uplo, n, a, da, eval, z, dz, info, times);
-}
-
-template <DdlaBackend B, class T>
-void pheevd_one_stage_uplo_timed(const DdlaHandle_t& h, char job, char uplo, int n, T* a, const int* da,
-                                 typename real_type<T>::type* eval, T* z, const int* dz, int& info,
-                                 OneStageTimes* times) {
-    one_stage_solve<true, B, T>(h, job, uplo, n, a, da, eval, z, dz, info, times);
-}
 } // namespace detail
 
 namespace spectral_impl {
 template <class T>
-OneStagePlan one_stage_check(const DdlaHandle_t& h, DdlaBackend backend, bool stored_only, char job,
+OneStagePlan one_stage_check(const DdlaHandle_t& h, DdlaBackend backend, char job,
                              char uplo, int n, const T* a, const int* da,
                              const typename real_type<T>::type* eval, const T* z, const int* dz) {
     using R = typename real_type<T>::type;
@@ -88,7 +74,7 @@ OneStagePlan one_stage_check(const DdlaHandle_t& h, DdlaBackend backend, bool st
         result.backend = backend;
         result.job = job;
         result.uplo = uplo;
-        result.stored_only = stored_only;
+        result.stored_only = false;
         result.n = n;
         ddlaGetGridDims(h, result.pr, result.pc);
         ddlaGetGridCoords(h, result.mr, result.mc);
@@ -124,15 +110,14 @@ OneStagePlan one_stage_check(const DdlaHandle_t& h, DdlaBackend backend, bool st
         }
         return result;
     });
-    int sig[21] = {n, job, uplo, int(backend), stored_only ? 1 : 0, h->nprows_, h->npcols_};
-    detail::descriptor_signature(sig + 7, da);
+    int sig[20] = {n, job, uplo, int(backend), h->nprows_, h->npcols_};
+    detail::descriptor_signature(sig + 6, da);
     if (job == 'V')
-        detail::descriptor_signature(sig + 14, dz);
+        detail::descriptor_signature(sig + 13, dz);
     detail::agree_signature(h, "pheevd_one_stage", sig);
     if (!n)
         return p;
-    if (!stored_only)
-        p.complete = pherm_complete_check(h, backend, uplo, n, a, da);
+    p.complete = pherm_complete_check(h, backend, uplo, n, a, da);
     if (job == 'V') {
         int overlap = p.backup ? 1 : 0;
         MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &overlap, 1, MPI_INT, MPI_MAX, h->comm));
@@ -162,7 +147,7 @@ void one_stage_workspace_size(const DdlaHandle_t& h, const OneStagePlan& p, std:
     };
     phetrd_workspace_size<T>(h, p, &bytes, &host);
     stage(bytes, host);
-    if (!p.stored_only) {
+    {
         const std::size_t capacity =
             p.backend == DdlaBackend::GPU ? p.output_scratch / (sizeof(T) / sizeof(R)) : 0;
         pherm_complete_workspace_size<T>(h, p.complete, capacity, &bytes, &host);
@@ -179,7 +164,7 @@ void one_stage_workspace_size(const DdlaHandle_t& h, const OneStagePlan& p, std:
         stage(rows + bytes, host);
         matrix_impl::scatter_rows_workspace_size<R>(h,p.n,&bytes,&host);
         stage(rows + y + bytes,host);
-        const auto apply=punmtr_trd_geometry(h,p.backend,'L',p.stored_only?p.uplo:'U','N',p.n,p.n,p.a.data(),p.z.data());
+        const auto apply=punmtr_trd_geometry(h,p.backend,'L','U','N',p.n,p.n,p.a.data(),p.z.data());
         punmtr_trd_workspace_size<T>(h,apply,&bytes);host=0;
         stage(bytes, host);
     } else {
@@ -238,7 +223,7 @@ void one_stage_run(const DdlaHandle_t& h, const OneStagePlan& p, OneStageResourc
             }
         };
         mark(nullptr);
-        if (!p.stored_only) {
+        {
             const auto capacity = B == DdlaBackend::GPU ? p.output_scratch / (sizeof(T) / sizeof(R)) : 0;
             pherm_complete_run<B, T>(h, p.complete, a, capacity ? z : nullptr, capacity, phase, phase_bytes,
                                      phase_host, phase_host_bytes);
@@ -253,18 +238,7 @@ void one_stage_run(const DdlaHandle_t& h, const OneStagePlan& p, OneStageResourc
             const int ar = num_loc(n, da[DDLA_MB_], p.mr, 0, p.pr),
                       ac = num_loc(n, da[DDLA_NB_], p.mc, 0, p.pc), ld = p.saved[DDLA_LLD_];
             detail::agree_check(h,"pheevd_one_stage reflector copy",[&](detail::Agree&) {
-                if (p.stored_only)
-                    for (int c = 0; c < ac; ++c) {
-                        const int global = indxl2g(c, da[DDLA_NB_], p.mc, 0, p.pc);
-                        const int first =
-                            p.uplo == 'L' ? num_loc(global + 1, da[DDLA_MB_], p.mr, 0, p.pr) : 0;
-                        const int end = p.uplo == 'U' ? num_loc(global, da[DDLA_MB_], p.mr, 0, p.pr) : ar;
-                        if (end > first)
-                            DDLA_CHECK(ddlaMemcpy(h, saved + first + std::size_t(c) * ld,
-                                                  a + first + std::size_t(c) * da[DDLA_LLD_],
-                                                  std::size_t(end - first) * sizeof(T)));
-                    }
-                else if (ar && ac)
+                if (ar && ac)
                     DDLA_CHECK(ddlaMemcpy2D(h, saved, std::size_t(ld) * sizeof(T), a,
                                             std::size_t(da[DDLA_LLD_]) * sizeof(T),
                                             std::size_t(ar) * sizeof(T), ac));
@@ -305,7 +279,7 @@ void one_stage_run(const DdlaHandle_t& h, const OneStagePlan& p, OneStageResourc
             DDLA_CHECK(ddlaSynchronize(h));
         }
         mark(times ? &times->redistribution : nullptr);
-        const auto apply=punmtr_trd_geometry(h,B,'L',p.stored_only?p.uplo:'U','N',n,n,reflector_desc,dz);
+        const auto apply=punmtr_trd_geometry(h,B,'L','U','N',n,n,reflector_desc,dz);
         punmtr_trd_run<B,T>(h,apply,reflectors,tau,z,phase,phase_bytes);
         mark(times ? &times->backtransform : nullptr);
         DDLA_CHECK(ddlaSynchronize(h));
@@ -321,7 +295,7 @@ void one_stage_run(const DdlaHandle_t& h, const OneStagePlan& p, OneStageResourc
 }
 
 #define INST_ONE_STAGE_CHECK(T)                                                                              \
-    template OneStagePlan one_stage_check<T>(const DdlaHandle_t&, DdlaBackend, bool, char, char, int,        \
+    template OneStagePlan one_stage_check<T>(const DdlaHandle_t&, DdlaBackend, char, char, int,              \
                                              const T*, const int*, const typename real_type<T>::type*,       \
                                              const T*, const int*);                                          \
     template void one_stage_workspace_size<T>(const DdlaHandle_t&, const OneStagePlan&, std::size_t*,        \
@@ -339,12 +313,6 @@ void pheevd_one_stage(const DdlaHandle_t& h, char job, char uplo, int n, T* a, c
     detail::pheevd_one_stage_timed<B, T>(h, job, uplo, n, a, da, eval, z, dz, info, nullptr);
 }
 
-template <DdlaBackend B, class T>
-void pheevd_one_stage_uplo(const DdlaHandle_t& h, char job, char uplo, int n, T* a, const int* da,
-                           typename real_type<T>::type* eval, T* z, const int* dz, int& info) {
-    detail::pheevd_one_stage_uplo_timed<B, T>(h, job, uplo, n, a, da, eval, z, dz, info, nullptr);
-}
-
 #define INST(B, T)                                                                                           \
     template void spectral_impl::one_stage_run<B, T>(                                                        \
         const DdlaHandle_t&, const spectral_impl::OneStagePlan&, spectral_impl::OneStageResources&, T*,      \
@@ -354,12 +322,7 @@ void pheevd_one_stage_uplo(const DdlaHandle_t& h, char job, char uplo, int n, T*
                                          typename real_type<T>::type*, T*, const int*, int&);                \
     template void detail::pheevd_one_stage_timed<B, T>(const DdlaHandle_t&, char, char, int, T*, const int*, \
                                                        typename real_type<T>::type*, T*, const int*, int&,   \
-                                                       detail::OneStageTimes*);                              \
-    template void pheevd_one_stage_uplo<B, T>(const DdlaHandle_t&, char, char, int, T*, const int*,          \
-                                              typename real_type<T>::type*, T*, const int*, int&);           \
-    template void detail::pheevd_one_stage_uplo_timed<B, T>(const DdlaHandle_t&, char, char, int, T*,        \
-                                                            const int*, typename real_type<T>::type*, T*,    \
-                                                            const int*, int&, detail::OneStageTimes*);
+                                                       detail::OneStageTimes*);
 INST(DdlaBackend::CPU, float)
 INST(DdlaBackend::CPU, double)
 INST(DdlaBackend::CPU, std::complex<float>)

@@ -22,7 +22,7 @@ struct OneStagePlan : HetrdPlan {
     HermitianPlan complete{};
     PstedcVectorPlan vectors{};PstedcPlan values{};
 };
-template<class T> OneStagePlan one_stage_check(const DdlaHandle_t&,DdlaBackend,bool,char,char,int,
+template<class T> OneStagePlan one_stage_check(const DdlaHandle_t&,DdlaBackend,char,char,int,
     const T*,const int*,const typename real_type<T>::type*,const T*,const int*);
 
 // The scratch of one_stage_run on this rank (none for n == 0).  Backend, in carving

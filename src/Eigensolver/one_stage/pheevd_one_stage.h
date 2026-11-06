@@ -8,8 +8,5 @@ struct OneStageTimes { double prepare=0, reduction=0, solve=0, redistribution=0,
 template<DdlaBackend Backend, class T>
 void pheevd_one_stage_timed(const DdlaHandle_t&,char,char,int,T*,const int*,
     typename real_type<T>::type*,T*,const int*,int&,OneStageTimes*);
-template<DdlaBackend Backend, class T>
-void pheevd_one_stage_uplo_timed(const DdlaHandle_t&,char,char,int,T*,const int*,
-    typename real_type<T>::type*,T*,const int*,int&,OneStageTimes*);
 } }
 #endif
