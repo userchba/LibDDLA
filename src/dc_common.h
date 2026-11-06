@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 // Plain helpers shared by the two distributed divide-and-conquer drivers:
 //   src/pstedc.cpp      symmetric tridiagonal eigenproblem (stage 3 of pheevd)
-//   src/pbdsdc_dc.cpp   bidiagonal SVD (stage 2 of pgesvd)
+//   src/SVD/pbdsdc.cpp   bidiagonal SVD (stage 2 of pgesvd)
 // Everything lives in an ANONYMOUS namespace.  NOTE: nvcc-compiled TUs export
 // anonymous-namespace functions as WEAK dynamic symbols (nm -D shows them), so
 // a same-named, same-signature helper with a DIFFERENT body in two TUs would

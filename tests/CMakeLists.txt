@@ -586,3 +586,14 @@ if(TARGET workspace_trace)
     set_tests_properties(test_symmt_mpi PROPERTIES ENVIRONMENT
         "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1;DDLA_WORKSPACE_TRACE_REQUIRED=1;LD_PRELOAD=$<TARGET_FILE:workspace_trace>")
 endif()
+
+# Distributed SVD: private row-transfer fixture and exact reusable workspace checks.
+target_include_directories(test_api_grid_pbdsdc PRIVATE ${PROJECT_SOURCE_DIR}/src)
+add_test_executable(test_workspace_pgesvd)
+target_include_directories(test_workspace_pgesvd PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(test_workspace_pgesvd PRIVATE ${CMAKE_DL_LIBS})
+if(TARGET workspace_trace)
+    add_dependencies(test_workspace_pgesvd workspace_trace)
+    set_tests_properties(test_workspace_pgesvd_mpi PROPERTIES ENVIRONMENT
+        "LD_PRELOAD=$<TARGET_FILE:workspace_trace>;DDLA_WORKSPACE_TRACE_REQUIRED=1;OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+endif()

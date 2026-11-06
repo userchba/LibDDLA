@@ -839,6 +839,48 @@ void pgeqrs(const DdlaHandle_t& handle, int m, int n, int nrhs,
             const T* A, const int* descA, const T* tau,
             T* B, const int* descB, int& info);
 
+/**
+ * @brief Compute a real bidiagonal SVD B = U diag(s) V^T by distributed divide and conquer.
+ * @tparam T float or double. d, e and s are host vectors on every rank.
+ * @param uplo 'U': upper bidiagonal; 'L': lower bidiagonal.
+ * @param n Order of the bidiagonal matrix.
+ * @param d Length n diagonal, destroyed on exit.
+ * @param e Length max(0,n-1) off-diagonal, destroyed on exit.
+ * @param s Length n singular values, descending and replicated on every rank.
+ * @param U This rank's contiguous rows of all n left singular-vector columns.
+ * @param V This rank's contiguous rows of all n right singular-vector columns,
+ * returning V rather than V^T. Both factors are column-major in backend memory.
+ * Communicator rank q among P ranks owns n/P+(q<n%P) rows starting at
+ * q*(n/P)+min(q,n%P). For n>0, U and V must be nonnull on every rank.
+ * @param ld Local leading dimension of both factors, at least max(1, local rows).
+ * Padding and storage beyond the first n columns are preserved.
+ * @param info Zero on success. Invalid arguments or numerical failure throw.
+ * All ranks participate, including ranks without rows. Both factors remain
+ * row-distributed throughout the solve and on return; no descriptor conversion
+ * or full replicated factor is used. Scalar vectors and bounded panels may be replicated.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void pbdsdc(const DdlaHandle_t& handle, char uplo, int n,
+            T* d, T* e, T* s, T* U, T* V, int ld, int& info);
+
+// Bidiagonalization and SVD interfaces used by the registered solver sources.
+template <DdlaBackend Backend = default_backend_v, typename T>
+void pgebrd(const DdlaHandle_t& handle, int m, int n,
+            T* A, const int* descA,
+            typename real_type<T>::type* d, typename real_type<T>::type* e,
+            T* tauq, T* taup,
+            int& info);
+
+template <DdlaBackend Backend = default_backend_v, typename T>
+void pgesvd(const DdlaHandle_t& handle,
+            char jobu, char jobvt,
+            int m, int n,
+            T* A, const int* descA,
+            typename real_type<T>::type* s,
+            T* U, const int* descU,
+            T* VT, const int* descVT,
+            int& info);
+
 template <DdlaBackend Backend = default_backend_v, typename T>
 void punmbr(const DdlaHandle_t& handle,
             char vect, char side, char trans,
