@@ -610,6 +610,13 @@ been removed. Callers must allocate the row layout described above.
 secular factors generated in bounded strips. The eigenvalues-only tree keeps
 only the boundary rows needed by later merges.
 
+Vector solves default to a requested leaf size of 1024. On multiple ranks,
+the actual size is also limited by `ceil(n/2)` and
+`max(256, ceil(n/P))`, including when `DDLA_EIG_DC_LEAF` requests larger leaves.
+This distributes large leaf solves across ranks while avoiding extra merges
+for small problems. Root calculation and vector normalization reuse the same
+scratch because their lifetimes do not overlap.
+
 The explicit `pheevd_one_stage(handle, jobz, uplo, n, A, descA, w, Z, descZ, info)`
 entry solves real symmetric or complex Hermitian eigenproblems on CPU and GPU
 handles. It combines direct Householder tridiagonalization, row-distributed

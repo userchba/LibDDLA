@@ -108,8 +108,9 @@ inline int pstedc_my_leaves(int leaves, int rank, int ranks) noexcept
 // receive buffer of one leaf (P > 1), the leaf errors and the ?STEDC work and iwork of every
 // leaf worker.  Merge phase (more than one leaf): z, dlamda, wv, givnum (2n), lam, wp, zhat,
 // tau, dbase, nrm, the root records (4n), the GPU upload (5n), a chunk of root deltas
-// (n x root_chunk), the normalisation columns, zho and dlo (split GEMM); iq, perm, givcol (2n),
-// indxp, indx, the origins, counts and displs (P), the chunk errors, order and perm2 (split
+// (n x max(root_chunk, normalisation workers), reused by normalisation), zho and dlo
+// (split GEMM); iq, perm, givcol (2n),
+// indxp, indx, counts and displs (P), the chunk errors, order and perm2 (split
 // GEMM); the column classes (split GEMM).
 // On a CPU handle, where backend memory is host memory, the host part follows the backend part
 // and *host_bytes is 0.

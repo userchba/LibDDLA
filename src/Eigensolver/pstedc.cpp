@@ -42,7 +42,7 @@
 // The hidden trailing CHARACTER-length arguments are omitted: correct on this
 // project's gfortran + x86-64 SysV toolchain (lengths travel in registers and
 // an extra unread one is harmless), not portable to toolchains that pass them
-// differently.  (src/pgesvd.cpp and src/pbdsdc_dc.cpp refer here.)
+// differently.  (src/pgesvd.cpp and src/SVD/pbdsdc.cpp refer here.)
 //   ?STEDC  leaf solves
 //   ?LAED8  deflation decisions (ICOMPQ = 0: never touches Q/Q2)
 //   ?LAED4  one secular-equation root and its delta vector
@@ -551,8 +551,12 @@ PstedcVectorPlan pstedc_policy(const DdlaHandle_t& h, int n)
     // On a multi-rank grid, a single leaf would solve and broadcast the
     // entire n-by-n eigenvector matrix. Keep every nontrivial leaf smaller
     // than the original problem, including an oversized user leaf override.
-    if (p.ranks > 1 && n > 1)
-        p.leaf = std::min(p.leaf, n / 2 + n % 2);
+    if (p.ranks > 1 && n > 1) {
+        // Large leaves should not serialize the solve on a subset of ranks.
+        // Keep a bounded floor for small problems, where extra merges dominate.
+        const int share = n / p.ranks + (n % p.ranks != 0);
+        p.leaf = std::min({p.leaf, n / 2 + n % 2, std::max(256, share)});
+    }
     int onnode = 1;
     MPI_Comm node = MPI_COMM_NULL;
     MPI_CHECK(MPI_Comm_split_type(h->comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &node));
@@ -670,9 +674,9 @@ void pstedc_workspace_size(const DdlaHandle_t&, const PstedcVectorPlan& p, std::
         const std::size_t split = p.split ? n : 0, norm_workers = std::max(1, std::min(p.threads, p.n));
         merge = 3 * padded_bytes<R>(n) + padded_bytes<R>(2 * n) + 6 * padded_bytes<R>(n) +
                 padded_bytes<R>(4 * n) + padded_bytes<R>(gpu ? 5 * n : 0) +
-                padded_bytes<R>(n * p.root_chunk) + padded_bytes<R>(n * norm_workers) +
+                padded_bytes<R>(n * std::max(std::size_t(p.root_chunk), norm_workers)) +
                 2 * padded_bytes<R>(split) + 2 * padded_bytes<int>(n) + padded_bytes<int>(2 * n) +
-                3 * padded_bytes<int>(n) + 2 * padded_bytes<int>(p.ranks) + padded_bytes<int>(p.root_chunk) +
+                2 * padded_bytes<int>(n) + 2 * padded_bytes<int>(p.ranks) + padded_bytes<int>(p.root_chunk) +
                 2 * padded_bytes<int>(split) + padded_bytes<char>(split);
     }
     std::size_t host = kept + std::max(leaf, merge);
@@ -918,7 +922,7 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
                         std::fill_n(el, m, rt(0));
                         std::copy_n(e + s0, std::max(0, m - 1), el);
                         rt* block = blocks + offsets[j];
-                        std::fill_n(block, std::size_t(m) * m, rt(0));
+                        // STEDC('I') initializes its output eigenvectors.
                         int li = 0;
                         stedc('I', m, dl, el, block, m, lapack, int(leaf_work_count - 2 * maxsz), iw,
                               int(leaf_iwork_count), li);
@@ -979,8 +983,9 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
     rt* const nrmv = rv(nn);
     rt* const rec = rv(4 * nn);
     [[maybe_unused]] rt* const up = rv(kGpu ? 5 * nn : 0); // GPU
-    rt* const dchunk = rv(nn * kRootChunk);
-    rt* const normcols = rv(nn * norm_workers);
+    // Root deltas expire before normalisation; both passes reuse this storage.
+    rt* const dchunk = rv(nn * std::max(kRootChunk, norm_workers));
+    rt* const normcols = dchunk;
     rt* const zho = rv(split_n);
     rt* const dlo = rv(split_n);
     int* const iq = iv(nn);
@@ -988,7 +993,6 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
     int* const givcol = iv(2 * nn);
     int* const indxp = iv(nn);
     int* const indx = iv(nn);
-    int* const org = iv(nn);
     int* const rcount = iv(P);
     int* const rdispl = iv(P);
     int* const ce = iv(kRootChunk);
@@ -1171,7 +1175,6 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
                         if (J + 1 < K && std::fabs(col[static_cast<std::size_t>(J) + 1]) <
                                              std::fabs(col[static_cast<std::size_t>(J)]))
                             o = J + 1;
-                        org[static_cast<std::size_t>(J)] = o;
                         tauv[static_cast<std::size_t>(J)] = -col[static_cast<std::size_t>(o)];
                         dbasev[static_cast<std::size_t>(J)] = dlamda[static_cast<std::size_t>(o)];
                     } else {
@@ -1373,9 +1376,8 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
             s += m;
         }
     }
-    sync();
-    resources.completed();
-    t_dev += clk.lap();
+    // The final gather follows the merges on the same stream; the completion
+    // fence below also retires their host uploads.
 
     // ---- ascending eigenvalues and the matching columns -----------------------
     for (int i = 0; i < n; ++i)
