@@ -15,19 +15,10 @@
 #endif
 
 namespace ddla { namespace detail {
-namespace {
-
-// Each worker owns complete output tiles, including conversion and the final
-// alpha/beta update. Real BLAS supplies its tuned microkernel and packing; its
-// internal team is held at one while the outer OpenMP team supplies parallelism.
-// Scratch is bounded per worker, independent of the full matrix dimensions.
-// The longer tile dimension reduces duplication of the complex-operand pack.
-constexpr int mixed_short = 128, mixed_long = 512, mixed_kb = 512;
-
 // RC: A [Br | Bi] = [Cr | Ci]. The two real planes are adjacent column panels,
 // so one real GEMM reuses A for both components.
 template <typename R>
-void pack_right(char trans, int kk, int nn, const std::complex<R>* B, int ldb,
+void mixed_pack_right(char trans, int kk, int nn, const std::complex<R>* B, int ldb,
                 R* packed)
 {
     const bool conjugate = trans == 'C';
@@ -45,7 +36,7 @@ void pack_right(char trans, int kk, int nn, const std::complex<R>* B, int ldb,
 
 // CR: [Ar; Ai] B = [Cr; Ci]. Stacking rows similarly lets real BLAS reuse B.
 template <typename R>
-void pack_left(char trans, int mm, int kk, const std::complex<R>* A, int lda,
+void mixed_pack_left(char trans, int mm, int kk, const std::complex<R>* A, int lda,
                R* packed)
 {
     const bool conjugate = trans == 'C';
@@ -62,7 +53,7 @@ void pack_left(char trans, int mm, int kk, const std::complex<R>* A, int lda,
 }
 
 template <typename R, bool CR>
-void combine(int mm, int nn, const R* result, std::complex<R> alpha,
+void mixed_combine(int mm, int nn, const R* result, std::complex<R> alpha,
              std::complex<R> beta, std::complex<R>* C, int ldc)
 {
     const int ldr = CR ? 2*mm : mm;
@@ -84,6 +75,16 @@ void combine(int mm, int nn, const R* result, std::complex<R> alpha,
         }
     }
 }
+
+
+namespace {
+
+// Each worker owns complete output tiles, including conversion and the final
+// alpha/beta update. Real BLAS supplies its tuned microkernel and packing; its
+// internal team is held at one while the outer OpenMP team supplies parallelism.
+// Scratch is bounded per worker, independent of the full matrix dimensions.
+// The longer tile dimension reduces duplication of the complex-operand pack.
+constexpr int mixed_short = 128, mixed_long = 512, mixed_kb = 512;
 
 // The tiling of one product, derived identically by the size and the run: the
 // worker team, mb x nb output tiles over an nr x nc grid, kb-deep panels, and
@@ -180,17 +181,17 @@ void mixed_gemm(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
                 const auto* bp = B + (tb == 'N' ? std::size_t(l0) + std::size_t(j0)*ldb
                                                : std::size_t(j0) + std::size_t(l0)*ldb);
                 if constexpr (CR) {
-                    pack_left(ta, mm, kk, ap, lda, packed);
+                    mixed_pack_left(ta, mm, kk, ap, lda, packed);
                     blas_impl::gemm_run<DdlaBackend::CPU, R>(h, 'N', tb, 2*mm, nn, kk,
                         R(1), packed, 2*mm, bp, ldb, accumulate, result, 2*mm);
                 } else {
-                    pack_right(tb, kk, nn, bp, ldb, packed);
+                    mixed_pack_right(tb, kk, nn, bp, ldb, packed);
                     blas_impl::gemm_run<DdlaBackend::CPU, R>(h, ta, 'N', mm, 2*nn, kk,
                         R(1), ap, lda, packed, kk, accumulate, result, mm);
                 }
                 l0 += kk;
             }
-            combine<R, CR>(mm, nn, result, alpha, beta,
+            mixed_combine<R, CR>(mm, nn, result, alpha, beta,
                            C + i0 + std::size_t(j0)*ldc, ldc);
         }
     }
@@ -238,6 +239,14 @@ void mixed_gemm_cpu(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k
 {
     mixed_gemm<R, true>(h,ta,tb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc,product,work,bytes);
 }
+template void mixed_pack_left<float>(char,int,int,const std::complex<float>*,int,float*);
+template void mixed_pack_right<float>(char,int,int,const std::complex<float>*,int,float*);
+template void mixed_combine<float,true>(int,int,const float*,std::complex<float>,std::complex<float>,std::complex<float>*,int);
+template void mixed_combine<float,false>(int,int,const float*,std::complex<float>,std::complex<float>,std::complex<float>*,int);
+template void mixed_pack_left<double>(char,int,int,const std::complex<double>*,int,double*);
+template void mixed_pack_right<double>(char,int,int,const std::complex<double>*,int,double*);
+template void mixed_combine<double,true>(int,int,const double*,std::complex<double>,std::complex<double>,std::complex<double>*,int);
+template void mixed_combine<double,false>(int,int,const double*,std::complex<double>,std::complex<double>,std::complex<double>*,int);
 #define INSTANTIATE_MIXED_CPU(R) \
     template void mixed_gemm_cpu<R>(const DdlaHandle_t&, char,char,int,int,int, \
         std::complex<R>,const R*,int,const std::complex<R>*,int,std::complex<R>,std::complex<R>*,int,bool,void*,std::size_t); \

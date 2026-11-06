@@ -3,6 +3,14 @@
 #include <ddla/ddla.h>
 #include <cstddef>
 namespace ddla { namespace detail {
+// Existing planar packing/combine operations, shared with CPU mixed batches.
+template <typename R>
+void mixed_pack_left(char trans,int m,int k,const std::complex<R>* A,int lda,R* packed);
+template <typename R>
+void mixed_pack_right(char trans,int k,int n,const std::complex<R>* B,int ldb,R* packed);
+template <typename R,bool ComplexLeft>
+void mixed_combine(int m,int n,const R* result,std::complex<R> alpha,
+    std::complex<R> beta,std::complex<R>* C,int ldc);
 // Bytes of the host-compiled path's scratch: the worker slots of the product's
 // tiling, each [ packed operand | real result ]. The tiling depends on the
 // handle's thread budget; m, n or k <= 0 needs nothing.

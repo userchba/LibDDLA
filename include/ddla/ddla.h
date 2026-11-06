@@ -1590,6 +1590,22 @@ void gemmBatched(
     const T& beta,
     T* const Carray[], int ldc,
     int batchCount);
+/** @brief Mixed real/complex GEMM over backend-resident pointer arrays.
+ * One input is real and the other complex, with matching float/double
+ * precision and complex alpha, beta and C. Flags and zero coefficients
+ * follow GEMM. Output matrices must not overlap inputs or each other.
+ */
+template <DdlaBackend Backend = default_backend_v, typename R>
+void gemmBatched(const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k,
+    const std::complex<R>& alpha, const R* const Aarray[], int lda,
+    const std::complex<R>* const Barray[], int ldb, const std::complex<R>& beta,
+    std::complex<R>* const Carray[], int ldc, int batchCount);
+template <DdlaBackend Backend = default_backend_v, typename R>
+void gemmBatched(const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k,
+    const std::complex<R>& alpha, const std::complex<R>* const Aarray[], int lda,
+    const R* const Barray[], int ldb, const std::complex<R>& beta,
+    std::complex<R>* const Carray[], int ldc, int batchCount);
+
 
 /**
  * @brief Backend-neutral matrix add / transpose-copy: C := alpha * op(A) + beta * op(B).

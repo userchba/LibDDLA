@@ -2,6 +2,9 @@
 #define DDLA_BLAS_IMPL_H
 #include <ddla/ddla.h>
 #include "ddla_connector.h"
+#include "plan_util.h"
+#include <algorithm>
+#include <type_traits>
 #include <cctype>
 #include <complex>
 #include <cstddef>
@@ -43,28 +46,28 @@ void gemm_run(
     const T& beta,
     T* C, int ldc);
 
-template <DdlaBackend Backend, typename T>
+template <DdlaBackend Backend, typename T, typename TA = T, typename TB = T>
 void gemmBatched_check(
     const DdlaHandle_t& handle,
     char transa, char transb,
     int m, int n, int k,
     const T& alpha,
-    const T* const Aarray[], int lda,
-    const T* const Barray[], int ldb,
+    const TA* const Aarray[], int lda,
+    const TB* const Barray[], int ldb,
     const T& beta,
     T* const Carray[], int ldc,
     int batchCount);
-template <DdlaBackend Backend, typename T>
+template <DdlaBackend Backend, typename T, typename TA = T, typename TB = T>
 void gemmBatched_run(
     const DdlaHandle_t& handle,
     char transa, char transb,
     int m, int n, int k,
     const T& alpha,
-    const T* const Aarray[], int lda,
-    const T* const Barray[], int ldb,
+    const TA* const Aarray[], int lda,
+    const TB* const Barray[], int ldb,
     const T& beta,
     T* const Carray[], int ldc,
-    int batchCount);
+    int batchCount, void* work = nullptr, std::size_t bytes = 0);
 
 template <DdlaBackend Backend, typename T>
 void geam_check(const DdlaHandle_t& handle, char transa, char transb, int m, int n,
@@ -384,5 +387,48 @@ template <DdlaBackend Backend, typename T>
 void gemmt_run(const DdlaHandle_t& h, char uplo, char ta, char tb,
     int n, int k, const T& alpha, const T* a, int lda, const T* b, int ldb,
     const T& beta, T* c, int ldc, void* backend_work, std::size_t backend_bytes);
+// Mixed batches keep device pointer tables on device and use bounded chunks.
+// Small GPU products reuse the existing fused mixed-GEMM tile kernel.
+template <typename R>
+int mixed_gemmBatched_capacity(int threads,int m,int n,int k,bool complex_left,int count,int& depth,std::size_t parallel_bytes=0)
+{
+    const std::size_t panel=std::min(n,512);
+    const auto slot=[&](int kk) {
+        return (2*(complex_left ? std::size_t(m)*kk : std::size_t(kk)*panel)
+                +2*std::size_t(m)*panel)*sizeof(R);
+    };
+    const std::size_t full=slot(k);
+    const int original=int(std::min<std::size_t>(std::max(0,count),
+        std::min<std::size_t>(32,std::max<std::size_t>(1,(32u<<20)/std::max<std::size_t>(1,full)))));
+    depth=k;
+    const std::size_t original_bytes=detail::padded_bytes<R>(std::size_t(original)*full/sizeof(R))
+        +3*detail::padded_bytes<R*>(original);
+    // A few large matrices can reuse the existing full-team scalar path.
+    if(threads>0 && parallel_bytes>0 && parallel_bytes<=original_bytes) {
+        depth=0;return 1;
+    }
+    if(threads<=0)return original;
+    if(m>256 || n>256 || k<=128)return std::min(original,std::max(1,threads));
+    // Long dot products otherwise leave only one or two worker slots in the
+    // packing budget. Stream K panels and keep each worker's real sum until
+    // the final alpha/beta update, without increasing the original allocation.
+    depth=128;
+    const std::size_t capacity=std::max<std::size_t>(1,std::size_t(original)*full/slot(depth));
+    int slots=int(std::min<std::size_t>(std::max(0,count),
+        std::min<std::size_t>(std::max(1,threads),capacity)));
+    while(slots>1 && detail::padded_bytes<R>(std::size_t(slots)*slot(depth)/sizeof(R))
+            +3*detail::padded_bytes<R*>(slots)>original_bytes)--slots;
+    return slots;
+}
+
+template <typename R>
+void mixed_gemmBatched_workspace_size(const DdlaHandle_t& h,int m,int n,int k,
+    bool complex_left,int count,std::size_t* bytes);
+template <typename R, bool ComplexLeft>
+void mixed_gemmBatched_gpu_run(const DdlaHandle_t& h,char ta,char tb,int m,int n,int k,
+    const std::complex<R>& alpha,const void* const* a,int lda,const void* const* b,int ldb,
+    const std::complex<R>& beta,std::complex<R>* const* c,int ldc,int count,void* work,std::size_t bytes);
+
+
 }} // namespace ddla::blas_impl
 #endif

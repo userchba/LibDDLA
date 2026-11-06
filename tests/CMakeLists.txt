@@ -515,6 +515,17 @@ endif()
 add_test_executable(test_gemmt_batched 1)
 target_include_directories(test_gemmt_batched PRIVATE ${PROJECT_SOURCE_DIR}/src)
 
+# Mixed real/complex fixed-size pointer-array GEMM batches.
+add_test_executable(test_gemm_mixed_batched 1)
+target_include_directories(test_gemm_mixed_batched PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(test_gemm_mixed_batched PRIVATE ${CMAKE_DL_LIBS})
+if(TARGET workspace_trace)
+    add_dependencies(test_gemm_mixed_batched workspace_trace)
+    set_tests_properties(test_gemm_mixed_batched_mpi PROPERTIES ENVIRONMENT
+        "LD_PRELOAD=$<TARGET_FILE:workspace_trace>;DDLA_WORKSPACE_TRACE_REQUIRED=1;OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+endif()
+
+
 add_test_executable(test_dgmm 1)
 target_include_directories(test_dgmm PRIVATE ${PROJECT_SOURCE_DIR}/src)
 

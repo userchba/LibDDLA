@@ -19,22 +19,22 @@ inline bool memory_overlaps(const void* a, std::size_t a_bytes,
 }
 
 // Keep counts in elements: multiplying a large count by sizeof(T) could overflow.
-template <typename T>
+template <typename T,typename U>
 inline bool array_overlaps(const T* a, std::size_t a_count,
-                           const T* b, std::size_t b_count) noexcept
+                           const U* b, std::size_t b_count) noexcept
 {
     if (!a || !b || !a_count || !b_count) return false;
     const auto ap = reinterpret_cast<std::uintptr_t>(a);
     const auto bp = reinterpret_cast<std::uintptr_t>(b);
-    return ap <= bp ? (bp - ap) / sizeof(T) < a_count : (ap - bp) / sizeof(T) < b_count;
+    return ap <= bp ? (bp - ap) / sizeof(T) < a_count : (ap - bp) / sizeof(U) < b_count;
 }
 
 // Column-major active spans include inter-column padding, but exclude padding
 // after the last active column. Dimensions and leading dimensions are checked
 // by the caller before this predicate is used.
-template <typename T>
+template <typename T,typename U>
 inline bool matrix_overlaps(const T* a, int lda, int a_rows, int a_cols,
-                            const T* b, int ldb, int b_rows, int b_cols) noexcept
+                            const U* b, int ldb, int b_rows, int b_cols) noexcept
 {
     if (!a_rows || !a_cols || !b_rows || !b_cols) return false;
     return array_overlaps(a, std::size_t(a_cols - 1) * lda + a_rows,
