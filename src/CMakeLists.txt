@@ -99,6 +99,7 @@ add_subdirectory(Cholesky)
 add_subdirectory(LU)
 add_subdirectory(PBLAS)
 add_subdirectory(QR)
+add_subdirectory(SVD)
 add_subdirectory(vbatched)
 add_subdirectory(Eigensolver/one_stage)
 

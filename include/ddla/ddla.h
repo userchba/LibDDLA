@@ -816,6 +816,38 @@ void pgeqrf(const DdlaHandle_t& handle, int m, int n,
             T* A, const int* descA, T* tau, int& info);
 
 /**
+ * @brief Solve min ||A_original X - B_original|| using pgeqrf factors.
+ *
+ * Requires m >= n >= 0, nrhs >= 0 and full column rank. A is the read-only
+ * m-by-n QR factorization returned by pgeqrf. tau is read-only HOST
+ * storage with the same local-column indexing and process-row replication
+ * as pgeqrf's output. No explicit Q is formed.
+ *
+ * B's leading m-by-nrhs region is overwritten by Q^H B, then its first n
+ * rows are replaced by the least-squares solution X. Rows n through m-1
+ * retain the transformed residual. Parent entries and padding are preserved.
+ * A needs square blocks. B must share A's row block size and row source,
+ * while B's column block size and source may differ. A and B use backend
+ * memory and B must be disjoint from A and tau. Descriptors may be larger
+ * than the logical matrices. n=0 or nrhs=0 leaves B untouched and permits
+ * null data pointers. info=0 on return. Invalid arguments throw collectively.
+ * Rank deficiency is not detected, as in the underlying triangular solve.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void pgeqrs(const DdlaHandle_t& handle, int m, int n, int nrhs,
+            const T* A, const int* descA, const T* tau,
+            T* B, const int* descB, int& info);
+
+template <DdlaBackend Backend = default_backend_v, typename T>
+void punmbr(const DdlaHandle_t& handle,
+            char vect, char side, char trans,
+            int m, int n, int k,
+            const T* A, const int* descA,
+            const T* tau,
+            T* C, const int* descC,
+            int& info);
+
+/**
  * @brief Distributed Householder QL factorization, A = Q L (ScaLAPACK PxGEQLF).
  *
  * Factorizes the leading m x n block, k = min(m,n), from right to left.

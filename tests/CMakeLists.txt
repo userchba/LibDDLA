@@ -211,6 +211,9 @@ endif()
 # Stage 0 of pheevd, in isolation: full Hermitian matrix from the stored triangle (poisoned opposite triangle).
 add_test_executable(test_api_grid_pherm_complete)
 add_test_executable(test_api_grid_pgeqrf)
+add_test_executable(test_api_grid_pgeqrs)
+add_test_executable(test_api_grid_punmbr)
+target_include_directories(test_api_grid_punmbr PRIVATE ${PROJECT_SOURCE_DIR}/src)
 # Host unit probe for the QR robust-norm fold/scale math (no GPU, no grid
 # work); the math is host code compiled into every backend, so one cpu label
 # registration is enough and the gpu label keeps gpu ctest fast.
