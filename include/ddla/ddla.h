@@ -6,6 +6,7 @@
 #include "ddla_desc.h"
 #include <cstdint>
 #include <complex>
+#include <type_traits>
 #include <stdexcept>
 #include <string>
 
@@ -1854,6 +1855,21 @@ void pscal(const DdlaHandle_t& handle, int m, int n, const T& alpha,
 template <DdlaBackend Backend = default_backend_v, typename T>
 void scalBatched(const DdlaHandle_t& handle, int m, int n, const T& alpha,
                  T* const Aarray[], int lda, int batchCount);
+/** @brief Real-coefficient scaling of complex matrix regions, componentwise.
+ * Precision must match. Zero alpha never reads old entries; padding is kept.
+ * T is the matrix type; Alpha is inferred, so scal<Backend,T> needs no cast.
+ */
+template <DdlaBackend Backend = default_backend_v,typename T,typename Alpha>
+std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void>
+scal(const DdlaHandle_t& h,int m,int n,const Alpha& alpha,T* A,int lda);
+template <DdlaBackend Backend = default_backend_v,typename T,typename Alpha>
+std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void>
+pscal(const DdlaHandle_t& h,int m,int n,const Alpha& alpha,T* A,const int* descA);
+template <DdlaBackend Backend = default_backend_v,typename T,typename Alpha>
+std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void>
+scalBatched(const DdlaHandle_t& h,int m,int n,const Alpha& alpha,T* const Aarray[],int lda,int count);
+
+
 
 
 template <DdlaBackend Backend = default_backend_v, typename T>

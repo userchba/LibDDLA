@@ -9,8 +9,9 @@
 #include <stdexcept>
 
 namespace ddla {
-template <DdlaBackend Backend, typename T>
-void pscal(const DdlaHandle_t& h, int m, int n, const T& alpha,
+namespace {
+template <DdlaBackend Backend, typename T, typename Alpha>
+void pscal_matrix(const DdlaHandle_t& h, int m, int n, const Alpha& alpha,
            T* a, const int* desc)
 {
     int rows=0,columns=0;
@@ -21,7 +22,7 @@ void pscal(const DdlaHandle_t& h, int m, int n, const T& alpha,
             throw std::invalid_argument("pscal: region exceeds descriptor dimensions");
         rows=num_loc(m,desc[DDLA_MB_],h->myprow_,desc[DDLA_RSRC_],h->nprows_);
         columns=num_loc(n,desc[DDLA_NB_],h->mypcol_,desc[DDLA_CSRC_],h->npcols_);
-        blas_impl::geam_check<Backend,T>(h,'N','N',rows,columns,alpha,a,desc[DDLA_LLD_],
+        blas_impl::geam_check<Backend,T>(h,'N','N',rows,columns,T(alpha),a,desc[DDLA_LLD_],
             T(0),nullptr,1,a,desc[DDLA_LLD_]);
     });
     int signature[9]={m,n};
@@ -29,8 +30,23 @@ void pscal(const DdlaHandle_t& h, int m, int n, const T& alpha,
     detail::agree_signature(h,"pscal",signature);
     // Each rank updates only its owned entries. PGEADD's general alias
     // workspace is unnecessary for this identical-layout in-place operation.
-    scal<Backend,T>(h,rows,columns,alpha,a,desc[DDLA_LLD_]);
+    blas_impl::matrix_scal_run<Backend,T,Alpha>(h,rows,columns,alpha,a,desc[DDLA_LLD_]);
 }
+
+} // namespace
+template <DdlaBackend Backend,typename T>
+void pscal(const DdlaHandle_t& h,int m,int n,const T& alpha,T* a,const int* desc)
+{pscal_matrix<Backend,T,T>(h,m,n,alpha,a,desc);}
+template <DdlaBackend Backend,typename T,typename Alpha>
+std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void>
+pscal(const DdlaHandle_t& h,int m,int n,const Alpha& alpha,T* a,const int* desc)
+{pscal_matrix<Backend,T,Alpha>(h,m,n,alpha,a,desc);}
+#define MIXED_PSCAL(B,R) template void pscal<B,std::complex<R>,R>(const DdlaHandle_t&,int,int,const R&,std::complex<R>*,const int*)
+MIXED_PSCAL(DdlaBackend::CPU,float);MIXED_PSCAL(DdlaBackend::CPU,double);
+#if DDLA_HAS_GPU
+MIXED_PSCAL(DdlaBackend::GPU,float);MIXED_PSCAL(DdlaBackend::GPU,double);
+#endif
+#undef MIXED_PSCAL
 
 #define INSTANTIATE(B,T) template void pscal<B,T>(const DdlaHandle_t&,int,int,const T&,T*,const int*)
 #define TYPES(B) INSTANTIATE(B,float); INSTANTIATE(B,double); \

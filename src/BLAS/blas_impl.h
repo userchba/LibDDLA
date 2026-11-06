@@ -80,12 +80,15 @@ void geam_run(const DdlaHandle_t& handle, char transa, char transb, int m, int n
           const T& beta, const T* B, int ldb,
           T* C, int ldc);
 
+// Prechecked matrix scaling shared by ordinary and real-coefficient calls.
+template <DdlaBackend Backend, typename T, typename Alpha = T>
+void matrix_scal_run(const DdlaHandle_t& h,int m,int n,const Alpha& alpha,T* a,int lda);
 // Matrix-region scaling. GPU arrays remain backend-resident; no workspace.
-template <typename T>
-void matrix_scal_gpu_run(const DdlaHandle_t& h, int m, int n, const T& alpha,
+template <typename T, typename Alpha = T>
+void matrix_scal_gpu_run(const DdlaHandle_t& h, int m, int n, const Alpha& alpha,
                          T* a, int lda, T* const* arrays, int count);
-template <DdlaBackend Backend, typename T>
-void scalBatched_run(const DdlaHandle_t& h, int m, int n, const T& alpha,
+template <DdlaBackend Backend, typename T, typename Alpha = T>
+void scalBatched_run(const DdlaHandle_t& h, int m, int n, const Alpha& alpha,
                      T* const* arrays, int lda, int count);
 
 template <DdlaBackend Backend, typename T>

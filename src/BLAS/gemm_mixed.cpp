@@ -50,13 +50,17 @@ __device__ void mixed_store(R* C, std::size_t p, R re, R im,
     C[2*p+1] = ci;
 }
 
-template <typename R, bool Batched = false, bool Complex = true>
+template <typename R, bool Batched = false, bool Complex = true, bool RealAlpha = false>
 __global__ void mixed_scale(int m, int n, R br, R bi, R* C, int ldc, void* const* array = nullptr)
 {
     if constexpr (Batched) C=static_cast<R*>(array[blockIdx.z]);
     for (std::size_t p = std::size_t(blockIdx.x)*blockDim.x + threadIdx.x;
          p < std::size_t(m)*n; p += std::size_t(blockDim.x)*gridDim.x)
-        if constexpr (Complex)
+        if constexpr (Complex && RealAlpha) {
+            const std::size_t index=2*(p%m+(p/m)*ldc);
+            if (br==R(0)) {C[index]=R(0);C[index+1]=R(0);}
+            else {C[index]*=br;C[index+1]*=br;}
+        } else if constexpr (Complex)
             mixed_store(C, p%m + (p/m)*ldc, R(0), R(0), R(0), R(0), br, bi);
         else {
             const std::size_t index=p%m+(p/m)*ldc;
@@ -326,8 +330,8 @@ void mixed_gpu_cr(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
 namespace blas_impl {
 // Expose the existing matrix scale kernel to the SCAL interfaces as well as
 // GEMM. The complex branch is unchanged, including beta-zero no-read stores.
-template <typename T>
-void matrix_scal_gpu_run(const DdlaHandle_t& h, int m, int n, const T& alpha,
+template <typename T, typename Alpha>
+void matrix_scal_gpu_run(const DdlaHandle_t& h, int m, int n, const Alpha& alpha,
                          T* a, int lda, T* const* arrays, int count)
 {
 #if DDLA_HAS_GPU
@@ -335,11 +339,11 @@ void matrix_scal_gpu_run(const DdlaHandle_t& h, int m, int n, const T& alpha,
     using R=typename real_type<T>::type;
     constexpr bool complex=!std::is_arithmetic_v<T>;
     R re,im;
-    if constexpr (complex) {re=alpha.real();im=alpha.imag();}
+    if constexpr (!std::is_arithmetic_v<Alpha>) {re=alpha.real();im=alpha.imag();}
     else {re=alpha;im=R(0);}
     const auto stream=static_cast<gpuStream_t>(h->stream);
     if (!arrays) {
-        mixed_scale<R,false,complex><<<mixed_blocks(std::size_t(m)*n),256,0,stream>>>(
+        mixed_scale<R,false,complex,complex && std::is_arithmetic_v<Alpha>><<<mixed_blocks(std::size_t(m)*n),256,0,stream>>>(
             m,n,re,im,reinterpret_cast<R*>(a),lda);
         GPU_CHECK(gpuGetLastError());
         return;
@@ -347,7 +351,7 @@ void matrix_scal_gpu_run(const DdlaHandle_t& h, int m, int n, const T& alpha,
     for (int first=0; first<count;) {
         const int batch=std::min(count-first,65535);
         const dim3 grid(mixed_blocks(std::size_t(m)*n),1,batch);
-        mixed_scale<R,true,complex><<<grid,256,0,stream>>>(m,n,re,im,nullptr,lda,
+        mixed_scale<R,true,complex,complex && std::is_arithmetic_v<Alpha>><<<grid,256,0,stream>>>(m,n,re,im,nullptr,lda,
             reinterpret_cast<void* const*>(arrays+first));
         GPU_CHECK(gpuGetLastError());
         first+=batch;
@@ -702,5 +706,7 @@ MATRIX_SCAL_GPU(double);
 MATRIX_SCAL_GPU(std::complex<float>);
 MATRIX_SCAL_GPU(std::complex<double>);
 #undef MATRIX_SCAL_GPU
+template void blas_impl::matrix_scal_gpu_run<std::complex<float>,float>(const DdlaHandle_t&,int,int,const float&,std::complex<float>*,int,std::complex<float>* const*,int);
+template void blas_impl::matrix_scal_gpu_run<std::complex<double>,double>(const DdlaHandle_t&,int,int,const double&,std::complex<double>*,int,std::complex<double>* const*,int);
 #endif
 } // namespace ddla
