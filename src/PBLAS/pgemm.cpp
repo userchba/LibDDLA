@@ -388,16 +388,7 @@ void pgemm_run(
             const int m_loc_C = num_loc(m, descC[DDLA_MB_], myprow, descC[DDLA_RSRC_], nprows);
             const int n_loc_C = num_loc(n, descC[DDLA_NB_], mypcol, descC[DDLA_CSRC_], npcols);
             const int lldC = descC[DDLA_LLD_];
-            if (m_loc_C > 0 && n_loc_C > 0) {
-                for (int j = 0; j < n_loc_C; ++j) {
-                    T* col = C + static_cast<std::size_t>(j) * lldC;
-                    if (beta == T(0)) {
-                        DDLA_CHECK(ddlaMemset(h, col, 0, sizeof(T) * m_loc_C));
-                    } else if (beta != T(1)) {
-                        blas_impl::scal_run<Backend, T>(h, m_loc_C, beta, col, 1);
-                    }
-                }
-            }
+            blas_impl::matrix_scal_run<Backend,T>(h,m_loc_C,n_loc_C,beta,C,lldC);
             return;
         }
 

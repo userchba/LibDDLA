@@ -412,11 +412,7 @@ void phemm_run(const DdlaHandle_t& h, char side, char uplo,
                 return;
             }
 
-            if (ml>0 && nl>0) {
-                if (beta==T(0)) for (int j=0;j<nl;++j)
-                    DDLA_CHECK(ddlaMemset(h,C+std::size_t(j)*ldc,0,std::size_t(ml)*sizeof(T)));
-                else blas_impl::geam_run<Backend>(h,'N','N',ml,nl,beta,C,ldc,T(0),static_cast<const T*>(nullptr),1,C,ldc);
-            }
+            blas_impl::matrix_scal_run<Backend,T>(h,ml,nl,beta,C,ldc);
             return;
         }
         // The scratch, in the order phemm_workspace_size counts it; the rest is

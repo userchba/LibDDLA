@@ -146,9 +146,7 @@ void hemmt_run(const DdlaHandle_t& h,char side,char uploA,char uploC,int n,
     if (n==0 || other==0 || (alpha==T(0) && beta==T(1))) return;
     if (alpha==T(0)) {
         if (uploC!='F') gemmt_run<Backend,T,T,T>(h,uploC,'N','N',n,0,T(0),nullptr,1,nullptr,1,beta,C,ldc,nullptr,0);
-        else if (beta==T(0)) for (int j=0;j<cols;++j)
-            DDLA_CHECK(ddlaMemset(h,C+std::size_t(j)*ldc,0,std::size_t(rows)*sizeof(T)));
-        else geam_run<Backend,T>(h,'N','N',rows,cols,beta,C,ldc,T(0),nullptr,1,C,ldc);
+        else matrix_scal_run<Backend,T>(h,rows,cols,beta,C,ldc);
         return;
     }
     const bool left=side=='L',upper_input=uploA=='U',upper_output=uploC=='U';

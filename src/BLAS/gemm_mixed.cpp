@@ -213,8 +213,7 @@ void mixed_gpu(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
     const R* b=reinterpret_cast<const R*>(B);
     R* c=reinterpret_cast<R*>(C);
     if (!product) {
-        mixed_scale<<<mixed_blocks(std::size_t(m)*n),256,0,stream>>>(m,n,br,bi,c,ldc);
-        GPU_CHECK(gpuGetLastError());
+        blas_impl::matrix_scal_gpu_run<std::complex<R>>(h,m,n,beta,C,ldc,nullptr,1);
         return;
     }
     // The fused path avoids packing/allocations for launch-bound products.
@@ -299,8 +298,7 @@ void mixed_gpu_cr(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
     const R* const a=reinterpret_cast<const R*>(A);
     R* const c=reinterpret_cast<R*>(C);
     if (!product) {
-        mixed_scale<<<mixed_blocks(std::size_t(m)*n),256,0,stream>>>(m,n,br,bi,c,ldc);
-        GPU_CHECK(gpuGetLastError());
+        blas_impl::matrix_scal_gpu_run<std::complex<R>>(h,m,n,beta,C,ldc,nullptr,1);
         return;
     }
     const int nb=std::min(n,mixed_panel);
