@@ -597,3 +597,7 @@ if(TARGET workspace_trace)
     set_tests_properties(test_workspace_pgesvd_mpi PROPERTIES ENVIRONMENT
         "LD_PRELOAD=$<TARGET_FILE:workspace_trace>;DDLA_WORKSPACE_TRACE_REQUIRED=1;OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
 endif()
+
+# QR application/generation against independent host LAPACK.
+add_test_executable(test_qr_apply)
+target_include_directories(test_qr_apply PRIVATE ${PROJECT_SOURCE_DIR}/src)

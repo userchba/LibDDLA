@@ -2198,6 +2198,35 @@ void ptrtrm(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, c
     int n, const T& alpha, const T* A, const int* descA, const T* B, const int* descB,
     const T& beta, T* C, const int* descC);
 
+/** Apply Q from geqrf('U') or pgeqrf, with Q=H(1)...H(k).
+ * side L/R and trans N/C are supported; real T is also accepted.
+ * The ORMQR name includes complex unitary arithmetic (LAPACK UNMQR).
+ * Local A and tau use backend memory. Distributed tau is HOST local-column
+ * storage returned by pgeqrf, replicated across process rows. A and tau are
+ * read-only and disjoint from C. Only reflector tails below R are read.
+ * Distributed descriptors may have different blocks and source coordinates.
+ * Only the leading m by n of C is modified. info is zero on success and
+ * invalid arguments throw (collectively for distributed interfaces).
+ * Distributed scratch includes replicated nq by min(k,32) panels per rank.
+ */
+template<DdlaBackend Backend=default_backend_v,typename T>
+void ormqr(const DdlaHandle_t& h,char side,char trans,int m,int n,int k,
+           const T* A,int lda,const T* tau,T* C,int ldc,int& info);
+template<DdlaBackend Backend=default_backend_v,typename T>
+void pormqr(const DdlaHandle_t& h,char side,char trans,int m,int n,int k,
+            const T* A,const int* descA,const T* tau,T* C,const int* descC,int& info);
+/** Replace the leading m by n of QR factors A by the first n columns of Q.
+ * Requires m>=n>=k>=0. k=0 generates the corresponding identity columns.
+ * The ORGQR name includes complex arithmetic (LAPACK UNGQR). tau follows
+ * ORMQR/PORMQR memory and ownership conventions and must be disjoint from A.
+ * Parent entries and leading-dimension padding are preserved. Reflector tails
+ * are saved before A is overwritten. info is zero on success.
+ */
+template<DdlaBackend Backend=default_backend_v,typename T>
+void orgqr(const DdlaHandle_t& h,int m,int n,int k,T* A,int lda,const T* tau,int& info);
+template<DdlaBackend Backend=default_backend_v,typename T>
+void porgqr(const DdlaHandle_t& h,int m,int n,int k,T* A,const int* descA,const T* tau,int& info);
+
 } // namespace ddla
 
 #endif // DDLA_H

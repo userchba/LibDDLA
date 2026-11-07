@@ -28,3 +28,6 @@ if(DDLA_USE_HIP)
         PROPERTIES LANGUAGE HIP
         COMPILE_OPTIONS "$<$<COMPILE_LANG_AND_ID:HIP,Clang>:-ffp-contract=off>")
 endif()
+
+# Local/distributed application and generation of QR factors.
+target_sources(ddla_lib PRIVATE ormqr.cpp)
