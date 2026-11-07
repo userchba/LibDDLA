@@ -162,6 +162,15 @@ add_test_executable(test_api_grid_pvector_redist)
 add_test_executable(test_api_grid_phe2hb)
 # phe2hb must ignore the pgeqrf tuning knob DDLA_QR_LOOKAHEAD: output bitwise equal with it set
 add_test_executable(test_api_grid_phe2hb_knobs)
+foreach(_phe2hb_test test_api_grid_phe2hb test_api_grid_phe2hb_knobs)
+    target_include_directories(${_phe2hb_test} PRIVATE ${PROJECT_SOURCE_DIR}/src)
+endforeach()
+# This fixture intentionally requires a CPU handle; the grid runner otherwise
+# creates the default GPU handle in CUDA/HIP builds.
+if(DDLA_USE_CPU AND NOT DDLA_USE_CUDA AND NOT DDLA_USE_HIP)
+    add_test_executable(test_phe2hb_upper_cpu)
+    target_include_directories(test_phe2hb_upper_cpu PRIVATE ${PROJECT_SOURCE_DIR}/src)
+endif()
 add_test_executable(test_api_grid_phb2st)
 add_test_executable(test_api_grid_pheevd)
 add_test_executable(test_pheevd_workspace)

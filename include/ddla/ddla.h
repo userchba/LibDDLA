@@ -2047,6 +2047,18 @@ void pgemm(const DdlaHandle_t& handle, char transa, char transb,
            const R* B, const int* descB,
            const std::complex<R>& beta, std::complex<R>* C, const int* descC);
 
+/**
+ * @brief Reduce a full distributed Hermitian matrix to band form.
+ * A has square source-zero blocks. nbw divides the block size. Both triangles
+ * of A are workspace; upper band entries and implicit-unit reflector tails
+ * remain in A. tmat is backend storage replicated across ranks, with
+ * ((n-1)/nbw) slots of nbw-by-nbw compact reflector factors (zero for n=0).
+ * Supports all four scalar types and owns its internal workspace.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void phe2hb(const DdlaHandle_t& handle, int n, T* A, const int* descA,
+            int nbw, T* tmat, int& info);
+
 template <DdlaBackend Backend = default_backend_v, typename T>
 void pherm_complete(
     const DdlaHandle_t& handle,
