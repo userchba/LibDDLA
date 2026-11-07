@@ -331,9 +331,12 @@ void triangle_panel_run(const DdlaHandle_t& h, char uplo, bool product, int n, i
                     blas_impl::local_gemm_run<Backend,T,TA,TB>(h,'N','N',end-start,width,kw,alpha,
                         a+start,mr,b+std::size_t(jl)*kw,kw,beta,out,ldc,triangle_work,triangle_bytes);
                 else if (beta==T(0)) {
-                    for (int col=0;col<width;++col)
-                        DDLA_CHECK(ddlaMemset(h,out+std::size_t(col)*ldc,0,
-                            std::size_t(end-start)*sizeof(T)));
+                    if constexpr (Backend==DdlaBackend::GPU)
+                        blas_impl::matrix_scal_run<Backend,T>(h,end-start,width,beta,out,ldc);
+                    else // Keep the faster CPU clears for small triangular panels.
+                        for (int col=0;col<width;++col)
+                            DDLA_CHECK(ddlaMemset(h,out+std::size_t(col)*ldc,0,
+                                std::size_t(end-start)*sizeof(T)));
                 } else if (beta!=T(1))
                     blas_impl::geam_run<Backend,T>(h,'N','N',end-start,width,beta,out,ldc,
                         T(0),static_cast<const T*>(nullptr),1,out,ldc);
