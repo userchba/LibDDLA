@@ -102,6 +102,7 @@ add_subdirectory(QR)
 add_subdirectory(SVD)
 add_subdirectory(vbatched)
 add_subdirectory(Eigensolver/one_stage)
+add_subdirectory(Eigensolver/two_stage)
 
 # ---------------------------------------------------------------------------
 # Per-target compile definitions (moved from directory-global)
