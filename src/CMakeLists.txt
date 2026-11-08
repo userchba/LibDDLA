@@ -195,3 +195,5 @@ endif()
 if(DDLA_USE_HIP)
     set_source_files_properties(Eigensolver/pstedc.cpp TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE HIP)
 endif()
+
+add_subdirectory(LDLT)

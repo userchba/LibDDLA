@@ -617,3 +617,35 @@ endif()
 # QR application/generation against independent host LAPACK.
 add_test_executable(test_qr_apply)
 target_include_directories(test_qr_apply PRIVATE ${PROJECT_SOURCE_DIR}/src)
+
+add_test_executable(test_ldlt)
+
+# Local complex-double HETRF must keep its matrix arithmetic on the GPU.
+if(DDLA_HAS_GPU AND UNIX AND NOT APPLE)
+    add_library(zhetrf_cpu_trace SHARED zhetrf_cpu_trace.cpp)
+    target_link_libraries(zhetrf_cpu_trace PRIVATE ${CMAKE_DL_LIBS})
+    add_test_executable(test_zhetrf_gpu 1)
+    target_link_libraries(test_zhetrf_gpu PRIVATE ${CMAKE_DL_LIBS})
+    add_dependencies(test_zhetrf_gpu zhetrf_cpu_trace)
+    set_property(TEST test_zhetrf_gpu_mpi APPEND PROPERTY ENVIRONMENT
+        "LD_PRELOAD=$<TARGET_FILE:zhetrf_cpu_trace>" "DDLA_EXPECT_NATIVE=1")
+endif()
+
+# GPU HETRF_NOPIV and distributed HETRF must not fall back to CPU arithmetic.
+if(DDLA_HAS_GPU AND UNIX AND NOT APPLE)
+    add_library(ldlt_cpu_trace SHARED ldlt_cpu_trace.cpp)
+    target_link_libraries(ldlt_cpu_trace PRIVATE ${CMAKE_DL_LIBS})
+    add_test_executable(test_ldlt_gpu_native 1)
+    target_link_libraries(test_ldlt_gpu_native PRIVATE ${CMAKE_DL_LIBS})
+    add_dependencies(test_ldlt_gpu_native ldlt_cpu_trace)
+    set_property(TEST test_ldlt_gpu_native_mpi APPEND PROPERTY ENVIRONMENT
+        "LD_PRELOAD=$<TARGET_FILE:ldlt_cpu_trace>" "DDLA_EXPECT_NATIVE=1")
+    add_library(ldlt_root_failure SHARED ldlt_root_failure.cpp)
+    target_compile_definitions(ldlt_root_failure PRIVATE OMPI_SKIP_MPICXX=1)
+    target_link_libraries(ldlt_root_failure PRIVATE MPI::MPI_CXX)
+    add_test_executable(test_ldlt_root_failure 2)
+    add_dependencies(test_ldlt_root_failure ldlt_root_failure)
+    set_property(TEST test_ldlt_root_failure_mpi APPEND PROPERTY ENVIRONMENT
+        "LD_PRELOAD=$<TARGET_FILE:ldlt_root_failure>")
+    set_tests_properties(test_ldlt_root_failure_mpi PROPERTIES SKIP_RETURN_CODE 77)
+endif()
