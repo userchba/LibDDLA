@@ -15,10 +15,6 @@ void summarize_column(const DdlaHandle_t& h, T* column, int first, int count, in
                       PivotSummary* output);
 template <class T>
 void hetrf_nopiv_gpu(const DdlaHandle_t& h, char uplo, int n, T* a, int lda, int& info);
-template <bool Pivot, class T>
-void phetrf_gpu(const DdlaHandle_t& h, char uplo, int n, T* a, const int* desc, int* piv,
-                int& info);
-
 // Hermitian 1x1 pivots: local leaves up to256, distributed diagonal tiles up
 // to64.
 template <class T>
@@ -38,5 +34,8 @@ template <class T>
 void copy_stored(const DdlaHandle_t& h, char uplo, int n, const int* desc, const T* src, int lds,
                  T* dst, int ldd, int row0 = 0, int col0 = 0, int rows = -1, int cols = -1,
                  bool subtract = false);
+template <class T>
+void swap_stored(const DdlaHandle_t& h, char u, int n, const int* d, T* a, int ld, int first,
+                 int count, int row_a, int row_b, const T* col_a, const T* col_b);
 } // namespace ddla::ldlt_impl
 #endif

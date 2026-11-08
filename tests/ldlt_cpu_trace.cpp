@@ -128,3 +128,27 @@ extern "C" void zherk_(const char* u, const char* trans, const int* n, const int
     ++calls;
     original(u, trans, n, k, alpha, a, lda, beta, c, ldc);
 }
+
+// Solve-side negative control: a native GPU solve must not call CPU HETRS/TRSM.
+#define TRACE_HETRS(NAME,T) \
+extern "C" void NAME##_(const char* u,const int* n,const int* nr,const T* a,const int* lda,const int* p,T* b,const int* ldb,int* info) { \
+ using F=void(*)(const char*,const int*,const int*,const T*,const int*,const int*,T*,const int*,int*); \
+ static auto original=reinterpret_cast<F>(dlsym(RTLD_NEXT,#NAME "_")); \
+ if(!original)throw std::runtime_error("CPU HETRS trace lookup failed"); \
+ ++calls;original(u,n,nr,a,lda,p,b,ldb,info); }
+#define TRACE_TRSM(NAME,T) \
+extern "C" void NAME##_(const char* side,const char* u,const char* trans,const char* diag,const int* m,const int* n,const T* alpha,const T* a,const int* lda,T* b,const int* ldb) { \
+ using F=void(*)(const char*,const char*,const char*,const char*,const int*,const int*,const T*,const T*,const int*,T*,const int*); \
+ static auto original=reinterpret_cast<F>(dlsym(RTLD_NEXT,#NAME "_")); \
+ if(!original)throw std::runtime_error("CPU TRSM trace lookup failed"); \
+ ++calls;original(side,u,trans,diag,m,n,alpha,a,lda,b,ldb); }
+TRACE_HETRS(ssytrs,float)
+TRACE_HETRS(dsytrs,double)
+TRACE_HETRS(chetrs,std::complex<float>)
+TRACE_HETRS(zhetrs,std::complex<double>)
+TRACE_TRSM(strsm,float)
+TRACE_TRSM(dtrsm,double)
+TRACE_TRSM(ctrsm,std::complex<float>)
+TRACE_TRSM(ztrsm,std::complex<double>)
+#undef TRACE_HETRS
+#undef TRACE_TRSM

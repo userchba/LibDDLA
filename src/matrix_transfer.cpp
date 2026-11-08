@@ -92,8 +92,10 @@ int transfer_peer_blocks(const DdlaHandle_t& h, int m, int n, int ia, int ja, co
 // column is one memcpy, column by column (tile-sized 2D copies touch many
 // columns at once and measured slower). On the GPU a copy call costs more than
 // the data it moves, so one kernel maps whole blocks.
+} // namespace
+
 template <DdlaBackend B, typename T>
-void map(const DdlaHandle_t& h, bool scatter, const Block<T>* blocks, int count,
+void map_blocks(const DdlaHandle_t& h, bool scatter, const Block<T>* blocks, int count,
          const int* d, int ia, int ja, int m, int n, T* window, int ldw)
 {
     if constexpr (B == DdlaBackend::GPU) {
@@ -118,6 +120,8 @@ void map(const DdlaHandle_t& h, bool scatter, const Block<T>* blocks, int count,
         }
     }
 }
+
+namespace {
 
 // The MPI paths of commSend/commRecv take an int count, so long messages go
 // in pieces. An empty message sends nothing.
@@ -266,7 +270,7 @@ void gather_run(const DdlaHandle_t& h, int m, int n, const T* A, int ia, int ja,
 
     // The root's own block is copied before the receives, while the peers
     // are still packing; the received blocks follow in one batch.
-    map<B>(h, false, &own, 1, d, ia, ja, m, n, dst, lddst);
+    map_blocks<B>(h, false, &own, 1, d, ia, ja, m, n, dst, lddst);
     assert(std::size_t(peers - 1) * sizeof(Block<T>) <= host_bytes);
     Block<T>* const blocks = static_cast<Block<T>*>(host_work);
     const int count = transfer_peer_blocks(h, m, n, ia, ja, d, scope, root_col, root_peer, peers, packed, blocks);
@@ -276,7 +280,7 @@ void gather_run(const DdlaHandle_t& h, int m, int n, const T* A, int ia, int ja,
         recv<B>(h, scope, b.data, block_size(b.p), scope == CommScope::Col ? b.p.prow : h->rc_to_rank(b.p.prow, b.p.pcol));
     }
     commGroupEnd<B>(h);
-    map<B>(h, false, blocks, count, d, ia, ja, m, n, dst, lddst);
+    map_blocks<B>(h, false, blocks, count, d, ia, ja, m, n, dst, lddst);
 }
 
 // Component 3, with the scratch of gather_run.
@@ -315,8 +319,8 @@ void scatter_run(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
     assert(std::size_t(peers - 1) * sizeof(Block<T>) <= host_bytes);
     Block<T>* const blocks = static_cast<Block<T>*>(host_work);
     const int count = transfer_peer_blocks(h, m, n, ia, ja, d, scope, root_col, root_peer, peers, packed, blocks);
-    map<B>(h, true, blocks, count, d, ia, ja, m, n, window, ldsrc);
-    map<B>(h, true, &own, 1, d, ia, ja, m, n, window, ldsrc);
+    map_blocks<B>(h, true, blocks, count, d, ia, ja, m, n, window, ldsrc);
+    map_blocks<B>(h, true, &own, 1, d, ia, ja, m, n, window, ldsrc);
     if (group_root) commGroupStart<B>(h);
     for (int k = 0; k < count; ++k) {
         const Block<T>& b = blocks[k];
@@ -517,6 +521,7 @@ void scatter(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
 }
 
 #define INST(B, T) \
+    template void matrix_impl::map_blocks<B,T>(const DdlaHandle_t&,bool,const matrix_impl::Block<T>*,int,const int*,int,int,int,int,T*,int); \
     template void matrix_impl::gather_check<B,T>(const DdlaHandle_t&,int,int,const T*,int,int,const int*,int,T*,int); \
     template void matrix_impl::scatter_check<B,T>(const DdlaHandle_t&,int,int,T*,int,int,const int*,int,const T*,int); \
     template void matrix_impl::gather_run<B,T>(const DdlaHandle_t&,int,int,const T*,int,int,const int*,int,T*,int, \
