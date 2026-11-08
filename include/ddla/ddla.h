@@ -2059,6 +2059,30 @@ template <DdlaBackend Backend = default_backend_v, typename T>
 void phe2hb(const DdlaHandle_t& handle, int n, T* A, const int* descA,
             int nbw, T* tmat, int& info);
 
+/**
+ * @brief Apply the full-to-band transform produced by phe2hb to distributed Z.
+ * trans='N' applies Q; 'C' applies Q^H and maps band eigenvectors back to the
+ * original matrix. 'T' is accepted as an alias of 'C', including complex types.
+ * A and tmat are read-only backend storage from phe2hb. Z's leading n-by-n
+ * region is overwritten and must be disjoint from the factors. Its row block
+ * size and source match A; its column distribution may differ. A has square
+ * source-zero blocks and nbw divides its block size. Parent data and padding
+ * outside the active region are preserved. No panels means identity.
+ * GPU execution combines adjacent panel pairs in bounded device workspace.
+ * The operation owns internal workspace; info is zero on success.
+ * Argument checks are local; callers provide consistent arguments on all ranks.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void punmtr_he2hb(
+    const DdlaHandle_t& handle,
+    char trans,
+    int n, int nbw,
+    const T* A, const int* descA,
+    const T* tmat,
+    T* Z, const int* descZ,
+    int& info
+);
+
 template <DdlaBackend Backend = default_backend_v, typename T>
 void pherm_complete(
     const DdlaHandle_t& handle,

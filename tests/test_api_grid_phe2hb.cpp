@@ -6,11 +6,14 @@
 #include "eig_test_common.h"
 
 // ---------------------------------------------------------------------------
-// Isolation test for the full-to-band reduction (phe2hb).
+// Isolation test for stage 1 (phe2hb) and stage 5 (punmtr_he2hb).
 //
 // Stage 1: reduce a full Hermitian matrix to banded form, reconstruct
 // A = Q^H B Q on the host from the banded part and the stored reflectors, and
 // compare against the input.
+//
+// Stage 5: run both transform directions on the identity and check them
+// against the host-built Q and Q^H, then check P B P^H = A for each.
 //
 // Output contract exercised:
 //   - upper triangle: band entries at rows [j-nbw, j] plus the reflector
@@ -253,7 +256,7 @@ void run_case(const ddla::DdlaHandle_t& handle, int n, int nb, int nbw, const st
     // Root-only: B, Q, A_in and the O(n^3) host products below read only the
     // replicated gather_full output, so computing them on every rank repeats
     // identical dense work P times -- the dominant share of this test's check
-    // phase. Reconstruction results are agreed collectively on all ranks;
+    // phase.  The stage-5 punmtr/gather calls stay collective on all ranks;
     // only their dense comparisons move inside the root-only verdicts.
     auto idx = [n](int i, int j) { return i + static_cast<std::size_t>(j) * n; };
     // Dense check inputs; filled on the root rank only (RootSection below):
@@ -293,10 +296,53 @@ void run_case(const ddla::DdlaHandle_t& handle, int n, int nb, int nbw, const st
     }
     }
 
+    // ---- stage 5: transform the identity in both directions ---------------
+    int descZ[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descZ, handle, n, n, nb, nb, 0, 0));
+    auto h_I = make_local<T>(handle, descZ, [](int i, int j) { return T(i == j ? 1 : 0); });
+
+    // trans='N' must give Q;  trans='C' must give Q^H.
+    for (int pass = 0; pass < 2; ++pass) {
+        const char trans = (pass == 0) ? 'N' : 'C';
+        const bool adjoint = (trans != 'N');
+        DeviceBuffer<T> d_Z(handle, h_I.size());
+        upload(handle, d_Z.ptr, h_I);
+        check_ddla_sync(handle);
+        int info5 = 0;
+        ddla::punmtr_he2hb(handle, trans, n, nbw, d_A.ptr, desc, d_tmat.ptr,
+                           d_Z.ptr, descZ, info5);
+        check_ddla_sync(handle);
+        if (info5 != 0) {
+            if (ddlaGetRank(handle) == 0)
+                std::cerr << "punmtr_he2hb('" << trans << "') info=" << info5 << std::endl;
+            MPI_Abort(ddlaGetCommunicator(handle), 1);
+        }
+        const auto P = gather_full<T>(handle, d_Z.ptr, descZ, n);
+
+        // P should equal the host-built Q, or its adjoint (dense work is
+        // root-only; Q and B exist only there).
+        if (dense.root) {
+        const std::vector<T> Qref = adjoint ? host_adjoint<T>(Q, n) : Q;
+        dense.check(std::string("stage5 '") + trans + "' P = " + (adjoint ? "Q^H" : "Q"),
+                      max_abs_diff(P, Qref) / denom, tol);
+
+        // The factorization is A = Q^H B Q, so applying the stage-5 transform
+        // to B recovers A in both directions, just from opposite sides: with
+        // P = Q (trans='N') the identity is P^H B P = A, and with P = Q^H
+        // (trans='C') it is P B P^H = A.  This is exactly the reduction the
+        // eigensolver driver relies on, so the two cases are checked
+        // separately rather than collapsed into one symmetric-looking form.
+        const auto A_chk = adjoint ? host_mul_conjB<T>(host_mul<T>(P, B, n), P, n)
+                                   : host_mul<T>(host_mul_conjA<T>(P, B, n), P, n);
+        const char* expr = adjoint ? "P B P^H = A" : "P^H B P = A";
+        dense.check(std::string("stage5 '") + trans + "' " + expr,
+                      max_abs_diff(A_chk, A_in) / denom, tol);
+        }
+    }
     dense.finish();
 }
 
-// phe2hb must REFUSE an nbw that does not divide nb (nbw > nb, nb % nbw != 0,
+// phe2hb and punmtr_he2hb must REFUSE an nbw that does not divide nb (nbw > nb, nb % nbw != 0,
 // nbw = 0): every rank throws before any collective.
 template <typename T>
 void check_refusals(const ddla::DdlaHandle_t& handle, int nb)
@@ -308,25 +354,32 @@ void check_refusals(const ddla::DdlaHandle_t& handle, int nb)
     DeviceBuffer<T> d_A(handle, h_A.size());
     upload(handle, d_A.ptr, h_A);
     DeviceBuffer<T> d_tmat(handle, static_cast<std::size_t>(4) * nb * nb + 16);
+    DeviceBuffer<T> d_Z(handle, h_A.size());
+    upload(handle, d_Z.ptr, h_A);
     check_ddla_sync(handle);
     std::vector<int> bad = {2 * nb, nb + 1, 0};
     if (nb > 2 && nb % (nb - 1) != 0) bad.push_back(nb - 1);   // does not divide nb
     for (const int nbw : bad) {
-        double threw1 = 0.0;
+        double threw1 = 0.0, threw5 = 0.0;
         int info = 0;
         try { ddla::phe2hb(handle, n, d_A.ptr, desc, nbw, d_tmat.ptr, info); }
         catch (const std::exception&) { threw1 = 1.0; }
+        try { ddla::punmtr_he2hb(handle, 'C', n, nbw, d_A.ptr, desc, d_tmat.ptr, d_Z.ptr, desc, info); }
+        catch (const std::exception&) { threw5 = 1.0; }
         check_ddla_sync(handle);
-        // refused UP FRONT: A was not touched (a check that only fired mid-call would
+        // refused UP FRONT: neither A nor Z was touched (a check that only fired mid-call would
         // have factored some panels first)
         const auto a_after = download<T>(handle, d_A.ptr, h_A.size());
+        const auto z_after = download<T>(handle, d_Z.ptr, h_A.size());
         double mism = 0.0;
         for (std::size_t i = 0; i < h_A.size(); ++i) {
             if (std::memcmp(&a_after[i], &h_A[i], sizeof(T)) != 0) mism += 1.0;
+            if (std::memcmp(&z_after[i], &h_A[i], sizeof(T)) != 0) mism += 1.0;
         }
         const std::string tag = "sizeof=" + std::to_string(sizeof(T)) + " nb=" + std::to_string(nb) + " nbw=" + std::to_string(nbw);
         require_close(handle, "phe2hb refuses " + tag, 1.0 - threw1, 0.0);
-        require_close(handle, "refusal leaves A untouched " + tag, mism, 0.0);
+        require_close(handle, "punmtr_he2hb refuses " + tag, 1.0 - threw5, 0.0);
+        require_close(handle, "refusal leaves A and Z untouched " + tag, mism, 0.0);
     }
 }
 
