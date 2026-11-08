@@ -20,6 +20,12 @@ template<class T>void run_type(const ddla::DdlaHandle_t&h){
     require_close(h,"grouped local argument validation",grouped_stage5_oracle::validation<T>(h),0);
 }
 void body(const ddla::DdlaHandle_t&h,const Shape&){
+    double policy=0;
+    policy+=grouped_stage5_oracle::policy_queries<float>(h);
+    policy+=grouped_stage5_oracle::policy_queries<double>(h);
+    policy+=grouped_stage5_oracle::policy_queries<std::complex<float>>(h);
+    policy+=grouped_stage5_oracle::policy_queries<std::complex<double>>(h);
+    require_close(h,"stage5 shared policy and exact queries at4999/5000/5001",policy,0);
 #if DDLA_HAS_GPU
     if(ddlaGetBackend(h)==ddla::DdlaBackend::GPU) {
         ddla::DdlaHandle_t cpu=nullptr;

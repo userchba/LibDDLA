@@ -2,6 +2,7 @@
 #define DDLA_PUNMTR_HE2HB_GROUPED_H
 #include <ddla/ddla.h>
 #include <cstddef>
+#include <type_traits>
 
 namespace ddla {
 namespace spectral_impl {
@@ -14,6 +15,21 @@ struct GroupedStage5Options
 {
     int group_cap = 3; // 1, 2 or 3; identical on every rank.
 };
+
+// The same policy selects the public operation and every whole-solver engine.
+// nbw remains the native panel width; descriptor blocks do not set group width.
+template <class T>
+GroupedStage5Options grouped_stage5_default_options(DdlaBackend backend, int n)
+{
+    GroupedStage5Options options;
+    if (backend == DdlaBackend::GPU)
+        options.group_cap = 2;
+    else if (n >= 5000)
+        options.group_cap = std::is_same<T, typename real_type<T>::type>::value ? 3 : 2;
+    else
+        options.group_cap = 1;
+    return options;
+}
 
 struct GroupedStage5Plan
 {
@@ -52,9 +68,11 @@ GroupedStage5Plan grouped_stage5_check(const DdlaHandle_t&,
                                        const int*,
                                        const GroupedStage5Options&);
 
-// Backend bytes, in carving order: V (max_rows x K), W and W2
-// (K x zcols), S (K x K), G and G2 (the Gram blocks of one group), where K is
-// the widest group's column count.
+// Backend bytes, in carving order: V, W and W2; for multiple-panel groups,
+// S (K x K), G and G2 (the Gram blocks), where K is the widest group's columns.
+// A one-panel plan borrows the panel's original T slot. CPU retains the old
+// V (max_rows x nbw), W/W2 (nbw x max(zcols,1)) regions; GPU uses the actual
+// partial-panel width instead of nbw. No combined factor/Gram regions are needed.
 template <class T>
 void grouped_stage5_workspace_size(const DdlaHandle_t&,
                                    const GroupedStage5Plan&,
