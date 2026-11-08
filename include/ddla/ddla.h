@@ -2240,14 +2240,21 @@ void ptrtrm(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, c
  * are supported, only the selected triangle is read/written. SY is transpose
  * symmetric, HE is Hermitian (real HE agrees with SY). Solve overwrites B.
  * info is host memory. Local hetrf<GPU, std::complex<double>> and all four
- * scalar types of hetrf_nopiv<GPU>, phetrf<GPU> and phetrf_nopiv<GPU> keep
- * matrix arithmetic on the GPU. Pivoted phetrf uses bounded panels and one
- * extra 2D block-cyclic matrix, about n*n/P elements per rank plus block
- * rounding. No-pivot GPU factorization updates the selected triangle in place
- * with bounded panels; no full host matrix is gathered by these GPU factors.
- * IPIV and INFO remain host data. Other GPU LDL variants stage arithmetic
- * through host LAPACK. CPU distributed factors and all distributed solves
- * still gather leading blocks to rank 0 with O(n*n) root storage.
+ * scalar types of hetrf_nopiv<GPU>, phetrf<GPU>, phetrf_nopiv<GPU>, phetrs<GPU>
+ * and phetrs_nopiv<GPU> keep matrix arithmetic on the GPU. CPU and GPU HE
+ * distributed calls keep quadratic matrix storage 2D block-cyclic.
+ * DDLA_LDLT_PANEL=gather (default) caches at most 64 columns on rank 0 and
+ * uses one extra distributed n-by-n matrix for pivoted phetrf. Setting it to
+ * inplace updates only the caller's selected triangle without that matrix.
+ * Both modes replicate bounded-width panel vectors, not a full dense matrix.
+ * No-pivot phetrf always updates the selected triangle in place.
+ * HE distributed solves compose permutations, unit triangular solves and
+ * block-diagonal scaling. Const input factors are copied to distributed
+ * storage only when pivot conversion or descriptor normalization requires it;
+ * RHS temporaries are also distributed. IPIV and INFO remain host data.
+ * Other GPU LDL variants stage arithmetic through host LAPACK. Distributed
+ * SY factors/solves still gather leading blocks to rank 0 with quadratic
+ * root storage. Local GPU hetrs/hetrs_nopiv also retain host staging.
  * Flags/global metadata must agree across ranks.
  */
 template <DdlaBackend Backend = default_backend_v, typename T>

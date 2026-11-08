@@ -10,7 +10,7 @@ target_sources(ddla_lib PRIVATE
 )
 
 if(NOT ddla_cpu_only_build)
-    target_sources(ddla_lib PRIVATE hetrf_gpu.cpp hetrf_kernels.cpp hetrf_nopiv_gpu.cpp phetrf_gpu.cpp ldlt_native_kernels.cpp)
+    target_sources(ddla_lib PRIVATE hetrf_gpu.cpp hetrf_kernels.cpp hetrf_nopiv_gpu.cpp ldlt_native_kernels.cpp)
 endif()
 if(DDLA_USE_CUDA)
     set_source_files_properties(hetrf_kernels.cpp ldlt_native_kernels.cpp TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE CUDA)

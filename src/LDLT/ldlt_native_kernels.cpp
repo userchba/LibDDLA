@@ -164,6 +164,35 @@ __global__ void stored_copy(bool upper, int n, int rows, int cols, int mb, int n
     }
 }
 
+// Each selected entry has exactly one writer, including the bridge between
+// the two permuted indices. The opposite triangle is never accessed.
+template <class T>
+__global__ void hermitian_swap(bool upper, int first, int count, int a, int b, int mb, int nb,
+                               int pr, int pc, int mr, int mc, int rs, int cs, T* matrix, int ld,
+                               const T* ca, const T* cb)
+{
+    for (int k = blockIdx.x * blockDim.x + threadIdx.x; k < 2 * count; k += blockDim.x * gridDim.x)
+    {
+        const int p = k / count, i = first + k % count;
+        if (p && i == a)
+            continue;
+        const int column = p ? b : a, old = i == a ? b : i == b ? a : i;
+        T value = p ? ca[old] : cb[old];
+        int r = i, c = column;
+        if (upper ? r > c : r < c)
+        {
+            const int tmp = r;
+            r = c;
+            c = tmp;
+            value = detail::device_conj(value);
+        }
+        if ((r / mb + rs) % pr != mr || (c / nb + cs) % pc != mc)
+            continue;
+        const int lr = (r / (mb * pr)) * mb + r % mb, lc = (c / (nb * pc)) * nb + c % nb;
+        matrix[lr + std::size_t(lc) * ld] = r == c ? T(real_part(value)) : value;
+    }
+}
+
 int blocks(std::size_t elements)
 {
     return int(std::min<std::size_t>((elements + 255) / 256, 65535));
@@ -244,7 +273,25 @@ void copy_stored(const DdlaHandle_t& h, char u, int n, const int* d, const T* sr
     DDLA_CHECK(ddlaGetLastError(h));
 }
 
+template <class T>
+void swap_stored(const DdlaHandle_t& h, char u, int n, const int* d, T* a, int ld, int first,
+                 int count, int row_a, int row_b, const T* ca, const T* cb)
+{
+    (void)n;
+    if (!count || row_a == row_b)
+        return;
+    using D = detail::DeviceScalarT<T>;
+    static_assert(sizeof(D) == sizeof(T) && sizeof(T) % alignof(D) == 0);
+    hermitian_swap<<<blocks(std::size_t(2) * count), 256, 0, static_cast<gpuStream_t>(h->stream)>>>(
+        u == 'U', first, count, row_a, row_b, d[DDLA_MB_], d[DDLA_NB_], h->nprows_, h->npcols_,
+        h->myprow_, h->mypcol_, d[DDLA_RSRC_], d[DDLA_CSRC_], reinterpret_cast<D*>(a), ld,
+        reinterpret_cast<const D*>(ca), reinterpret_cast<const D*>(cb));
+    DDLA_CHECK(ddlaGetLastError(h));
+}
+
 #define INSTANCE(T)                                                                                \
+    template void swap_stored<T>(const DdlaHandle_t&, char, int, const int*, T*, int, int, int,    \
+                                 int, int, const T*, const T*);                                    \
     template void summarize_column<T>(const DdlaHandle_t&, T*, int, int, int, PivotSummary*);      \
     template void nopiv_diagonal<T>(const DdlaHandle_t&, char, int, T*, int, int*);                \
     template void divide_panel<T>(const DdlaHandle_t&, int, int, const T*, int, const T*, int, T*, \

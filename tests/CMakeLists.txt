@@ -649,3 +649,25 @@ if(DDLA_HAS_GPU AND UNIX AND NOT APPLE)
         "LD_PRELOAD=$<TARGET_FILE:ldlt_root_failure>")
     set_tests_properties(test_ldlt_root_failure_mpi PROPERTIES SKIP_RETURN_CODE 77)
 endif()
+
+# CPU/GPU distributed LDLT factors and immutable distributed solves.
+add_test_executable(test_ldlt_distributed)
+target_link_libraries(test_ldlt_distributed PRIVATE ${CMAKE_DL_LIBS})
+set_property(TEST test_ldlt_distributed_mpi APPEND PROPERTY ENVIRONMENT "DDLA_LDLT_PANEL=gather")
+add_test(NAME test_ldlt_distributed_inplace_mpi
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${DDLA_TEST_NP}
+        ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_ldlt_distributed> ${MPIEXEC_POSTFLAGS})
+set_tests_properties(test_ldlt_distributed_inplace_mpi PROPERTIES PROCESSORS ${DDLA_TEST_NP}
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1;DDLA_LDLT_PANEL=inplace")
+if(DDLA_HAS_GPU)
+    set_tests_properties(test_ldlt_distributed_inplace_mpi PROPERTIES LABELS gpu)
+    if(TARGET ldlt_cpu_trace)
+        add_dependencies(test_ldlt_distributed ldlt_cpu_trace)
+        foreach(_ldlt_test test_ldlt_distributed_mpi test_ldlt_distributed_inplace_mpi)
+            set_property(TEST ${_ldlt_test} APPEND PROPERTY ENVIRONMENT
+                "LD_PRELOAD=$<TARGET_FILE:ldlt_cpu_trace>" "DDLA_EXPECT_NATIVE=1")
+        endforeach()
+    endif()
+else()
+    set_tests_properties(test_ldlt_distributed_inplace_mpi PROPERTIES LABELS cpu)
+endif()
