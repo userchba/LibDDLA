@@ -3,6 +3,7 @@
 #include <ddla/ddla.h>
 #include <ddla/ddla_vector.h>
 #include "Eigensolver/eig_workspace.h"
+#include "punmtr_impl.h"
 #include "Eigensolver/two_stage/punmtr_he2hb_grouped.h"
 #include "Eigensolver/pheevd_alias.h"
 #include <algorithm>
@@ -112,6 +113,42 @@ template<class T> std::vector<Wide> expected(const Fixture<T>&f,const std::vecto
     for(int c=0;c<n;++c)for(int r=0;r<n;++r)for(int l=0;l<n;++l)
         out[r+std::size_t(c)*n]+=(trans=='N'?q[r+std::size_t(l)*n]:std::conj(q[l+std::size_t(r)*n]))*wide(input_z<T>(l,c));
     return out;
+}
+// Independent requested-byte model: one panel borrows its immutable T slot,
+// while a multi-panel group additionally owns S and two Gram buffers.
+template<class T> std::size_t expected_workspace_bytes(const ddla::DdlaHandle_t& h,const ddla::detail::GroupedStage5Plan& p) {
+    if (!p.steps) return 0;
+    const auto padded=[](std::size_t count) { return (count*sizeof(T)+255)/256*256; };
+    const std::size_t panels=std::min(p.options.group_cap,p.steps);
+    const std::size_t rows=std::max(1,p.max_rows),cols=std::max(1,p.zcols);
+    if (panels==1) {
+        const std::size_t width=ddla::ddlaGetBackend(h)==ddla::DdlaBackend::GPU?
+            std::min(p.nbw,p.n-p.nbw):p.nbw;
+        return padded(rows*width)+2*padded(width*cols);
+    }
+    const std::size_t k=std::min<std::size_t>(panels*p.nbw,p.n-p.nbw);
+    const std::size_t gram=std::max<std::size_t>(1,panels*(panels-1)/2*p.nbw*p.nbw);
+    return padded(rows*k)+2*padded(k*cols)+padded(k*k)+2*padded(gram);
+}
+// Descriptor-only policy-boundary coverage; no n-by-n data is allocated.
+template<class T> double policy_queries(const ddla::DdlaHandle_t& h) {
+    double bad=0;
+    const auto backend=ddla::ddlaGetBackend(h);
+    for(int n:{4999,5000,5001})for(int nb:{64,128}) {
+        int d[ddla::DDLA_DLEN_];
+        ddla::ddlaDescInit(d,h,n,n,nb,nb,0,0);
+        const int band=backend==ddla::DdlaBackend::GPU?16:nb;
+        const int wanted=backend==ddla::DdlaBackend::GPU?2:
+            (n>=5000?(std::is_same<T,Real<T>>::value?3:2):1);
+        const auto options=ddla::detail::grouped_stage5_default_options<T>(backend,n);
+        bad+=options.group_cap!=wanted;
+        const auto common=ddla::spectral_impl::punmtr_he2hb_geometry(h,backend,'C',n,band,d,d);
+        const auto p=ddla::detail::grouped_stage5_geometry(common,options);
+        std::size_t bytes=0;
+        ddla::spectral_impl::punmtr_he2hb_workspace_size<T>(h,common,&bytes);
+        bad+=bytes!=expected_workspace_bytes<T>(h,p);
+    }
+    return bad;
 }
 struct Result {double dense=0,sequential=0,guards=0;std::size_t variants=0;};
 template<class T> Result prepared(const ddla::DdlaHandle_t&h,const Fixture<T>&f,const T*A,const int*da,int parent,int pad,int zblock,int zsource) {
@@ -263,13 +300,17 @@ Result prepared_gpu(
     for (char trans : {'N', 'C', 'T'}) {
         DDLA_CHECK(ddlaMemcpy(h, old.data(), input.data(), input.size() * sizeof(T)));
         int info = 0;
-        const auto sequential=ddla::spectral_impl::punmtr_he2hb_check(
-            h,ddla::DdlaBackend::GPU,trans,n,b,A,da,factor.data(),old.data(),dz);
+        ddla::detail::GroupedStage5Options single;
+        single.group_cap=1;
+        const auto sequential=ddla::detail::grouped_stage5_check<T>(
+            h,trans,n,b,A,da,factor.data(),old.data(),dz,single);
         std::size_t bytes=0;
-        ddla::spectral_impl::punmtr_he2hb_sequential_workspace_size<T>(h,sequential,&bytes);
+        ddla::detail::grouped_stage5_workspace_size<T>(h,sequential,&bytes);
+        if (bytes!=expected_workspace_bytes<T>(h,sequential))
+            throw std::runtime_error("stage5 single-panel requested-byte model");
         ddla::vector<char> work(h,bytes);
-        ddla::spectral_impl::punmtr_he2hb_sequential_run<ddla::DdlaBackend::GPU,T>(
-            h,sequential,A,da,factor.data(),old.data(),dz,info,work.data(),bytes);
+        ddla::detail::grouped_stage5_run<ddla::DdlaBackend::GPU,T>(
+            h,sequential,A,factor.data(),old.data(),info,work.data(),bytes);
         std::vector<T> reference(input.size());
         DDLA_CHECK(ddlaMemcpy(h, reference.data(), old.data(), reference.size() * sizeof(T)));
         DDLA_CHECK(ddlaSynchronize(h));

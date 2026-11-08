@@ -37,9 +37,9 @@ UnmtrHe2hbPlan punmtr_he2hb_check(const DdlaHandle_t&,
                                   const void*,
                                   const int*);
 
-// Backend bytes of punmtr_he2hb_run. CPU uses a single V/W/W2 panel; GPU
-// uses one pair of panels plus its small grouped factor and Gram buffers.
-// No panel (nsteps == 0) needs nothing.
+// Backend bytes of the shared grouped engine selected by the default policy:
+// GPU pairs; CPU single panels below n=5000, real triples/complex pairs above.
+// A single panel borrows T and needs only V/W/W2. No panels need no scratch.
 template <class T>
 void punmtr_he2hb_workspace_size(const DdlaHandle_t&,
                                  const UnmtrHe2hbPlan& p,
@@ -56,12 +56,6 @@ void punmtr_he2hb_run(const DdlaHandle_t&,
                       int&,
                       void* backend_work,
                       std::size_t backend_bytes);
-// Unchanged per-panel reference engine, also used for measured comparisons.
-template<class T>
-void punmtr_he2hb_sequential_workspace_size(const DdlaHandle_t&,const UnmtrHe2hbPlan&,std::size_t*);
-template<DdlaBackend B,class T>
-void punmtr_he2hb_sequential_run(const DdlaHandle_t&,const UnmtrHe2hbPlan&,const T*,const int*,
-    const T*,T*,const int*,int&,void*,std::size_t);
 struct HermitianBlock {
     long long src_off=0,dst_off=0;
     int src_ld=1,dst_ld=1,rows=0,cols=0;

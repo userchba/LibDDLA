@@ -24,24 +24,16 @@
 // ---------------------------------------------------------------------------
 #include <ddla/ddla.h>
 
-#include "Eigensolver/pvector_redist.h"
 #include "Eigensolver/eig_workspace.h"
 #include "ddla_connector.h"
-#include "BLAS/blas_impl.h"
-#include "comm_traits.h"
 #include "ddla_stream.h"
 #include "ddla_desc.h"
 #include "plan_util.h"
-#include "punmtr_impl.h"
 #include "punmtr_he2hb_grouped.h"
 
 #include <algorithm>
-#include <cassert>
 #include <cstddef>
 #include <stdexcept>
-#include <string>
-#include <type_traits>
-#include <vector>
 
 namespace ddla {
 
@@ -119,189 +111,13 @@ UnmtrHe2hbPlan punmtr_he2hb_check(
     return p;
 }
 
-namespace {
-detail::GroupedStage5Plan gpu_grouped_plan(
-    const UnmtrHe2hbPlan& p)
-{
-    // Pair panels to bound the additional Gram/TRMM work and workspace.
-    detail::GroupedStage5Options options;
-    options.group_cap = 2;
-    return detail::grouped_stage5_geometry(p, options);
-}
-} // namespace
-
 template <class T>
 void punmtr_he2hb_workspace_size(
     const DdlaHandle_t& h, const UnmtrHe2hbPlan& p, std::size_t* backend_bytes)
 {
-    if (p.backend == DdlaBackend::GPU)
-        detail::grouped_stage5_workspace_size<T>(h, gpu_grouped_plan(p), backend_bytes);
-    else
-        punmtr_he2hb_sequential_workspace_size<T>(h, p, backend_bytes);
-}
-
-// [ V | W | W2 ].  V's window is largest for the last panel (istep = nsteps); each panel keeps its own leading
-// dimension ld_v = max(l_rows, 1) inside it.  W and W2 are panel-independent.
-template <class T>
-void punmtr_he2hb_sequential_workspace_size(
-    const DdlaHandle_t&, const UnmtrHe2hbPlan& p, std::size_t* backend_bytes)
-{
-    *backend_bytes = 0;
-    if (!p.nsteps)
-        return;
-    const std::size_t w_elements = static_cast<std::size_t>(p.nbw) * std::max(p.zcols, 1);
-    *backend_bytes = detail::padded_bytes<T>(static_cast<std::size_t>(p.ldv) * p.nbw) +
-                     2 * detail::padded_bytes<T>(w_elements);
-}
-
-template <DdlaBackend Backend, class T>
-void punmtr_he2hb_sequential_run(
-    const DdlaHandle_t& handle,
-    const UnmtrHe2hbPlan& p,
-    const T* A,
-    const int*,
-    const T* tmat,
-    T* Z,
-    const int*,
-    int& info,
-    void* backend_work,
-    std::size_t backend_bytes)
-{
-    try {
-        static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                      "GPU punmtr_he2hb is not available");
-        info = 0;
-        if (!p.nsteps)
-            return;
-        const char trans = p.trans;
-        const int n = p.n;
-        const int nbw = p.nbw;
-        const int nb = p.nb;
-        const int lldA = p.lldA;
-        const int lldZ = p.lldZ;
-        const int nprows = p.nprows;
-        const int npcols = p.npcols;
-        const int myprow = p.myprow;
-        const int mypcol = p.mypcol;
-        auto sync_stream = [&]() {
-            if constexpr (Backend != DdlaBackend::CPU)
-                DDLA_CHECK(ddlaSynchronize(handle));
-        };
-        // Source for the v(nrow)=1 anchors issued below.  Hoisted out of the panel
-        // loop on purpose: the H2D that reads it is issued asynchronously, so a
-        // constant local to the loop body would be read after its scope had ended.
-        // That only ever worked because CUDA stages small pageable H2D copies
-        // synchronously; it is not something to keep relying on.
-        const T one_anchor = T(1);
-
-        const int nsteps = p.nsteps;
-        const int l_zcols = p.zcols;
-        const int ld_w = nbw;
-
-        // Q_total = Qp_1 ... Qp_nsteps, so applying Q_total^H means consuming the
-        // panels in ascending istep order with T^H; applying Q_total reverses both.
-        const bool adjoint = (trans != 'N');
-        const int istep_begin = adjoint ? 1 : nsteps;
-        const int istep_end = adjoint ? nsteps + 1 : 0; // exclusive
-        const int istep_step = adjoint ? 1 : -1;
-        // 'C' and 'T' agree for a real scalar type, but the vendor GEMM entry
-        // points are inconsistent about accepting 'C' on real operands (cf. the
-        // xSYR2K note in src/her2k.h), so spell the real case explicitly.
-        const char t_op =
-            adjoint ? (std::is_same<T, typename real_type<T>::type>::value ? 'T' : 'C') : 'N';
-
-        // Panel scratch, sized once for the largest panel instead of allocated
-        // once per panel: per-panel cudaMallocAsync/cudaFreeAsync pairs are
-        // trimmed by the default pool at every synchronize (release threshold 0)
-        // and re-mapped by the next panel (see phe2hb).
-        const std::size_t w_elements = static_cast<std::size_t>(ld_w) * std::max(l_zcols, 1);
-        char* w = static_cast<char*>(backend_work);
-        T* const V = detail::take<T>(
-            w, static_cast<std::size_t>(p.ldv) * nbw); // gathered reflectors: l_rows x n_cols
-        T* const W =
-            detail::take<T>(w, w_elements); // W = V^H Z partial / T W result: nbw x l_zcols
-        T* const W2 = detail::take<T>(w, w_elements); // W allreduce recv: nbw x l_zcols
-        assert(static_cast<std::size_t>(w - static_cast<char*>(backend_work)) <= backend_bytes);
-        (void)backend_bytes;
-
-        for (int istep = istep_begin; istep != istep_end; istep += istep_step) {
-            const int panel_start = istep * nbw;
-            const int n_cols = std::min(n, panel_start + nbw) - panel_start;
-            const int lr_end = panel_start + n_cols - nbw;
-            const int l_rows = ddla::num_loc(lr_end, nb, myprow, 0, nprows);
-            const int ld_v = std::max(l_rows, 1);
-
-            // ---- gather V from A's storage region (ONE Row bcast) ---------------
-            // Zero the whole buffer first: rows beyond a column's support must
-            // contribute zero to W = V^H Z.  The panel lies inside one block column, so
-            // its n_cols columns have one owner process column and are consecutive local
-            // columns of A; V is column-major with stride ld_v, so they form one
-            // contiguous broadcast payload.
-            DDLA_CHECK(
-                ddlaMemset(handle, V, 0, static_cast<std::size_t>(ld_v) * n_cols * sizeof(T)));
-            const int root = ddla::indxg2p(panel_start, nb, 0, npcols);
-            if (root == mypcol) {
-                const int j0 = ddla::indxg2l(panel_start, nb, npcols);
-                for (int c = 0; c < n_cols; ++c) {
-                    const int nrow_c = (panel_start + c) - nbw;
-                    const int lp_c = ddla::num_loc(nrow_c, nb, myprow, 0, nprows);
-                    T* vcol = V + static_cast<std::size_t>(c) * ld_v;
-                    DDLA_CHECK(ddlaMemcpy(handle,
-                                          vcol,
-                                          A + static_cast<std::size_t>(j0 + c) * lldA,
-                                          sizeof(T) * lp_c));
-                }
-            }
-            // The payload is every column's support (ld_v rows), which is exactly what the
-            // non-owner ranks need.
-            commBcast<Backend>(
-                handle, CommScope::Row, V, static_cast<std::size_t>(ld_v) * n_cols, root);
-            // Explicit anchor: v(nrow) = 1 on the pivot-row owner.
-            for (int c = 0; c < n_cols; ++c) {
-                const int nrow = (panel_start + c) - nbw;
-                if (myprow == ddla::indxg2p(nrow, nb, 0, nprows)) {
-                    const int lp = ddla::num_loc(nrow, nb, myprow, 0, nprows);
-                    T* vcol = V + static_cast<std::size_t>(c) * ld_v;
-                    if constexpr (Backend == DdlaBackend::CPU) {
-                        vcol[lp] = T(1);
-                    } else {
-                        DDLA_CHECK(ddlaMemcpy(handle, vcol + lp, &one_anchor, sizeof(T)));
-                    }
-                }
-            }
-            sync_stream();
-
-            const T* Tstep = tmat + static_cast<std::size_t>(istep - 1) * nbw * nbw;
-
-            detail::punmtr_run<Backend, T>(handle,
-                                           'L',
-                                           'U',
-                                           t_op,
-                                           l_rows,
-                                           l_zcols,
-                                           n_cols,
-                                           ld_v,
-                                           nbw,
-                                           lldZ,
-                                           ld_w,
-                                           ('L' == 'L' ? handle->nprows_ : handle->npcols_) > 1,
-                                           V,
-                                           Tstep,
-                                           Z,
-                                           W,
-                                           W2);
-            sync_stream();
-        }
-
-    } catch (...) {
-        // Retire queued host reads before the caller reuses or releases scratch.
-        if (ddlaGetBackend(handle) == DdlaBackend::GPU)
-            try {
-                (void)ddlaSynchronize(handle);
-            } catch (...) {
-            }
-        throw;
-    }
+    const auto options = detail::grouped_stage5_default_options<T>(p.backend, p.n);
+    const auto grouped = detail::grouped_stage5_geometry(p, options);
+    detail::grouped_stage5_workspace_size<T>(h, grouped, backend_bytes);
 }
 
 template <DdlaBackend Backend, class T>
@@ -309,28 +125,28 @@ void punmtr_he2hb_run(
     const DdlaHandle_t& h,
     const UnmtrHe2hbPlan& p,
     const T* A,
-    const int* da,
+    const int*,
     const T* tmat,
     T* Z,
-    const int* dz,
+    const int*,
     int& info,
     void* work,
     std::size_t bytes)
 {
-    if constexpr (Backend == DdlaBackend::CPU) {
-        punmtr_he2hb_sequential_run<Backend, T>(h, p, A, da, tmat, Z, dz, info, work, bytes);
-    } else {
-        try {
-            detail::grouped_stage5_run<Backend, T>(
-                h, gpu_grouped_plan(p), A, tmat, Z, info, work, bytes);
+    const auto options = detail::grouped_stage5_default_options<T>(p.backend, p.n);
+    const auto grouped = detail::grouped_stage5_geometry(p, options);
+    try {
+        detail::grouped_stage5_run<Backend, T>(h, grouped, A, tmat, Z, info, work, bytes);
+        if constexpr (Backend == DdlaBackend::GPU)
             DDLA_CHECK(ddlaSynchronize(h));
-        } catch (...) {
+    } catch (...) {
+        if constexpr (Backend == DdlaBackend::GPU) {
             try {
                 (void)ddlaSynchronize(h);
             } catch (...) {
             }
-            throw;
         }
+        throw;
     }
 }
 
@@ -380,22 +196,9 @@ void punmtr_he2hb(
         const int*,                                                                                \
         int&,                                                                                      \
         void*,                                                                                     \
-        std::size_t);                                                                              \
-    template void spectral_impl::punmtr_he2hb_sequential_run<BACKEND, TYPE>(                       \
-        const DdlaHandle_t&,                                                                       \
-        const spectral_impl::UnmtrHe2hbPlan&,                                                      \
-        const TYPE*,                                                                               \
-        const int*,                                                                                \
-        const TYPE*,                                                                               \
-        TYPE*,                                                                                     \
-        const int*,                                                                                \
-        int&,                                                                                      \
-        void*,                                                                                     \
         std::size_t)
 #define INSTANTIATE_PUNMTR_HE2HB_SIZE(TYPE)                                                        \
     template void spectral_impl::punmtr_he2hb_workspace_size<TYPE>(                                \
-        const DdlaHandle_t&, const spectral_impl::UnmtrHe2hbPlan&, std::size_t*);                  \
-    template void spectral_impl::punmtr_he2hb_sequential_workspace_size<TYPE>(                     \
         const DdlaHandle_t&, const spectral_impl::UnmtrHe2hbPlan&, std::size_t*)
 
 INSTANTIATE_PUNMTR_HE2HB(DdlaBackend::CPU, float);
