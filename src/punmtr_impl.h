@@ -12,7 +12,7 @@ template<class T>void punmtr_workspace_size(const DdlaHandle_t&,char side,int ro
 template<DdlaBackend B,class T>void punmtr_run(const DdlaHandle_t&,char side,char uplo,char trans,
     int rows,int cols,int k,int ldv,int ldt,int ldc,int ldw,bool reduce,
     const T* V,const T* tmat,T* C,T* work,T* reduced_work);
-// The grouped CPU driver keeps its failure-draining boundaries around these phases.
+// The grouped driver reuses projection and update phases on either backend.
 template<DdlaBackend B,class T>void punmtr_project_run(const DdlaHandle_t&,char side,
     int rows,int cols,int k,int ldv,int ldc,int ldw,const T* V,const T* C,T* work);
 template<DdlaBackend B,class T>void punmtr_update_run(const DdlaHandle_t&,char side,

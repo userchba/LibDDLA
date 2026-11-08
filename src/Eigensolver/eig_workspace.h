@@ -5,24 +5,63 @@
 #include <cstddef>
 
 namespace ddla { namespace spectral_impl {
-struct UnmtrHe2hbPlan {
+struct UnmtrHe2hbPlan
+{
     DdlaBackend backend{};
-    char trans='N';
-    int n=0,nbw=1,nb=1,lldA=1,lldZ=1,nsteps=0;
-    int nprows=1,npcols=1,myprow=0,mypcol=0,zcols=0,ldv=1;
+    char trans = 'N';
+    int n = 0;
+    int nbw = 1;
+    int nb = 1;
+    int lldA = 1;
+    int lldZ = 1;
+    int nsteps = 0;
+    int nprows = 1;
+    int npcols = 1;
+    int myprow = 0;
+    int mypcol = 0;
+    int zcols = 0;
+    int ldv = 1;
 };
-UnmtrHe2hbPlan punmtr_he2hb_geometry(const DdlaHandle_t&,DdlaBackend,char,int,int,const int*,const int*);
-UnmtrHe2hbPlan punmtr_he2hb_check(const DdlaHandle_t&,DdlaBackend,char,int,int,const void*,const int*,const void*,const void*,const int*);
 
-// Backend bytes of punmtr_he2hb_run: the gathered reflectors V (ldv x nbw),
-// the product W = V^H Z (nbw x max(zcols, 1)) and its all-reduce W2 (same
-// size).  No panel (nsteps == 0) needs nothing.
+UnmtrHe2hbPlan
+punmtr_he2hb_geometry(const DdlaHandle_t&, DdlaBackend, char, int, int, const int*, const int*);
+
+UnmtrHe2hbPlan punmtr_he2hb_check(const DdlaHandle_t&,
+                                  DdlaBackend,
+                                  char,
+                                  int,
+                                  int,
+                                  const void*,
+                                  const int*,
+                                  const void*,
+                                  const void*,
+                                  const int*);
+
+// Backend bytes of punmtr_he2hb_run. CPU uses a single V/W/W2 panel; GPU
+// uses one pair of panels plus its small grouped factor and Gram buffers.
+// No panel (nsteps == 0) needs nothing.
+template <class T>
+void punmtr_he2hb_workspace_size(const DdlaHandle_t&,
+                                 const UnmtrHe2hbPlan& p,
+                                 std::size_t* backend_bytes);
+
+template <DdlaBackend B, class T>
+void punmtr_he2hb_run(const DdlaHandle_t&,
+                      const UnmtrHe2hbPlan&,
+                      const T*,
+                      const int*,
+                      const T*,
+                      T*,
+                      const int*,
+                      int&,
+                      void* backend_work,
+                      std::size_t backend_bytes);
+// Unchanged per-panel reference engine, also used for measured comparisons.
 template<class T>
-void punmtr_he2hb_workspace_size(const DdlaHandle_t&,const UnmtrHe2hbPlan& p,std::size_t* backend_bytes);
+void punmtr_he2hb_sequential_workspace_size(const DdlaHandle_t&,const UnmtrHe2hbPlan&,std::size_t*);
 template<DdlaBackend B,class T>
-void punmtr_he2hb_run(const DdlaHandle_t&,const UnmtrHe2hbPlan&,const T*,const int*,const T*,T*,const int*,int&,
-    void* backend_work,std::size_t backend_bytes);
-
+void punmtr_he2hb_sequential_run(const DdlaHandle_t&,const UnmtrHe2hbPlan&,const T*,const int*,
+    const T*,T*,const int*,int&,void*,std::size_t);
 struct HermitianBlock {
     long long src_off=0,dst_off=0;
     int src_ld=1,dst_ld=1,rows=0,cols=0;
