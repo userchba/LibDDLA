@@ -2234,6 +2234,56 @@ void ptrtrm(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, c
     int n, const T& alpha, const T* A, const int* descA, const T* B, const int* descB,
     const T& beta, T* C, const int* descC);
 
+/** LDL factorization/solve family. Pivoted variants use LAPACK Bunch-Kaufman
+ * storage and 1-based host IPIV (replicated length n for distributed calls).
+ * _nopiv uses only 1x1 pivots and info>0 reports a zero pivot. Both triangles
+ * are supported, only the selected triangle is read/written. SY is transpose
+ * symmetric, HE is Hermitian (real HE agrees with SY). Solve overwrites B.
+ * info is host memory. Local hetrf<GPU, std::complex<double>> and all four
+ * scalar types of hetrf_nopiv<GPU>, phetrf<GPU> and phetrf_nopiv<GPU> keep
+ * matrix arithmetic on the GPU. Pivoted phetrf uses bounded panels and one
+ * extra 2D block-cyclic matrix, about n*n/P elements per rank plus block
+ * rounding. No-pivot GPU factorization updates the selected triangle in place
+ * with bounded panels; no full host matrix is gathered by these GPU factors.
+ * IPIV and INFO remain host data. Other GPU LDL variants stage arithmetic
+ * through host LAPACK. CPU distributed factors and all distributed solves
+ * still gather leading blocks to rank 0 with O(n*n) root storage.
+ * Flags/global metadata must agree across ranks.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void sytrf(const DdlaHandle_t& h, char uplo, int n, T* A, int lda, int* ipiv, int& info);
+template <DdlaBackend Backend = default_backend_v, typename T>
+void sytrs(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A, int lda, const int* ipiv, T* B, int ldb, int& info);
+template <DdlaBackend Backend = default_backend_v, typename T>
+void sytrf_nopiv(const DdlaHandle_t& h, char uplo, int n, T* A, int lda, int& info);
+template <DdlaBackend Backend = default_backend_v, typename T>
+void sytrs_nopiv(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A, int lda, T* B, int ldb, int& info);
+template <DdlaBackend Backend = default_backend_v, typename T>
+void hetrf(const DdlaHandle_t& h, char uplo, int n, T* A, int lda, int* ipiv, int& info);
+template <DdlaBackend Backend = default_backend_v, typename T>
+void hetrs(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A, int lda, const int* ipiv, T* B, int ldb, int& info);
+template <DdlaBackend Backend = default_backend_v, typename T>
+void hetrf_nopiv(const DdlaHandle_t& h, char uplo, int n, T* A, int lda, int& info);
+template <DdlaBackend Backend = default_backend_v, typename T>
+void hetrs_nopiv(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A, int lda, T* B, int ldb, int& info);
+template <DdlaBackend Backend = default_backend_v, typename T>
+void psytrf(const DdlaHandle_t& h, char uplo, int n, T* A, const int* descA, int* ipiv, int& info);
+template <DdlaBackend Backend = default_backend_v, typename T>
+void psytrs(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A, const int* descA, const int* ipiv, T* B, const int* descB, int& info);
+template <DdlaBackend Backend = default_backend_v, typename T>
+void psytrf_nopiv(const DdlaHandle_t& h, char uplo, int n, T* A, const int* descA, int& info);
+template <DdlaBackend Backend = default_backend_v, typename T>
+void psytrs_nopiv(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A, const int* descA, T* B, const int* descB, int& info);
+template <DdlaBackend Backend = default_backend_v, typename T>
+void phetrf(const DdlaHandle_t& h, char uplo, int n, T* A, const int* descA, int* ipiv, int& info);
+template <DdlaBackend Backend = default_backend_v, typename T>
+void phetrs(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A, const int* descA, const int* ipiv, T* B, const int* descB, int& info);
+template <DdlaBackend Backend = default_backend_v, typename T>
+void phetrf_nopiv(const DdlaHandle_t& h, char uplo, int n, T* A, const int* descA, int& info);
+template <DdlaBackend Backend = default_backend_v, typename T>
+void phetrs_nopiv(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A, const int* descA, T* B, const int* descB, int& info);
+
+
 /** Apply Q from geqrf('U') or pgeqrf, with Q=H(1)...H(k).
  * side L/R and trans N/C are supported; real T is also accepted.
  * The ORMQR name includes complex unitary arithmetic (LAPACK UNMQR).
