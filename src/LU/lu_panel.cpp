@@ -85,6 +85,13 @@ void check_solve(const char* name, char side, char trans, int n, int nrhs, const
         throw std::invalid_argument(who + ": A needs square blocks");
     if (descA[DDLA_MB_] != descB[DDLA_MB_])
         throw std::invalid_argument(who + ": A and B need the same row block size");
+    // Pivots and triangular solves take the owner from A's descriptor and the
+    // local index from B's, so the solved dimension of B must be distributed
+    // exactly like A's (otherwise the owner computes a -1 local index).
+    if (side == 'L' && descA[DDLA_RSRC_] != descB[DDLA_RSRC_])
+        throw std::invalid_argument(who + ": side 'L' needs B's rows distributed like A's (RSRC)");
+    if (side == 'R' && (descA[DDLA_NB_] != descB[DDLA_NB_] || descA[DDLA_CSRC_] != descB[DDLA_CSRC_]))
+        throw std::invalid_argument(who + ": side 'R' needs B's columns distributed like A's (NB, CSRC)");
 }
 
 // ---------------------------------------------------------------------------

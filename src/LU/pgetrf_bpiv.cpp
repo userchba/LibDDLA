@@ -134,8 +134,11 @@ void pgetrf_bpiv_run(const DdlaHandle_t& handle, int m, int n, T* A,
                 info += n_s;
                 break;
             }
-            if(n_s + nb_real == n){
-                // Last block: no right panel, but for a standard A = P*L*U the
+            if(n_s + nb_real == n && m <= n){
+                // Last block with no rows below it (when m > n the general path
+                // below runs instead: it applies the same left-column swaps and
+                // also solves L21 for the remaining rows; the right panel is
+                // empty).  No right panel, but for a standard A = P*L*U the
                 // row swaps must still be applied to the already-factored columns
                 // [0, n_s).  getrf wrote these pivots only on (owner_row,
                 // owner_col) -- the loop breaks before step 2's row broadcast --
@@ -170,7 +173,7 @@ void pgetrf_bpiv_run(const DdlaHandle_t& handle, int m, int n, T* A,
             // Step 3: Extract/broadcast the factored diagonal block (L1+U1)
             // ================================================================
             if (myprow == owner_row && mypcol == owner_col) {
-                DDLA_CHECK(ddlaMemcpy2D(handle, temp_block, nb_real * sizeof(T), A + i_loc + j_loc * lld,
+                DDLA_CHECK(ddlaMemcpy2D(handle, temp_block, nb_real * sizeof(T), A + i_loc + std::size_t(j_loc) * lld,
                                         lld * sizeof(T), nb_real * sizeof(T), nb_real));
             }
             int right_panel_col_start = (j_loc >= 0) ? (j_loc + nb_real) : mm_col_start;
@@ -200,7 +203,7 @@ void pgetrf_bpiv_run(const DdlaHandle_t& handle, int m, int n, T* A,
                     // When j_loc >= 0, right panel starts at local column j_loc + nb_real.
                     // When j_loc < 0, all local columns are in the right panel, starting at 0.
 
-                    T* right_panel = A + right_panel_col_start * lld + mm_row_start;
+                    T* right_panel = A + std::size_t(right_panel_col_start) * lld + mm_row_start;
                     lapack_impl::laswp_run<Backend, T>(
                         handle, n_loc - right_panel_col_start,
                         right_panel, lld,
@@ -231,7 +234,7 @@ void pgetrf_bpiv_run(const DdlaHandle_t& handle, int m, int n, T* A,
             if(mypcol == owner_col){
                 commBcast<Backend>(handle, CommScope::Col, temp_block, (std::size_t)nb_real * nb_real, owner_row);
                 if(m_loc > left_panel_row_start){
-                    T* left_panel = A + mm_col_start * lld + left_panel_row_start;
+                    T* left_panel = A + std::size_t(mm_col_start) * lld + left_panel_row_start;
                     blas_impl::trsm_run<Backend, T>(
                         handle,
                         'R', 'U',
@@ -265,7 +268,7 @@ void pgetrf_bpiv_run(const DdlaHandle_t& handle, int m, int n, T* A,
                     temp_L, trailing_m,
                     temp_U, nb_real,
                     T(1.0),
-                    A + left_panel_row_start + right_panel_col_start * lld, lld);
+                    A + left_panel_row_start + std::size_t(right_panel_col_start) * lld, lld);
             }
 
             DDLA_CHECK(ddlaSynchronize(handle));

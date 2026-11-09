@@ -34,6 +34,13 @@ void ptrtrs_check(const DdlaHandle_t& handle, char side, char uplo, char trans, 
             throw std::invalid_argument("ptrtrs: A and B need the same row block size");
         if (side != 'L' && side != 'R')
             throw std::invalid_argument("ptrtrs: side must be 'L' or 'R'");
+        // The solve walks B with A's distribution: B's rows (side 'L') or
+        // columns (side 'R') must be owned like the matching rows/columns of A.
+        if (side == 'L' && array_descA[DDLA_RSRC_] != array_descB[DDLA_RSRC_])
+            throw std::invalid_argument("ptrtrs: side 'L' needs B's rows distributed like A's (RSRC)");
+        if (side == 'R' && (array_descA[DDLA_NB_] != array_descB[DDLA_NB_] ||
+                            array_descA[DDLA_CSRC_] != array_descB[DDLA_CSRC_]))
+            throw std::invalid_argument("ptrtrs: side 'R' needs B's columns distributed like A's (NB, CSRC)");
         if (uplo != 'L' && uplo != 'U')
             throw std::invalid_argument("ptrtrs: uplo must be 'L' or 'U'");
         if (diag != 'U' && diag != 'N')
@@ -175,7 +182,7 @@ void ptrtrs_run(const DdlaHandle_t& handle,
 
                 if(myprow == owner_row && mypcol == owner_col){
                     DDLA_CHECK(ddlaMemcpy2D(ddla_handle, block_diag, nb_real * sizeof(T),
-                                            A + mm_row_start + mm_col_start * lldA, lldA * sizeof(T),
+                                            A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA * sizeof(T),
                                             nb_real * sizeof(T), nb_real));
                 }
                 DDLA_CHECK(ddlaSynchronize(ddla_handle));
@@ -202,7 +209,7 @@ void ptrtrs_run(const DdlaHandle_t& handle,
                         g_ja = 0;
                     }else{
                         // U^H solve: gather the row panel to the right of the diagonal.
-                        A_offset = mm_row_start + (mm_col_start + mm_col_step) * array_descA[DDLA_LLD_];
+                        A_offset = mm_row_start + std::size_t(mm_col_start + mm_col_step) * array_descA[DDLA_LLD_];
                         length_block_A = n_loc_A - mm_col_start - mm_col_step;
                         g_n = n_solve - n_s - nb_real;
                         g_ja = n_s + nb_real;
@@ -212,13 +219,13 @@ void ptrtrs_run(const DdlaHandle_t& handle,
                     g_n = nb_real;
                     if(uplo == 'L'){
                         length_block_A = m_loc_A - mm_row_start - mm_row_step;
-                        A_offset = mm_row_start + mm_row_step + mm_col_start * array_descA[DDLA_LLD_];
+                        A_offset = mm_row_start + mm_row_step + std::size_t(mm_col_start) * array_descA[DDLA_LLD_];
                         g_m = n_solve - n_s - nb_real;
                         g_ia = n_s + nb_real;
                     }else{
                         // U solve: gather the column panel above the diagonal.
                         length_block_A = mm_row_start;
-                        A_offset = mm_col_start * array_descA[DDLA_LLD_];
+                        A_offset = std::size_t(mm_col_start) * array_descA[DDLA_LLD_];
                         g_m = n_s;
                         g_ia = 0;
                     }
@@ -281,7 +288,7 @@ void ptrtrs_run(const DdlaHandle_t& handle,
 
                 if(myprow == owner_row && mypcol == owner_col){
                     DDLA_CHECK(ddlaMemcpy2D(ddla_handle, block_diag, nb_real * sizeof(T),
-                                            A + mm_row_start + mm_col_start * lldA, lldA * sizeof(T),
+                                            A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA * sizeof(T),
                                             nb_real * sizeof(T), nb_real));
                 }
                 DDLA_CHECK(ddlaSynchronize(ddla_handle));
@@ -292,7 +299,7 @@ void ptrtrs_run(const DdlaHandle_t& handle,
                     blas_impl::trsm_run<Backend, T>(ddla_handle, 'R', uplo, trans, diag,
                         m_loc_B, nb_real, (T)1.0,
                         block_diag, nb_real,
-                        B + mm_col_start * lldB, lldB
+                        B + std::size_t(mm_col_start) * lldB, lldB
                     );
                 }
                 // gather the solved block column of B (local part: m_loc x nb_real)
@@ -309,9 +316,9 @@ void ptrtrs_run(const DdlaHandle_t& handle,
                     if(far_right){
                         g_n = n_solve - n_s - nb_real;
                         g_ja = n_s + nb_real;
-                        A_offset = mm_row_start + (mm_col_start + mm_col_step) * array_descA[DDLA_LLD_];
+                        A_offset = mm_row_start + std::size_t(mm_col_start + mm_col_step) * array_descA[DDLA_LLD_];
                         length_block_A = n_loc_A - mm_col_start - mm_col_step;
-                        B_offset = (mm_col_start + mm_col_step) * lldB;
+                        B_offset = std::size_t(mm_col_start + mm_col_step) * lldB;
                     }else{
                         g_n = n_s;
                         g_ja = 0;
@@ -326,7 +333,7 @@ void ptrtrs_run(const DdlaHandle_t& handle,
                         g_m = n_solve - n_s - nb_real;
                         g_ia = n_s + nb_real;
                         length_block_A = n_loc_A - mm_col_start - mm_col_step;
-                        B_offset = (mm_col_start + mm_col_step) * lldB;
+                        B_offset = std::size_t(mm_col_start + mm_col_step) * lldB;
                     }else{
                         g_m = n_s;
                         g_ia = 0;

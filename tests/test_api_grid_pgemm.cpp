@@ -98,11 +98,51 @@ void check_pgemm_k_zero(const ddla::DdlaHandle_t& handle, const Shape& base)
     require_close(handle, "pgemm(handle, k=0)", err, 2e-10);
 }
 
+// The automatic selection may favour a stationary branch whose owners are not
+// aligned (A starting on another process row than C).  It must then fall back
+// to SUMMA instead of throwing: a tall-skinny product with A's RSRC shifted.
+void check_pgemm_auto_unaligned(const ddla::DdlaHandle_t& handle, const Shape& base)
+{
+    int nprows = 0, npcols = 0;
+    ddlaGetGridDims(handle, nprows, npcols);
+    if(nprows < 2) return;
+    const int nb = base.nb;
+    const int m = round_up_for_grid(4 * nb * std::max(nprows, npcols), nb, nprows);
+    const int k = m;
+    const int n = nb;
+    const Complex alpha(0.7, 0.1);
+    const Complex beta(0.2, -0.4);
+    int descA[ddla::DDLA_DLEN_], descB[ddla::DDLA_DLEN_], descC[ddla::DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(descA, handle, m, k, nb, nb, 1, 0));
+    DDLA_CHECK(ddlaDescInit(descB, handle, k, n, nb, nb, 0, 0));
+    DDLA_CHECK(ddlaDescInit(descC, handle, m, n, nb, nb, 0, 0));
+    auto a = [](int i, int j){ return general_value(i, j, 4); };
+    auto b = [](int i, int j){ return general_value(i, j, 5); };
+    auto c = [](int i, int j){ return general_value(i, j, 6); };
+    auto h_A = make_local<Complex>(handle, descA, a);
+    auto h_B = make_local<Complex>(handle, descB, b);
+    auto h_C = make_local<Complex>(handle, descC, c);
+    DeviceBuffer<Complex> d_A(handle, h_A.size()), d_B(handle, h_B.size()), d_C(handle, h_C.size());
+    upload(handle, d_A.ptr, h_A);
+    upload(handle, d_B.ptr, h_B);
+    upload(handle, d_C.ptr, h_C);
+    check_ddla_sync(handle);
+    ddla::pgemm<>(handle, 'N', 'N', m, n, k, alpha, d_A.ptr, descA, d_B.ptr, descB, beta, d_C.ptr, descC);
+    auto out = download(handle, d_C.ptr, h_C.size());
+    const double err = local_max_error<Complex>(handle, descC, out, [&](int i, int j){
+        Complex sum(0.0, 0.0);
+        for(int l = 0; l < k; ++l) sum += a(i, l) * b(l, j);
+        return alpha * sum + beta * c(i, j);
+    });
+    require_close(handle, "pgemm(handle, auto, unaligned A RSRC)", err, 2e-10);
+}
+
 int main(int argc, char** argv)
 {
     return run_grid_test(argc, argv, "test_api_grid_pgemm",
                           [](const ddla::DdlaHandle_t& handle, const Shape& base){
                               check_pgemm(handle, base);
                               check_pgemm_k_zero(handle, base);
+                              check_pgemm_auto_unaligned(handle, base);
                           });
 }

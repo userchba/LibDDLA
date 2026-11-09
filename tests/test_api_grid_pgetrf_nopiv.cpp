@@ -1,5 +1,6 @@
 #include "api_grid_test_common.h"
 #include "LU/lu_internal.h"
+#include "lu_tall_test_common.h"
 
 using namespace api_grid_test;
 
@@ -26,6 +27,10 @@ void check_pgetrf_nopiv(const ddla::DdlaHandle_t& handle, const Shape& base)
     if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
     ddla::pgetrs_nopiv(handle, 'L', 'N', n, nrhs, d_A.ptr, descA, d_B.ptr, descB);
     check_solution(handle, descB, d_B.ptr, h_B.size(), "pgetrf_nopiv", 5e-9);
+
+    check_tall_lu(handle, base, "pgetrf_nopiv tall", [&](int m, int n, Complex* A, const int* desc, int& info) {
+        ddla::pgetrf_nopiv(handle, m, n, A, desc, info);
+    });
 }
 
 int main(int argc, char** argv)

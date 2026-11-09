@@ -22,31 +22,35 @@
 namespace ddla {
 
 // ---------------------------------------------------------------------------
-// MPI_Allreduce maps each scalar type to its MPI_Op reduction datatype.
+// typed_allreduce maps each scalar type to its MPI_Op reduction datatype.
+// It is deliberately NOT named MPI_Allreduce: a ddla:: overload of that name
+// hides ::MPI_Allreduce for every unqualified 6-argument call inside namespace
+// ddla, which only compiles while ADL finds the global function through
+// pointer-typed MPI handles (Open MPI), not with int handles (MPICH ABI).
+// sbuf == rbuf is an in-place reduction; MPI spells that MPI_IN_PLACE, since
+// aliased send/receive buffers are erroneous (Open MPI: MPI_ERR_ARG).
 // The raw NCCL/RCCL and host-staged GPU_CPU_TUNNEL send/recv/bcast/allreduce
 // primitives are inlined directly in the comm* wrappers below (no separate
 // ccl* helper functions remain -- formerly include/ddla/ddla_comm.h).
 // ---------------------------------------------------------------------------
-
-inline int MPI_Allreduce(const float* sendbuff, float* recvbuff, int count, MPI_Op op, MPI_Comm comm)
+namespace detail {
+template <typename T>
+inline int typed_allreduce(const T* sendbuff, T* recvbuff, int count, MPI_Op op, MPI_Comm comm)
 {
-    return MPI_Allreduce(sendbuff, recvbuff, count, MPI_FLOAT, op, comm);
+    const void* send = static_cast<const void*>(sendbuff) == static_cast<const void*>(recvbuff)
+                           ? MPI_IN_PLACE : static_cast<const void*>(sendbuff);
+    if constexpr (std::is_same_v<T, float>)
+        return ::MPI_Allreduce(send, recvbuff, count, MPI_FLOAT, op, comm);
+    else if constexpr (std::is_same_v<T, std::complex<float>>)
+        return ::MPI_Allreduce(send, recvbuff, count * 2, MPI_FLOAT, op, comm);
+    else if constexpr (std::is_same_v<T, double>)
+        return ::MPI_Allreduce(send, recvbuff, count, MPI_DOUBLE, op, comm);
+    else if constexpr (std::is_same_v<T, std::complex<double>>)
+        return ::MPI_Allreduce(send, recvbuff, count, MPI_DOUBLE_COMPLEX, op, comm);
+    else
+        static_assert(sizeof(T) == 0, "typed_allreduce: unsupported scalar type");
 }
-
-inline int MPI_Allreduce(const std::complex<float>* sendbuff, std::complex<float>* recvbuff, int count, MPI_Op op, MPI_Comm comm)
-{
-    return MPI_Allreduce(sendbuff, recvbuff, count * 2, MPI_FLOAT, op, comm);
-}
-
-inline int MPI_Allreduce(const double* sendbuff, double* recvbuff, int count, MPI_Op op, MPI_Comm comm)
-{
-    return MPI_Allreduce(sendbuff, recvbuff, count, MPI_DOUBLE, op, comm);
-}
-
-inline int MPI_Allreduce(const std::complex<double>* sendbuff, std::complex<double>* recvbuff, int count, MPI_Op op, MPI_Comm comm)
-{
-    return MPI_Allreduce(sendbuff, recvbuff, count, MPI_DOUBLE_COMPLEX, op, comm);
-}
+} // namespace detail
 
 // In GPU-enabled builds a single TU can instantiate both
 // the CCL and the CPU path of commAllReduce; there cclOp is ncclRedOp_t and
@@ -319,8 +323,8 @@ inline void commAllReduce(const DdlaHandle_t& h, CommScope scope,
                           const T* sbuf, T* rbuf, int count, cclOp op)
 {
     if constexpr (Backend == DdlaBackend::CPU) {
-        MPI_CHECK(MPI_Allreduce(sbuf, rbuf, count, to_mpi_op(op),
-                                CommTraits<Backend>::comm(h, scope)));
+        MPI_CHECK(detail::typed_allreduce(sbuf, rbuf, count, to_mpi_op(op),
+                                          CommTraits<Backend>::comm(h, scope)));
     } else {
 #if defined(DDLA_USE_GPU_CPU_TUNNEL)
         auto [hs, hr] = h->host_buffers<T>(count, count);
@@ -329,7 +333,7 @@ inline void commAllReduce(const DdlaHandle_t& h, CommScope scope,
         DDLA_CHECK(ddlaSynchronize(h));
         // In TUNNEL+CCL builds cclOp is ncclRedOp_t and must be translated
         // before it reaches MPI (identity for MPI_Op-only builds).
-        MPI_CHECK(MPI_Allreduce(hs, hr, count, to_mpi_op(op), CommTraits<Backend>::comm(h, scope)));
+        MPI_CHECK(detail::typed_allreduce(hs, hr, count, to_mpi_op(op), CommTraits<Backend>::comm(h, scope)));
         DDLA_CHECK(ddlaMemcpy(h, rbuf, hr, count * sizeof(T)));
         DDLA_CHECK(ddlaSynchronize(h));
 #elif defined(DDLA_USE_CCL)
@@ -344,7 +348,7 @@ inline void commAllReduce(const DdlaHandle_t& h, CommScope scope,
         }
 #else
         DDLA_CHECK(ddlaSynchronize(h));
-        MPI_CHECK(MPI_Allreduce(sbuf, rbuf, count, op, CommTraits<Backend>::comm(h, scope)));
+        MPI_CHECK(detail::typed_allreduce(sbuf, rbuf, count, op, CommTraits<Backend>::comm(h, scope)));
 #endif
     }
 }

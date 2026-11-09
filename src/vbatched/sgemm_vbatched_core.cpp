@@ -418,7 +418,10 @@ ddla_internal_sgemm_vbatched_core_2s(
     bool C0_left,
     int batchCount, int const * segment_sizes)
 {
-    if (max_m_0 <= 0 || max_n_0 <= 0 || max_k_0 < 0) return;
+    // Either stage may be empty on its own: an empty stage 0 still leaves
+    // stage 1 to scale C1 by beta_1 (k_1 == 0), and the launcher skips empty grids.
+    if (max_k_0 < 0 || max_k_1 < 0) return;
+    if ((max_m_0 <= 0 || max_n_0 <= 0) && (max_m_1 <= 0 || max_n_1 <= 0)) return;
 
     Func_gemm_template_vbatched_kernel<float> func_gemm_template_vbatched_kernel_0 = ddla_internal_sgemm_vbatched_function(transA_0, transB_0, max_m_0, max_n_0, max_k_0);
     Func_gemm_template_vbatched_kernel<float> func_gemm_template_vbatched_kernel_1 = ddla_internal_sgemm_vbatched_function(transA_1, transB_1, max_m_1, max_n_1, max_k_1);

@@ -92,9 +92,22 @@ void check_head_case(const ddla::DdlaHandle_t& handle, int n, int nrhs, int nb,
 
     // Same location forwarded to ppotrs; the B permutation (if any) happens
     // inside ppotrs.
+    const auto factor = download(handle, d_A.ptr, h_A.size());
     ddla::ppotrs(handle, 'L', 'L', 'N', n, nrhs, d_A.ptr, descA, d_B.ptr, descB, is_nega, location);
 
     check_solution(handle, descB, d_B.ptr, h_B.size(), label, 5e-9);
+
+    // ppotrs must leave the factor unchanged (it flips the head pivot's sign
+    // only around its second solve), so factor-once/solve-many stays correct.
+    const auto after = download(handle, d_A.ptr, h_A.size());
+    double changed = 0.0;
+    for(std::size_t i = 0; i < factor.size(); ++i)
+        changed = std::max(changed, static_cast<double>(std::abs(after[i] - factor[i])));
+    require_close(handle, label + " factor unchanged by ppotrs", changed, 0.0);
+    upload(handle, d_B.ptr, h_B);
+    check_ddla_sync(handle);
+    ddla::ppotrs(handle, 'L', 'L', 'N', n, nrhs, d_A.ptr, descA, d_B.ptr, descB, is_nega, location);
+    check_solution(handle, descB, d_B.ptr, h_B.size(), label + " second solve", 5e-9);
 }
 
 } // namespace

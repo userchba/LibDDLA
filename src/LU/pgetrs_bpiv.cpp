@@ -129,8 +129,8 @@ void pgetrs_bpiv_run(const DdlaHandle_t& handle, char side, char trans, int n, i
                             const int j1 = indx_g2l_c(array_descB, handle, n_s + i - 1);
                             const int j2 = indx_g2l_c(array_descB, handle, n_s + t);
                             blas_impl::swap_run<Backend, T>(handle,
-                                                      m_loc_B, B + j1 * lldB, 1,
-                                                      B + j2 * lldB, 1);
+                                                      m_loc_B, B + std::size_t(j1) * lldB, 1,
+                                                      B + std::size_t(j2) * lldB, 1);
                         }
                     }else{
                         if(myprow == owner_row){

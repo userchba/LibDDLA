@@ -4,6 +4,30 @@ using namespace api_grid_test;
 
 void check_ppotrf(const ddla::DdlaHandle_t& handle, const Shape& base)
 {
+    {
+        // ppotrf transposes panels through the diagonal processes: a
+        // non-square grid, or RSRC != CSRC, must be rejected up front.
+        int nprows = 0, npcols = 0;
+        ddlaGetGridDims(handle, nprows, npcols);
+        const int nb = base.nb;
+        const int n = round_up_for_grid(round_up_for_grid(base.n, nb, nprows), nb, npcols);
+        int desc[ddla::DDLA_DLEN_];
+        int info = 0;
+        if(nprows != npcols){
+            DDLA_CHECK(ddlaDescInit(desc, handle, n, n, nb, nb, 0, 0));
+            // A real local buffer, so only the grid check can reject the call.
+            DeviceBuffer<Complex> a(handle, local_size(handle, desc));
+            expect_invalid(handle, "ppotrf on a non-square grid", [&]{
+                (void)ddla::ppotrf(handle, 'L', n, a.ptr, 1, 1, desc, info);
+            });
+        } else if(nprows > 1){
+            DDLA_CHECK(ddlaDescInit(desc, handle, n, n, nb, nb, 1, 0));
+            DeviceBuffer<Complex> a(handle, local_size(handle, desc));
+            expect_invalid(handle, "ppotrf with RSRC != CSRC", [&]{
+                (void)ddla::ppotrf(handle, 'L', n, a.ptr, 1, 1, desc, info);
+            });
+        }
+    }
     if(skip_non_square_grid(handle, "ppotrf")) return;
 
     const int nb = base.nb;

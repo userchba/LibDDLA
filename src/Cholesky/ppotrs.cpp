@@ -18,6 +18,10 @@ void ppotrs_check(const DdlaHandle_t& h,char side,char uplo,char trans,int n,int
         check_desc(da,h);check_desc(db,h);detail::require_backend<Backend>(h,"ppotrs");
         if((side!='L' && side!='R') || (uplo!='L' && uplo!='U') || (trans!='N' && trans!='C') || n<0 || nrhs<0 || n>da[DDLA_M_] || n>da[DDLA_N_] || da[DDLA_MB_]!=da[DDLA_NB_])
             throw std::invalid_argument("ppotrs: invalid flags, dimensions or factor blocks");
+        // The solves walk B with A's distribution (see ptrtrs_check).
+        if(db[DDLA_MB_]!=da[DDLA_MB_] || (side=='L' && db[DDLA_RSRC_]!=da[DDLA_RSRC_]) ||
+           (side=='R' && (db[DDLA_NB_]!=da[DDLA_NB_] || db[DDLA_CSRC_]!=da[DDLA_CSRC_])))
+            throw std::invalid_argument("ppotrs: B must be distributed like A along the solved dimension");
         const int rows=side=='L'?n:nrhs,cols=side=='L'?nrhs:n;
         if(rows>db[DDLA_M_] || cols>db[DDLA_N_] || (location!=-1 && (location<1 || location>n)))throw std::invalid_argument("ppotrs: invalid right-hand side or head location");
         if(n && num_loc(n,da[DDLA_MB_],h->myprow_,da[DDLA_RSRC_],h->nprows_) && num_loc(n,da[DDLA_NB_],h->mypcol_,da[DDLA_CSRC_],h->npcols_) && !A)throw std::invalid_argument("ppotrs: null local factor");
@@ -70,25 +74,35 @@ void ppotrs_run(
         B, array_descB,
         backend_work, backend_bytes, host_work, host_bytes
     );
-    if(is_nega){
-        int i_loc = indx_g2l_r(array_descA, handle, n - 1);
-        int j_loc = indx_g2l_c(array_descA, handle, n - 1);
-        if(i_loc >= 0 && j_loc >= 0){
-            DDLA_CHECK(ddlaSynchronize(ddla_handle));
-            T correction;
-            DDLA_CHECK(ddlaMemcpy(ddla_handle, &correction, A + i_loc + j_loc * array_descA[DDLA_LLD_], sizeof(T)));
-            DDLA_CHECK(ddlaSynchronize(ddla_handle));
-            correction = -correction;
-            DDLA_CHECK(ddlaMemcpy(ddla_handle, A + i_loc + j_loc * array_descA[DDLA_LLD_], &correction, sizeof(T)));
-            DDLA_CHECK(ddlaSynchronize(ddla_handle));
-        }
+    // A negative head pivot: the second solve needs L(n,n) with its sign
+    // flipped.  Flip it only for that solve and flip it back afterwards, so the
+    // caller's factor is unchanged and factor-once/solve-many stays correct.
+    auto flip_last_diagonal = [&]() {
+        const int i_loc = indx_g2l_r(array_descA, handle, n - 1);
+        const int j_loc = indx_g2l_c(array_descA, handle, n - 1);
+        if(i_loc < 0 || j_loc < 0) return;
+        T* const d = A + i_loc + std::size_t(j_loc) * array_descA[DDLA_LLD_];
+        DDLA_CHECK(ddlaSynchronize(ddla_handle));
+        T correction;
+        DDLA_CHECK(ddlaMemcpy(ddla_handle, &correction, d, sizeof(T)));
+        DDLA_CHECK(ddlaSynchronize(ddla_handle));
+        correction = -correction;
+        DDLA_CHECK(ddlaMemcpy(ddla_handle, d, &correction, sizeof(T)));
+        DDLA_CHECK(ddlaSynchronize(ddla_handle));
+    };
+    if(is_nega) flip_last_diagonal();
+    try {
+        ptrtrs_impl::ptrtrs_run<Backend,T>(handle,
+            side, uplo, second_trans, 'N', b_rows, b_cols,
+            A, array_descA,
+            B, array_descB,
+            backend_work, backend_bytes, host_work, host_bytes
+        );
+    } catch (...) {
+        if(is_nega) try { flip_last_diagonal(); } catch (...) {}
+        throw;
     }
-    ptrtrs_impl::ptrtrs_run<Backend,T>(handle,
-        side, uplo, second_trans, 'N', b_rows, b_cols,
-        A, array_descA,
-        B, array_descB,
-        backend_work, backend_bytes, host_work, host_bytes
-    );
+    if(is_nega) flip_last_diagonal();
 
     if(needs_permute){
         if(side == 'L')

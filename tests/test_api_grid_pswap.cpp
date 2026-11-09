@@ -38,6 +38,19 @@ void check_pswap(const ddla::DdlaHandle_t& handle, const Shape& base)
         return base_value(i, src_j);
     });
     require_close(handle, "pswap(handle, col)", col_err, 1e-12);
+
+    // Equal local lengths are not enough: segments that start at different
+    // block offsets pair the wrong entries and must be rejected.
+    if(nprows > 1 && nb > 1)
+        expect_invalid(handle, "pswap misaligned column segments", [&]{
+            ddla::pswap(handle, 2, d_A.ptr, 1, 1, desc, 1, d_A.ptr, 2, 2, desc, 1);
+        });
+    expect_invalid(handle, "pswap segment past the descriptor", [&]{
+        ddla::pswap(handle, m, d_A.ptr, 2, 1, desc, 1, d_A.ptr, 2, 2, desc, 1);
+    });
+    expect_invalid(handle, "pswap mixed directions", [&]{
+        ddla::pswap(handle, 1, d_A.ptr, 1, 1, desc, desc[DDLA_M_], d_A.ptr, 1, 2, desc, 1);
+    });
 }
 
 int main(int argc, char** argv)

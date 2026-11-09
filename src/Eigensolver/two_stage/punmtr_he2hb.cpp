@@ -33,6 +33,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <exception>
 #include <stdexcept>
 
 namespace ddla {
@@ -168,9 +169,23 @@ void punmtr_he2hb(
     info = 0;
     const auto p =
         spectral_impl::punmtr_he2hb_check(handle, Backend, trans, n, nbw, A, descA, tmat, Z, descZ);
+    // Size and allocation may fail on one rank only: agree before the
+    // collective run, as phe2hb does, so no rank is left in a broadcast.
     std::size_t backend_bytes = 0;
-    spectral_impl::punmtr_he2hb_workspace_size<T>(handle, p, &backend_bytes);
-    vector<char> backend_work(handle, backend_bytes);
+    vector<char> backend_work(handle);
+    std::exception_ptr failure;
+    try {
+        spectral_impl::punmtr_he2hb_workspace_size<T>(handle, p, &backend_bytes);
+        backend_work.resize(backend_bytes);
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    int bad = failure ? 1 : 0;
+    MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &bad, 1, MPI_INT, MPI_MAX, handle->comm));
+    if (bad) {
+        if (failure) std::rethrow_exception(failure);
+        throw std::runtime_error("punmtr_he2hb: workspace preparation failed on another rank");
+    }
     spectral_impl::punmtr_he2hb_run<Backend, T>(
         handle, p, A, descA, tmat, Z, descZ, info, backend_work.data(), backend_bytes);
 }

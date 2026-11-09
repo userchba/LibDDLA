@@ -25,6 +25,11 @@ void ppotrf_check(const DdlaHandle_t& h,char uplo,int n,const void* A,int ia,int
     detail::agree_check(h,"ppotrf",[&](detail::Agree&){check_desc(d,h);detail::require_backend<Backend>(h,"ppotrf");
         if((uplo!='L' && uplo!='U') || n<0 || n>d[DDLA_M_] || n>d[DDLA_N_] || d[DDLA_MB_]!=d[DDLA_NB_] || ia!=1 || ja!=1)
             throw std::invalid_argument("ppotrf: invalid triangle, dimensions, blocks or offsets");
+        // The trailing update transposes panels through the diagonal processes
+        // (myprow == mypcol, broadcast roots taken from the other coordinate),
+        // which is only valid on a square grid whose diagonal blocks sit on it.
+        if(h->nprows_!=h->npcols_ || d[DDLA_RSRC_]!=d[DDLA_CSRC_])
+            throw std::invalid_argument("ppotrf: needs a square process grid and RSRC == CSRC");
         if(head && location!=-1 && (location<1 || location>n))throw std::invalid_argument("ppotrf: invalid head location");
         const int ml=num_loc(n,d[DDLA_MB_],h->myprow_,d[DDLA_RSRC_],h->nprows_),nl=num_loc(n,d[DDLA_NB_],h->mypcol_,d[DDLA_CSRC_],h->npcols_);
         if(n && ml && nl && !A)throw std::invalid_argument("ppotrf: null local matrix");});
@@ -127,38 +132,38 @@ bool ppotrf_run(
         {
             if(n_s + nb_real == n && is_head){
                 if(nb_real > 1){
-                    lapack_impl::potrf_run<Backend,T>(ddla_handle, uplo, nb_real - 1, A + mm_row_start + mm_col_start * lldA, lldA, info_buffer, solver, solver_bytes);
+                    lapack_impl::potrf_run<Backend,T>(ddla_handle, uplo, nb_real - 1, A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA, info_buffer, solver, solver_bytes);
                     if(uplo == 'L'){
                         blas_impl::trsm_run<Backend, T>(
                             ddla_handle, side_char, uplo, 'C', 'N',
                             1, nb_real - 1, (T)1.0,
-                            A + mm_row_start + mm_col_start * lldA, lldA,
-                            A + mm_row_start + nb_real - 1 + mm_col_start * lldA, lldA
+                            A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA,
+                            A + mm_row_start + nb_real - 1 + std::size_t(mm_col_start) * lldA, lldA
                         );
                         blas_impl::herk_run<Backend, T>(
                             ddla_handle, uplo, 'N',
                             1, nb_real - 1,
-                            -1.0, A + mm_row_start + nb_real - 1 + mm_col_start * lldA, lldA,
-                            1.0, A + mm_row_start + nb_real - 1 + (mm_col_start + nb_real - 1) * lldA, lldA
+                            -1.0, A + mm_row_start + nb_real - 1 + std::size_t(mm_col_start) * lldA, lldA,
+                            1.0, A + mm_row_start + nb_real - 1 + std::size_t(mm_col_start + nb_real - 1) * lldA, lldA
                         );
                     }else{
                         blas_impl::trsm_run<Backend, T>(
                             ddla_handle, side_char, uplo, 'C', 'N',
                             nb_real - 1, 1, (T)1.0,
-                            A + mm_row_start + mm_col_start * lldA, lldA,
-                            A + mm_row_start + (mm_col_start + nb_real - 1) * lldA, lldA
+                            A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA,
+                            A + mm_row_start + std::size_t(mm_col_start + nb_real - 1) * lldA, lldA
                         );
                         blas_impl::herk_run<Backend, T>(
                             ddla_handle, uplo, 'C',
                             1, nb_real - 1,
-                            -1.0, A + mm_row_start + (mm_col_start + nb_real - 1) * lldA, lldA,
-                            1.0, A + mm_row_start + nb_real - 1 + (mm_col_start + nb_real - 1) * lldA, lldA
+                            -1.0, A + mm_row_start + std::size_t(mm_col_start + nb_real - 1) * lldA, lldA,
+                            1.0, A + mm_row_start + nb_real - 1 + std::size_t(mm_col_start + nb_real - 1) * lldA, lldA
                         );
                     }
                 }
                 T last_value;
                 DDLA_CHECK(ddlaMemcpy(ddla_handle, &last_value,
-                                      A + mm_row_start + nb_real - 1 + (mm_col_start + nb_real - 1) * lldA,
+                                      A + mm_row_start + nb_real - 1 + std::size_t(mm_col_start + nb_real - 1) * lldA,
                                       sizeof(T)));
                 // The D2H copy above is async; the host reads last_value below,
                 // so synchronize the stream before consuming it (no sync exists
@@ -180,15 +185,15 @@ bool ppotrf_run(
                 }
                 last_value = std::sqrt(last_value);
                 DDLA_CHECK(ddlaMemcpy(ddla_handle,
-                                      A + mm_row_start + nb_real - 1 + (mm_col_start + nb_real - 1) * lldA,
+                                      A + mm_row_start + nb_real - 1 + std::size_t(mm_col_start + nb_real - 1) * lldA,
                                       &last_value, sizeof(T)));
             }else
-                lapack_impl::potrf_run<Backend,T>(ddla_handle, uplo, nb_real, A + mm_row_start + mm_col_start * lldA, lldA, info_buffer, solver, solver_bytes);
+                lapack_impl::potrf_run<Backend,T>(ddla_handle, uplo, nb_real, A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA, info_buffer, solver, solver_bytes);
             DDLA_CHECK(ddlaSynchronize(ddla_handle));
             DDLA_CHECK(ddlaMemcpy(ddla_handle, &info, info_buffer, sizeof(int)));
             DDLA_CHECK(ddlaSynchronize(ddla_handle));
             DDLA_CHECK(ddlaMemcpy2D(ddla_handle, block_diag, nb_real * sizeof(T),
-                                    A + mm_row_start + mm_col_start * lldA, lldA * sizeof(T), nb_real * sizeof(T),
+                                    A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA * sizeof(T), nb_real * sizeof(T),
                                     nb_real));
         }
         if(n_s + nb_real == n)
@@ -210,10 +215,10 @@ bool ppotrf_run(
                     ddla_handle, side_char, uplo, 'C', 'N',
                     length_row, nb_real, (T)1.0,
                     block_diag, nb_real,
-                    A + mm_row_start + mm_col_start * lldA, lldA
+                    A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA
                 );
                 DDLA_CHECK(ddlaMemcpy2D(ddla_handle, block_col, length_row * sizeof(T),
-                                        A + mm_row_start + mm_col_start * lldA, lldA * sizeof(T),
+                                        A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA * sizeof(T),
                                         length_row * sizeof(T), nb_real));
             }
         }
@@ -236,7 +241,7 @@ bool ppotrf_run(
                     ddla_handle, uplo, 'N',
                     length_row, nb_real,
                     -1.0, block_col, length_row,
-                    1.0, A + mm_row_start + mm_col_start * lldA, lldA
+                    1.0, A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA
                 );
         }else{
             // the first approach in which the unused block will be polluted
@@ -280,7 +285,7 @@ bool ppotrf_run(
                         row_remain, length_col_real, nb_real, (T)-1.0,
                         block_col + length_row - row_remain, length_row,
                         block_row, length_col,
-                        (T)1.0, A + mm_row_start + mm_col_start * lldA + (length_row - row_remain), lldA
+                        (T)1.0, A + mm_row_start + std::size_t(mm_col_start) * lldA + (length_row - row_remain), lldA
                     );
             }
             if(col_remain != 0){
@@ -296,7 +301,7 @@ bool ppotrf_run(
                         length_row_real, col_remain, nb, (T)-1.0,
                         block_col + length_row - length_row_real, length_row,
                         block_row + length_col - col_remain, length_col,
-                        (T)1.0, A + mm_row_start + mm_col_start * lldA + (length_row - length_row_real) + (length_col - col_remain) * lldA, lldA
+                        (T)1.0, A + mm_row_start + std::size_t(mm_col_start) * lldA + (length_row - length_row_real) + std::size_t(length_col - col_remain) * lldA, lldA
                     );
             }
             for(;row_s <= num_row_block * nb; row_s += nb){
@@ -310,7 +315,7 @@ bool ppotrf_run(
                 for(; col_s <= num_col_block * nb; col_s += nb){
                     h_A_array[i_batch_count] = block_col + length_row - row_s;
                     h_B_array[i_batch_count] = block_row + length_col - col_s;
-                    h_C_array[i_batch_count] = A + m_loc_A - row_s + (n_loc_A - col_s) * lldA;
+                    h_C_array[i_batch_count] = A + m_loc_A - row_s + std::size_t(n_loc_A - col_s) * lldA;
                     i_batch_count++;
                 }
             }
@@ -341,10 +346,10 @@ bool ppotrf_run(
                         ddla_handle, side_char, uplo, 'C', 'N',
                         nb_real, length_col, (T)1.0,
                         block_diag, nb_real,
-                        A + mm_row_start + mm_col_start * lldA, lldA
+                        A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA
                     );
                     DDLA_CHECK(ddlaMemcpy2D(ddla_handle, block_row, nb_real * sizeof(T),
-                                            A + mm_row_start + mm_col_start * lldA, lldA * sizeof(T),
+                                            A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA * sizeof(T),
                                             nb_real * sizeof(T), length_col));
                 }
             }
@@ -367,7 +372,7 @@ bool ppotrf_run(
                         ddla_handle, uplo, 'C',
                         length_col, nb_real,
                         -1.0, block_row, nb_real,
-                        1.0, A + mm_row_start + mm_col_start * lldA, lldA
+                        1.0, A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA
                     );
             }else{
                 if(length_row <= 0 || length_col <= 0)
@@ -394,7 +399,7 @@ bool ppotrf_run(
                             block_col + row_offset * nb_real, nb_real,
                             block_row + col_offset * nb_real, nb_real,
                             (T)1.0,
-                            A + row_loc + col_loc * lldA, lldA
+                            A + row_loc + std::size_t(col_loc) * lldA, lldA
                         );
                     }
                 }
@@ -414,7 +419,7 @@ bool ppotrf_run(
                             block_col + row_offset * nb_real, nb_real,
                             block_row + col_offset * nb_real, nb_real,
                             (T)1.0,
-                            A + row_loc + col_loc * lldA, lldA
+                            A + row_loc + std::size_t(col_loc) * lldA, lldA
                         );
                     }
                 }
@@ -430,7 +435,7 @@ bool ppotrf_run(
                             continue;
                         h_A_array[i_batch_count] = block_col + row_offset * nb_real;
                         h_B_array[i_batch_count] = block_row + col_offset * nb_real;
-                        h_C_array[i_batch_count] = A + row_loc + col_loc * lldA;
+                        h_C_array[i_batch_count] = A + row_loc + std::size_t(col_loc) * lldA;
                         i_batch_count++;
                     }
                 }
