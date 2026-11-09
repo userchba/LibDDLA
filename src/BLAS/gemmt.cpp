@@ -66,17 +66,15 @@ template <typename R> struct Global<thrust::complex<R>> {
     }
 };
 
-// GEAM works on rectangles. These small copy/scale kernels are needed to
-// restrict access to one triangle, particularly with an undefined other half.
-template <typename T, bool ReadC>
+// Nonzero scaling must read only the selected triangle. Zero fills use
+// ddlaMemsetTri instead of duplicating its no-read kernel.
+template <typename T>
 __global__ void scale_triangle_kernel(bool upper, int n, T beta, void* c, int ldc)
 {
     const int i=blockIdx.x*blockDim.x+threadIdx.x, j=blockIdx.y*blockDim.y+threadIdx.y;
     if (i>=n || j>=n || (upper ? i>j : i<j)) return;
     const std::size_t p=i+std::size_t(j)*ldc;
-    T x(0);
-    if constexpr (ReadC) x=beta*Global<T>::load(c,p);
-    Global<T>::store(c,p,x);
+    Global<T>::store(c,p,beta*Global<T>::load(c,p));
 }
 
 template <typename R>
@@ -162,22 +160,23 @@ template <DdlaBackend Backend, typename T>
 void scale_triangle(const DdlaHandle_t& h, char uplo, int n, const T& beta, T* c, int ldc)
 {
     if (beta==T(1)) return;
+    if (beta==T(0)) {
+        DDLA_CHECK(ddlaMemsetTri(h, uplo, n, n, c, ldc));
+        return;
+    }
     if constexpr (Backend==DdlaBackend::CPU) {
         for (int j=0;j<n;++j) {
             const int begin=uplo=='U' ? 0 : j, end=uplo=='U' ? j+1 : n;
             for (int i=begin;i<end;++i) {
                 T& x=c[i+std::size_t(j)*ldc];
-                x=beta==T(0) ? T(0) : beta*x;
+                x=beta*x;
             }
         }
     } else {
 #if DDLA_GPU_VENDOR
         using D=detail::DeviceScalarT<T>;
         const dim3 grid((n-1)/16+1,(n-1)/16+1), block(16,16);
-        if (beta==T(0))
-            scale_triangle_kernel<D,false><<<grid,block,0,static_cast<gpuStream_t>(h->stream)>>>(uplo=='U',n,D(0),c,ldc);
-        else
-            scale_triangle_kernel<D,true><<<grid,block,0,static_cast<gpuStream_t>(h->stream)>>>(uplo=='U',n,detail::to_device_scalar(beta),c,ldc);
+        scale_triangle_kernel<D><<<grid,block,0,static_cast<gpuStream_t>(h->stream)>>>(uplo=='U',n,detail::to_device_scalar(beta),c,ldc);
         DDLA_CHECK(ddlaGetLastError(h));
 #endif
     }

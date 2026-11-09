@@ -350,6 +350,20 @@ copy-direction argument. GPU copies involving device memory are queued on
 the handle; call `ddlaSynchronize(handle)` before reading their results on
 the host. Pitches and copy sizes are in bytes.
 
+`ddlaMemcpyTri(handle, uplo, m, n, dst, ldd, src, lds, include_diagonal=true)`
+copies only a local column-major upper/lower triangle. Leading dimensions are
+in elements; the other triangle and padding remain unchanged. The matching
+`ddlaMemsetTri(handle, uplo, m, n, ptr, lda, value=0, include_diagonal=true)`
+repeats a byte value, just like `ddlaMemset` (use zero for numerical zero).
+Pass `false` to preserve the diagonal. Both accept trivially copyable element
+types, including real and complex scalars. Large host operations use the
+handle's OpenMP thread budget; GPU fills and device-to-device copies use one
+kernel on the handle stream without scratch allocation. Host/device triangular
+copies enqueue selected contiguous column segments, with the same pointer
+direction and synchronization rules as `ddlaMemcpy`. GPU fills require device
+or managed memory. These are local memory helpers, not distributed operations
+or transpose/conjugation routines.
+
 ## API overview
 
 ### Handle and descriptor

@@ -73,15 +73,14 @@ __device__ T load_tri(const void* m, int ld, int r, int c, int n,
     return conj_if(conj, v);
 }
 
-template <bool Upper, typename T, bool ReadC>
+template <bool Upper, typename T>
 __global__ void scale_triangle(int n, T beta, void* c, int ldc)
 {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     const int j = blockIdx.y * blockDim.y + threadIdx.y;
     if (Upper ? (i <= j && j < n) : (j <= i && i < n)) {
         const std::size_t p = i + std::size_t(j) * ldc;
-        if constexpr (ReadC) Global<T>::store(c, p, beta * Global<T>::load(c, p));
-        else Global<T>::store(c, p, T(0));
+        Global<T>::store(c, p, beta * Global<T>::load(c, p));
     }
 }
 
@@ -442,6 +441,10 @@ void trtrm_impl(const DdlaHandle_t& handle, int n, const T& alpha,
            const T& beta, T* C, int ldc, [[maybe_unused]] void* work, [[maybe_unused]] std::size_t bytes)
 {
     if (n == 0 || (alpha == T(0) && beta == T(1))) return;
+    if (alpha == T(0) && beta == T(0)) {
+        DDLA_CHECK(ddlaMemsetTri(handle, Upper ? 'U' : 'L', n, n, C, ldc));
+        return;
+    }
     if constexpr (Backend == DdlaBackend::CPU) {
         trtrm_cpu(handle, Upper ? 'U' : 'L', 'N', Upper ? 'U' : 'L', 'N',
                    n, alpha, A, lda, B, ldb, beta, C, ldc, work, bytes);
@@ -457,8 +460,7 @@ void trtrm_impl(const DdlaHandle_t& handle, int n, const T& alpha,
         const D al = detail::to_device_scalar(alpha), be = detail::to_device_scalar(beta);
         if (alpha == T(0)) {
             const dim3 threads(16, 16), blocks((n - 1) / 16 + 1, (n - 1) / 16 + 1);
-            if (beta == T(0)) scale_triangle<Upper, D, false><<<blocks, threads, 0, static_cast<gpuStream_t>(handle->stream)>>>(n, be, c, ldc);
-            else scale_triangle<Upper, D, true><<<blocks, threads, 0, static_cast<gpuStream_t>(handle->stream)>>>(n, be, c, ldc);
+            scale_triangle<Upper, D><<<blocks, threads, 0, static_cast<gpuStream_t>(handle->stream)>>>(n, be, c, ldc);
         } else {
             // V100 measurements favor more small tiles before the GPU is full;
             // complex<double> needs the smaller register tile even at large n.
@@ -484,6 +486,12 @@ void trtrm_general_impl(const DdlaHandle_t& handle, int n, const T& alpha,
                         const T& beta, T* C, int ldc, [[maybe_unused]] void* work,
                         [[maybe_unused]] std::size_t bytes)
 {
+    if constexpr (UpA == UpB) {
+        if (alpha == T(0) && beta == T(0)) {
+            DDLA_CHECK(ddlaMemsetTri(handle, UpA ? 'U' : 'L', n, n, C, ldc));
+            return;
+        }
+    }
     if constexpr (Backend == DdlaBackend::CPU) {
         trtrm_cpu(handle, (UpA != ta) ? 'U' : 'L', ca ? 'C' : (ta ? 'T' : 'N'),
                    (UpB != tb) ? 'U' : 'L', cb ? 'C' : (tb ? 'T' : 'N'),
@@ -502,8 +510,7 @@ void trtrm_general_impl(const DdlaHandle_t& handle, int n, const T& alpha,
         if (alpha == T(0)) {
             if constexpr (UpA == UpB) {
                 const dim3 threads(16, 16), blocks((n - 1) / 16 + 1, (n - 1) / 16 + 1);
-                if (beta == T(0)) scale_triangle<UpA, D, false><<<blocks, threads, 0, static_cast<gpuStream_t>(handle->stream)>>>(n, be, c, ldc);
-                else scale_triangle<UpA, D, true><<<blocks, threads, 0, static_cast<gpuStream_t>(handle->stream)>>>(n, be, c, ldc);
+                scale_triangle<UpA, D><<<blocks, threads, 0, static_cast<gpuStream_t>(handle->stream)>>>(n, be, c, ldc);
             } else {
                 const dim3 threads(16, 16), blocks((n - 1) / 16 + 1, (n - 1) / 16 + 1);
                 if (beta == T(0)) scale_full<D, false><<<blocks, threads, 0, static_cast<gpuStream_t>(handle->stream)>>>(n, be, c, ldc);
