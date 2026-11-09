@@ -86,7 +86,9 @@ template <typename U> struct real_type<std::complex<U>> { using type = U; };
  * @param A    Pointer in the selected backend to distributed triangular matrix A.
  * @param descA  ScaLAPACK int[9] descriptor for A (must be square, mb == nb).
  * @param B    Pointer in the selected backend to RHS / solution B.
- * @param descB  ScaLAPACK int[9] descriptor for B.
+ * @param descB  ScaLAPACK int[9] descriptor for B: same MB as A, and the
+ *               solved dimension distributed like A's (side 'L': equal RSRC;
+ *               side 'R': equal NB and CSRC).  Other layouts throw.
  *
  * The descriptors may describe matrices larger than the logical sub-matrix
  * (leading block anchored at global (0,0)); only the leading m x n block of B
@@ -534,7 +536,8 @@ void pgetrf_nopiv(
  * @param descA   ScaLAPACK int[9] descriptor for A.
  * @param ipiv    Host pivot array from pgetrf.
  * @param B     Pointer in the selected backend to RHS / solution B (input/output).
- * @param descB   ScaLAPACK int[9] descriptor for B.
+ * @param descB   ScaLAPACK int[9] descriptor for B (same MB as A; rows for
+ *                side 'L' / columns for side 'R' distributed like A's).
  */
 template <DdlaBackend Backend = default_backend_v, typename T>
 void pgetrs(
@@ -1007,6 +1010,8 @@ void pdam(const DdlaHandle_t& handle, const T1& alpha, T2* A, const int* descA, 
  * @param ja       Reserved; must be 1 (1-based).
  * @param handle   Handle owning the process grid and stream.
  * @param descA    ScaLAPACK int[9] descriptor for A (mb == nb required).
+ *                 The process grid must be square and RSRC == CSRC; other
+ *                 layouts throw std::invalid_argument (pposv inherits this).
  * @param info     0 on success, >0 if not positive-definite.
  * @param is_head  Internal flag for multi-head Cholesky (default false).
  * @param location Internal row/col rearrangement index (default -1).
@@ -1104,8 +1109,11 @@ void ppotrf_bottom_right(
  * @param handle   Handle owning the process grid and stream.
  * @param descA    ScaLAPACK int[9] descriptor for A.
  * @param B      Pointer in the selected backend to RHS / solution B (input/output).
- * @param descB    ScaLAPACK int[9] descriptor for B.
- * @param is_nega  Diagonal sign-correction flag (from ppotrf return).
+ * @param descB    ScaLAPACK int[9] descriptor for B: same MB as A, and B's
+ *                 rows (side 'L') / columns (side 'R') distributed like A's
+ *                 (equal RSRC, resp. equal NB and CSRC).
+ * @param is_nega  Diagonal sign-correction flag (from ppotrf return).  The
+ *                 factor in A is left unchanged, so it can be reused.
  * @param location Head-correction index forwarded from ppotrf; -1 (or == n)
  *                 means no B permutation.
  */
@@ -1856,7 +1864,8 @@ void gemmVbatched2s(
 
 
 /**
- * @brief Fill a buffer with independent uniform random values in [0, 1).
+ * @brief Fill a buffer with independent uniform random values in [0, 1) on a CPU handle and
+ * (0, 1] on a GPU handle (the vendor generators exclude 0 and include 1).
  *
  * `data` lives where the handle's backend does: host memory for a CPU handle, device memory for a GPU handle.  The CPU
  * arm uses std::mt19937_64 seeded from the system clock; the GPU arm uses the vendor RNG (curand on CUDA, hiprand on
@@ -2252,9 +2261,10 @@ void ptrtrm(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, c
  * block-diagonal scaling. Const input factors are copied to distributed
  * storage only when pivot conversion or descriptor normalization requires it;
  * RHS temporaries are also distributed. IPIV and INFO remain host data.
- * Other GPU LDL variants stage arithmetic through host LAPACK. Distributed
- * SY factors/solves still gather leading blocks to rank 0 with quadratic
- * root storage. Local GPU hetrs/hetrs_nopiv also retain host staging.
+ * Other GPU LDL variants stage arithmetic through host LAPACK. Real
+ * distributed SY calls use the distributed HE path (real SY == HE); complex
+ * distributed SY factors/solves still gather leading blocks to rank 0 with
+ * quadratic root storage. Local GPU hetrs/hetrs_nopiv also retain host staging.
  * Flags/global metadata must agree across ranks.
  */
 template <DdlaBackend Backend = default_backend_v, typename T>

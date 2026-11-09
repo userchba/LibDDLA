@@ -42,6 +42,25 @@ void check_pgetrs(const ddla::DdlaHandle_t& handle, const Shape& base)
     run_case('R', 'N');
     run_case('R', 'T');
     run_case('R', 'C');
+
+    // Pivots take the owner from A and the local index from B: a B whose
+    // solved dimension is distributed differently must be rejected (it used
+    // to write at local index -1).
+    int nprows = 0, npcols = 0;
+    ddlaGetGridDims(handle, nprows, npcols);
+    std::vector<int> ipiv(std::max(1, ddla_test::m_loc(handle, descA)), 1);
+    auto reject = [&](char side, int rsrc, int csrc, const std::string& what){
+        const int b_rows = (side == 'L') ? n : nrhs;
+        const int b_cols = (side == 'L') ? nrhs : n;
+        int descB[ddla::DDLA_DLEN_];
+        DDLA_CHECK(ddlaDescInit(descB, handle, b_rows, b_cols, nb, nb, rsrc, csrc));
+        expect_invalid(handle, std::string("pgetrs side=") + side + " B " + what, [&]{
+            ddla::pgetrs(handle, side, 'N', n, nrhs, static_cast<Complex*>(nullptr), descA, ipiv.data(),
+                         static_cast<Complex*>(nullptr), descB);
+        });
+    };
+    if(nprows > 1) reject('L', 1, 0, "RSRC != A RSRC");
+    if(npcols > 1) reject('R', 0, 1, "CSRC != A CSRC");
 }
 
 int main(int argc, char** argv)

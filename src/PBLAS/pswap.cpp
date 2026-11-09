@@ -65,7 +65,10 @@ void swap_rows(const DdlaHandle_t& h,
 namespace pswap_impl {
 
 // Component 1.  The segments have to pair up entry for entry on every process
-// row (or column): the local length of A's range and of B's range must agree.
+// row (or column).  Equal local lengths are not enough: the run swaps the
+// i-th local entry of A's range with the i-th local entry of B's range, so
+// both ranges need the same block size, the same offset inside a block and
+// the same owning process for their first entry.
 template <DdlaBackend Backend>
 void pswap_check(const DdlaHandle_t& handle, int N,
                  int ia, int ja, const int* array_descA, int inca,
@@ -82,24 +85,33 @@ void pswap_check(const DdlaHandle_t& handle, int N,
             throw std::invalid_argument("pswap: incb must be 1 or the row count of B");
         if (inca == 1 && incb != inca)
             throw std::invalid_argument("pswap: inca and incb must select the same direction");
+        if (inca != 1 && incb != array_descB[DDLA_M_])
+            throw std::invalid_argument("pswap: inca and incb must select the same direction");
+        if (N < 0)
+            throw std::invalid_argument("pswap: negative length");
+        if (N == 0) return;
 
-        int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
+        int nprows = 0, npcols = 0;
         ddlaGetGridDims(handle, nprows, npcols);
-        ddlaGetGridCoords(handle, myprow, mypcol);
         --ia; --ja; --ib; --jb;
-        int length_a, length_b;
-        if (inca == 1) {
-            length_a = num_loc(N + ia, array_descA[DDLA_MB_], myprow, array_descA[DDLA_RSRC_], nprows)
-                     - num_loc(ia, array_descA[DDLA_MB_], myprow, array_descA[DDLA_RSRC_], nprows);
-            length_b = num_loc(N + ib, array_descB[DDLA_MB_], myprow, array_descB[DDLA_RSRC_], nprows)
-                     - num_loc(ib, array_descB[DDLA_MB_], myprow, array_descB[DDLA_RSRC_], nprows);
-        } else {
-            length_a = num_loc(N + ja, array_descA[DDLA_NB_], mypcol, array_descA[DDLA_CSRC_], npcols)
-                     - num_loc(ja, array_descA[DDLA_NB_], mypcol, array_descA[DDLA_CSRC_], npcols);
-            length_b = num_loc(N + jb, array_descB[DDLA_NB_], mypcol, array_descB[DDLA_CSRC_], npcols)
-                     - num_loc(jb, array_descB[DDLA_NB_], mypcol, array_descB[DDLA_CSRC_], npcols);
-        }
-        if (length_a != length_b)
+        if (ia < 0 || ja < 0 || ib < 0 || jb < 0)
+            throw std::invalid_argument("pswap: ia, ja, ib and jb must be at least 1");
+        const bool column = inca == 1;
+        const long long a_rows = column ? (long long)ia + N : ia + 1LL;
+        const long long a_cols = column ? ja + 1LL : (long long)ja + N;
+        const long long b_rows = column ? (long long)ib + N : ib + 1LL;
+        const long long b_cols = column ? jb + 1LL : (long long)jb + N;
+        if (a_rows > array_descA[DDLA_M_] || a_cols > array_descA[DDLA_N_] ||
+            b_rows > array_descB[DDLA_M_] || b_cols > array_descB[DDLA_N_])
+            throw std::invalid_argument("pswap: a segment exceeds its descriptor");
+        const int bs_a = column ? array_descA[DDLA_MB_] : array_descA[DDLA_NB_];
+        const int bs_b = column ? array_descB[DDLA_MB_] : array_descB[DDLA_NB_];
+        const int src_a = column ? array_descA[DDLA_RSRC_] : array_descA[DDLA_CSRC_];
+        const int src_b = column ? array_descB[DDLA_RSRC_] : array_descB[DDLA_CSRC_];
+        const int procs = column ? nprows : npcols;
+        const int start_a = column ? ia : ja, start_b = column ? ib : jb;
+        if (bs_a != bs_b || start_a % bs_a != start_b % bs_b ||
+            indxg2p(start_a, bs_a, src_a, procs) != indxg2p(start_b, bs_b, src_b, procs))
             throw std::invalid_argument("pswap: the segments of A and B are distributed differently");
     });
 }

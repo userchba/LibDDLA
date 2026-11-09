@@ -98,7 +98,7 @@ void pgetrf_nopiv_run(const DdlaHandle_t& handle, int m, int n, T* A, const int*
             // Call the local getrf_nopiv directly on the local backend buffer.
             int local_info = 0;
             if (myprow == owner_row && mypcol == owner_col) {
-                lapack_impl::getrf_nopiv_run<Backend, T>(handle, nb_real, nb_real, A + i_loc + j_loc * lld, lld, info_buffer);
+                lapack_impl::getrf_nopiv_run<Backend, T>(handle, nb_real, nb_real, A + i_loc + std::size_t(j_loc) * lld, lld, info_buffer);
                 DDLA_CHECK(ddlaMemcpy(handle, &local_info, info_buffer, sizeof(int)));
                 DDLA_CHECK(ddlaSynchronize(handle));
             }
@@ -110,14 +110,17 @@ void pgetrf_nopiv_run(const DdlaHandle_t& handle, int m, int n, T* A, const int*
                 info = local_info + n_s;
                 break;
             }
-            if (n_s + nb_real == n)
+            // Last block column with no rows below it: nothing left to solve.
+            // When m > n the rows below still need L21 = A21 * U1^{-1} (step 4),
+            // so fall through; the right panel and the update are empty then.
+            if (n_s + nb_real == n && m <= n)
                 break;
 
             // ================================================================
             // Step 2: Extract/broadcast the factored diagonal block (L1+U1)
             // ================================================================
             if (myprow == owner_row && mypcol == owner_col) {
-                DDLA_CHECK(ddlaMemcpy2D(handle, temp_block, nb_real * sizeof(T), A + i_loc + j_loc * lld,
+                DDLA_CHECK(ddlaMemcpy2D(handle, temp_block, nb_real * sizeof(T), A + i_loc + std::size_t(j_loc) * lld,
                                         lld * sizeof(T), nb_real * sizeof(T), nb_real));
             }
             if (myprow == owner_row) {
@@ -133,7 +136,7 @@ void pgetrf_nopiv_run(const DdlaHandle_t& handle, int m, int n, T* A, const int*
             int right_panel_col_start = (j_loc >= 0) ? (j_loc + nb_real) : mm_col_start;
             if (myprow == owner_row) {
                 if (n_loc > right_panel_col_start) {
-                    T* right_panel = A + right_panel_col_start * lld + mm_row_start;
+                    T* right_panel = A + std::size_t(right_panel_col_start) * lld + mm_row_start;
                     blas_impl::trsm_run<Backend, T>(
                         handle,
                         'L', 'L',
@@ -153,7 +156,7 @@ void pgetrf_nopiv_run(const DdlaHandle_t& handle, int m, int n, T* A, const int*
             int left_panel_row_start = (i_loc >= 0) ? (i_loc + nb_real) : mm_row_start;
             if (mypcol == owner_col) {
                 if (m_loc > left_panel_row_start) {
-                    T* left_panel = A + mm_col_start * lld + left_panel_row_start;
+                    T* left_panel = A + std::size_t(mm_col_start) * lld + left_panel_row_start;
                     blas_impl::trsm_run<Backend, T>(
                         handle,
                         'R', 'U',
@@ -191,7 +194,7 @@ void pgetrf_nopiv_run(const DdlaHandle_t& handle, int m, int n, T* A, const int*
                     temp_L, trailing_m,
                     temp_U, nb_real,
                     T(1.0),
-                    A + left_panel_row_start + right_panel_col_start * lld, lld);
+                    A + left_panel_row_start + std::size_t(right_panel_col_start) * lld, lld);
             }
 
             DDLA_CHECK(ddlaSynchronize(handle));

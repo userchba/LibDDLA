@@ -59,7 +59,11 @@ void gemm_check(
             std::string("gemm: template backend ") + backend_name(Backend) +
             " does not match handle backend " + backend_name(actual));
     }
-
+    // Fortran LSAME is case-insensitive, so accept either case on both
+    // backends; anything else would otherwise reach cuBLAS as OP_C.
+    const char ta = upper(transa), tb = upper(transb);
+    if ((ta != 'N' && ta != 'T' && ta != 'C') || (tb != 'N' && tb != 'T' && tb != 'C'))
+        throw std::invalid_argument("gemm: transa/transb must be 'N', 'T' or 'C'");
 }
 
 template <DdlaBackend Backend, typename T>
@@ -90,10 +94,8 @@ void gemm_run(
             static_assert(sizeof(T) == 0, "gemm: unsupported scalar type T");
     } else {
 #if DDLA_HAS_GPU
-        const gpublasOperation_t opA = transa == 'N' ? GPUBLAS_OP_N :
-                                       transa == 'T' ? GPUBLAS_OP_T : GPUBLAS_OP_C;
-        const gpublasOperation_t opB = transb == 'N' ? GPUBLAS_OP_N :
-                                       transb == 'T' ? GPUBLAS_OP_T : GPUBLAS_OP_C;
+        const gpublasOperation_t opA = op(transa);
+        const gpublasOperation_t opB = op(transb);
         if constexpr (std::is_same_v<T, float>) {
 #if DDLA_GPU_VENDOR
             BLAS_CHECK(gpublasSgemm(static_cast<gpublasHandle_t>(handle->blasH), opA, opB, m, n, k,

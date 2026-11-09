@@ -308,11 +308,17 @@ Algorithm pgemm_check(
         if (m == 0 || n == 0 || k == 0 || alpha_is_zero) return Algorithm::AB;
 
         Algorithm chosen = algorithm;
-        if (chosen == Algorithm::Auto)
+        if (chosen == Algorithm::Auto) {
             chosen = select(transa, transb, m, n, k, descA, descB, descC, nprows, npcols);
-        if (chosen != Algorithm::AB &&
-            !stationary_aligned(chosen == Algorithm::BC, transa, transb, descA, descB, descC))
+            // The cost model ignores source coordinates; SUMMA (AB) accepts any
+            // alignment, so an unaligned stationary pick falls back to it.
+            if (chosen != Algorithm::AB &&
+                !stationary_aligned(chosen == Algorithm::BC, transa, transb, descA, descB, descC))
+                chosen = Algorithm::AB;
+        } else if (chosen != Algorithm::AB &&
+                   !stationary_aligned(chosen == Algorithm::BC, transa, transb, descA, descB, descC)) {
             throw std::invalid_argument("pgemm: stationary branch requires aligned non-transposed panel owners");
+        }
         panel_width = kpanel_width();
         agree.mode("DDLA_PGEMM_KPANEL", panel_width);
         return chosen;

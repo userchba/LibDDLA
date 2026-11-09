@@ -73,6 +73,24 @@ void check_ptrtrs(const ddla::DdlaHandle_t& handle, const Shape& base)
             for(char trans : transes)
                 for(char diag : diags)
                     run_case(side, uplo, trans, diag);
+
+    // The solve walks B with A's ownership, so B distributed differently
+    // along the solved dimension must be rejected, not silently mis-solved.
+    int nprows = 0, npcols = 0;
+    ddlaGetGridDims(handle, nprows, npcols);
+    auto reject = [&](char side, int bnb, int rsrc, int csrc, const std::string& what){
+        const int b_rows = (side == 'L') ? n : nrhs;
+        const int b_cols = (side == 'L') ? nrhs : n;
+        int descB[ddla::DDLA_DLEN_];
+        DDLA_CHECK(ddlaDescInit(descB, handle, b_rows, b_cols, nb, bnb, rsrc, csrc));
+        expect_invalid(handle, std::string("ptrtrs side=") + side + " B " + what, [&]{
+            ddla::ptrtrs(handle, side, 'L', 'N', 'N', b_rows, b_cols,
+                         static_cast<Complex*>(nullptr), descA, static_cast<Complex*>(nullptr), descB);
+        });
+    };
+    if(nprows > 1) reject('L', nb, 1, 0, "RSRC != A RSRC");
+    if(npcols > 1) reject('R', nb, 0, 1, "CSRC != A CSRC");
+    reject('R', nb + 1, 0, 0, "NB != A NB");
 }
 
 int main(int argc, char** argv)

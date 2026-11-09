@@ -561,6 +561,16 @@ inline void check_solution(const ddla::DdlaHandle_t& handle, const int* descB,
     require_close(handle, name, err, tol);
 }
 
+// Every rank must see std::invalid_argument from `call` (argument checks are
+// agreed across ranks, so a rejection is collective).
+template <typename Fn>
+inline void expect_invalid(const ddla::DdlaHandle_t& handle, const std::string& name, Fn call)
+{
+    bool caught = false;
+    try { call(); } catch (const std::invalid_argument&) { caught = true; }
+    require_close(handle, name + " rejected", caught ? 0.0 : 1.0, 0.0);
+}
+
 inline bool skip_non_square_grid(const ddla::DdlaHandle_t& handle, const std::string& name)
 {
     int nprows = 0, npcols = 0;

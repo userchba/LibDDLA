@@ -482,6 +482,52 @@ double run_two_stage_case(bool temporary_on_left, const ddla::DdlaHandle_t& hand
     return maximum_error;
 }
 
+// One two-stage segment larger than the grid's z limit (65535): it must be
+// launched in chunks, stage 0 of each chunk before its stage 1.  Each entry is
+// a 1x1x1 product, C1 = alpha1 * (A0*B0) * AB1 + beta1 * C1.
+double run_large_segment_case(const ddla::DdlaHandle_t& handle)
+{
+    const int batch = 70000;
+    std::vector<double> data(std::size_t(5) * batch);
+    for (int i = 0; i < batch; ++i) {
+        data[i] = double(i % 7 + 1);            // A0
+        data[batch + i] = 2.0;                  // B0
+        data[2 * std::size_t(batch) + i] = 0.0; // C0 (temporary)
+        data[3 * std::size_t(batch) + i] = 3.0; // AB1
+        data[4 * std::size_t(batch) + i] = 1.0; // C1
+    }
+    DeviceArray<double> d_data(handle, data);
+    std::vector<double*> a0(batch), b0(batch), c0(batch), ab1(batch), c1(batch);
+    for (int i = 0; i < batch; ++i) {
+        a0[i] = d_data.data() + i;
+        b0[i] = d_data.data() + batch + i;
+        c0[i] = d_data.data() + 2 * std::size_t(batch) + i;
+        ab1[i] = d_data.data() + 3 * std::size_t(batch) + i;
+        c1[i] = d_data.data() + 4 * std::size_t(batch) + i;
+    }
+    DeviceArray<double*> d_a0(handle, a0), d_b0(handle, b0), d_c0(handle, c0), d_ab1(handle, ab1), d_c1(handle, c1);
+    DeviceArray<int> d_ones(handle, std::vector<int>(batch, 1));
+    const std::vector<int> segments{batch};
+    const double alpha1 = 1.0, beta1 = 0.5;
+    ddla::gemmVbatched2s<ddla::DdlaBackend::GPU, double>(
+        handle, 'N', 'N', d_ones.data(), d_ones.data(), d_ones.data(),
+        1.0, const_cast<const double* const*>(d_a0.data()), d_ones.data(),
+        const_cast<const double* const*>(d_b0.data()), d_ones.data(),
+        0.0, d_c0.data(), d_ones.data(),
+        'N', 'N', d_ones.data(), d_ones.data(), d_ones.data(),
+        alpha1, const_cast<const double* const*>(d_ab1.data()), d_ones.data(), d_ones.data(),
+        beta1, d_c1.data(), d_ones.data(), true, batch, segments.data(), 1);
+    ddla::DDLA_CHECK(ddla::ddlaSynchronize(handle));
+    std::vector<double> out(batch);
+    ddla::DDLA_CHECK(ddla::ddlaMemcpy(handle, out.data(), d_data.data() + 4 * std::size_t(batch),
+                                      sizeof(double) * batch));
+    ddla::DDLA_CHECK(ddla::ddlaSynchronize(handle));
+    double error = 0.0;
+    for (int i = 0; i < batch; ++i)
+        error = std::max(error, std::abs(out[i] - (alpha1 * 6.0 * double(i % 7 + 1) + beta1)));
+    return error;
+}
+
 template <typename T>
 double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
 {
@@ -528,6 +574,13 @@ double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
               << " temporary=right error=" << right_error << '\n';
     maximum_error = std::max(maximum_error, right_error);
     ++case_count;
+    if constexpr (std::is_same_v<T, double>) {
+        const double large_error = run_large_segment_case(handle);
+        std::cout << "DDLA_GEMM_VBATCHED_2S_CASE type=" << type_name
+                  << " segment=70000 error=" << large_error << '\n';
+        maximum_error = std::max(maximum_error, large_error);
+        ++case_count;
+    }
 
     // An empty batch is a no-op whatever the pointers are.
     ddla::gemmVbatched<ddla::DdlaBackend::GPU, T>(

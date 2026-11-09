@@ -426,19 +426,33 @@ void gemm_template_vbatched_2s(
 
     dim3 dimBlock_0(DIM_X_0, DIM_Y_0);
     dim3 dimBlock_1(DIM_X_1, DIM_Y_1);
+    // A segment's stage-1 products read the stage-0 temporaries of the same
+    // segment, so stage 0 of a chunk must precede its stage 1 (one stream
+    // orders them). Chunks stay within ddlaVbatchedMaxBatchCount, the grid's
+    // z limit, and a stage with an empty grid (no rows or columns) is skipped.
+    const int max_batchCount = ddlaVbatchedMaxBatchCount;
+    const unsigned gx_0 = ddlaVbatchedCeilDiv( max_m_0, BLK_M_0 ), gy_0 = ddlaVbatchedCeilDiv( max_n_0, BLK_N_0 );
+    const unsigned gx_1 = ddlaVbatchedCeilDiv( max_m_1, BLK_M_1 ), gy_1 = ddlaVbatchedCeilDiv( max_n_1, BLK_N_1 );
+    const bool run_0 = max_m_0 > 0 && max_n_0 > 0;
+    const bool run_1 = max_m_1 > 0 && max_n_1 > 0;
     for(int i=0, segment=0; i<batchCount; ++segment) {
-        int ibatch = min(segment_sizes[segment], batchCount-i);
-        dim3 dimGrid_0( ddlaVbatchedCeilDiv( max_m_0, BLK_M_0 ), ddlaVbatchedCeilDiv( max_n_0, BLK_N_0 ), ibatch );
-        dim3 dimGrid_1( ddlaVbatchedCeilDiv( max_m_1, BLK_M_1 ), ddlaVbatchedCeilDiv( max_n_1, BLK_N_1 ), ibatch );
+        const int segment_end = min(i + segment_sizes[segment], batchCount);
+        for(int c = i; c < segment_end; c += max_batchCount) {
+            const int ibatch = min(max_batchCount, segment_end - c);
+            dim3 dimGrid_0( gx_0, gy_0, ibatch );
+            dim3 dimGrid_1( gx_1, gy_1, ibatch );
 
-        ddlaLaunchKernelByPtr<T>(handle, func_gemm_template_vbatched_kernel_0, dim3(dimGrid_0), dim3(dimBlock_0), shmem_0, m_0+i, n_0+i, k_0+i, dA_array_0+i, Ai_0, Aj_0, ldda_0+i, dB_array_0+i, Bi_0, Bj_0, lddb_0+i, dC_array_0+i, Ci_0, Cj_0, lddc_0+i, alpha_0, beta_0, max_m_0, max_n_0, max_k_0);
+            if(run_0)
+                ddlaLaunchKernelByPtr<T>(handle, func_gemm_template_vbatched_kernel_0, dim3(dimGrid_0), dim3(dimBlock_0), shmem_0, m_0+c, n_0+c, k_0+c, dA_array_0+c, Ai_0, Aj_0, ldda_0+c, dB_array_0+c, Bi_0, Bj_0, lddb_0+c, dC_array_0+c, Ci_0, Cj_0, lddc_0+c, alpha_0, beta_0, max_m_0, max_n_0, max_k_0);
 
-        if(C0_left)
-            ddlaLaunchKernelByPtr<T>(handle, func_gemm_template_vbatched_kernel_1, dim3(dimGrid_1), dim3(dimBlock_1), shmem_1, m_1+i, n_1+i, k_1+i, dC_array_0+i, Ai_1, Aj_1, ldda_1+i, dAB_array_1+i, Bi_1, Bj_1, lddb_1+i, dC_array_1+i, Ci_1, Cj_1, lddc_1+i, alpha_1, beta_1, max_m_1, max_n_1, max_k_1);
-        else
-            ddlaLaunchKernelByPtr<T>(handle, func_gemm_template_vbatched_kernel_1, dim3(dimGrid_1), dim3(dimBlock_1), shmem_1, m_1+i, n_1+i, k_1+i, dAB_array_1+i, Ai_1, Aj_1, ldda_1+i, dC_array_0+i, Bi_1, Bj_1, lddb_1+i, dC_array_1+i, Ci_1, Cj_1, lddc_1+i, alpha_1, beta_1, max_m_1, max_n_1, max_k_1);
-
-		i += segment_sizes[segment];
-	}
+            if(!run_1)
+                continue;
+            if(C0_left)
+                ddlaLaunchKernelByPtr<T>(handle, func_gemm_template_vbatched_kernel_1, dim3(dimGrid_1), dim3(dimBlock_1), shmem_1, m_1+c, n_1+c, k_1+c, dC_array_0+c, Ai_1, Aj_1, ldda_1+c, dAB_array_1+c, Bi_1, Bj_1, lddb_1+c, dC_array_1+c, Ci_1, Cj_1, lddc_1+c, alpha_1, beta_1, max_m_1, max_n_1, max_k_1);
+            else
+                ddlaLaunchKernelByPtr<T>(handle, func_gemm_template_vbatched_kernel_1, dim3(dimGrid_1), dim3(dimBlock_1), shmem_1, m_1+c, n_1+c, k_1+c, dAB_array_1+c, Ai_1, Aj_1, ldda_1+c, dC_array_0+c, Bi_1, Bj_1, lddb_1+c, dC_array_1+c, Ci_1, Cj_1, lddc_1+c, alpha_1, beta_1, max_m_1, max_n_1, max_k_1);
+        }
+        i = segment_end;
+    }
 }
 #endif //GEMM_TEMPLATE_KERNEL_VBATCHED_CUH

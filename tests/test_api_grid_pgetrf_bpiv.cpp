@@ -1,5 +1,6 @@
 #include "api_grid_test_common.h"
 #include "LU/lu_internal.h"
+#include "lu_tall_test_common.h"
 
 using namespace api_grid_test;
 
@@ -24,6 +25,11 @@ void check_pgetrf_bpiv(const ddla::DdlaHandle_t& handle, const Shape& base)
         if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
         require_close(handle, "pgetrf_bpiv(handle, info)", 0.0, 0.0);
     }
+
+    check_tall_lu(handle, base, "pgetrf_bpiv tall", [&](int m, int n, Complex* A, const int* desc, int& info) {
+        DeviceBuffer<int> d_ipiv(handle, std::max(1, ddla_test::m_loc(handle, desc)));
+        ddla::pgetrf_bpiv(handle, m, n, A, desc, d_ipiv.ptr, info);
+    });
 }
 
 int main(int argc, char** argv)

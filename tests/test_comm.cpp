@@ -160,6 +160,11 @@ template<DdlaBackend B,class T>void messages(DdlaHandle_t h,CommScope scope,int 
     commAllReduce<B>(h,scope,count?send.data():nullptr,count?recv.data():nullptr,count,op);
     verify(recv,count,sum,"allreduce value/guard");
     upload();
+    // In place: sbuf == rbuf is legal for NCCL/the tunnel and maps to
+    // MPI_IN_PLACE on the MPI paths (aliased MPI buffers are erroneous).
+    commAllReduce<B>(h,scope,count?send.data():nullptr,count?send.data():nullptr,count,op);
+    verify(send,count,sum,"in-place allreduce value/guard");
+    upload();
     // The root contributes and receives through the same device/host buffer.
     commReduceSum<B>(h,scope,send.data(),rank==root?send.data():recv.data(),count,root);
     if(rank==root) {
