@@ -2,6 +2,7 @@
 #define DDLA_HANDLE_T_H
 
 #include <cstddef>
+#include <type_traits>
 #include <stdexcept>
 #include <string>
 #include <mpi.h>
@@ -179,6 +180,51 @@ ddlaStatus_t ddlaMemcpy2D(const DdlaHandle_t& handle, void* dst, std::size_t dpi
 /// device, managed or pinned memory; a CPU handle calls memset.  Zero bytes succeeds without touching
 /// @p ptr; a null @p ptr with a nonzero size is DDLA_STATUS_INVALID_VALUE.
 ddlaStatus_t ddlaMemset(const DdlaHandle_t& handle, void* ptr, int value, std::size_t bytes);
+
+/// Local column-major triangular memory operations (no transpose/conjugation).
+/// U selects row <= column, L selects row >= column; lowercase is accepted.
+/// include_diagonal=false selects the strict triangle. Leading dimensions are
+/// in elements, unlike ddlaMemcpy2D's byte pitches. The opposite triangle and
+/// leading-dimension padding are untouched. T must be trivially copyable.
+///
+/// ddlaMemsetTri repeats the low byte of value in every selected element,
+/// just like ddlaMemset: value=0 produces numerical zero for DDLA scalar types;
+/// value=1 is a byte pattern, not numerical 1. CPU handles need host memory;
+/// GPU handles need device/managed memory and enqueue one kernel.
+///
+/// ddlaMemcpyTri derives transfer direction like ddlaMemcpy. Host copies are
+/// synchronous and may use OpenMP for large matrices. Device copies use one
+/// kernel; host/device transfers enqueue contiguous selected column segments.
+/// GPU work uses the handle queue; synchronize before consuming host results.
+/// Host-to-host work on a GPU handle is immediate and does not wait for queued
+/// device work. Regions must not overlap, except identical pointer/LD self-copy.
+///
+/// Null handle is INVALID_HANDLE. Invalid uplo, negative extents, insufficient
+/// LD, overflowing byte spans or null pointers for a nonempty selection are
+/// INVALID_VALUE. An empty selection succeeds without accessing pointers/LDs.
+namespace detail {
+    ddlaStatus_t memset_tri(const DdlaHandle_t&, char, int, int, void*, int, int,
+                            std::size_t, bool);
+    ddlaStatus_t memcpy_tri(const DdlaHandle_t&, char, int, int, void*, int,
+                            const void*, int, std::size_t, bool);
+}
+
+template <class T>
+ddlaStatus_t ddlaMemsetTri(const DdlaHandle_t& handle, char uplo, int m, int n,
+                           T* ptr, int lda, int value = 0, bool include_diagonal = true)
+{
+    static_assert(std::is_trivially_copyable<T>::value, "triangular memory requires trivial elements");
+    return detail::memset_tri(handle, uplo, m, n, ptr, lda, value, sizeof(T), include_diagonal);
+}
+
+template <class T>
+ddlaStatus_t ddlaMemcpyTri(const DdlaHandle_t& handle, char uplo, int m, int n,
+                           T* dst, int ldd, const T* src, int lds,
+                           bool include_diagonal = true)
+{
+    static_assert(std::is_trivially_copyable<T>::value, "triangular memory requires trivial elements");
+    return detail::memcpy_tri(handle, uplo, m, n, dst, ldd, src, lds, sizeof(T), include_diagonal);
+}
 
 /// Block until everything queued on the handle has finished.
 ddlaStatus_t ddlaSynchronize(const DdlaHandle_t& handle);

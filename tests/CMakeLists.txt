@@ -317,6 +317,8 @@ add_bench_executable(benchmark_pgeqrf)
 add_bench_executable(benchmark_pgesvd)
 
 # Backend handle test — works for all backends
+add_test_executable(test_memory_tri)
+
 add_executable(test_backend_handle test_backend_handle.cpp)
 target_link_libraries(test_backend_handle PRIVATE ddla_lib)
 apply_test_connector_defs(test_backend_handle)

@@ -7,6 +7,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <limits>
+#if DDLA_HAS_GPU
+#include "memory_tri_kernels.h"
+#endif
 
 namespace ddla {
 
@@ -404,6 +408,124 @@ ddlaStatus_t ddlaMemset(const DdlaHandle_t& handle, void* ptr, int value, std::s
 #else
     return kInternal;
 #endif
+}
+
+namespace {
+// All pointer arithmetic below is bounded by a representable byte span.
+bool triangle_layout(int m, int n, int ld, std::size_t element_bytes, std::size_t& pitch)
+{
+    const auto limit = std::size_t(std::numeric_limits<std::ptrdiff_t>::max());
+    if (ld < m || element_bytes == 0 || std::size_t(ld) > limit / element_bytes)
+        return false;
+    pitch = std::size_t(ld) * element_bytes;
+    const auto width = std::size_t(m) * element_bytes;
+    return std::size_t(n - 1) <= (limit - width) / pitch;
+}
+
+bool empty_triangle(char u, int m, int n, bool diagonal)
+{
+    return m == 0 || n == 0 || (!diagonal && (u == 'U' ? n == 1 : m == 1));
+}
+
+void triangle_range(bool upper, bool diagonal, int rows, int column, int& first, int& end)
+{
+    first = upper ? 0 : std::min(rows, column + (diagonal ? 0 : 1));
+    end = upper ? std::min(rows, column + (diagonal ? 1 : 0)) : rows;
+}
+
+template <bool Copy>
+void host_triangle(const DdlaHandle_t& h, bool upper, bool diagonal, int m, int n,
+                    void* dst, std::size_t dpitch, const void* src, std::size_t spitch,
+                    std::size_t element_bytes, int value)
+{
+    const auto grain = static_cast<long long>(std::max<std::size_t>(
+        1, (1 << 20) / (std::size_t(m) * element_bytes)));
+    const auto operation = [&](long long lo, long long hi) {
+        for (int j = int(lo); j < hi; ++j) {
+            int first, end;
+            triangle_range(upper, diagonal, m, j, first, end);
+            if (first == end)
+                continue;
+            auto* output = static_cast<char*>(dst) + std::size_t(j) * dpitch +
+                           std::size_t(first) * element_bytes;
+            const auto bytes = std::size_t(end - first) * element_bytes;
+            if constexpr (Copy) {
+                const auto* input = static_cast<const char*>(src) + std::size_t(j) * spitch +
+                                    std::size_t(first) * element_bytes;
+                std::memcpy(output, input, bytes);
+            } else {
+                std::memset(output, value, bytes);
+            }
+        }
+    };
+    detail::host_parallel_for(n, grain, h->host_threads, operation);
+}
+}
+
+namespace detail {
+ddlaStatus_t memset_tri(const DdlaHandle_t& h, char u, int m, int n, void* ptr, int ld,
+                         int value, std::size_t element_bytes, bool diagonal)
+{
+    if (!h) return kBadHandle;
+    if (u == 'u') u = 'U';
+    if (u == 'l') u = 'L';
+    if ((u != 'U' && u != 'L') || m < 0 || n < 0) return kBadValue;
+    if (empty_triangle(u, m, n, diagonal)) return kOk;
+    std::size_t pitch;
+    if (!ptr || !triangle_layout(m, n, ld, element_bytes, pitch)) return kBadValue;
+    if (!is_gpu(h)) {
+        host_triangle<false>(h, u == 'U', diagonal, m, n, ptr, pitch, nullptr, 0,
+                             element_bytes, value);
+        return kOk;
+    }
+#if DDLA_HAS_GPU
+    return to_status(memory_tri_gpu(h->stream, false, u == 'U', diagonal, m, n, ptr, pitch,
+                                    nullptr, 0, element_bytes, value));
+#else
+    return kInternal;
+#endif
+}
+
+ddlaStatus_t memcpy_tri(const DdlaHandle_t& h, char u, int m, int n, void* dst, int ldd,
+                         const void* src, int lds, std::size_t element_bytes, bool diagonal)
+{
+    if (!h) return kBadHandle;
+    if (u == 'u') u = 'U';
+    if (u == 'l') u = 'L';
+    if ((u != 'U' && u != 'L') || m < 0 || n < 0) return kBadValue;
+    if (empty_triangle(u, m, n, diagonal)) return kOk;
+    std::size_t dpitch, spitch;
+    if (!dst || !src || !triangle_layout(m, n, ldd, element_bytes, dpitch) ||
+        !triangle_layout(m, n, lds, element_bytes, spitch)) return kBadValue;
+    if (dst == src && ldd == lds) return kOk;
+    const CopyRoute route = route_copy(h, dst, src);
+    if (route == CopyRoute::Unknown) return kInternal;
+    if (route == CopyRoute::Host) {
+        host_triangle<true>(h, u == 'U', diagonal, m, n, dst, dpitch, src, spitch,
+                            element_bytes, 0);
+        return kOk;
+    }
+#if DDLA_HAS_GPU
+    if (route == CopyRoute::DeviceToDevice)
+        return to_status(memory_tri_gpu(h->stream, true, u == 'U', diagonal, m, n, dst, dpitch,
+                                        src, spitch, element_bytes, 0));
+    for (int j = 0; j < n; ++j) {
+        int first, end;
+        triangle_range(u == 'U', diagonal, m, j, first, end);
+        if (first == end) continue;
+        const auto offset = std::size_t(first) * element_bytes;
+        const auto status = to_status(gpuMemcpyAsync(
+            static_cast<char*>(dst) + std::size_t(j) * dpitch + offset,
+            static_cast<const char*>(src) + std::size_t(j) * spitch + offset,
+            std::size_t(end - first) * element_bytes, vendor_kind(route),
+            static_cast<gpuStream_t>(h->stream)));
+        if (status != kOk) return status;
+    }
+    return kOk;
+#else
+    return kInternal;
+#endif
+}
 }
 
 // -- synchronization and events --------------------------------------------------------------------

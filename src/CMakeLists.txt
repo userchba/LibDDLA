@@ -70,14 +70,14 @@ target_sources(ddla_lib PRIVATE
 if(NOT ddla_cpu_only_build)
     # GPU copy kernels of ddla::matrix_transfer (matrix_transfer.cpp keeps the
     # distributed driver and the CPU arm).
-    target_sources(ddla_lib PRIVATE matrix_transfer_kernels.cpp)
+    target_sources(ddla_lib PRIVATE matrix_transfer_kernels.cpp memory_tri_kernels.cpp)
 endif()
 if(DDLA_USE_CUDA)
-    set_source_files_properties(matrix_transfer_kernels.cpp TARGET_DIRECTORY ddla_lib
+    set_source_files_properties(matrix_transfer_kernels.cpp memory_tri_kernels.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES LANGUAGE CUDA)
 endif()
 if(DDLA_USE_HIP)
-    set_source_files_properties(matrix_transfer_kernels.cpp TARGET_DIRECTORY ddla_lib
+    set_source_files_properties(matrix_transfer_kernels.cpp memory_tri_kernels.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES LANGUAGE HIP)
 endif()
 

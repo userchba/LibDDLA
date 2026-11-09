@@ -216,16 +216,6 @@ inline char triangle(char u) {
         throw std::invalid_argument("ldlt invalid triangle");
     return u;
 }
-// Copy only stored entries, including on GPU handles.
-template <typename T>
-void copy_triangle(const DdlaHandle_t &h, char u, int n, const T *src, int lds, T *dst, int ldd) {
-    for (int j = 0; j < n; ++j) {
-        const int first = u == 'L' ? j : 0, count = u == 'L' ? n - j : j + 1;
-        DDLA_CHECK(ddlaMemcpy(h, dst + first + std::size_t(j) * ldd,
-                              src + first + std::size_t(j) * lds, std::size_t(count) * sizeof(T)));
-    }
-    DDLA_CHECK(ddlaSynchronize(h));
-}
 inline void check_pivots(char u, int n, const int *piv) {
     for (int step = 0; step < n; ++step) {
         const int i = u == 'L' ? step : n - 1 - step;
@@ -264,7 +254,8 @@ void local(const DdlaHandle_t &h, char u, int n, int nrhs, T *a, int ld, int *pi
     if (!n || (Solve && !nrhs))
         return;
     std::vector<T> host_a(std::size_t(n) * n), host_b(Solve ? std::size_t(n) * nrhs : 0);
-    copy_triangle(h, u, n, a, ld, host_a.data(), n);
+    DDLA_CHECK(ddlaMemcpyTri(h, u, n, n, host_a.data(), n, a, ld));
+    DDLA_CHECK(ddlaSynchronize(h));
     if constexpr (Solve) {
         DDLA_CHECK(ddlaMemcpy2D(h, host_b.data(), std::size_t(n) * sizeof(T), b,
                                 std::size_t(ldb) * sizeof(T), std::size_t(n) * sizeof(T), nrhs));
@@ -285,7 +276,8 @@ void local(const DdlaHandle_t &h, char u, int n, int nrhs, T *a, int ld, int *pi
             factor(std::bool_constant<H>{}, u, n, host_a.data(), n, piv, info);
         else
             factor_nopiv<H>(h, u, n, host_a.data(), n, info);
-        copy_triangle(h, u, n, host_a.data(), n, a, ld);
+        DDLA_CHECK(ddlaMemcpyTri(h, u, n, n, a, ld, host_a.data(), n));
+        DDLA_CHECK(ddlaSynchronize(h));
     }
 }
 template <DdlaBackend B, bool H, bool Pivot, bool Solve, typename T>
@@ -362,8 +354,10 @@ void distributed(const DdlaHandle_t &h, char u, int n, int nrhs, T *a, const int
                      h->myid == 0 ? window.data() + first + std::size_t(j) * n : nullptr, n);
     }
     detail::agree_check(h, "pldlt factor copy", [&](detail::Agree &) {
-        if (h->myid == 0)
-            copy_triangle(h, u, n, window.data(), n, ha.data(), n);
+        if (h->myid == 0) {
+            DDLA_CHECK(ddlaMemcpyTri(h, u, n, n, ha.data(), n, window.data(), n));
+            DDLA_CHECK(ddlaSynchronize(h));
+        }
     });
     if constexpr (Solve) {
         gather<B, T>(h, n, nrhs, b, 1, 1, db, 0, rhs.data(), n);
@@ -409,8 +403,10 @@ void distributed(const DdlaHandle_t &h, char u, int n, int nrhs, T *a, const int
         scatter<B, T>(h, n, nrhs, b, 1, 1, db, 0, rhs.data(), n);
     } else {
         detail::agree_check(h, "pldlt factor upload", [&](detail::Agree &) {
-            if (h->myid == 0)
-                copy_triangle(h, u, n, ha.data(), n, window.data(), n);
+            if (h->myid == 0) {
+                DDLA_CHECK(ddlaMemcpyTri(h, u, n, n, window.data(), n, ha.data(), n));
+                DDLA_CHECK(ddlaSynchronize(h));
+            }
         });
         for (int j = 0; j < n; ++j) {
             const int first = u == 'L' ? j : 0, count = u == 'L' ? n - j : j + 1;

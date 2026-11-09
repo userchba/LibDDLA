@@ -78,20 +78,6 @@ void scale_output(const DdlaHandle_t& h, char ua, char ub, int n,
     }
 }
 
-// The batched updates read the packed diagonal block as a full square, so its
-// unstored opposite triangle must be zeroed or the product would consume it
-// (the stored-triangle-only contract of trtrm does not carry into GEMM).
-template <DdlaBackend Backend, typename T>
-void clean_triangle(T* packed, int wk, bool upper, const DdlaHandle_t& h, int ld = -1)
-{
-    if (ld < 0) ld = wk;
-    // The opposite strict triangle is a complete triangle of order wk-1
-    // starting one row/column away. Reuse the triangular zero path so GPU
-    // cleanup is one launch instead of wk separate memset launches.
-    blas_impl::gemmt_run<Backend,T,T,T>(h,upper ? 'L' : 'U','N','N',wk-1,0,
-        T(0),nullptr,1,nullptr,1,T(0),packed+(upper ? 1 : ld),ld,nullptr,0);
-}
-
 template <typename T>
 void ptrtrm_base_workspace_size(const DdlaHandle_t& handle, int n,
                            const int* descA, const int* descB, const int* descC,
@@ -196,8 +182,8 @@ void ptrtrm_sweep(const DdlaHandle_t& handle, char ta, char tb, int n,
                 offsB[t]=(UpperB?j>=k:j<=k)?std::size_t(wk)*num_loc(j*nb-fb,nb,c,bp[DDLA_CSRC_],pc):0;
             }
             if(r==ar && c==ac) {
-                clean_triangle<Backend>(packA+offsA[(k-shiftR)/pr],wk,UpperA,handle,panel_lda_a);
-                clean_triangle<Backend>(packB+offsB[(k-shiftC)/pc],wk,UpperB,handle);
+                DDLA_CHECK(ddlaMemsetTri(handle, UpperA ? 'L' : 'U', wk, wk, packA+offsA[(k-shiftR)/pr], panel_lda_a, 0, false));
+                DDLA_CHECK(ddlaMemsetTri(handle, UpperB ? 'L' : 'U', wk, wk, packB+offsB[(k-shiftC)/pc], wk, 0, false));
             }
             countA=std::size_t(num_loc(ma,nb,r,ap[DDLA_RSRC_],pr))*wk;
             countB=std::size_t(num_loc(cols_b,nb,c,bp[DDLA_CSRC_],pc))*wk;
@@ -221,7 +207,7 @@ void ptrtrm_sweep(const DdlaHandle_t& handle, char ta, char tb, int n,
                     DDLA_CHECK(ddlaMemcpy2D(handle,out,std::size_t(width(i))*sizeof(T),
                         A+std::size_t(t)*nb+std::size_t(qk)*nb*lldA,std::size_t(lldA)*sizeof(T),
                         std::size_t(width(i))*sizeof(T),wk));
-                    if(i==k) clean_triangle<Backend>(out,wk,UpperA,handle);
+                    if(i==k) DDLA_CHECK(ddlaMemsetTri(handle, UpperA ? 'L' : 'U', wk, wk, out, wk, 0, false));
                 }
             }
             if(r==ar) {
@@ -233,7 +219,7 @@ void ptrtrm_sweep(const DdlaHandle_t& handle, char ta, char tb, int n,
                     DDLA_CHECK(ddlaMemcpy2D(handle,out,std::size_t(wk)*sizeof(T),
                         B+std::size_t(pk)*nb+std::size_t(t)*nb*lldB,std::size_t(lldB)*sizeof(T),
                         std::size_t(wk)*sizeof(T),width(j)));
-                    if(j==k) clean_triangle<Backend>(out,wk,UpperB,handle);
+                    if(j==k) DDLA_CHECK(ddlaMemsetTri(handle, UpperB ? 'L' : 'U', wk, wk, out, wk, 0, false));
                 }
             }
         }
