@@ -2152,6 +2152,56 @@ void pstedc(
     int& info
 );
 
+// Hermitian eigensolver interfaces; shared by CPU and GPU backends.
+template <typename T>
+struct hb2st_rot {
+    int j0;
+    typename real_type<T>::type c;
+    T s;
+};
+
+/**
+ * @brief Distributed Hermitian eigensolver with runtime method selection.
+ *
+ * DDLA_EIGEN_METHOD=one_stage selects pheevd_one_stage; two_stage selects
+ * pheevd_two_stage (the default when unset or empty). The value is read on
+ * every call and must agree across the process grid. Invalid values or
+ * inconsistent selections throw collectively before either algorithm starts.
+ * Both methods read only UPLO, destroy A, and keep A/Z distributed; w is a
+ * host array on every rank. See the explicit entries for method requirements.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void pheevd(
+    const DdlaHandle_t& handle,
+    char jobz, char uplo, int n,
+    T* A, const int* descA,
+    typename real_type<T>::type* w,
+    T* Z, const int* descZ,
+    int& info
+);
+
+/**
+ * @brief Two-stage Hermitian eigensolver: full to band to tridiagonal.
+ *
+ * Same arguments as pheevd. Ignores DDLA_EIGEN_METHOD. All dense matrices
+ * remain distributed; the requested band width is reduced on multiple ranks
+ * when needed to bound per-rank storage. Reads only UPLO and destroys A.
+ * Automatic Givens/Householder and band selection retains conservative
+ * fallbacks outside measured profiles. On one CUDA SM70 node using NCCL, eight ranks
+ * in a row-major 2x4 grid, one host worker/rank and block64, full-vector double solves
+ * from4096 use Householder/band64; complex-double defaults from16384.
+ * Stage2 uses CPU below16384 and GPU from16384. DDLA_EIG_NBW is respected;
+ * explicit band64 also permits complex-double from8192, while explicit band16
+ * selects Householder only for double from32768. Other widths retain Givens.
+ * Eigenvalues-only, other devices/grids/thread budgets and float types retain
+ * their existing GPU policy. Both algorithms keep quadratic storage distributed.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void pheevd_two_stage(const DdlaHandle_t& handle, char jobz, char uplo, int n,
+    T* A, const int* descA, typename real_type<T>::type* w,
+    T* Z, const int* descZ, int& info);
+
+
 /**
  * @brief Direct one-stage Hermitian eigensolver using Householder tridiagonalization.
  *
