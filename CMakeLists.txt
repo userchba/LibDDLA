@@ -38,12 +38,6 @@ option(DDLA_ENABLE_PYTHON "Build the Python bindings and C-ABI library" OFF)
 if(DDLA_USE_CUDA AND DDLA_USE_HIP)
     message(FATAL_ERROR "Cannot enable both CUDA and HIP")
 endif()
-# Each source is compiled once; GPU builds instantiate CPU and GPU backends.
-set(DDLA_DUAL_BUILD OFF)
-if(DDLA_USE_CUDA OR DDLA_USE_HIP)
-    set(DDLA_DUAL_BUILD ON)
-endif()
-
 # CUDA/HIP target definitions are set in src/CMakeLists.txt on ddla_lib
 
 enable_language(CXX)
@@ -130,9 +124,41 @@ else()
     message(STATUS "Using BLAS: ${BLAS_LIBRARIES}")
     set(DDLA_CPU_BLAS_LIBRARIES ${BLAS_LIBRARIES})
 endif()
+
 list(APPEND math_libs ${DDLA_CPU_BLAS_LIBRARIES})
 
-
+# Complex Fortran function returns have compiler-dependent ABIs. CPU dotc
+# requires the CBLAS output-pointer interface from the selected BLAS.
+include(CheckCXXSourceCompiles)
+include(CMakePushCheckState)
+cmake_push_check_state(RESET)
+if(DDLA_CPU_BLAS_LIBRARY)
+    set(CMAKE_REQUIRED_LIBRARIES "${DDLA_CPU_BLAS_LIBRARY}")
+else()
+    set(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+endif()
+# Recheck when reconfiguring, including after changing the selected BLAS.
+unset(DDLA_CPU_CBLAS_DOTC_LINKS CACHE)
+check_cxx_source_compiles([=[
+    extern "C" {
+    void cblas_cdotc_sub(int, const void*, int, const void*, int, void*);
+    void cblas_zdotc_sub(int, const void*, int, const void*, int, void*);
+    }
+    int main() {
+        float c[2] = {};
+        double z[2] = {};
+        cblas_cdotc_sub(0, c, 1, c, 1, c);
+        cblas_zdotc_sub(0, z, 1, z, 1, z);
+        return 0;
+    }
+]=] DDLA_CPU_CBLAS_DOTC_LINKS)
+if(NOT DDLA_CPU_CBLAS_DOTC_LINKS)
+    message(FATAL_ERROR
+        "The CPU backend requires cblas_cdotc_sub and cblas_zdotc_sub. "
+        "Select a BLAS library with CBLAS enabled, for example OpenBLAS, "
+        "using DDLA_CPU_BLAS_LIBRARY or find_package(BLAS).")
+endif()
+cmake_pop_check_state()
 # ---------------------------------------------------------------------------
 # Host LAPACK is required by both CPU computations and host portions of GPU
 # algorithms. OpenBLAS/MKL normally supply it with BLAS; a separate LAPACK

@@ -36,6 +36,9 @@
 #include <ddla/ddla.h>
 
 #include "ddla_stream.h"   // DdlaStream::host_threads
+#if DDLA_HAS_GPU
+#include "QR/pgeqrf_kernels.h"
+#endif
 
 using namespace ddla;
 
@@ -225,7 +228,7 @@ int check_alpha_zero_cpu(const DdlaHandle_t& h, char ta, char tb, int m, int n)
     return 0;
 }
 
-// -- the exact-copy contract (CPU) --------------------------------------------
+// -- the exact-copy contract --------------------------------------------
 template <typename R>
 R special_value(int k)
 {
@@ -251,25 +254,49 @@ std::vector<T> special_vec(std::size_t n, std::uint64_t seed)
     return v;
 }
 
-template <typename T>
-int check_exact_copy_cpu(const DdlaHandle_t& h, char ta, int m, int n)
+template <DdlaBackend Backend, typename T>
+int check_exact_copy(const DdlaHandle_t& h, char ta, int m, int n)
 {
     const int rowsA = ta == 'N' ? m : n, colsA = ta == 'N' ? n : m;
-    const int lda = rowsA + 2, ldc = m + 1;
+    const int lda = rowsA + (Backend == DdlaBackend::CPU ? 2 : 0), ldc = m + 1;
     const std::vector<T> A = special_vec<T>(static_cast<std::size_t>(lda) * colsA, 5);
     std::vector<T> C(static_cast<std::size_t>(ldc) * n, Tr<T>::make(1, 1));
     Buf<T> dA(h, A.size()), dC(h, C.size());
     dA.up(A); dC.up(C);
     const T zero = Tr<T>::make(0, 0);
-    geam<DdlaBackend::CPU, T>(h, ta, 'N', m, n, Tr<T>::make(1, 0), dA.p, lda, zero, nullptr, 1, dC.p, ldc);
+    if constexpr (Backend == DdlaBackend::CPU) {
+        geam<Backend, T>(h, ta, 'N', m, n, Tr<T>::make(1, 0), dA.p, lda, zero, nullptr, 1, dC.p, ldc);
+    } else {
+#if DDLA_HAS_GPU
+        // Check the actual QR T^H path. Vendor GPU GEAM has no bitwise-copy
+        // contract for signed zeros and nonfinite complex components.
+        detail::qr_adjoint_T<T>(h, dC.p, ldc, dA.p, m);
+#endif
+    }
     dC.down(C);
     for (int j = 0; j < n; ++j)
-        for (int i = 0; i < m; ++i) {
+        for (int i = 0; i < ldc; ++i) {
+            if (i == m) {
+                const T marker = Tr<T>::make(1, 1);
+                if (std::memcmp(&C[i + static_cast<std::size_t>(j)*ldc], &marker, sizeof(T)) != 0) {
+                    report("exact copy padding", ta, 'N', m, n, "");
+                    return 1;
+                }
+                continue;
+            }
             const T x = ta == 'N' ? A[static_cast<std::size_t>(i) + static_cast<std::size_t>(j) * lda]
                                   : A[static_cast<std::size_t>(j) + static_cast<std::size_t>(i) * lda];
             const T want = ta == 'C' ? Tr<T>::conjv(x) : x;
             const T got = C[static_cast<std::size_t>(i) + static_cast<std::size_t>(j) * ldc];
-            if (std::memcmp(&got, &want, sizeof(T)) != 0) {
+            T comparable = got;
+            if constexpr (Backend == DdlaBackend::GPU && Tr<T>::cplx) {
+                // The original GPU negation may canonicalize an imaginary
+                // NaN. Require NaN classification there, retaining exact bits
+                // for the real component and all non-NaN imaginary values.
+                if (std::isnan(std::imag(want)) && std::isnan(std::imag(got)))
+                    comparable = Tr<T>::make(std::real(got), std::imag(want));
+            }
+            if (std::memcmp(&comparable, &want, sizeof(T)) != 0) {
                 report("exact copy", ta, 'N', m, n, "at (" + std::to_string(i) + "," + std::to_string(j) + ")");
                 return 1;
             }
@@ -342,11 +369,17 @@ int run_type(const DdlaHandle_t& h)
     geam<Backend, T>(h, 'N', 'N', 0, 5, alpha, nullptr, 1, beta, nullptr, 1, nullptr, 1);
     geam<Backend, T>(h, 'T', 'C', 5, 0, alpha, nullptr, 1, beta, nullptr, 1, nullptr, 1);
 
+    if constexpr (Backend == DdlaBackend::GPU) {
+        // QR retains its exact GPU copy after the vendor GEAM compatibility
+        // check showed signed-zero/nonfinite differences. Test both paths.
+        bad += check_exact_copy<Backend, T>(h, 'C', 37, 37);
+        bad += check_exact_copy<Backend, T>(h, 'C', 64, 64);
+    }
     if constexpr (Backend == DdlaBackend::CPU) {
         for (char ta : ops) {
-            bad += check_exact_copy_cpu<T>(h, ta, 37, 53);
-            bad += check_exact_copy_cpu<T>(h, ta, 64, 64);
-            bad += check_exact_copy_cpu<T>(h, ta, 700, 500);
+            bad += check_exact_copy<Backend, T>(h, ta, 37, 53);
+            bad += check_exact_copy<Backend, T>(h, ta, 64, 64);
+            bad += check_exact_copy<Backend, T>(h, ta, 700, 500);
             bad += check_alpha_zero_cpu<T>(h, ta, 'N', 37, 53);
         }
         bad += check_alpha_zero_cpu<T>(h, 'T', 'C', 40, 33);

@@ -3,10 +3,9 @@
 
 // Contiguous row shares of an n-row matrix over the P ranks of the handle's communicator: rank q owns the rows
 // [lo(q), hi(q)), the first n % P ranks one row more.  This is the split of the eigensolver and SVD row-distributed
-// matrices -- the Q_band accumulation of Hb2stAccum (hb2st_accum.cpp) and the row-slab eigenvector matrix of the
+// matrices -- the distributed CPU Q_band accumulation and the row-slab eigenvector matrix of the
 // distributed tridiagonal solve (pstedc.cpp) -- so that a slab's rows line up with the other side's columns
-// when the two are multiplied.  Deliberately independent of the 2D process grid (see the layout note in
-// hb2st_accum.h).
+// when the two are multiplied.  Deliberately independent of the 2D process grid.
 
 namespace ddla {
 namespace detail {

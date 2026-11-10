@@ -170,8 +170,9 @@ ddlaStatus_t ddlaMemcpy(const DdlaHandle_t& handle, void* dst, const void* src, 
 ///   DDLA_STATUS_SUCCESS without dereferencing @p src or @p dst.
 /// - Otherwise returns DDLA_STATUS_INVALID_VALUE if @p src or @p dst is
 ///   null, or if @p dpitch or @p spitch is smaller than @p width.
-/// - Ordering, the host-to-host case and CPU-handle behavior are the same as for ddlaMemcpy.
-///   The source and destination rectangles must not overlap.
+/// - Host-to-host copies complete before returning and may use the CPU handle's
+///   worker threads for large rectangles. Other ordering and CPU-handle behavior
+///   are the same as for ddlaMemcpy. The rectangles must not overlap.
 ddlaStatus_t ddlaMemcpy2D(const DdlaHandle_t& handle, void* dst, std::size_t dpitch,
                            const void* src, std::size_t spitch,
                            std::size_t width, std::size_t height);

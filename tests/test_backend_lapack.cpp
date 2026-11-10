@@ -46,6 +46,7 @@
 #include <mpi.h>
 
 #include <ddla/ddla.h>
+#include "reflector_build_T.h"
 
 using namespace ddla;
 
@@ -783,6 +784,56 @@ int check_larft(const DdlaHandle_t& h, char direct, int n, int k, int padv, int 
         ++failures;
     }
 
+    // The shared helper accepts a Gram matrix independently of QR's V storage.
+    // Poison the diagonal/lower triangle: neither order may read those entries.
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::vector<T> G(static_cast<std::size_t>(k) * k, Tr<T>::make(nan, nan));
+    for (int c = 0; c < k; ++c)
+        for (int r = 0; r < c; ++r) {
+            const cd value = gram(r, c);
+            G[r + static_cast<std::size_t>(c) * k] = Tr<T>::make(value.real(), value.imag());
+        }
+    auto check_factor = [&](const std::vector<T>& factor, const char* label) {
+        double error = 0;
+        for (int c = 0; c < k; ++c) {
+            for (int r = 0; r < k; ++r) {
+                const double e = std::abs(to_cd(factor[r + c * LT]) - R[r + static_cast<std::size_t>(c) * k]);
+                if (!std::isfinite(e)) error = std::numeric_limits<double>::infinity();
+                else error = std::max(error, e);
+                if ((bwd ? r < c : r > c) && factor[r + c * LT] != zero)
+                    error = std::numeric_limits<double>::infinity();
+            }
+            if (factor[c + c * LT] != tau[c]) error = std::numeric_limits<double>::infinity();
+            for (int r = k; r < ldt; ++r)
+                if (!same_bits(factor[r + c * LT], guard_value<T>()))
+                    error = std::numeric_limits<double>::infinity();
+        }
+        if (!(error <= ttol)) {
+            report(label, tag + " err " + std::to_string(error));
+            ++failures;
+        }
+    };
+    Buf<T> dG(h, G.size());
+    dG.up(G);dT.up(T0);
+    detail::reflector_build_T<Backend, T>(h, k, dG.p, dtau.p, dT.p, ldt, bwd);
+    std::vector<T> shared_factor, unchanged;
+    dT.down(shared_factor);
+    check_factor(shared_factor, "reflector_build_T vs independent oracle");
+    dG.down(unchanged);
+    if (std::memcmp(unchanged.data(), G.data(), G.size() * sizeof(T))) {
+        report("reflector_build_T Gram modified", tag);++failures;
+    }
+    dtau.down(unchanged);
+    if (std::memcmp(unchanged.data(), tau.data(), tau.size() * sizeof(T))) {
+        report("reflector_build_T tau modified", tag);++failures;
+    }
+    if constexpr (Backend == DdlaBackend::GPU) {
+        // Host fallback must remain linkable in a GPU-only build as well.
+        std::vector<T> host_factor = T0;
+        detail::reflector_build_T<DdlaBackend::CPU, T>(h, k, G.data(), tau.data(), host_factor.data(), ldt, bwd);
+        check_factor(host_factor, "reflector_build_T host fallback");
+    }
+
     // the definition: H(1)...H(k) (F) / H(k)...H(1) (B) multiplied out equals I - V T V^H
     const std::size_t N = static_cast<std::size_t>(n);
     std::vector<cd> Q(N * N, cd(0.0, 0.0));
@@ -854,6 +905,8 @@ int check_empty(const DdlaHandle_t& h)
     }
     // larft: no reflectors, null pointers allowed.
     try {
+        detail::reflector_build_T<Backend, T>(h, 0, nullptr, nullptr, nullptr, 1, false);
+        detail::reflector_build_T<Backend, T>(h, 0, nullptr, nullptr, nullptr, 1, true);
         larft<Backend, T>(h, 'F', 'C', 5, 0, static_cast<T*>(nullptr), 5, static_cast<const T*>(nullptr), static_cast<T*>(nullptr), 1);
         larft<Backend, T>(h, 'B', 'C', 0, 0, static_cast<T*>(nullptr), 1, static_cast<const T*>(nullptr), static_cast<T*>(nullptr), 1);
     } catch (const std::exception& e) {

@@ -16,7 +16,7 @@ target_sources(ddla_lib PRIVATE
     pgesv_nopiv.cpp
     pgesv_bpiv.cpp
 )
-if(NOT ddla_cpu_only_build)
+if(DDLA_HAS_GPU)
     target_sources(ddla_lib PRIVATE pgetf2_kernels.cpp)
 endif()
 # getrf_nopiv.cpp keeps a GPU kernel next to its CPU arm: plain C++ in a

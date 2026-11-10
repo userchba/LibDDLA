@@ -7,7 +7,7 @@ target_sources(ddla_lib PRIVATE
     pgeqrs.cpp
     pgeqr2_panel.cpp
 )
-if(NOT ddla_cpu_only_build)
+if(DDLA_HAS_GPU)
     target_sources(ddla_lib PRIVATE pgeqrf_kernels.cpp)
 endif()
 # pgeqrf_kernels.cpp (index maps) and

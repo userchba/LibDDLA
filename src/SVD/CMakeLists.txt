@@ -7,7 +7,7 @@ target_sources(ddla_lib PRIVATE
     punmbr.cpp
     pgesvd.cpp
 )
-if(NOT ddla_cpu_only_build)
+if(DDLA_HAS_GPU)
     target_sources(ddla_lib PRIVATE pgebrd_kernels.cpp)
 endif()
 # SVD/pgebrd_kernels.cpp carries the exact LAPACK scalar ports (larfg/dladiv)
