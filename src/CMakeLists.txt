@@ -52,7 +52,7 @@ if(DDLA_USE_OPENMP)
         message(WARNING "ddla: OpenMP not found; the CPU eigensolver host kernels run serially")
     endif()
 endif()
-# Eigensolver/hb2st_sink_host.cpp (the CPU accumulation sink: tile kernels with the GPU's explicit fma roundings, planner, finish) is plain host
+# Eigensolver/two_stage/hb2st_sink_host.cpp (the CPU accumulation sink: tile kernels with the GPU's explicit fma roundings, planner, finish) is plain host
 # C++ for the same reason: -ffp-contract=off keeps the products rounded, and the target_clones attributes would not survive nvcc.
 # BLAS/geam.cpp (the OpenMP CPU arm of ddla::geam) and BLAS/gemmBatched.cpp (its CPU arm runs one BLAS gemm per OpenMP thread) are plain host C++
 # for the same reason and take the same flags; the Eigensolver and BLAS CMakeLists attach them to their files.
@@ -66,6 +66,7 @@ target_sources(ddla_lib PRIVATE
     ddla_stream.cpp
     ddla_desc.cpp
     reflector_build_T.cpp
+    punmtr.cpp
 )
 if(NOT ddla_cpu_only_build)
     # GPU copy kernels of ddla::matrix_transfer (matrix_transfer.cpp keeps the
@@ -99,10 +100,10 @@ add_subdirectory(Cholesky)
 add_subdirectory(LU)
 add_subdirectory(PBLAS)
 add_subdirectory(QR)
-add_subdirectory(SVD)
 add_subdirectory(vbatched)
-add_subdirectory(Eigensolver/one_stage)
-add_subdirectory(Eigensolver/two_stage)
+add_subdirectory(Eigensolver)
+set(DDLA_HAS_EIGENSOLVER ON PARENT_SCOPE)
+add_subdirectory(SVD)
 
 # ---------------------------------------------------------------------------
 # Per-target compile definitions (moved from directory-global)
@@ -171,29 +172,9 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/
     PATTERN "*.h.in" EXCLUDE
 )
 
-# Shared reflectors and the standalone Hermitian reduction/application routines.
-target_sources(ddla_lib PRIVATE
-    host_parallel.cpp
-    punmtr.cpp
-    Eigensolver/pherm_complete.cpp
-    Eigensolver/pvector_redist.cpp
-)
+# Shared host-only helpers used by Hermitian completion and eigensolver kernels.
+target_sources(ddla_lib PRIVATE host_parallel.cpp)
 set_source_files_properties(host_parallel.cpp TARGET_DIRECTORY ddla_lib
     PROPERTIES COMPILE_OPTIONS "${_ddla_cpu_kernel_opts}")
-if(DDLA_USE_CUDA)
-    set_source_files_properties(Eigensolver/pherm_complete.cpp Eigensolver/pvector_redist.cpp TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE CUDA)
-endif()
-if(DDLA_USE_HIP)
-    set_source_files_properties(Eigensolver/pherm_complete.cpp Eigensolver/pvector_redist.cpp TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE HIP)
-endif()
-
-# Standalone row-distributed tridiagonal divide-and-conquer solver.
-target_sources(ddla_lib PRIVATE Eigensolver/pstedc.cpp Eigensolver/eig_params.cpp)
-if(DDLA_USE_CUDA)
-    set_source_files_properties(Eigensolver/pstedc.cpp TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE CUDA)
-endif()
-if(DDLA_USE_HIP)
-    set_source_files_properties(Eigensolver/pstedc.cpp TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE HIP)
-endif()
 
 add_subdirectory(LDLT)

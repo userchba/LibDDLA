@@ -1,0 +1,123 @@
+#include "api_grid_test_common.h"
+#include "Eigensolver/two_stage/pheevd_impl.h"
+#include "Eigensolver/two_stage/hb2st_householder_kernels.h"
+#include "eig_test_common.h"
+#include <cstdio>
+#include <limits>
+#include <type_traits>
+using namespace api_grid_test;
+namespace {
+namespace hh=ddla::detail::hh;
+template<class T> T value(double re,double im) {
+    using R=typename real_type<T>::type;
+    if constexpr(std::is_same<T,R>::value)return T(re);
+    else return T(R(re),R(im));
+}
+template<class T> T full_value(int i,int j) {
+    if(i<j)return hh::adj(full_value<T>(j,i));
+    return i==j?value<T>(3+0.02*i,0):value<T>(0.1*std::sin(i*0.61+j*0.37),0.1*std::cos(i*0.31-j*0.27));
+}
+template<class T>
+void check_full(const DdlaHandle_t& h,int n,bool upper,bool alias,int method) {
+    using R=typename real_type<T>::type;
+    const int P=ddlaGetSize(h);int npr=0,npc=0;ddlaGetGridDims(h,npr,npc);
+    int descA[DDLA_DLEN_],descZ[DDLA_DLEN_];
+    ddlaDescInit(descA,h,n+3,n+5,8,8,0,0);descA[DDLA_LLD_]+=3;
+    ddlaDescInit(descZ,h,n+3,n+5,8,8,0,alias?0:npc-1);descZ[DDLA_LLD_]+=3;
+    if(alias)std::copy(descA,descA+DDLA_DLEN_,descZ);
+    const T sentinel=value<T>(139,-137);
+    auto make_input=[&](const int* desc,bool poisoned) {
+        std::vector<T> local(std::max<std::size_t>(1,local_size(h,desc)),sentinel);
+        const int rows=ddla_test::m_loc(h,desc),cols=ddla_test::n_loc(h,desc),ld=desc[DDLA_LLD_];
+        for(int c=0;c<cols;++c)for(int r=0;r<rows;++r) {
+            const int i=indx_l2g_r(desc,h,r),j=indx_l2g_c(desc,h,c);
+            if(i>=n||j>=n)continue;
+            T x=full_value<T>(i,j);
+            if(poisoned&&(upper?i>j:i<j))x=value<T>(1e5,-2e5);
+            if constexpr(!std::is_same<T,R>::value)if(poisoned&&i==j)x=T(x.real(),R(1e5));
+            local[r+static_cast<std::size_t>(c)*ld]=x;
+        }
+        return local;
+    };
+    const auto input=make_input(descA,true),full=make_input(descA,false);
+    DeviceBuffer<T>A(h,input.size()),Z(h,std::max<std::size_t>(1,local_size(h,descZ))),reference(h,input.size());
+    upload(h,A.ptr,input);upload(h,Z.ptr,std::vector<T>(Z.count,sentinel));upload(h,reference.ptr,input);
+    std::vector<R>w(n),old(n),only(n);int info=-1;
+    detail::pheevd_householder_stage4<DdlaBackend::CPU, T>(h,'V',upper?'U':'L',n,A.ptr,descA,w.data(),alias?A.ptr:Z.ptr,descZ,info,method);
+    require_close(h,"HH private full driver info",info,0);
+    T* output=alias?A.ptr:Z.ptr;
+    const auto after=download(h,output,alias?input.size():Z.count);
+    double padbad=0,finite=0;
+    const int zr=ddla_test::m_loc(h,descZ),zc=ddla_test::n_loc(h,descZ),zld=descZ[DDLA_LLD_];
+    for(int c=0;c<zc;++c)for(int r=0;r<zld;++r) {
+        const int i=r<zr?indx_l2g_r(descZ,h,r):n,j=indx_l2g_c(descZ,h,c);
+        const T x=after[r+static_cast<std::size_t>(c)*zld];
+        if(i<n&&j<n){if(!hh::finite(x))++finite;}else padbad+=x!=sentinel;
+    }
+    require_close(h,"HH full output padding",padbad,0);require_close(h,"HH full finite vectors",finite,0);
+    upload(h,reference.ptr,full);
+    const double residual=eig_test::residual_metric<T, DdlaBackend::CPU>(h,reference.ptr,descA,output,descZ,w.data(),n);
+    const double orthogonal=eig_test::orthogonality_metric<T, DdlaBackend::CPU>(h,output,descZ,n);
+    require_close(h,"HH full independent residual",std::isfinite(residual)?residual:INFINITY,50);
+    require_close(h,"HH full independent orthogonality",std::isfinite(orthogonal)?orthogonal:INFINITY,50);
+    upload(h,reference.ptr,input);
+    pheevd<DdlaBackend::CPU,T>(h,'N',upper?'U':'L',n,reference.ptr,descA,old.data(),nullptr,nullptr,info);
+    require_close(h,"HH reference eigenvalues info",info,0);
+    upload(h,reference.ptr,input);
+    detail::pheevd_householder_stage4<DdlaBackend::CPU, T>(h,'N',upper?'U':'L',n,reference.ptr,descA,only.data(),nullptr,nullptr,info,method);
+    require_close(h,"HH eigenvalues-only info",info,0);
+    double error=0,norm=0;
+    for(int j=0;j<n;++j) {
+        if(!std::isfinite(w[j])||!std::isfinite(only[j])||!std::isfinite(old[j])||(j&&w[j]<w[j-1]))error=INFINITY;
+        else error=std::max({error,std::abs(double(w[j]-old[j])),std::abs(double(only[j]-old[j]))});
+        for(int i=0;i<n;++i)norm+=std::norm(full_value<T>(i,j));
+    }
+    require_close(h,"HH full eigenvalue agreement",error/(std::max(1,n)*std::numeric_limits<R>::epsilon()*std::sqrt(norm)),50);
+    (void)P;
+}
+void check_policy(const DdlaHandle_t& h) {
+    constexpr int n=17;
+    int desc[DDLA_DLEN_];ddlaDescInit(desc,h,n,n,8,8,0,0);
+    const auto input=make_local<double>(h,desc,[](int i,int j){return full_value<double>(i,j);});
+    DeviceBuffer<double>A(h,input.size());std::vector<double>w(n);
+    for(int method:{-1,6,127}) {
+        upload(h,A.ptr,input);int info=-1;bool caught=false;
+        const int choice=ddlaGetRank(h)==ddlaGetSize(h)-1?method:1;
+        try {detail::pheevd_householder_stage4<DdlaBackend::CPU, double>(h,'N','U',n,A.ptr,desc,w.data(),nullptr,nullptr,info,choice);}
+        catch(const std::exception&){caught=true;}
+        require_close(h,"full driver one-rank invalid stage4 rejects collectively",!caught,0);
+    }
+    if(ddlaGetSize(h)>1) {
+        upload(h,A.ptr,input);int info=-1;bool caught=false;
+        const int choice=ddlaGetRank(h)==0?0:1;
+        try {detail::pheevd_householder_stage4<DdlaBackend::CPU, double>(h,'N','U',n,A.ptr,desc,w.data(),nullptr,nullptr,info,choice);}
+        catch(const std::exception&){caught=true;}
+        require_close(h,"full driver mismatched valid stage4 rejects collectively",!caught,0);
+    }
+}
+}
+int main(int argc,char** argv) {
+    int provided=0;MPI_Init_thread(&argc,&argv,MPI_THREAD_FUNNELED,&provided);
+    int rank=0,size=0;MPI_Comm_rank(MPI_COMM_WORLD,&rank);MPI_Comm_size(MPI_COMM_WORLD,&size);
+    try {
+        if(provided<MPI_THREAD_FUNNELED)throw std::runtime_error("MPI thread support");
+        TestOptions options;std::string error;
+        if(!parse_options(argc,argv,size,options,error))throw std::runtime_error(error);
+        for(const auto& grid:options.grids) {
+            DdlaHandle_t h=nullptr;DDLA_CHECK(ddlaInit(h,DdlaBackend::CPU));
+            DDLA_CHECK(ddlaSet(h,MPI_COMM_WORLD,grid.first,grid.second));
+            for(int method=0;method<6;++method) {
+#define FULL_CASE(T) for(int n:{33,129}){check_full<T>(h,n,true,false,method);check_full<T>(h,n,false,true,method);}
+                FULL_CASE(float)
+                FULL_CASE(double)
+                FULL_CASE(std::complex<float>)
+                FULL_CASE(std::complex<double>)
+#undef FULL_CASE
+                if(rank==0)std::printf("PHEEVD_HH_METHOD_FULL_PASS grid=%dx%d method=%d\n",grid.first,grid.second,method);
+            }
+            check_policy(h);DDLA_CHECK(ddlaDestroy(h));
+        }
+        if(rank==0)std::puts("test_pheevd_householder_stage4 passed");
+    }catch(const std::exception& e){std::fprintf(stderr,"rank %d: %s\n",rank,e.what());MPI_Abort(MPI_COMM_WORLD,1);}
+    MPI_Finalize();return 0;
+}

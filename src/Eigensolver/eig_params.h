@@ -16,7 +16,9 @@ namespace ddla {
 //                           (a stage-1 panel is one block column).  Default: 16
 //                           for GPU runs (real and complex) whenever nblk
 //                           is a positive multiple of 16 (nblk >= 16);
-//                           otherwise nblk.  Tuned for nblk = 64, 128, ...;
+//                           otherwise nblk. The two-stage driver can jointly choose
+//                           Householder/band64 for its measured full-vector profiles.
+//                           Tuned for nblk = 64, 128, ...;
 //                           a small nblk runs with a small nbw (slow stage 1).
 //                           An override must satisfy 1 <= nbw <= nblk and
 //                           nblk % nbw == 0 (the rule phe2hb/punmtr_he2hb
