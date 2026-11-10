@@ -20,6 +20,20 @@ void check_pdam(const ddla::DdlaHandle_t& handle, const Shape& base)
         return i == j ? alpha : Complex(0.0, 0.0);
     });
     require_close(handle, "pdam(handle, complex)", err, 1e-12);
+
+    // Empty orders permit a null matrix and precede backend validation.
+    ddla::pdam(handle, alpha, static_cast<Complex*>(nullptr), desc, 0);
+#if DDLA_HAS_GPU
+    if (ddla::ddlaGetBackend(handle) == ddla::DdlaBackend::GPU)
+        ddla::pdam<ddla::DdlaBackend::CPU>(handle, alpha, static_cast<Complex*>(nullptr), desc, 0);
+    else
+        ddla::pdam<ddla::DdlaBackend::GPU>(handle, alpha, static_cast<Complex*>(nullptr), desc, 0);
+#endif
+    bool threw = false;
+    try { ddla::pdam(handle, alpha, d_A.ptr, desc, n + 1); }
+    catch (const std::invalid_argument&) { threw = true; }
+    require_close(handle, "pdam oversized order rejected", threw ? 0.0 : 1.0, 0.0);
+
 }
 
 int main(int argc, char** argv)

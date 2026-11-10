@@ -22,17 +22,25 @@ template <typename T> struct Buffer {
     }
     ~Buffer() { ddlaFree(h,p); }
 };
+// variant 'r' times real x complex, 'c' times complex x real; both compare
+// against the same full complex GEMM baseline.
 template <DdlaBackend BE,typename R>
-void bench(DdlaHandle_t h,int m,int n,int k,char ta,char tb,int reps) {
+void bench(DdlaHandle_t h,int m,int n,int k,char ta,char tb,int reps,char variant='r') {
     using Z=std::complex<R>;
     const int lda=ta=='N'?m:k,ldb=tb=='N'?k:n;
     const std::size_t na=std::size_t(m)*k,nb=std::size_t(k)*n,nc=std::size_t(m)*n;
     std::vector<R> a(na); std::vector<Z> ac(na),b(nb),c(nc),ref(nc);
-    for (std::size_t p=0;p<na;++p) { a[p]=R(int((p*31+17)%97)-48)/R(53);ac[p]=Z(a[p],0); }
+    for (std::size_t p=0;p<na;++p) { a[p]=R(int((p*31+17)%97)-48)/R(53);ac[p]=Z(a[p],variant=='c'?R(int((p*37+11)%79)-39)/R(59):R(0)); }
     for (std::size_t p=0;p<nb;++p) b[p]=Z(R(int((p*19+3)%89)-44)/R(47),R(int((p*23+5)%83)-41)/R(43));
-    Buffer<R> da(h,a); Buffer<Z> dac(h,ac),db(h,b),dc(h,c),dr(h,ref);
+    // For complex x real the complex baseline must agree with the mixed
+    // product, so its B carries the same real values with zero imaginary
+    // parts (mirroring how the real x complex baseline treats A).
+    std::vector<R> bcr(variant=='c'?nb:0);
+    if (variant=='c') for (std::size_t p=0;p<nb;++p) { bcr[p]=b[p].real(); b[p]=Z(bcr[p],0); }
+    Buffer<R> da(h,a),dbc(h,bcr); Buffer<Z> dac(h,ac),db(h,b),dc(h,c),dr(h,ref);
     const Z alpha(1),beta(0);
-    auto mixed=[&]{gemm<BE,R>(h,ta,tb,m,n,k,alpha,da.p,lda,db.p,ldb,beta,dc.p,m);};
+    auto mixed=[&]{if(variant=='c')gemm<BE,R>(h,ta,tb,m,n,k,alpha,dac.p,lda,dbc.p,ldb,beta,dc.p,m);
+                   else gemm<BE,R>(h,ta,tb,m,n,k,alpha,da.p,lda,db.p,ldb,beta,dc.p,m);};
     auto full=[&]{gemm<BE,Z>(h,ta,tb,m,n,k,alpha,dac.p,lda,db.p,ldb,beta,dr.p,m);};
     // beta=0 overwrites C, so each repetition has identical inputs. Host/device
     // input copies and preconversion of A for the complex baseline are untimed.
@@ -59,6 +67,7 @@ void bench(DdlaHandle_t h,int m,int n,int k,char ta,char tb,int reps) {
     // Preserve every sample before sorting; emit after the timed work.
     for (int r=0;r<reps;++r)
         std::cerr<<std::setprecision(12)<<"sample,"<<(BE==DdlaBackend::CPU?"CPU":"GPU")<<','
+            <<(variant=='c'?"cr,":"rc,")
             <<(sizeof(R)==8?"double":"float")<<','<<ta<<tb<<','<<m<<','<<n<<','<<k<<','
             <<r<<','<<tm[r]<<','<<tf[r]<<'\n';
     std::sort(tm.begin(),tm.end());std::sort(tf.begin(),tf.end());
@@ -71,11 +80,16 @@ template <DdlaBackend BE> void run(int argc,char**argv) {
     DdlaHandle_t h=nullptr;check(ddlaInit(h,BE));check(ddlaSet(h,MPI_COMM_WORLD));
     const int reps=argc>7?std::stoi(argv[7]):7;
     if(reps<1)throw std::invalid_argument("reps must be positive");
+    const std::string varg=argc>8?argv[8]:"rc";
+    if(varg!="rc"&&varg!="cr"&&varg!="both")
+        throw std::invalid_argument("variant must be rc, cr or both");
     if(argc>4) {
         const int m=std::stoi(argv[2]),n=std::stoi(argv[3]),k=std::stoi(argv[4]);
         const char ta=argc>5?argv[5][0]:'N',tb=argc>6?argv[6][0]:'N';
         if(m<1||n<1||k<1)throw std::invalid_argument("dimensions must be positive");
-        bench<BE,float>(h,m,n,k,ta,tb,reps);bench<BE,double>(h,m,n,k,ta,tb,reps);
+        for(char v : varg=="both"?std::vector<char>{'r','c'}:std::vector<char>{char(varg[0])}) {
+            bench<BE,float>(h,m,n,k,ta,tb,reps,v);bench<BE,double>(h,m,n,k,ta,tb,reps,v);
+        }
     } else for(int n:{64,256,1024,2048,4096}) {
         bench<BE,float>(h,n,n,n,'N','N',reps);bench<BE,double>(h,n,n,n,'N','N',reps);
     }

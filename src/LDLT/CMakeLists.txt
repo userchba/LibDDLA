@@ -9,7 +9,7 @@ target_sources(ddla_lib PRIVATE
     phetrs.cpp
 )
 
-if(NOT ddla_cpu_only_build)
+if(DDLA_HAS_GPU)
     target_sources(ddla_lib PRIVATE hetrf_gpu.cpp hetrf_kernels.cpp hetrf_nopiv_gpu.cpp ldlt_native_kernels.cpp)
 endif()
 if(DDLA_USE_CUDA)

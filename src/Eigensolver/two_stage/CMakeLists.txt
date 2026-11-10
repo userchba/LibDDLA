@@ -38,11 +38,9 @@ if(DDLA_USE_CUDA OR DDLA_USE_HIP)
     endif()
 endif()
 
-if(DDLA_USE_CPU)
-    target_sources(ddla_lib PRIVATE hb2st_householder_cpu.cpp hb2st_householder_cpu_rows.cpp)
-    set_source_files_properties(hb2st_householder_cpu.cpp hb2st_householder_cpu_rows.cpp
-        TARGET_DIRECTORY ddla_lib
-        PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "${_ddla_cpu_kernel_opts}")
-    set_property(SOURCE hb2st_householder_cpu.cpp hb2st_householder_cpu_rows.cpp
-        TARGET_DIRECTORY ddla_lib APPEND PROPERTY COMPILE_DEFINITIONS DDLA_HH_PAIR_ENABLE_CLONES=1)
-endif()
+target_sources(ddla_lib PRIVATE hb2st_householder_cpu.cpp hb2st_householder_cpu_rows.cpp)
+set_source_files_properties(hb2st_householder_cpu.cpp hb2st_householder_cpu_rows.cpp
+    TARGET_DIRECTORY ddla_lib
+    PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "${_ddla_cpu_kernel_opts}")
+set_property(SOURCE hb2st_householder_cpu.cpp hb2st_householder_cpu_rows.cpp
+    TARGET_DIRECTORY ddla_lib APPEND PROPERTY COMPILE_DEFINITIONS DDLA_HH_PAIR_ENABLE_CLONES=1)

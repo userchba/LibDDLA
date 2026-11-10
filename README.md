@@ -40,6 +40,13 @@ selection per handle at runtime. All functions live in the `ddla` namespace.
   device pointers for GPU handles. Individual routines may allocate temporary
   storage internally. `ddla::vector<T>` provides optional ownership of an
   uninitialized buffer in the handle's memory space; the handle must outlive it.
+  Public convenience routines arrange their
+  temporary storage. Internal callers can check arguments once, query local
+  host/backend workspace byte counts without allocation, and reuse caller-owned
+  `std::vector<char>` / `ddla::vector<char>` buffers through
+  unchecked execution. Scratch-free routines such as AXPY have check/run only.
+  See [internal workspace interfaces](docs/workspace.md) for examples and
+  memory/resource lifetime requirements.
 - **Integer dimensions (ScaLAPACK-compatible).** Global/local dimensions,
   strides, and indices use `int`, matching ScaLAPACK's descriptor convention.
   Matrices whose element count exceeds `INT_MAX` are not supported; extending
@@ -62,6 +69,8 @@ selection per handle at runtime. All functions live in the `ddla` namespace.
   and MKL carry LAPACK in the same library. Point CMake at it with
   `-DDDLA_CPU_BLAS_LIBRARY=/path/to/libopenblas.so`, or leave it unset to fall
   back to `find_package(BLAS REQUIRED)`.
+  All builds require both CBLAS DOT interfaces at configuration time;
+  complex dot products always call the library, with no scalar fallback.
 - **CUDA backend:** CUDA Toolkit with cuBLAS, cuSOLVER, cuRAND
 - **HIP backend:** ROCm / DTK with hipBLAS, hipSOLVER, hipRAND, and a CMake
   version with first-class HIP language support
@@ -98,6 +107,88 @@ cmake -S . -B build-cpu                                 \
 cmake --build build-cpu -j
 cmake --build build-cpu --target install
 ```
+
+#### Hermitian eigensolver method
+
+The implementation is organized under `src/Eigensolver/one_stage/` and
+`src/Eigensolver/two_stage/`. The public dispatcher and shared operations stay
+in `src/Eigensolver/`.
+
+`pheevd` reads `DDLA_EIGEN_METHOD` on every call:
+
+- `two_stage` (default when unset or empty): full → band → tridiagonal.
+- `one_stage`: direct Householder reduction to tridiagonal.
+
+For example, `export DDLA_EIGEN_METHOD=one_stage` selects the one-stage solver
+on CPU or GPU. All MPI ranks must select the same method; invalid values and
+inconsistent selections are rejected collectively. `pheevd_one_stage` and
+`pheevd_two_stage` select their algorithm explicitly and ignore this variable.
+Both read only the selected input triangle and destroy A. The one-stage solver
+completes the other triangle, then uses both halves as workspace for full-matrix
+GEMV/GEMM; `uplo` selects the input triangle, not a separate reduction method.
+
+#### CPU threads (OpenMP)
+
+The CPU eigensolver (`pheevd`) scales with threads as well as ranks.  The host kernels that BLAS does not
+cover (the stage-4 rotation replay, the stage-3 divide-and-conquer loops, the stage-2 chase team) run on
+OpenMP threads (`DDLA_USE_OPENMP`, default ON when OpenMP is found; without it they run serially with
+identical results).  Rules for a threaded run:
+
+- Set `OMP_NUM_THREADS` to the threads per rank.  If it is unset each rank uses the CPUs it may run on
+  divided by the ranks of its node, so an unset environment never oversubscribes.  `DDLA_EIG_THREADS`
+  overrides both.
+- On CPU handles, `pheevd` / `pstedc` temporarily set recognized BLAS thread controls to one while
+  multiple LAPACK STEDC leaves run on multiple host threads. The previous count is restored after the
+  joined leaf loop, before merge GEMMs, and when that loop exits by exception. One-leaf and one-host-thread
+  paths retain the caller's setting. This guard applies to CPU handles in CPU-only or dual builds;
+  it does not change GPU-handle behavior.
+- The vendor thread setting is process-global. Run one solver call per process, with no overlapping
+  solves or unrelated concurrent BLAS calls while the guard is active. The guard recognizes
+  OpenBLAS/MKL get/set control pairs; unsupported libraries retain their configuration. The validation
+  below covers OpenBLAS and does not establish a threading guarantee for other backends.
+- Bind each MPI rank to its allocated cores. Under Slurm request `P` tasks with `T` CPUs per task
+  (`--ntasks=P --cpus-per-task=T`) and use `mpirun -np P --map-by slot:PE=T --bind-to core`.
+- Results are bitwise independent of the thread count for the library's own loops; a threaded BLAS may
+  change the last bits of the GEMM-based stages, as it does between BLAS builds.
+- `geam` (matrix add / transpose-copy) on a CPU handle runs its loop on the same budget of threads, fixed
+  when the handle is set up with `ddlaSet` (`OMP_NUM_THREADS`, else the CPUs divided among the node's ranks;
+  `DDLA_EIG_THREADS` overrides); its result is bitwise independent of the thread count.
+- `gemmBatched` on a CPU handle uses the same budget: each OpenMP thread computes whole matrix products, so
+  every core handles one multiplication at a time.  For the duration of that loop the BLAS library's own
+  thread count (OpenBLAS `openblas_set_num_threads`, MKL `mkl_set_num_threads`, found at run time) is held at
+  one and then restored, so even a pthreads OpenBLAS does not start a thread pool inside each call.  A single
+  product or a one-thread budget runs serially and leaves the BLAS threads alone.
+- The CPU two-stage solver can use Householder reflectors or Givens rotations.
+  With square blocks and band width 64, its automatic Householder path supports
+  one shared-memory node, n >= 2048, at most 64 ranks and 1–64 host workers per rank.
+  The existing `DDLA_EIG_CPU_ACCUM=1` / `=0` controls select the Givens path's
+  accumulation or replay engine and bypass automatic Householder selection.
+
+With pthreads OpenBLAS 0.3.29 on HPC3, the following CPU threading setup was validated with one MPI
+rank bound to eight cores. Use default eigensolver tuning for this example. The native test observed
+BLAS1 inside parallel STEDC leaves, restoration to BLAS8 after success and exception unwind, correct
+numerical results, and unchanged affinity. These settings are a tested configuration; performance depends on the matrix, process grid
+and hardware.
+
+```bash
+export OMP_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8
+export OPENBLAS_MAIN_FREE=1 OMP_PROC_BIND=false
+export OMP_DYNAMIC=false OMP_WAIT_POLICY=PASSIVE
+# In a Slurm allocation with one task and eight CPUs per task:
+mpirun -np 1 --map-by slot:PE=8 --bind-to core ./your_cpu_eigensolver
+```
+
+The GPU eigensolver applies distributed Householder reflectors or Givens rotations
+without forming the dense band-to-tridiagonal factor. The tested eight-V100
+CUDA/NCCL profile can select Householder automatically; other GPU profiles retain
+conservative fallbacks. See the [`pheevd_two_stage` contract](include/ddla/ddla.h)
+for bandwidth, topology, thread-budget and CPU/GPU stage-2 selection rules.
+For multiple ranks with separate, matching compact input/output layouts, it reuses A and Z between
+stages and temporarily backs up A in distributed host memory. Padded or different layouts use separate
+distributed workspaces. The Givens stage-2 path distributes band cores between nodes
+and rotation history between ranks; native GPU Householder stage 2 currently
+requires one shared-memory node. Eigenvalues and tridiagonal diagonals remain replicated. A and Z may overlap: the solver preserves
+the reflectors needed by its final back-transform.
 
 ### CPU + CUDA
 
@@ -165,6 +256,7 @@ default to GPU. For CPU calls, create a CPU handle and select
 | `DDLA_USE_CUDA`           | OFF     | Add NVIDIA CUDA support to the CPU backend |
 | `DDLA_USE_HIP`            | OFF     | Add AMD HIP/ROCm support to the CPU backend |
 | `DDLA_CPU_BLAS_LIBRARY`   | (empty) | Path to a BLAS library for the CPU backend; falls back to `find_package(BLAS REQUIRED)` if unset |
+| `DDLA_USE_OPENMP`         | ON      | OpenMP threads for the host kernels of the CPU eigensolver (`src/Eigensolver/eig_cpu_kernels.cpp`, compiled with the host compiler in every build); OFF or no OpenMP: serial, same results |
 | `DDLA_LAPACK_LIBRARY`     | (empty) | Host LAPACK for all source builds; otherwise use `DDLA_CPU_BLAS_LIBRARY`, the `OPENBLAS` environment path, or LAPACK discovery |
 | `DDLA_USE_DEBUG`          | OFF     | Enable `DDLA_USE_DEBUG` preprocessor macro |
 | `DDLA_USE_CCL`            | OFF     | Use NCCL (CUDA) or RCCL (HIP) for device collectives (GPU backend required) |
@@ -229,6 +321,31 @@ for AB when estimated costs are close. There is no public branch override.
 `DDLA_PGEMM_KPANEL` continues to control K-panel batching in AB only; AC and BC
 use one output descriptor block per panel, bounding temporary storage.
 
+### Products updating one triangle
+
+`gemmt` (local) and `pgemmt` (distributed) compute only the selected triangle
+of `C = alpha * op(A) * op(B) + beta * C`. The opposite triangle stays
+untouched. A and B are general matrices; the result need not be symmetric or
+Hermitian. C uses ordinary column-major storage, not packed triangular storage.
+
+```cpp
+// Lower triangle only; op(A) is n-by-k and op(B) is k-by-n.
+ddla::gemmt<ddla::DdlaBackend::CPU>(h, 'L', 'N', 'N', n, k,
+    alpha, A, lda, B, ldb, beta, C, ldc);
+ddla::pgemmt<ddla::DdlaBackend::CPU>(h, 'L', 'N', 'N', n, k,
+    alpha, A_local, descA, B_local, descB, beta, C_local, descC);
+```
+
+Both `'U'` and `'L'` and independent `'N'/'T'/'C'` operand flags are supported.
+CPU and GPU handles use the same interface with pointers in the matching memory
+space. Complex alpha, beta and diagonal entries are unrestricted.
+`beta=0` reads no old C; `alpha=0` or `k=0` reads no A/B.
+C must not overlap the inputs. The distributed routine supports rectangular
+process grids and independent descriptor source coordinates, with a common
+square block size and leading logical regions. Matrices remain distributed;
+workspace consists of panels rather than replicated full matrices.
+
+
 ### Products of triangular matrices
 
 `trtrm` and `ptrtrm` accept independent input triangles. Upper times lower and
@@ -252,9 +369,16 @@ Distributed `ptrtrm` redistributes one panel at a time for transposed operands;
 its descriptors require a common square block size and matching source
 coordinates. Both routines expose only this four-flag interface.
 
-The distributed implementation shares one sweep for NN and transposed
-operands. Its compile-time NN specialization preserves direct packing and
-batched updates; transposed panels use `pgeadd` for redistribution.
+`benchmark_products cpu|gpu local|distributed s|d|c|z n [nb=128]
+[warmups=3] [repeats=9]` compares these products and symmetric/Hermitian
+products against GEMM/PGEMM. Run it under MPI; local mode requires one rank.
+Set `DDLA_BENCH_CASES=sym` for symmetric/Hermitian cases or `tri` for
+upper-times-lower and lower-times-upper cases; the default `all` runs both.
+Set `DDLA_BENCH_GRID=2x2` for an explicit distributed grid. Each sample times
+the complete public call, including internal allocation and communication,
+with backend synchronization and the slowest-rank elapsed time. Input setup
+and correctness checks are outside the timed interval. Raw samples include
+both full-output comparisons and independent scalar-reference error checks.
 
 ### Descriptor (ScaLAPACK `int[9]`)
 
@@ -338,17 +462,23 @@ int main(int argc, char** argv) {
 }
 ```
 
-The `ddlaMalloc` / `ddlaFree` helpers declared in
-`<ddla/ddla_handle_t.h>` (pulled in by `<ddla/ddla.h>`) dispatch to the
-handle's backend (host memory for CPU handles, device memory on the handle's
-stream for GPU handles) and safely handle zero-byte requests (zero bytes sets
-`*ptr = nullptr`).
+The `ddlaMalloc` / `ddlaFree` / `ddlaMemcpy` / `ddlaMemcpy2D` helpers declared
+in `<ddla/ddla_handle_t.h>` (pulled in by `<ddla/ddla.h>`) all take the handle
+as their first argument and dispatch to the handle's backend (host memory for
+CPU handles, device memory on the handle's stream for GPU handles). Zero-byte
+requests are safe (a zero-byte `ddlaMalloc` sets `*ptr = nullptr`).
 
-Copies also take the handle first: `ddlaMemcpy(handle, dst, src, bytes)` and
-`ddlaMemcpy2D(handle, dst, dpitch, src, spitch, width, height)`. There is no
-copy-direction argument. GPU copies involving device memory are queued on
-the handle; call `ddlaSynchronize(handle)` before reading their results on
-the host. Pitches and copy sizes are in bytes.
+`ddlaMemcpy(handle, dst, src, bytes)` copies a contiguous range and
+`ddlaMemcpy2D(handle, dst, dpitch, src, spitch, width, height)` copies a
+pitched rectangle (pitches and width in bytes, as in `cudaMemcpy2D`). There is
+no direction argument: a CPU handle copies host to host, and a GPU handle asks
+the GPU runtime where each pointer lives (host memory or device memory, managed
+memory counts as device) and chooses host to host, host to device, device to
+host or device to device itself. A host-to-host copy is a plain `memcpy` that
+runs immediately on the calling thread and is not ordered after the handle's
+stream; the other directions are enqueued asynchronously on the handle's
+stream, so call `ddlaSynchronize(handle)` before using a device-to-host
+result.
 
 `ddlaMemcpyTri(handle, uplo, m, n, dst, ldd, src, lds, include_diagonal=true)`
 copies only a local column-major upper/lower triangle. Leading dimensions are
@@ -364,6 +494,30 @@ direction and synchronization rules as `ddlaMemcpy`. GPU fills require device
 or managed memory. These are local memory helpers, not distributed operations
 or transpose/conjugation routines.
 
+The same family covers the rest of what the library does with the device, so
+that no CUDA or HIP type appears in your code either:
+
+- `ddlaMalloc` also takes a typed pointer (`double* p; ddlaMalloc(handle, &p, bytes)`).
+- `ddlaMemset(handle, ptr, value, bytes)` fills device memory (host memory on a
+  CPU handle).
+- `ddlaMallocHost` / `ddlaFreeHost` allocate page-locked host memory, the
+  source and target of true asynchronous copies.
+- `ddlaEventCreate` / `ddlaEventDestroy` / `ddlaEventRecord` / `ddlaEventWait` /
+  `ddlaEventSynchronize` mark a point in the handle's queue and order work against it.
+- `ddlaGetLastError(handle)` is the check after your own kernel launch,
+  `ddlaSetDevice(handle)` selects the handle's device on a helper thread,
+  `ddlaGetDeviceCount` / `ddlaMemGetInfo` query the device.
+
+All of them return a `ddlaStatus_t`; `DDLA_CHECK(status)` throws on anything but
+`DDLA_STATUS_SUCCESS`, with the vendor error text from `ddlaGetErrorString`
+for a device failure.  On a CPU handle the event calls are no-ops.
+
+Copies also take the handle first: `ddlaMemcpy(handle, dst, src, bytes)` and
+`ddlaMemcpy2D(handle, dst, dpitch, src, spitch, width, height)`. There is no
+copy-direction argument. GPU copies involving device memory are queued on
+the handle; call `ddlaSynchronize(handle)` before reading their results on
+the host. Pitches and copy sizes are in bytes.
+
 ## API overview
 
 ### Handle and descriptor
@@ -376,6 +530,12 @@ or transpose/conjugation routines.
 | `ddlaGetBackend` / `ddlaBackendAvailable` | Query the handle's backend / compiled backend availability |
 | `ddlaDestroy` | Tear down handle (idempotent) |
 | `ddlaGetStream` | Return the default device stream from a handle (CPU: `nullptr`) |
+| `ddlaMalloc` / `ddlaFree` | Allocate / free backend memory: `ddlaMalloc(handle, &ptr, bytes)`, `ddlaFree(handle, ptr)` |
+| `ddlaMemcpy` / `ddlaMemcpy2D` | Contiguous / pitched copy: `ddlaMemcpy(handle, dst, src, bytes)`, `ddlaMemcpy2D(handle, dst, dpitch, src, spitch, width, height)`; the direction is derived from the handle and the pointers |
+| `ddlaMemset` / `ddlaMallocHost` / `ddlaFreeHost` | Fill device memory / allocate and free pinned host memory |
+| `ddlaEventCreate` / `ddlaEventDestroy` / `ddlaEventRecord` / `ddlaEventWait` / `ddlaEventSynchronize` | Mark a point in the handle's queue and order work against it |
+| `ddlaGetLastError` / `ddlaSetDevice` / `ddlaGetDeviceCount` / `ddlaMemGetInfo` / `ddlaGetErrorString` | Launch-error check, device selection and queries, status text |
+| `ddlaSynchronize` | Wait for the handle's stream (needed after an async `DeviceToHost` copy) |
 | `ddlaDescInit` | Fill a ScaLAPACK-layout `int[9]` descriptor (`DESCINIT` equivalent) |
 | `int[9]` descriptor | 2D block-cyclic matrix layout, slots `DDLA_DTYPE_` … `DDLA_LLD_` |
 | `ddlaGetGridDims` / `ddlaGetGridCoords` | Process grid of a handle |
@@ -406,19 +566,6 @@ must live in the handle's memory space, and GPU work uses the handle's stream.
 | `symmt` / `hemmt` | Symmetric / Hermitian A times general B (or B times A), updating only the selected triangle of C |
 | `syrk` / `syr2k` / `herk` / `her2k` | Symmetric / Hermitian rank-k and rank-2k updates |
 | `gemmBatched` | Fixed-size GEMMs over arrays of pointers; arrays and matrices use the handle's memory space |
-
-**TRMM interface change.** Local `trmm` now follows the in-place BLAS form:
-
-```cpp
-ddla::trmm(handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb);
-```
-
-The separate output arguments of the former `trmm(..., B, ldb, C, ldc)`
-interface were removed. To preserve B, first copy it into a destination,
-then multiply that destination in place. A must not overlap B. The C ABI,
-Fortran module and generated Python ctypes signatures use the same in-place
-form; rebuild bindings and update old calls. Distributed `ptrmm` already
-overwrites B and retains its existing signature.
 
 `trtrm(handle, uplo_a, transa, uplo_b, transb, n, alpha, A, lda, B, ldb, beta, C, ldc)`
 reads the `U` or `L` stored triangle of each operand; `transa` and `transb` select
@@ -486,7 +633,6 @@ Panels use a gathered local `geqrf` by default (`DDLA_QR_PANEL=gather`),
 or the distributed `inplace` variant. All ranks must use the same selector.
 Only QR and QL are implemented; right-side LQ and RQ forms are not provided.
 
-
 ### Singular value decomposition
 
 | Function | Description |
@@ -511,27 +657,111 @@ columns for side='R') when given the same `location` passed to `ppotrf`.
 
 | Function | Description |
 |----------|-------------|
+| `swap` | Swap two vectors (BLAS-1 `?swap`; strides may be negative) |
+| `getrf` | Local LU with partial pivoting, `A = P·L·U` (LAPACK `?getrf`; `ipiv` and `info` live with the data) |
+| `potrf` | Local Cholesky factorization, `uplo` = `'U'`/`'L'` (LAPACK `?potrf`; the other triangle is not touched) |
+| `laswp` | Local row interchanges from a `getrf` pivot array (LAPACK `?laswp`; any nonzero `incx`) |
 | `geqrf(handle, uplo, m, n, A, lda, tau)` | Local QR / QL factorization, `uplo` = `'U'` (`A = Q·R`, LAPACK `?geqrf`) or `'L'` (`A = Q·L`, LAPACK `?geqlf`; cuSOLVER / hipSOLVER have no QL, so the GPU runs the vendor `geqrf` on the reversed matrix `J A J`); `tau` lives with the data |
 | `larft(handle, direct, storev, n, k, V, ldv, tau, T, ldt)` | Local triangular factor `T` of a block reflector (LAPACK `?larft`, `storev` = `'C'`): `H = I - V·T·V^H` for `k` reflectors stored as `geqrf` / `geqlf` leave them, `direct` = `'F'` (`T` upper, `H = H(1)…H(k)`) or `'B'` (`T` lower, `H = H(k)…H(1)`); `T` is written whole (zeros in the other triangle).  The GPU needs no vendor routine (cuSOLVER has `Xlarft` only from CUDA 12.4, hipSOLVER none): `herk` forms `V^H V` and one small kernel runs the column recurrence |
-| `gemmVbatched` | Batch of GEMMs with variable dimensions (device-resident dim arrays) |
-| `gemmVbatched2s` | Two-stage variable-batch GEMM with reusable temporary |
-| `random_generate` | Fill a backend-memory buffer with uniform random values |
+| `gemmVbatched(handle, ...)` | Batch of GEMMs with variable dimensions (device-resident dim arrays; GPU only) |
+| `gemmVbatched2s(handle, ...)` | Two-stage variable-batch GEMM with reusable temporary (GPU only) |
+| `random_generate(handle, data, n)` | Fill a buffer with uniform random values |
 
-`random_generate<Backend, T>` is declared in `<ddla/ddla.h>` (as are
-`write_matrix` and all other backend-templated functions), implemented in
-`src/random_generate.cpp`, and explicitly instantiated for `float`, `double`,
-`std::complex<float>`, and `std::complex<double>`.
+`swap`, `getrf`, `potrf`, `laswp`, `geqrf`, `larft` and `random_generate` are `<Backend, T>` templates declared in
+`<ddla/ddla.h>` (as are `gemm`, `geam`, `write_matrix` and all other backend-templated
+functions); each takes the handle first, is implemented in the `.cpp` of the same name
+(CPU arm: host BLAS / LAPACK, GPU arm: cuBLAS / cuSOLVER / cuRAND or the hip equivalents) and is
+explicitly instantiated for `float`, `double`, `std::complex<float>`, and `std::complex<double>`.
+Every pointer lives where the handle's backend does -- host memory for a CPU handle, device memory
+for a GPU handle -- `ipiv` and `info` included; a GPU call is asynchronous on the handle's stream,
+so read `info` after `ddlaSynchronize`.  `gemmVbatched` / `gemmVbatched2s` are `<Backend, T>` as
+well but the kernels are device code: a CPU handle (or `Backend = CPU`) is rejected with
+`std::invalid_argument`.
 
-## Optional language bindings
+### Fortran bindings
 
-`-DDDLA_ENABLE_FORTRAN=ON` builds the C-ABI bridge `ddla_c`, the Fortran
-library `ddla_fortran`, and module `ddla`. The installed module is placed
-under `include/ddla/`; link the matching Fortran and C-ABI libraries.
+Built with `-DDDLA_ENABLE_FORTRAN=ON` (needs a Fortran compiler, off by
+default): `ddla_c` contains the C-ABI bridge (`fortran/ddla_c_api.cpp`), and
+`ddla_fortran` supplies the Fortran module (`fortran/ddla.f90`, `bind(C)`
+interfaces) and links to that bridge. Installing places both libraries next
+to `libddla` and `ddla.mod` under `include/ddla`. The signature table in
+`fortran/gen_bindings.py` generates the C-ABI, Fortran and Python ctypes files.
+Enable `DDLA_ENABLE_PYTHON` to build the bridge and stage the Python package;
+see [Python setup and examples](python/README.md).
 
-`-DDDLA_ENABLE_PYTHON=ON` builds `ddla_c` and stages the Python package.
-Python does not require a Fortran compiler unless the Fortran option is also
-enabled. Install the Python package separately and set `DDLA_LIB_PATH` to
-the matching `libddla_c.so`; see [Python setup and examples](python/README.md).
+Routines keep their names under a LAPACK-style type prefix: `ddla_s_*`,
+`ddla_d_*`, `ddla_c_*` and `ddla_z_*` take `real(c_float)`, `real(c_double)`,
+`complex(c_float)` and `complex(c_double)` data (`ddla_d_pgemm`,
+`ddla_z_pgesv`, ...).  There are deliberately no generic names: most routines
+pass their matrices as `type(c_ptr)`, which a Fortran generic cannot resolve
+by scalar type.  Every binding returns `integer(c_int)` status, 0 = success
+(`ddla_check(status)` aborts with the text from `ddla_error_text(status)`);
+a C++ exception from the library surfaces as `DDLA_STATUS_EXCEPTION` with its
+`what()` text.
+
+The ScaLAPACK block-cyclic data model carries over unchanged: `ddla_descinit`
+fills the same `integer(c_int) :: desc(9)` array ScaLAPACK's `DESCINIT` would
+(`ddla_numloc` is the `LOCr`/`LOCc` helper), the process grid comes from the
+handle (`ddla_init` + `ddla_set(handle, fcomm, nprows, npcols, 'R')`, with
+0, 0 requesting the automatic grid), and the local pieces are plain Fortran
+arrays -- `c_loc(array)` on a CPU handle, `ddla_malloc`/`ddla_memcpy` device
+buffers on a GPU handle.  Complex scalars travel as the `bind(C)` derived
+types `ddla_complex_float` / `ddla_complex_double` (the layout of
+`complex(c_float)` / `complex(c_double)`).
+
+```fortran
+use ddla
+include 'mpif.h'
+type(c_ptr) :: h
+integer(c_int) :: st, desca(9)
+st = ddla_init(h)
+st = ddla_set(h, int(MPI_COMM_WORLD, c_int), 0, 0, 'R')
+st = ddla_descinit(desca, h, n, n, mb, mb, 0, 0, -1)
+st = ddla_d_pgesv(h, 'L', 'N', n, nrhs, pa, desca, pb, descb)
+```
+
+Bound: the distributed family (`pgemm`, `pgetrf` + `_nopiv`/`_bpiv`,
+`pgetrs` + `_nopiv`/`_bpiv`, `pgesv` + `_nopiv`/`_bpiv`, `ppotrf`, `ppotrs`,
+`pposv`, `ppotrf_bottom_right`, `potrf_bottom_right`, `pgeqrf`, `pgeadd`,
+`pdam`, `ptrtrs`, `ptrmm`, `plapiv`, `pswap`, `gather`, `scatter`), the local
+BLAS/LAPACK wrappers (`gemm`, `gemv`, `trsm`, `trmm`, `trmv`, `syrk`, `herk`,
+`her2k`, `hemv`, `hemm`, `her2`, `geam`, `trtrm`, `scal`, `axpy`, `swap`,
+`geru`, `gerc`, `iamax`, `nrm2`, `dotc`, `getrf`, `potrf`, `laswp`, `geqrf`,
+`larft`) and the lifecycle / descriptor / memory calls (`ddla_init`,
+`ddla_init_backend`, `ddla_set`, `ddla_destroy`, `ddla_grid_dims`,
+`ddla_grid_coords`, `ddla_rank`, `ddla_size`, `ddla_descinit`, `ddla_numloc`,
+`ddla_malloc`, `ddla_free`, `ddla_memcpy`, `ddla_memcpy2d`, `ddla_memset`,
+`ddla_synchronize`).  Not bound: the pointer-array APIs (`gemmBatched`,
+`gemmVbatched`, `gemmVbatched2s`), the utilities
+`random_generate` / `write_matrix`, and the mixed real-by-complex `gemm`
+overload -- call those from C++.
+
+`tests/test_fortran_api.f90` registers as the `test_fortran_api_mpi` ctest
+when the option is on: handle lifecycle, descriptors, memory round trips, and
+`pgemm` / `pgesv` / `ppotrf`+`pdam`+`ppotrs` / `pgeqrf` residual checks for
+real and complex data on the build's default backend (device buffers +
+`ddla_memcpy` on a GPU handle).
+
+### In-place triangular multiplication
+
+Both local `trmm` and distributed `ptrmm` overwrite `B`, following BLAS/PBLAS:
+
+```cpp
+trmm<Backend, T>(handle, side, uplo, trans, diag, m, n,
+                 alpha, A, lda, B, ldb);
+ptrmm<Backend, T>(handle, side, uplo, trans, diag, m, n,
+                  alpha, A, descA, B, descB);
+```
+
+`A` is read-only and must not overlap `B`. The unused triangle and implicit
+unit diagonal are not referenced. With `alpha == 0`, the logical entries of
+`B` become zero without reading `A` or the original `B`; padding is preserved.
+The former local `trmm(..., B, ldb, C, ldc)` interface has been removed.
+Callers that need to preserve `B` must first copy it to their destination,
+then call in-place `trmm` on that destination. Rebuild C++ clients and migrate
+C, Fortran, and Python calls to the same shorter argument list. The distributed
+`ptrmm` signature is unchanged. Internal QR, SVD, triangular-product and
+Householder consumers use their existing work buffers in place.
 
 ## Testing
 
@@ -573,9 +803,13 @@ LibDDLA/
 │   ├── ddla_desc.h       ScaLAPACK int[9] descriptor contract and index mapping helpers
 │   ├── ddla_vector.h     Owned, uninitialized storage in the handle's memory space
 │   └── ddla_config.h.in  Generated config header template (ddla_config.h at build time)
-├── src/                  Implementation (one routine per .cpp) and private headers
+├── src/                  Implementation (one routine per .cpp) and private headers,
+│                         grouped per algorithm: LU/ Cholesky/ QR/ Eigensolver/ SVD/
+│                         BLAS/ PBLAS/ (plus gpu/ and vbatched/); shared
+│                         infrastructure (comm_traits.h, ddla_connector.h, ...) at root
 │   └── comm_traits.h     Unified communication layer (commSend/commRecv/
 │                         commBcast/commAlltoallv)
+├── fortran/              Fortran bindings: C-ABI shim, bind(C) module, signature-table generator
 ├── tests/                Integration tests (MPI executables)
 ├── benchmarks/           Benchmark data and supporting artifacts
 ├── install_scripts/      Backend-specific build/install scripts
@@ -631,18 +865,26 @@ This distributes large leaf solves across ranks while avoiding extra merges
 for small problems. Root calculation and vector normalization reuse the same
 scratch because their lifetimes do not overlap.
 
-The explicit `pheevd_one_stage(handle, jobz, uplo, n, A, descA, w, Z, descZ, info)`
-entry solves real symmetric or complex Hermitian eigenproblems on CPU and GPU
-handles. It combines direct Householder tridiagonalization, row-distributed
-`pstedc`, bounded eigenvector redistribution, and a blocked reflector
-back-transform. `jobz` selects eigenvalues (`N`) or all eigenvectors (`V`);
-`uplo` selects the input triangle. The eigenvalues `w` are replicated host
-values, and `Z` uses the caller's distributed output descriptor. Input blocks
-are square with zero source coordinates; output rows must match the input.
+The Hermitian one-stage and two-stage drivers use the same row-distributed
+D&C solver. Each rank owns a contiguous share of rows and all
+columns, keeping eigenvector storage distributed as O(n²/P). One-stage
+redistributes bounded real panels into the output's 2D descriptor, widens
+locally for complex output, and applies its stored reflectors. Two-stage
+feeds the row slabs directly to its replay, Householder, or accumulated-Q
+back-transform. Both drivers return eigenvectors in the caller's 2D output
+descriptor and reuse caller-sized workspace across these phases. No dense
+secular factor is replicated.
 
-`pheevd_one_stage` uses both triangles as workspace after reading the selected
-input triangle; `uplo` selects only which input triangle is read. Padding is
-preserved unless it overlaps active eigenvector output; overlapping
-input/output uses a reflector backup. Internal callers can reuse workspace
-across the reduction, solve, redistribution, and back-transform through check,
-byte-query, and no-check run components.
+The private GPU Householder route uses the native host band-to-tridiagonal
+reduction and a device back-transform. Reflector history is partitioned across
+MPI shared windows on one node; each GPU receives bounded panels, rather than
+a complete history. Narrow panels use register windows, and wider panels use
+cooperative warps. A GPU BLAS/WY reference handles other widths and supports
+direct comparisons. The public GPU two-stage default remains Givens.
+Run `test_pheevd_householder_gpu` for numerical and layout checks; the private
+`detail::pheevd_householder_gpu` entry selects the new route for benchmarks.
+
+Panel extraction and redistribution use `pgeadd` followed by row/column
+broadcasts. `pgeadd` accepts independent block sizes, owners, and submatrix
+offsets for N/T/C. Aligned panel copies retain the direct packing path.
+The former public `transport_block` interface has been removed.

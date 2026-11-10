@@ -23,11 +23,11 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 #include <mpi.h>
 #include <ddla/ddla.h>
 #include "ddla_connector.h"
-#include "ddla_stream.h"
 #include "ddla_stream.h"
 
 using namespace ddla;
@@ -606,6 +606,31 @@ int main(int argc, char** argv)
                 rc = ddlaMemcpy2D(h, cdst.data(), width, csrc.data(), width, width, 6);
                 TEST(nm + "memcpy2D host->host contiguous succeeds", rc == ok);
                 TEST(nm + "memcpy2D host->host contiguous copies all rows", cdst == csrc);
+            }
+
+            // Large host rectangles cross the parallel-copy grain. Check
+            // unequal pitches, packed rows and unaligned interior pointers;
+            // completion and every padding/guard byte are observable on return.
+            for (const auto shape : {std::pair<std::size_t, std::size_t>{4099, 1025},
+                                     {17, 131073}, {131071, 17}}) {
+                for (bool packed : {false, true}) {
+                    const auto width = shape.first, height = shape.second;
+                    const auto spitch = width + (packed ? 0 : 17);
+                    const auto dpitch = width + (packed ? 0 : 31);
+                    auto src = make_rect(spitch, width, height, 0xA5);
+                    src.insert(src.begin(), 9, 0xA5);
+                    src.insert(src.end(), 13, 0xA5);
+                    const auto original = src;
+                    std::vector<unsigned char> dst(7 + dpitch * height + 11, 0xC3);
+                    auto want = make_rect(dpitch, width, height, 0xC3);
+                    want.insert(want.begin(), 7, 0xC3);
+                    want.insert(want.end(), 11, 0xC3);
+                    const auto rc = ddlaMemcpy2D(h, dst.data() + 7, dpitch,
+                                                src.data() + 9, spitch, width, height);
+                    TEST(nm + "large memcpy2D host->host succeeds", rc == ok);
+                    TEST(nm + "large memcpy2D completes, keeps padding and guards", dst == want);
+                    TEST(nm + "large memcpy2D preserves source", src == original);
+                }
             }
 
             // 12i. Argument validation: exact status codes

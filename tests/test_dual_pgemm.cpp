@@ -2,7 +2,7 @@
  * @file test_dual_pgemm.cpp
  * @brief Dual-backend (CPU + GPU) pgemm comparison test.
  *
- * Built only for DDLA_DUAL_BUILD configurations (both CPU and GPU compiled).
+ * Built for GPU-enabled configurations (both CPU and GPU compiled).
  * Compares CPU pgemm against GPU pgemm on deterministic inputs.
  */
 

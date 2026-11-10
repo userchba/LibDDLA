@@ -126,7 +126,16 @@ echo "================================================="
 echo "Configuring and building CUDA tests..."
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
-cmake "${LibDDLA_SRC_PATH}" -DDDLA_USE_CUDA=ON -DDDLA_USE_CCL=ON -DBUILD_TESTS=ON -DCMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES}"
+# Use an initial cache on HPC3: long -D argument lists can be dropped on
+# some login nodes. GPU QR still needs host LAPACK.
+cat > test_cuda_init.cmake <<EOF
+set(DDLA_USE_CUDA ON CACHE BOOL "" FORCE)
+set(DDLA_USE_CCL ON CACHE BOOL "" FORCE)
+set(BUILD_TESTS ON CACHE BOOL "" FORCE)
+set(CMAKE_CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}" CACHE STRING "" FORCE)
+set(DDLA_LAPACK_LIBRARY "${DDLA_LAPACK_LIBRARY:-/data/app/openblas/0.3.29/lib/libopenblas.so}" CACHE FILEPATH "" FORCE)
+EOF
+cmake -S "${LibDDLA_SRC_PATH}" -B . -C test_cuda_init.cmake
 make -j"${BUILD_JOBS}" "${files[@]}" "${api_grid_files[@]}" "${api_subcomm_files[@]}"
 cd "${BUILD_DIR}/tests"
 

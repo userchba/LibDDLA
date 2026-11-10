@@ -20,17 +20,8 @@ message(STATUS "Building ddla library version ${CMAKE_PROJECT_VERSION}")
 # (CMake >= 3.18); a property set without it in a subdirectory is silently
 # ignored for this target.
 
-# A CPU-only build (DDLA_USE_CPU without a GPU backend) leaves the GPU-kernel
-# translation units out; the subdirectories read ddla_cpu_only_build for that.
-# The files that keep a GPU kernel next to their CPU arm (LU/getrf_nopiv.cpp,
-# PBLAS/pdam.cpp, PBLAS/pgeadd.cpp, Cholesky/potrf_bottom_right_transform.cpp)
-# are always listed and compile as plain C++ in a CPU-only build: all kernel
-# code is behind DDLA_USE_CUDA / DDLA_USE_HIP.
-if(DDLA_USE_CPU AND NOT DDLA_DUAL_BUILD)
-    set(ddla_cpu_only_build ON)
-else()
-    set(ddla_cpu_only_build OFF)
-endif()
+# DDLA_HAS_GPU selects device-only translation units; sources containing
+# both backend arms are always listed and guard their device code locally.
 
 # ---------------------------------------------------------------------------
 # Host OpenMP kernels of the CPU eigensolver path (src/Eigensolver/eig_cpu_kernels.cpp).  That ONE translation unit
@@ -68,7 +59,7 @@ target_sources(ddla_lib PRIVATE
     reflector_build_T.cpp
     punmtr.cpp
 )
-if(NOT ddla_cpu_only_build)
+if(DDLA_HAS_GPU)
     # GPU copy kernels of ddla::matrix_transfer (matrix_transfer.cpp keeps the
     # distributed driver and the CPU arm).
     target_sources(ddla_lib PRIVATE matrix_transfer_kernels.cpp memory_tri_kernels.cpp)
@@ -102,7 +93,6 @@ add_subdirectory(PBLAS)
 add_subdirectory(QR)
 add_subdirectory(vbatched)
 add_subdirectory(Eigensolver)
-set(DDLA_HAS_EIGENSOLVER ON PARENT_SCOPE)
 add_subdirectory(SVD)
 
 # ---------------------------------------------------------------------------
@@ -116,7 +106,7 @@ if(DDLA_USE_HIP)
     # Host C++ sources and dependent targets also include rocThrust headers.
     target_compile_definitions(ddla_lib PUBLIC THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
 endif()
-if(DDLA_USE_CPU AND NOT DDLA_DUAL_BUILD)
+if(NOT DDLA_HAS_GPU)
     target_compile_definitions(ddla_lib PRIVATE DDLA_USE_CPU)
 endif()
 if(DDLA_USE_CCL)

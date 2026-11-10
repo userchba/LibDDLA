@@ -854,7 +854,8 @@ void pgeqrs(const DdlaHandle_t& handle, int m, int n, int nrhs,
  * @param V This rank's contiguous rows of all n right singular-vector columns,
  * returning V rather than V^T. Both factors are column-major in backend memory.
  * Communicator rank q among P ranks owns n/P+(q<n%P) rows starting at
- * q*(n/P)+min(q,n%P). For n>0, U and V must be nonnull on every rank.
+ * q*(n/P)+min(q,n%P). For n>0, U and V must be non-null on every rank, including
+ * ranks owning no rows (any valid backend pointer is accepted there).
  * @param ld Local leading dimension of both factors, at least max(1, local rows).
  * Padding and storage beyond the first n columns are preserved.
  * @param info Zero on success. Invalid arguments or numerical failure throw.
@@ -1546,9 +1547,9 @@ void nrm2(
  * @brief Conjugate dot product: result := x**H * y (plain dot for real types).
  *
  * Same unified backend-templated form as @ref gemm: the CPU instantiation
- * calls Fortran xDOT for the real scalar types (the complex ones accumulate in
- * the host arm, since the Fortran ABI for complex-valued function returns is
- * compiler-dependent), the GPU instantiation calls cuBLAS/hipBLAS.  The result
+ * calls Fortran xDOT for real scalars and CBLAS's output-pointer xDOTC for
+ * complex scalars. CPU-enabled builds require cblas_cdotc_sub and
+ * cblas_zdotc_sub from the selected BLAS library. The GPU arm calls cuBLAS/hipBLAS. The result
  * is written THROUGH THE POINTER @p result, not returned by value, because the
  * two backends disagree on the pointer's address space:
  *   - GPU handles: @p result is DEVICE memory.  The GPU instantiation forces
@@ -2042,6 +2043,16 @@ void larft(const DdlaHandle_t& handle, char direct, char storev, int n, int k, T
            int ldt);
 
 // Interfaces for the registered reflector and mixed-domain operations.
+/**
+ * @brief Distributed mixed-domain product, real A and complex B/C.
+ *
+ * Same descriptor, transpose, backend and collective contract as pgemm above.
+ * Alpha and beta are complex. The real operand remains real during panel
+ * communication; local products use the mixed-domain gemm overload. 'C' on
+ * the real operand means transpose. AB, AC and BC schedules are supported.
+ * alpha=0 or k=0 does not read A/B; beta=0 does not read the previous C.
+ * Null local storage is allowed when that rank owns no active entries.
+ */
 template <DdlaBackend Backend = default_backend_v, typename R>
 void pgemm(const DdlaHandle_t& handle, char transa, char transb,
            int m, int n, int k, const std::complex<R>& alpha,
@@ -2049,6 +2060,9 @@ void pgemm(const DdlaHandle_t& handle, char transa, char transb,
            const std::complex<R>* B, const int* descB,
            const std::complex<R>& beta, std::complex<R>* C, const int* descC);
 
+/** @brief Distributed mixed-domain product, complex A/C and real B.
+ *  Shares the contract of the real-by-complex overload above.
+ */
 template <DdlaBackend Backend = default_backend_v, typename R>
 void pgemm(const DdlaHandle_t& handle, char transa, char transb,
            int m, int n, int k, const std::complex<R>& alpha,
@@ -2099,19 +2113,84 @@ void pherm_complete(
     T* A, const int* descA
 );
 
+/**
+ * @brief Reduce the leading n-by-n Hermitian matrix to real tridiagonal form.
+ *
+ * Only uplo='U'/'L' is referenced and overwritten; the opposite triangle and
+ * parent/padding entries are preserved. Blocks must be square with source
+ * coordinates zero. d[n] and e[n-1] are replicated HOST outputs; tau[n-1]
+ * is replicated backend memory. A and tau use the handle's backend memory.
+ * n=0 permits null data; n=1 does not reference e/tau. info=0 on success;
+ * invalid arguments and non-finite reductions throw collectively.
+ *
+ * Native LibDDLA reflector storage: for j=1..n-1 (zero-based A), v_j has
+ * support [0,j), unit entry j-1, and zeros thereafter. Upper storage holds
+ * v_j[0:j-1) in A(0:j-1,j); lower storage holds their conjugates in
+ * A(j,0:j-1). Let H_j=I-tau[j-1]*v_j*v_j^H and Q=(H_1*...*H_{n-1})^H;
+ * Q^H*A_original*Q has diagonal d and off-diagonal e. Use the stored-reflector
+ * punmtr overload to apply Q. This is a handle-first LibDDLA interface;
+ * tau distribution/conjugation and lower reflector storage differ from
+ * ScaLAPACK's Fortran P?HETRD representation. Outputs must be disjoint.
+ */
 template <DdlaBackend Backend = default_backend_v, typename T>
 void phetrd(const DdlaHandle_t& handle, char uplo, int n, T* A, const int* descA,
     typename real_type<T>::type* d, typename real_type<T>::type* e, T* tau, int& info);
 
+/**
+ * @brief Apply Q from phetrd's stored reflectors to distributed C.
+ *
+ * side L/R applies op(Q) on the left/right of C's leading m-by-n region.
+ * Q's order is m for L and n for R; trans N/C applies Q/Q^H (real T is
+ * accepted). uplo selects phetrd's native reflector storage in A, described
+ * above. A/tau are read-only backend memory; C must be disjoint from them.
+ * A has square source-zero blocks. C's applied row/column block size and
+ * source match A; its other distribution may differ. The unused triangle of
+ * A and C's parent/padding entries are untouched. All ranks participate.
+ * Globally empty C or an order below two references no data pointers.
+ * The existing explicit (V,T) overload remains available for prepared blocks.
+ */
 template <DdlaBackend Backend = default_backend_v, typename T>
 void punmtr(const DdlaHandle_t& handle, char side, char uplo, char trans, int m, int n,
     const T* A, const int* descA, const T* tau, T* C, const int* descC);
 
+/**
+ * @brief Apply a prepared block H = I - V Tmat V^H to distributed C.
+ *
+ * side='L': C := op(H) C; side='R': C := C op(H), on C's leading m-by-n
+ * region. trans='N' applies H and 'C' its adjoint; real types also accept 'T'.
+ * This is LibDDLA's explicit (V,T) block interface, rather than a stored-A/tau
+ * interface. uplo selects the upper/lower triangle of the k-by-k Tmat; its
+ * other triangle is never read. Tmat is replicated across the process grid.
+ *
+ * V holds k explicit columns (including unit entries and zeros). For 'L' its
+ * local rows match C's first m rows and it is replicated across process
+ * columns. For 'R' its local rows match C's first n columns and it is replicated
+ * across process rows. ldv >= max(1, local V rows), ldt >= max(1,k).
+ * V and Tmat are read-only; active C must be disjoint from both. Descriptor
+ * parent data and leading-dimension padding outside active C are preserved.
+ * All pointers use backend memory. Empty m/n/k touches no data and permits
+ * null V/Tmat/C. Checks and workspace allocation are collective; GPU execution
+ * is stream ordered. Internal callers reuse the no-check, allocation-free run.
+ */
 template <DdlaBackend Backend = default_backend_v, typename T>
 void punmtr(const DdlaHandle_t& handle, char side, char uplo, char trans,
     int m, int n, int k, const T* V, int ldv, const T* Tmat, int ldt,
     T* C, const int* descC);
 
+/**
+ * @brief Single-process complex-by-real GEMM:
+ * C := alpha * op(A) * op(B) + beta * C.
+ *
+ * Mirror of the real-by-complex form above: A/C and alpha/beta have type
+ * std::complex<R>, B is real. Flags accept N/T/C (case insensitive); C on
+ * real B is T, while C on complex A conjugates. Leading dimensions are in
+ * elements of each matrix's own type; the remaining contract (overlap,
+ * pointers, null/zero/alpha-zero semantics, exceptions) matches the
+ * real-by-complex form. The CPU arm shares its internally-threaded packed
+ * GEMM engine with the operand roles swapped; the GPU arm packs
+ * [Re op(A); Im op(A)] into one real matrix and drives a single real GEMM
+ * per column panel.
+ */
 template <DdlaBackend Backend = default_backend_v, typename R>
 void gemm(
     const DdlaHandle_t& handle,

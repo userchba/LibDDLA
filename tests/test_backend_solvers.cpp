@@ -497,6 +497,73 @@ void check_rejected(const DdlaHandle_t& h, const char* name)
 
 } // namespace
 
+// The argument checks of the distributed routines are COLLECTIVE: when only rank 0 passes a bad argument, every rank
+// throws (rank 0 its own exception, the others std::invalid_argument "... on another rank") and nobody is left waiting in
+// a later collective.  A routine whose check were local would leave the other ranks running into its first collective:
+// the test hangs instead of failing, so each call below is bounded by the routine's own first collective.
+template <DdlaBackend B>
+void check_collective_rejection(const DdlaHandle_t& h, const char* label)
+{
+    int rank = 0;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    const int n = 16, nb = 4;
+    int desc[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(desc, h, n, n, nb, nb, 0, 0));
+    std::vector<double> local(local_size(h, desc), 1.0);
+    DeviceBuffer<double> a(h, local.size()), b(h, local.size()), c(h, local.size());
+    std::vector<double> tau(n, 0.0);
+    std::vector<int> ipiv(n + 1, 0);
+    for (int i = 0; i < ddla_test::m_loc(h, desc); ++i)
+        ipiv[i] = indx_l2g_r(desc, h, i) + 1;
+    upload(h, a.ptr, local);
+    upload(h, b.ptr, local);
+    upload(h, c.ptr, local);
+
+    auto expect_all_throw = [&](const char* what, auto&& call) {
+        int threw = 0;
+        try { call(rank == 0); } catch (const std::exception&) { threw = 1; }
+        int all = 0;
+        MPI_Allreduce(&threw, &all, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+        require_close(h, std::string(label) + " " + what + ": a bad argument on rank 0 only makes every rank throw",
+                      all == 1 ? 0.0 : 1.0, 0.0);
+    };
+    // The same call with every argument valid on every rank must not throw (the check is not a blanket rejection).
+    auto expect_ok = [&](const char* what, auto&& call) {
+        bool ok = true;
+        try { call(false); } catch (const std::exception&) { ok = false; }
+        require_close(h, std::string(label) + " " + what + ": valid arguments pass", ok ? 0.0 : 1.0, 0.0);
+    };
+    auto both = [&](const char* what, auto&& call) { expect_all_throw(what, call); expect_ok(what, call); };
+
+    both("pgeadd", [&](bool bad) {
+        ddla::pgeadd<B>(h, bad ? 'Q' : 'N', 'N', n, n, 1.0, a.ptr, 1, 1, desc, 0.0, b.ptr, 1, 1, desc,
+                        c.ptr, 1, 1, desc); });
+    both("pdam", [&](bool bad) { ddla::pdam<B>(h, 1.0, a.ptr, desc, bad ? n + 1 : n); });
+    both("pswap", [&](bool bad) {
+        ddla::pswap<B>(h, 4, a.ptr, 1, 1, desc, bad ? 5 : 1, b.ptr, 1, 1, desc, 1); });
+    both("plapiv", [&](bool bad) {
+        ddla::plapiv<B>(h, bad ? 'X' : 'F', 'R', 'C', 1, n, a.ptr, desc, ipiv.data(), desc, nullptr); });
+    both("ptrtrs", [&](bool bad) {
+        ddla::ptrtrs<B>(h, bad ? 'X' : 'L', 'L', 'N', 'N', 1, 1, a.ptr, desc, b.ptr, desc); });
+    both("ptrmm", [&](bool bad) {
+        ddla::ptrmm<B>(h, bad ? 'X' : 'L', 'L', 'N', 'N', 1, 1, 1.0, a.ptr, desc, b.ptr, desc); });
+    both("pgemm", [&](bool bad) {
+        ddla::pgemm<B>(h, bad ? 'Q' : 'N', 'N', 1, 1, 1, 1.0, a.ptr, desc, b.ptr, desc, 0.0, c.ptr, desc); });
+    both("pgeqrf", [&](bool bad) {
+        int info = 0;
+        ddla::pgeqrf<B>(h, bad ? -1 : 1, 1, a.ptr, desc, tau.data(), info); });
+    both("pgeqlf", [&](bool bad) {
+        int info = 0;
+        ddla::pgeqlf<B>(h, bad ? -1 : 1, 1, a.ptr, desc, tau.data(), info); });
+    if (ddlaGetSize(h) > 1) {
+        both("mixed QR/QL entries", [&](bool bad) {
+            int info = 0;
+            if (bad) ddla::pgeqlf<B>(h, 1, 1, a.ptr, desc, tau.data(), info);
+            else ddla::pgeqrf<B>(h, 1, 1, a.ptr, desc, tau.data(), info);
+        });
+    }
+}
+
 int main(int argc, char** argv)
 {
     MPI_Init(&argc, &argv);
@@ -518,6 +585,7 @@ int main(int argc, char** argv)
             ddlaSet(h, MPI_COMM_WORLD, grid.first, grid.second);
             if (rank == 0) std::cout << "=== CPU handle, grid " << grid_name(h) << " ===" << std::endl;
             run_backend<DdlaBackend::CPU>(h, options.shapes);
+            check_collective_rejection<DdlaBackend::CPU>(h, "[CPU]");
 #if DDLA_HAS_GPU
             check_rejected<DdlaBackend::GPU>(h, "[CPU handle, <GPU>]");
 #endif
@@ -531,6 +599,7 @@ int main(int argc, char** argv)
             ddlaSet(h, MPI_COMM_WORLD, grid.first, grid.second);
             if (rank == 0) std::cout << "=== GPU handle, grid " << grid_name(h) << " ===" << std::endl;
             run_backend<DdlaBackend::GPU>(h, options.shapes);
+            check_collective_rejection<DdlaBackend::GPU>(h, "[GPU]");
             check_rejected<DdlaBackend::CPU>(h, "[GPU handle, <CPU>]");
             check_ddla_sync(h);
             ddlaDestroy(h);
