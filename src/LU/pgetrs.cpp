@@ -12,6 +12,7 @@
 #include "pgetrs_impl.h"
 #include "PBLAS/plapiv_impl.h"
 #include "PBLAS/ptrtrs_impl.h"
+#include "instantiate.h"
 
 namespace ddla{
 
@@ -157,24 +158,9 @@ void pgetrs(
     template void lu_impl::pgetrs_check<BACKEND>(const DdlaHandle_t&, char, char, int, int, const int*, const int*)
 
 
-INSTANTIATE_PGETRS_CHECK(DdlaBackend::CPU);
-INSTANTIATE_PGETRS(DdlaBackend::CPU, float);
-INSTANTIATE_PGETRS(DdlaBackend::CPU, double);
-INSTANTIATE_PGETRS(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PGETRS(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PGETRS_CHECK(DdlaBackend::GPU);
-INSTANTIATE_PGETRS(DdlaBackend::GPU, float);
-INSTANTIATE_PGETRS(DdlaBackend::GPU, double);
-INSTANTIATE_PGETRS(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PGETRS(DdlaBackend::GPU, std::complex<double>);
-#endif
-
-INSTANTIATE_PGETRS_SIZE(float);
-INSTANTIATE_PGETRS_SIZE(double);
-INSTANTIATE_PGETRS_SIZE(std::complex<float>);
-INSTANTIATE_PGETRS_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_PGETRS_CHECK)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PGETRS)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PGETRS_SIZE)
 
 #undef INSTANTIATE_PGETRS_SIZE
 #undef INSTANTIATE_PGETRS_CHECK

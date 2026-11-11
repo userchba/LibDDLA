@@ -20,6 +20,8 @@
 #include "blas_enums.h"
 #include "ddla_connector.h"
 #include "ddla_stream.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 extern "C" {
 // Real: xGER (same signature for real and complex; real is plain xGER).
@@ -122,20 +124,7 @@ void gerc_check(const DdlaHandle_t& handle, int m, int n,
           const T& alpha, const T* x, int incx,
           const T* y, int incy, T* A, int lda)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU gerc is not available in this LibDDLA build");
-
-    if (handle == nullptr)
-        throw std::runtime_error("gerc: null handle");
-
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("gerc: template backend ") +
-            (Backend == DdlaBackend::CPU ? "CPU" : "GPU") +
-            " does not match handle backend " +
-            (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
-    }
+    detail::require_backend<Backend>(handle, "gerc");
 
     if (m <= 0 || n <= 0) return;
 
@@ -185,33 +174,14 @@ void gerc(const DdlaHandle_t& handle, int m, int n,
         const DdlaHandle_t&, int, int, const TYPE&, const TYPE*, int,        \
         const TYPE*, int, TYPE*, int)
 
-INSTANTIATE_GERC(DdlaBackend::CPU, float);
-INSTANTIATE_GERC(DdlaBackend::CPU, double);
-INSTANTIATE_GERC(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_GERC(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_GERC(DdlaBackend::GPU, float);
-INSTANTIATE_GERC(DdlaBackend::GPU, double);
-INSTANTIATE_GERC(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_GERC(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_GERC)
 
 #undef INSTANTIATE_GERC
 
 
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::gerc_check<BACKEND, TYPE>(const DdlaHandle_t& handle, int m, int n, const TYPE& alpha, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* A, int lda); \
-    template void blas_impl::gerc_run<BACKEND, TYPE>(const DdlaHandle_t& handle, int m, int n, const TYPE& alpha, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* A, int lda);
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#if DDLA_HAS_GPU
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
-#endif
+    template void blas_impl::gerc_run<BACKEND, TYPE>(const DdlaHandle_t& handle, int m, int n, const TYPE& alpha, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* A, int lda)
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_INSTANTIATE_PHASES)
 #undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

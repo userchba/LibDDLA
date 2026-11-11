@@ -3,6 +3,7 @@
 #include "helpers.h"
 #include "hetrf_native.h"
 #include "ldlt_gpu_max.h"
+#include "instantiate.h"
 #include <algorithm>
 #include <type_traits>
 
@@ -299,10 +300,7 @@ void swap_stored(const DdlaHandle_t& h, char u, int n, const int* d, T* a, int l
     template void pivot_columns<T>(const DdlaHandle_t&, int, int, int, int, int, int, int,         \
                                    const T*, const T*, T*, T*, T*, T*);                            \
     template void copy_stored<T>(const DdlaHandle_t&, char, int, const int*, const T*, int, T*,    \
-                                 int, int, int, int, int, bool);
-INSTANCE(float)
-INSTANCE(double)
-INSTANCE(std::complex<float>)
-INSTANCE(std::complex<double>)
+                                 int, int, int, int, int, bool)
+DDLA_FOR_EACH_TYPE(INSTANCE)
 #undef INSTANCE
 } // namespace ddla::ldlt_impl

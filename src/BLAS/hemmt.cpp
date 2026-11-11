@@ -6,6 +6,7 @@
 #include "require_backend.h"
 #include "plan_util.h"
 #include "ddla_stream.h"
+#include "instantiate.h"
 #include <ddla/ddla_vector.h>
 #include <algorithm>
 #include <complex>
@@ -234,16 +235,10 @@ void hemmt(const DdlaHandle_t& h,char side,char uploA,char uploC,int n,
  template bool blas_impl::hemmt_check<B,T>(const DdlaHandle_t&,char,char,char,int,const T&,const T*,int,const T*,int,const T&,T*,int,const char*,int); \
  template void blas_impl::hemmt_run<B,T>(const DdlaHandle_t&,char,char,char,int,const T&,const T*,int,const T*,int,const T&,T*,int,void*,std::size_t,bool,int); \
  template void blas_impl::diagonal_block_run<B,T>(const DdlaHandle_t&,bool,bool,int,const T*,int,T*,int)
-#define TYPES(B) \
- INSTANTIATE(B,float); INSTANTIATE(B,double); INSTANTIATE(B,std::complex<float>); INSTANTIATE(B,std::complex<double>)
-TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-TYPES(DdlaBackend::GPU);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE)
 #define SIZE(T) template void blas_impl::hemmt_workspace_size<T>(const DdlaHandle_t&,int,bool,std::size_t*,int,char,char)
-SIZE(float); SIZE(double); SIZE(std::complex<float>); SIZE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(SIZE)
 #undef SIZE
-#undef TYPES
 #undef INSTANTIATE
 template <DdlaBackend Backend,typename R>
 void hemm(const DdlaHandle_t& h,char side,char ua,int m,int n,const std::complex<R>& alpha,

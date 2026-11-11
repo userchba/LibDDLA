@@ -24,6 +24,8 @@
 #include "blas_enums.h"
 #include "ddla_connector.h"
 #include "ddla_stream.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 extern "C" {
 // Real: xHER2K has no real-scalar BLAS counterpart, so the real types use
@@ -159,20 +161,7 @@ void her2k_check(
     const typename real_type<T>::type& beta,
     T* C, int ldc)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU her2k is not available in this LibDDLA build");
-
-    if (handle == nullptr) {
-        throw std::runtime_error("her2k: null handle");
-    }
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("her2k: template backend ") +
-            (Backend == DdlaBackend::CPU ? "CPU" : "GPU") +
-            " does not match handle backend " +
-            (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
-    }
+    detail::require_backend<Backend>(handle, "her2k");
 
     if constexpr (Backend == DdlaBackend::GPU) {
         (void)detail::to_fill_mode(uplo);
@@ -256,33 +245,14 @@ void her2k(
         const TYPE&, const TYPE*, int, const TYPE*, int,                       \
         const typename real_type<TYPE>::type&, TYPE*, int)
 
-INSTANTIATE_HER2K(DdlaBackend::CPU, float);
-INSTANTIATE_HER2K(DdlaBackend::CPU, double);
-INSTANTIATE_HER2K(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_HER2K(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_HER2K(DdlaBackend::GPU, float);
-INSTANTIATE_HER2K(DdlaBackend::GPU, double);
-INSTANTIATE_HER2K(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_HER2K(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_HER2K)
 
 #undef INSTANTIATE_HER2K
 
 
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::her2k_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, char trans, int n, int k, const TYPE& alpha, const TYPE* A, int lda, const TYPE* B, int ldb, const typename real_type<TYPE>::type& beta, TYPE* C, int ldc); \
-    template void blas_impl::her2k_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, char trans, int n, int k, const TYPE& alpha, const TYPE* A, int lda, const TYPE* B, int ldb, const typename real_type<TYPE>::type& beta, TYPE* C, int ldc);
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#if DDLA_HAS_GPU
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
-#endif
+    template void blas_impl::her2k_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, char trans, int n, int k, const TYPE& alpha, const TYPE* A, int lda, const TYPE* B, int ldb, const typename real_type<TYPE>::type& beta, TYPE* C, int ldc)
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_INSTANTIATE_PHASES)
 #undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

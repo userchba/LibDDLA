@@ -20,6 +20,7 @@
 #include "plan_util.h"
 
 #include "pgetf2_kernels.h"
+#include "instantiate.h"
 
 namespace ddla{
 
@@ -314,24 +315,9 @@ void pgetf2(const DdlaHandle_t& handle, int m, int n, int width, T* A, int ia, i
     template bool lu_impl::pgetf2_check<BACKEND>(const DdlaHandle_t&, int, int, int, const void*, int, int, \
         const int*, const int*)
 
-INSTANTIATE_PGETF2_CHECK(DdlaBackend::CPU);
-INSTANTIATE_PGETF2(DdlaBackend::CPU, float);
-INSTANTIATE_PGETF2(DdlaBackend::CPU, double);
-INSTANTIATE_PGETF2(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PGETF2(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PGETF2_CHECK(DdlaBackend::GPU);
-INSTANTIATE_PGETF2(DdlaBackend::GPU, float);
-INSTANTIATE_PGETF2(DdlaBackend::GPU, double);
-INSTANTIATE_PGETF2(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PGETF2(DdlaBackend::GPU, std::complex<double>);
-#endif
-
-INSTANTIATE_PGETF2_SIZE(float);
-INSTANTIATE_PGETF2_SIZE(double);
-INSTANTIATE_PGETF2_SIZE(std::complex<float>);
-INSTANTIATE_PGETF2_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_PGETF2_CHECK)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PGETF2)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PGETF2_SIZE)
 
 #undef INSTANTIATE_PGETF2_SIZE
 #undef INSTANTIATE_PGETF2_CHECK

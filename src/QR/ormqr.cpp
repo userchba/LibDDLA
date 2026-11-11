@@ -9,6 +9,7 @@
 #include "mpi_datatype.h"
 #include "punmtr_impl.h"
 #include "require_backend.h"
+#include "instantiate.h"
 #include <algorithm>
 #include <climits>
 #include <complex>
@@ -328,15 +329,6 @@ void porgqr(const DdlaHandle_t &h, int m, int n, int k, T *a, const int *da, con
                                const int *, const T *, T *, const int *, int &);                   \
     template void porgqr<B, T>(const DdlaHandle_t &, int, int, int, T *, const int *, const T *,   \
                                int &)
-#define DDLA_QR_APPLY_TYPES(B)                                                                     \
-    DDLA_QR_APPLY(B, float);                                                                       \
-    DDLA_QR_APPLY(B, double);                                                                      \
-    DDLA_QR_APPLY(B, std::complex<float>);                                                         \
-    DDLA_QR_APPLY(B, std::complex<double>)
-DDLA_QR_APPLY_TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-DDLA_QR_APPLY_TYPES(DdlaBackend::GPU);
-#endif
-#undef DDLA_QR_APPLY_TYPES
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_QR_APPLY)
 #undef DDLA_QR_APPLY
 } // namespace ddla

@@ -11,6 +11,7 @@
 #include "plan_util.h"
 #include "pgeadd_impl.h"
 #include "pblas_workspace.h"
+#include "instantiate.h"
 #include <algorithm>
 #include <cassert>
 #include <cctype>
@@ -473,20 +474,8 @@ void ptrtrm(const DdlaHandle_t& h, char ua, char ta, char ub, char tb, int n,
     template void ptrtrm_impl::ptrtrm_run<BACKEND, TYPE>(const DdlaHandle_t&,char,char,char,char,int,const TYPE&,const TYPE*,const int*,const TYPE*,const int*,const TYPE&,TYPE*,const int*,void*,std::size_t,void*,std::size_t)
 #define INSTANTIATE_PTRTRM_SIZE(TYPE) \
     template void ptrtrm_impl::ptrtrm_workspace_size<TYPE>(const DdlaHandle_t&,char,char,int,const int*,const int*,const int*,std::size_t*,std::size_t*)
-INSTANTIATE_PTRTRM(DdlaBackend::CPU, float);
-INSTANTIATE_PTRTRM(DdlaBackend::CPU, double);
-INSTANTIATE_PTRTRM(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PTRTRM(DdlaBackend::CPU, std::complex<double>);
-#if DDLA_HAS_GPU
-INSTANTIATE_PTRTRM(DdlaBackend::GPU, float);
-INSTANTIATE_PTRTRM(DdlaBackend::GPU, double);
-INSTANTIATE_PTRTRM(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PTRTRM(DdlaBackend::GPU, std::complex<double>);
-#endif
-INSTANTIATE_PTRTRM_SIZE(float);
-INSTANTIATE_PTRTRM_SIZE(double);
-INSTANTIATE_PTRTRM_SIZE(std::complex<float>);
-INSTANTIATE_PTRTRM_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PTRTRM)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PTRTRM_SIZE)
 #undef INSTANTIATE_PTRTRM_SIZE
 #undef INSTANTIATE_PTRTRM
 

@@ -8,6 +8,7 @@
 #include "require_backend.h"
 #include "PBLAS/ptrtrs_impl.h"
 #include "SVD/svd_workspace.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <complex>
@@ -92,16 +93,7 @@ void pgeqrs(const DdlaHandle_t& handle, int m, int n, int nrhs,
     template void pgeqrs<BACKEND, TYPE>(const DdlaHandle_t&, int, int, int, \
         const TYPE*, const int*, const TYPE*, TYPE*, const int*, int&)
 
-INSTANTIATE_PGEQRS(DdlaBackend::CPU, float);
-INSTANTIATE_PGEQRS(DdlaBackend::CPU, double);
-INSTANTIATE_PGEQRS(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PGEQRS(DdlaBackend::CPU, std::complex<double>);
-#if DDLA_HAS_GPU
-INSTANTIATE_PGEQRS(DdlaBackend::GPU, float);
-INSTANTIATE_PGEQRS(DdlaBackend::GPU, double);
-INSTANTIATE_PGEQRS(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PGEQRS(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PGEQRS)
 #undef INSTANTIATE_PGEQRS
 
 } // namespace ddla

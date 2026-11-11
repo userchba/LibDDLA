@@ -15,6 +15,8 @@
 #include <type_traits>
 
 #include "gemm_mixed_cpu.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 namespace ddla {
 namespace {
@@ -491,10 +493,7 @@ void gemm_check(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
           std::complex<R>* C, int ldc)
 {
     static_assert(std::is_same_v<R,float> || std::is_same_v<R,double>);
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU);
-    if (!h) throw std::runtime_error("gemm(real,complex): null handle");
-    if (ddlaGetBackend(h) != Backend)
-        throw std::runtime_error("gemm(real,complex): template backend does not match handle backend");
+    detail::require_backend<Backend>(h, "gemm(real,complex)");
     ta=mixed_trans(ta); tb=mixed_trans(tb);
     if (m<0 || n<0 || k<0 || lda<std::max(1,ta=='N'?m:k) ||
         ldb<std::max(1,tb=='N'?k:n) || ldc<std::max(1,m))
@@ -575,10 +574,7 @@ void gemm_check(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
           std::complex<R>* C, int ldc)
 {
     static_assert(std::is_same_v<R,float> || std::is_same_v<R,double>);
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU);
-    if (!h) throw std::runtime_error("gemm(complex,real): null handle");
-    if (ddlaGetBackend(h) != Backend)
-        throw std::runtime_error("gemm(complex,real): template backend does not match handle backend");
+    detail::require_backend<Backend>(h, "gemm(complex,real)");
     ta=mixed_trans(ta); tb=mixed_trans(tb);
     if (m<0 || n<0 || k<0 || lda<std::max(1,ta=='N'?m:k) ||
         ldb<std::max(1,tb=='N'?k:n) || ldc<std::max(1,m))
@@ -699,10 +695,7 @@ template void blas_impl::mixed_gemmBatched_workspace_size<float>(const DdlaHandl
 template void blas_impl::mixed_gemmBatched_workspace_size<double>(const DdlaHandle_t&,int,int,int,bool,int,std::size_t*);
 #if DDLA_HAS_GPU
 #define MATRIX_SCAL_GPU(T) template void blas_impl::matrix_scal_gpu_run<T>(const DdlaHandle_t&,int,int,const T&,T*,int,T* const*,int)
-MATRIX_SCAL_GPU(float);
-MATRIX_SCAL_GPU(double);
-MATRIX_SCAL_GPU(std::complex<float>);
-MATRIX_SCAL_GPU(std::complex<double>);
+DDLA_FOR_EACH_TYPE(MATRIX_SCAL_GPU)
 #undef MATRIX_SCAL_GPU
 template void blas_impl::matrix_scal_gpu_run<std::complex<float>,float>(const DdlaHandle_t&,int,int,const float&,std::complex<float>*,int,std::complex<float>* const*,int);
 template void blas_impl::matrix_scal_gpu_run<std::complex<double>,double>(const DdlaHandle_t&,int,int,const double&,std::complex<double>*,int,std::complex<double>* const*,int);

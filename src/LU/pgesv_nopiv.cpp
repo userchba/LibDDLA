@@ -14,6 +14,7 @@
 #include "lu_panel.h"
 #include "pgetrf_impl.h"
 #include "pgetrs_impl.h"
+#include "instantiate.h"
 
 namespace ddla {
 
@@ -126,24 +127,9 @@ void pgesv_nopiv(
     const int*)
 
 
-INSTANTIATE_PGESV_NOPIV_CHECK(DdlaBackend::CPU);
-INSTANTIATE_PGESV_NOPIV(DdlaBackend::CPU, float);
-INSTANTIATE_PGESV_NOPIV(DdlaBackend::CPU, double);
-INSTANTIATE_PGESV_NOPIV(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PGESV_NOPIV(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PGESV_NOPIV_CHECK(DdlaBackend::GPU);
-INSTANTIATE_PGESV_NOPIV(DdlaBackend::GPU, float);
-INSTANTIATE_PGESV_NOPIV(DdlaBackend::GPU, double);
-INSTANTIATE_PGESV_NOPIV(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PGESV_NOPIV(DdlaBackend::GPU, std::complex<double>);
-#endif
-
-INSTANTIATE_PGESV_NOPIV_SIZE(float);
-INSTANTIATE_PGESV_NOPIV_SIZE(double);
-INSTANTIATE_PGESV_NOPIV_SIZE(std::complex<float>);
-INSTANTIATE_PGESV_NOPIV_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_PGESV_NOPIV_CHECK)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PGESV_NOPIV)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PGESV_NOPIV_SIZE)
 
 #undef INSTANTIATE_PGESV_NOPIV_SIZE
 #undef INSTANTIATE_PGESV_NOPIV_CHECK

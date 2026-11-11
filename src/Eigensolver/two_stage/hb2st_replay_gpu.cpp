@@ -9,6 +9,7 @@
 #include "helpers.h"
 #include "check_agree.h"
 #include "plan_util.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <cassert>
@@ -198,15 +199,6 @@ void displacements(const int* count,int* disp,int P)
     long long total=0;
     for(int q=0;q<P;++q) { disp[q]=checked_count(total); total+=count[q]; }
     checked_count(total);
-}
-void agree_replay_failure(const DdlaHandle_t& h,const std::exception_ptr& failure)
-{
-    int failed=failure?1:0;
-    MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&failed,1,MPI_INT,MPI_MAX,h->comm));
-    if(failed) {
-        if(failure) std::rethrow_exception(failure);
-        throw std::runtime_error("hb2st replay: preparation failed on another rank");
-    }
 }
 #endif
 } // namespace
@@ -539,7 +531,7 @@ void hb2st_replay_gpu_run(const DdlaHandle_t& h,const Hb2stReplayGpuPlan& p,Hb2s
                     if(!pipeline) DDLA_CHECK(ddlaSynchronize(h));
                 }
                 } catch(...) { failure=std::current_exception(); }
-                agree_replay_failure(h,failure);
+                detail::agree_failure(h,failure,"hb2st replay: preparation");
                 upload_slot^=1;
                 end=begin;
             }
@@ -547,7 +539,7 @@ void hb2st_replay_gpu_run(const DdlaHandle_t& h,const Hb2stReplayGpuPlan& p,Hb2s
         std::exception_ptr replay_error;
         try { DDLA_CHECK(ddlaSynchronize(h)); }
         catch(...) { replay_error=std::current_exception(); }
-        agree_replay_failure(h,replay_error);
+        detail::agree_failure(h,replay_error,"hb2st replay: preparation");
         if(direct) {
             transpose_square<D><<<dim3((n+31)/32,(n+31)/32),dim3(32,8),0,static_cast<gpuStream_t>(h->stream)>>>(strip,stride,n);
             DDLA_CHECK(ddlaGetLastError(h));
@@ -575,7 +567,7 @@ void hb2st_replay_gpu_run(const DdlaHandle_t& h,const Hb2stReplayGpuPlan& p,Hb2s
                     }
                     displacements(sc,sd,P); displacements(rc,rd,P);
                 } catch(...) { failure=std::current_exception(); }
-                agree_replay_failure(h,failure);
+                detail::agree_failure(h,failure,"hb2st replay: preparation");
                 copy_ints(d0,sd,P); copy_ints(d1,slots,count); copy_ints(d2,rc,P); copy_ints(d3,rd,P);
                 copy_ints(d6,column_disp,P); copy_ints(d7,columns,ncolumns);
                 const int main_count=std::max(0,std::min(b,clo+main_columns)-a);
@@ -626,8 +618,7 @@ template<class T>void hb2st_replay_rows_gpu(const DdlaHandle_t& h,int n,typename
     std::optional<Hb2stReplayGpuResources<T>> resources;std::exception_ptr failure;
     try{hb2st_replay_gpu_workspace_size<T>(h,p,&backend_bytes,&host_bytes);backend_work.resize(backend_bytes);host_work.resize(host_bytes);
         resources.emplace(h,p);}catch(...){failure=std::current_exception();}
-    int bad=failure?1:0;MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&bad,1,MPI_INT,MPI_MAX,h->comm));
-    if(bad){if(failure)std::rethrow_exception(failure);throw std::runtime_error("hb2st replay: workspace preparation failed on another rank");}
+    detail::agree_failure(h->comm,failure,"hb2st replay: workspace preparation");
     bool consumed=false;
     auto retire=[&] {if(consumed){if(Y&&(!workspace||workspace->owns_input))DDLA_CHECK(ddlaFree(h,Y));Y=nullptr;}};
     try{hb2st_replay_gpu_run<T>(h,p,*resources,history,phases.data(),Y,Z,info,&consumed,backend_work.data(),backend_bytes,
@@ -642,13 +633,10 @@ template<class T>void hb2st_replay_rows_gpu(const DdlaHandle_t& h,int n,typename
  template void hb2st_replay_gpu_workspace_size<T>(const DdlaHandle_t&,const Hb2stReplayGpuPlan&,std::size_t*,std::size_t*); \
  template class Hb2stReplayGpuResources<T>; \
  template void hb2st_replay_gpu_run<T>(const DdlaHandle_t&,const Hb2stReplayGpuPlan&,Hb2stReplayGpuResources<T>&,const DistributedHistory<T>&,const T*,const typename real_type<T>::type*,T*,int&,bool*,void*,std::size_t,void*,std::size_t,Hb2stHouseholderCpu<T>*)
-DDLA_REPLAY_PHASE(float);DDLA_REPLAY_PHASE(double);DDLA_REPLAY_PHASE(std::complex<float>);DDLA_REPLAY_PHASE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(DDLA_REPLAY_PHASE)
 #undef DDLA_REPLAY_PHASE
 
 #define DDLA_REPLAY_INSTANTIATE(T) template void hb2st_replay_rows_gpu<T>(const DdlaHandle_t&,int,typename real_type<T>::type*&,int,const DistributedHistory<T>&,const std::vector<T>&,T*,const int*,int&,int,int,bool,const Hb2stReplayGpuWorkspace<T>*)
-DDLA_REPLAY_INSTANTIATE(float);
-DDLA_REPLAY_INSTANTIATE(double);
-DDLA_REPLAY_INSTANTIATE(std::complex<float>);
-DDLA_REPLAY_INSTANTIATE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(DDLA_REPLAY_INSTANTIATE)
 #undef DDLA_REPLAY_INSTANTIATE
 } }

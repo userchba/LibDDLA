@@ -37,6 +37,8 @@
 #include "blas_pointer_mode.h"
 #include "ddla_connector.h"
 #include "ddla_stream.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 extern "C" {
 float  sdot_(const int*, const float*, const int*, const float*, const int*);
@@ -146,20 +148,7 @@ void dotc_check(
     const T* y, int incy,
     T* result)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU dotc is not available in this LibDDLA build");
-
-    if (handle == nullptr) {
-        throw std::runtime_error("dotc: null handle");
-    }
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("dotc: template backend ") +
-            (Backend == DdlaBackend::CPU ? "CPU" : "GPU") +
-            " does not match handle backend " +
-            (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
-    }
+    detail::require_backend<Backend>(handle, "dotc");
 
 }
 
@@ -220,33 +209,14 @@ void dotc(
     template void dotc<BACKEND, TYPE>(                                         \
         const DdlaHandle_t&, int, const TYPE*, int, const TYPE*, int, TYPE*)
 
-INSTANTIATE_DOTC(DdlaBackend::CPU, float);
-INSTANTIATE_DOTC(DdlaBackend::CPU, double);
-INSTANTIATE_DOTC(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_DOTC(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_DOTC(DdlaBackend::GPU, float);
-INSTANTIATE_DOTC(DdlaBackend::GPU, double);
-INSTANTIATE_DOTC(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_DOTC(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_DOTC)
 
 #undef INSTANTIATE_DOTC
 
 
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::dotc_check<BACKEND, TYPE>( const DdlaHandle_t& handle, int n, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* result); \
-    template void blas_impl::dotc_run<BACKEND, TYPE>( const DdlaHandle_t& handle, int n, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* result);
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#if DDLA_HAS_GPU
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
-#endif
+    template void blas_impl::dotc_run<BACKEND, TYPE>( const DdlaHandle_t& handle, int n, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* result)
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_INSTANTIATE_PHASES)
 #undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

@@ -1,5 +1,5 @@
 #include "api_grid_test_common.h"
-#include "hh_paired_state_oracle.h"
+#include "hh_kernel_state_oracle.h"
 #include <cstdio>
 
 using namespace api_grid_test;
@@ -9,11 +9,12 @@ template<class T> void run(const DdlaHandle_t& h) {
     int desc[DDLA_DLEN_];
     ddlaDescInit(desc,h,n,n,4,4,0,0);
     auto matrix=make_local<T>(h,desc,[&](int i,int j) {
-        return hh_paired_state_oracle::value<T>(i,j,b);
+        return hh_kernel_state_oracle::value<T>(i,j,b);
     });
     for(auto stage2:{detail::Hb2stHouseholderCpuOptions::Stage2::Scalar,
                      detail::Hb2stHouseholderCpuOptions::Stage2::Blas}) {
-        const auto x=hh_paired_state_oracle::run<T>(h,n,b,desc,matrix.data(),stage2);
+        const auto x=hh_kernel_state_oracle::run<T>(h,n,b,desc,matrix.data(),stage2,
+            detail::Hb2stHouseholderCpuOptions::Stage4::Paired);
         if(ddlaGetRank(h)==0)
             std::printf("HH_PAIRED_STATE PASS bytes=%zu stage2=%d applications=%zu inactive=%zu residual=%.9g orth=%.9g difference=%.9g\n",
                 sizeof(T),static_cast<int>(stage2),x.applications,x.inactive,

@@ -9,6 +9,11 @@
 #include <limits>
 #include <type_traits>
 using namespace api_grid_test;
+// Where the band reduction runs.  test_pheevd_device_stage2.cpp builds this
+// same test with the reduction on the device.
+#ifndef DDLA_TEST_REDUCTION_BACKEND
+#define DDLA_TEST_REDUCTION_BACKEND DdlaBackend::CPU
+#endif
 namespace {
 namespace hh=ddla::detail::hh;
 template<class T> T value(double re,double im) {
@@ -46,7 +51,7 @@ void check_full(const DdlaHandle_t& h,int n,bool upper,bool alias,int nb=8) {
     DeviceBuffer<T>A(h,input.size()),Z(h,std::max<std::size_t>(1,local_size(h,descZ))),reference(h,input.size());
     upload(h,A.ptr,input);upload(h,Z.ptr,std::vector<T>(Z.count,sentinel));upload(h,reference.ptr,input);
     std::vector<R>w(n),old(n),only(n);int info=-1;
-    detail::pheevd_householder<DdlaBackend::GPU, T>(h,'V',upper?'U':'L',n,A.ptr,descA,w.data(),alias?A.ptr:Z.ptr,descZ,info, DdlaBackend::CPU);
+    detail::pheevd_householder<DdlaBackend::GPU, T>(h,'V',upper?'U':'L',n,A.ptr,descA,w.data(),alias?A.ptr:Z.ptr,descZ,info, DDLA_TEST_REDUCTION_BACKEND);
     require_close(h,"HH private full driver info",info,0);
     T* output=alias?A.ptr:Z.ptr;
     const auto after=download(h,output,alias?input.size():Z.count);
@@ -67,7 +72,7 @@ void check_full(const DdlaHandle_t& h,int n,bool upper,bool alias,int nb=8) {
     pheevd_two_stage<DdlaBackend::GPU,T>(h,'N',upper?'U':'L',n,reference.ptr,descA,old.data(),nullptr,nullptr,info);
     require_close(h,"HH reference eigenvalues info",info,0);
     upload(h,reference.ptr,input);
-    detail::pheevd_householder<DdlaBackend::GPU, T>(h,'N',upper?'U':'L',n,reference.ptr,descA,only.data(),nullptr,nullptr,info, DdlaBackend::CPU);
+    detail::pheevd_householder<DdlaBackend::GPU, T>(h,'N',upper?'U':'L',n,reference.ptr,descA,only.data(),nullptr,nullptr,info, DDLA_TEST_REDUCTION_BACKEND);
     require_close(h,"HH eigenvalues-only info",info,0);
     double error=0,norm=0;
     for(int j=0;j<n;++j) {
@@ -83,7 +88,7 @@ void check_full(const DdlaHandle_t& h,int n,bool upper,bool alias,int nb=8) {
         upload(h,reference.ptr,input);upload(h,wy.ptr,std::vector<T>(wy.count,sentinel));
         std::vector<R> ww(n);
         detail::pheevd_householder_stage4<DdlaBackend::GPU, T>(h,'V',upper?'U':'L',n,
-            reference.ptr,descA,ww.data(),wy.ptr,descZ,info,0, DdlaBackend::CPU);
+            reference.ptr,descA,ww.data(),wy.ptr,descZ,info,0, DDLA_TEST_REDUCTION_BACKEND);
         const auto expected=download(h,wy.ptr,wy.count);
         double difference=0,scale=1;
         for(int c=0;c<zc;++c)for(int r=0;r<zr;++r) {
@@ -127,7 +132,7 @@ int main(int argc,char** argv) {
             }
             unsetenv("DDLA_EIG_NBW");
             int da[DDLA_DLEN_];ddlaDescInit(da,h,0,0,8,8,0,0);int info=-1;
-            detail::pheevd_householder<DdlaBackend::GPU, double>(h,'N','U',0,nullptr,da,nullptr,nullptr,nullptr,info, DdlaBackend::CPU);
+            detail::pheevd_householder<DdlaBackend::GPU, double>(h,'N','U',0,nullptr,da,nullptr,nullptr,nullptr,info, DDLA_TEST_REDUCTION_BACKEND);
             require_close(h,"HH GPU empty output",info,0);
             DDLA_CHECK(ddlaDestroy(h));
         }

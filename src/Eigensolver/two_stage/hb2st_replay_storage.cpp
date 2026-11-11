@@ -7,6 +7,8 @@
 #include "row_share.h"
 #include "comm_traits.h"
 #include "plan_util.h"
+#include "instantiate.h"
+#include "check_agree.h"
 
 #include <algorithm>
 #include <cassert>
@@ -17,18 +19,6 @@
 #include <utility>
 
 namespace ddla { namespace detail {
-namespace {
-void storage_agree(const DdlaHandle_t& h,const std::exception_ptr& failure)
-{
-    int failed=failure?1:0;
-    MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&failed,1,MPI_INT,MPI_MAX,ddlaGetCommunicator(h)));
-    if(failed) {
-        if(failure) std::rethrow_exception(failure);
-        throw std::runtime_error("hb2st reuse: preparation failed on another rank");
-    }
-}
-}
-
 namespace {
 std::size_t storage_capacity(const Hb2stReplayStoragePlan& p,int rank)
 {
@@ -69,7 +59,7 @@ template<class T>Hb2stReplayStoragePlan hb2st_replay_storage_check(const DdlaHan
         p.real_capacity=p.cells*(sizeof(T)/sizeof(R));const RowShare rows(n,p.P);p.ldy=std::max(rows.count(p.rank),1);p.y_count=std::size_t(p.ldy)*std::size_t(n);
         p.borrow_y=rows.count(p.rank)>0&&p.real_capacity>=p.y_count;
         if(hb2st_replay_storage_prefix(p,p.P)!=n)throw std::logic_error("hb2st reuse: incomplete column partition");
-    }catch(...){failure=std::current_exception();}storage_agree(h,failure);return p;
+    }catch(...){failure=std::current_exception();}detail::agree_failure(h,failure,"hb2st reuse: preparation");return p;
 }
 template<class T>void hb2st_replay_storage_workspace_size(const DdlaHandle_t&,const Hb2stReplayStoragePlan& p,std::size_t* host_bytes)
 {
@@ -84,7 +74,7 @@ template<class T>void hb2st_replay_storage_save_run(const DdlaHandle_t& h,const 
         char* w=static_cast<char*>(host_work);int* columns=take<int>(w,std::size_t(p.P)+1);T* backup=take<T>(w,p.cells);
         assert(w-static_cast<char*>(host_work)<=static_cast<std::ptrdiff_t>(host_bytes));(void)host_bytes;
         int first=0;for(int rank=0;rank<p.P;++rank){columns[rank]=first;first+=storage_columns(p,rank);}columns[p.P]=first;
-        std::exception_ptr failure;try{DDLA_CHECK(ddlaMemcpy(h,backup,A,p.cells*sizeof(T)));DDLA_CHECK(ddlaSynchronize(h));}catch(...){failure=std::current_exception();}storage_agree(h,failure);
+        std::exception_ptr failure;try{DDLA_CHECK(ddlaMemcpy(h,backup,A,p.cells*sizeof(T)));DDLA_CHECK(ddlaSynchronize(h));}catch(...){failure=std::current_exception();}detail::agree_failure(h,failure,"hb2st reuse: preparation");
     } catch (...) {
         // Retire queued host reads before the caller reuses or releases scratch.
         if (ddlaGetBackend(h) == DdlaBackend::GPU)
@@ -99,7 +89,7 @@ template<class T>void hb2st_replay_storage_restore_run(const DdlaHandle_t& h,con
         if(!p.enabled)return;
         char* w=static_cast<char*>(host_work);(void)take<int>(w,std::size_t(p.P)+1);const T* backup=take<T>(w,p.cells);
         assert(w-static_cast<char*>(host_work)<=static_cast<std::ptrdiff_t>(host_bytes));(void)host_bytes;
-        std::exception_ptr failure;try{DDLA_CHECK(ddlaMemcpy(h,A,backup,p.cells*sizeof(T)));DDLA_CHECK(ddlaSynchronize(h));}catch(...){failure=std::current_exception();}storage_agree(h,failure);
+        std::exception_ptr failure;try{DDLA_CHECK(ddlaMemcpy(h,A,backup,p.cells*sizeof(T)));DDLA_CHECK(ddlaSynchronize(h));}catch(...){failure=std::current_exception();}detail::agree_failure(h,failure,"hb2st reuse: preparation");
     } catch (...) {
         // Retire queued host reads before the caller reuses or releases scratch.
         if (ddlaGetBackend(h) == DdlaBackend::GPU)
@@ -112,7 +102,7 @@ template<class T>void hb2st_replay_storage_restore_run(const DdlaHandle_t& h,con
  template void hb2st_replay_storage_workspace_size<T>(const DdlaHandle_t&,const Hb2stReplayStoragePlan&,std::size_t*); \
  template void hb2st_replay_storage_save_run<T>(const DdlaHandle_t&,const Hb2stReplayStoragePlan&,const T*,void*,std::size_t); \
  template void hb2st_replay_storage_restore_run<T>(const DdlaHandle_t&,const Hb2stReplayStoragePlan&,T*,void*,std::size_t)
-STORAGE_PHASE(float);STORAGE_PHASE(double);STORAGE_PHASE(std::complex<float>);STORAGE_PHASE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(STORAGE_PHASE)
 #undef STORAGE_PHASE
 
 // Owning convenience wrapper: check, size, allocate and run in one object.
@@ -138,7 +128,7 @@ void Hb2stReplayStorage<T>::prepare()
         host_work_.resize(host_bytes);columns_.resize(std::size_t(P_)+1);
         owns_Y_=!plan_.borrow_y;
         if(owns_Y_)DDLA_CHECK(ddlaMalloc(h_,reinterpret_cast<void**>(&Y_),plan_.y_count*sizeof(R)));else Y_=reinterpret_cast<R*>(Z_);
-    }catch(...){failure=std::current_exception();}storage_agree(h_,failure);
+    }catch(...){failure=std::current_exception();}detail::agree_failure(h_,failure,"hb2st reuse: preparation");
     hb2st_replay_storage_save_run<T>(h_,plan_,A_,host_work_.data(),host_work_.size());
     // the prefix save_run wrote at the front of the host bytes
     std::copy_n(reinterpret_cast<const int*>(host_work_.data()),columns_.size(),columns_.begin());prepared_=true;
@@ -151,7 +141,7 @@ void Hb2stReplayStorage<T>::replay(const DistributedHistory<T>& history,const st
     std::exception_ptr failure;
     try { if(!prepared_ || restored_) throw std::logic_error("hb2st reuse: replay before prepare or after restore"); }
     catch(...) { failure=std::current_exception(); }
-    storage_agree(h_,failure);
+    detail::agree_failure(h_,failure,"hb2st reuse: preparation");
 #if DDLA_HAS_GPU
     Hb2stReplayGpuWorkspace<T> workspace;
     workspace.main=A_; workspace.main_elements=cells_; workspace.column_offsets=&columns_; workspace.owns_input=owns_Y_;
@@ -166,7 +156,7 @@ template<class T>
 void Hb2stReplayStorage<T>::restore()
 {
     if(!enabled_||restored_)return;std::exception_ptr failure;
-    try{if(!prepared_||Y_)throw std::logic_error("hb2st reuse: restore before input consumption");}catch(...){failure=std::current_exception();}storage_agree(h_,failure);
+    try{if(!prepared_||Y_)throw std::logic_error("hb2st reuse: restore before input consumption");}catch(...){failure=std::current_exception();}detail::agree_failure(h_,failure,"hb2st reuse: preparation");
     hb2st_replay_storage_restore_run<T>(h_,plan_,A_,host_work_.data(),host_work_.size());
     std::vector<char>().swap(host_work_);restored_=true;
 }

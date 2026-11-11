@@ -12,6 +12,7 @@
 // ---------------------------------------------------------------------------
 #include "pgeqrf_kernels.h"
 #include "ddla_stream.h"
+#include "instantiate.h"
 
 #include <algorithm>
 
@@ -163,12 +164,9 @@ void qr_adjoint_T(const DdlaHandle_t& handle, T* out, int ldout, const T* in, in
     template void qr_reverse<T>(const DdlaHandle_t&, int, int, const T*, int, T*, int); \
     template void qr_build_v<T>(const DdlaHandle_t&, bool, int, T*, int, const T*, int, int, int, int,  \
                                 int, int, int, int, int, int);    \
-    template void qr_adjoint_T<T>(const DdlaHandle_t&, T*, int, const T*, int);
+    template void qr_adjoint_T<T>(const DdlaHandle_t&, T*, int, const T*, int)
 
-DDLA_QR_INST_MAP_KERNELS(float)
-DDLA_QR_INST_MAP_KERNELS(double)
-DDLA_QR_INST_MAP_KERNELS(std::complex<float>)
-DDLA_QR_INST_MAP_KERNELS(std::complex<double>)
+DDLA_FOR_EACH_TYPE(DDLA_QR_INST_MAP_KERNELS)
 
 #undef DDLA_QR_INST_MAP_KERNELS
 

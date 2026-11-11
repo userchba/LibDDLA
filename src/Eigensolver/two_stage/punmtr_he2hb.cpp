@@ -30,6 +30,9 @@
 #include "ddla_desc.h"
 #include "plan_util.h"
 #include "punmtr_he2hb_grouped.h"
+#include "instantiate.h"
+#include "require_backend.h"
+#include "check_agree.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -82,10 +85,7 @@ UnmtrHe2hbPlan punmtr_he2hb_check(
     const void* Z,
     const int* descZ)
 {
-    if (!handle)
-        throw std::runtime_error("punmtr_he2hb: null handle");
-    if (ddlaGetBackend(handle) != backend)
-        throw std::runtime_error("punmtr_he2hb: template backend does not match handle backend");
+    detail::require_backend(handle, backend, "punmtr_he2hb");
     if (trans != 'N' && trans != 'T' && trans != 'C')
         throw std::invalid_argument("punmtr_he2hb: invalid trans");
     check_desc(descA, handle);
@@ -180,12 +180,7 @@ void punmtr_he2hb(
     } catch (...) {
         failure = std::current_exception();
     }
-    int bad = failure ? 1 : 0;
-    MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &bad, 1, MPI_INT, MPI_MAX, handle->comm));
-    if (bad) {
-        if (failure) std::rethrow_exception(failure);
-        throw std::runtime_error("punmtr_he2hb: workspace preparation failed on another rank");
-    }
+    detail::agree_failure(handle->comm,failure,"punmtr_he2hb: workspace preparation");
     spectral_impl::punmtr_he2hb_run<Backend, T>(
         handle, p, A, descA, tmat, Z, descZ, info, backend_work.data(), backend_bytes);
 }
@@ -216,22 +211,8 @@ void punmtr_he2hb(
     template void spectral_impl::punmtr_he2hb_workspace_size<TYPE>(                                \
         const DdlaHandle_t&, const spectral_impl::UnmtrHe2hbPlan&, std::size_t*)
 
-INSTANTIATE_PUNMTR_HE2HB(DdlaBackend::CPU, float);
-INSTANTIATE_PUNMTR_HE2HB(DdlaBackend::CPU, double);
-INSTANTIATE_PUNMTR_HE2HB(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PUNMTR_HE2HB(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PUNMTR_HE2HB(DdlaBackend::GPU, float);
-INSTANTIATE_PUNMTR_HE2HB(DdlaBackend::GPU, double);
-INSTANTIATE_PUNMTR_HE2HB(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PUNMTR_HE2HB(DdlaBackend::GPU, std::complex<double>);
-#endif
-
-INSTANTIATE_PUNMTR_HE2HB_SIZE(float);
-INSTANTIATE_PUNMTR_HE2HB_SIZE(double);
-INSTANTIATE_PUNMTR_HE2HB_SIZE(std::complex<float>);
-INSTANTIATE_PUNMTR_HE2HB_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PUNMTR_HE2HB)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PUNMTR_HE2HB_SIZE)
 
 #undef INSTANTIATE_PUNMTR_HE2HB_SIZE
 #undef INSTANTIATE_PUNMTR_HE2HB

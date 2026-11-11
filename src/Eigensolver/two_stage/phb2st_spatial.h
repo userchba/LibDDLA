@@ -9,12 +9,6 @@ int set_phb2st_test_partitions(int groups) {
 }
 }
 namespace {
-template<class Function> void spatial_allocate(MPI_Comm comm,Function&& function) {
-    std::exception_ptr failure;
-    try { function(); } catch(...) { failure=std::current_exception(); }
-    int ok=failure?0:1,all=0; MPI_CHECK(MPI_Allreduce(&ok,&all,1,MPI_INT,MPI_MIN,comm));
-    if(!all) { if(failure) std::rethrow_exception(failure); throw std::runtime_error("phb2st spatial allocation failed on another rank"); }
-}
 // Checked size arithmetic of the ring capacities.
 inline std::size_t chase_size_add(std::size_t a,std::size_t b) {
     if(b>std::numeric_limits<std::size_t>::max()-a) throw std::length_error("phb2st: size overflow");
@@ -39,11 +33,11 @@ struct SpatialGrid {
         else MPI_CHECK(MPI_Comm_split_type(world,MPI_COMM_TYPE_SHARED,rank,MPI_INFO_NULL,&node));
         MPI_CHECK(MPI_Comm_rank(node,&local_rank));MPI_CHECK(MPI_Comm_size(node,&local_size));
         int root=rank; MPI_CHECK(MPI_Bcast(&root,1,MPI_INT,0,node));
-        spatial_allocate(world,[&]{roots.resize(ranks);}); MPI_CHECK(MPI_Allgather(&root,1,MPI_INT,roots.data(),1,MPI_INT,world));
+        detail::agree_local(world,"phb2st spatial allocation",[&]{roots.resize(ranks);}); MPI_CHECK(MPI_Allgather(&root,1,MPI_INT,roots.data(),1,MPI_INT,world));
         std::sort(roots.begin(),roots.end()); roots.erase(std::unique(roots.begin(),roots.end()),roots.end());
         groups=static_cast<int>(roots.size()); group=static_cast<int>(std::lower_bound(roots.begin(),roots.end(),root)-roots.begin());
         MPI_CHECK(MPI_Comm_split(world,local_rank==0?0:MPI_UNDEFINED,rank,&leaders));
-        int c[2]={prow,pcol}; spatial_allocate(world,[&]{coords.resize(static_cast<std::size_t>(2)*ranks);});
+        int c[2]={prow,pcol}; detail::agree_local(world,"phb2st spatial allocation",[&]{coords.resize(static_cast<std::size_t>(2)*ranks);});
         MPI_CHECK(MPI_Allgather(c,2,MPI_INT,coords.data(),2,MPI_INT,world));
     }
     void release() {
@@ -97,7 +91,7 @@ void gather_spatial_band(const DdlaHandle_t& handle,int n,int kd,const T* A,cons
     const int nb=desc[DDLA_NB_],lld=desc[DDLA_LLD_],rsrc=desc[DDLA_RSRC_],csrc=desc[DDLA_CSRC_];
     auto visit=[&](int rowrank,int colrank,int first,int last,auto&& put){spatial_visit(rowrank,colrank,first,last,kd,nb,lld,npr,npc,rsrc,csrc,put);};
     std::size_t count=0;
-    spatial_allocate(grid.world,[&] {
+    detail::agree_local(grid.world,"phb2st spatial allocation",[&] {
         std::fill_n(sc,grid.ranks,0);std::fill_n(rc,grid.ranks,0);
         for(int q=0;q<grid.groups;++q) {
             std::size_t owned=0;
@@ -108,7 +102,7 @@ void gather_spatial_band(const DdlaHandle_t& handle,int n,int kd,const T* A,cons
         std::fill_n(band,std::max<std::size_t>(1,static_cast<std::size_t>(domain.width)*(kd+1)),T(0));
     });
     MPI_CHECK(MPI_Alltoall(sc,1,MPI_INT,rc,1,MPI_INT,grid.world));
-    spatial_allocate(grid.world,[&] {
+    detail::agree_local(grid.world,"phb2st spatial allocation",[&] {
         const int bytes=spatial_displacements(rc,rd,grid.ranks);
         if(static_cast<std::size_t>(bytes)/sizeof(T)>receive_capacity) throw std::logic_error("spatial band receive capacity");
     });
@@ -116,7 +110,7 @@ void gather_spatial_band(const DdlaHandle_t& handle,int n,int kd,const T* A,cons
         for(std::size_t p=0;p<count;++p) send[p]=A[indices[p]];
     } else {
 #if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
-        spatial_allocate(grid.world,[&] {
+        detail::agree_local(grid.world,"phb2st spatial allocation",[&] {
         if(count) {
             DDLA_CHECK(ddlaMemcpy(handle,device_indices,indices,count*sizeof(std::size_t)));
             spatial_extract_kernel<T><<<std::min(1024,static_cast<int>((count+255)/256)),256,0,static_cast<gpuStream_t>(handle->stream)>>>(A,device_indices,count,device_values);
@@ -346,8 +340,7 @@ std::unique_ptr<Phb2stTopology> phb2st_topology_prepare(const DdlaHandle_t& h)
 {
     std::unique_ptr<PreparedSpatialTopology> result;std::exception_ptr error;
     try{result.reset(new PreparedSpatialTopology);}catch(...){error=std::current_exception();}
-    int failed=error?1:0;MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&failed,1,MPI_INT,MPI_MAX,h->comm));
-    if(failed){if(error)std::rethrow_exception(error);throw std::runtime_error("phb2st: topology preparation failed on another rank");}
+    detail::agree_failure(h->comm,error,"phb2st: topology preparation");
     result->prepare(h);return result;
 }
 Phb2stSpatialPlan phb2st_spatial_geometry(const DdlaHandle_t&,const Phb2stBandPlan& b,const Phb2stTopology& topology,
@@ -451,7 +444,7 @@ template<DdlaBackend B,class T>void phb2st_spatial_run(const DdlaHandle_t& h,con
         SpatialRecords<T> records(g,domain,b.n,b.band,hw);
         assert(std::size_t(std::max(hw,tail)-host_base)<=host_bytes);
         std::atomic<long long> emitted{0},consumed{0};std::atomic<int> aborted{0};StreamWindow window;window.ring=p.ring_capacity;window.consumed=&consumed;
-        if(sink){try{spatial_allocate(g.world,[&]{sink->start_stager_run(ring,p.ring_capacity,&emitted,&window,&aborted,1,false);});}
+        if(sink){try{detail::agree_local(g.world,"phb2st spatial allocation",[&]{sink->start_stager_run(ring,p.ring_capacity,&emitted,&window,&aborted,1,false);});}
             catch(...){sink->cancel_run();throw;}}
         struct Publish {const Phb2stSpatialPlan& p;SpatialRecords<T>& record_exchange;detail::DistributedHistory<T>& history;
             hb2st_rot<T>* ring;Hb2stSink<T>* sink;std::atomic<long long>& emitted;std::atomic<long long>& consumed;long long handed=0;};
@@ -467,19 +460,15 @@ template<DdlaBackend B,class T>void phb2st_spatial_run(const DdlaHandle_t& h,con
         try{host_chase<T,true,true,true>(band,b.n,b.band,diagonal,off,ring,phases,phase_count,nullptr,&output,&domain,dc,wc);}
         catch(...){aborted.store(1,std::memory_order_release);if(sink)sink->cancel_run();throw;}
         if(sink){sink->mark_chase_done();std::exception_ptr error;try{sink->drain_stage2_run();}catch(...){error=std::current_exception();}
-            int failed=error?1:0;MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&failed,1,MPI_INT,MPI_MAX,g.world));
-            if(failed){if(error)std::rethrow_exception(error);throw std::runtime_error("phb2st: spatial sink drain failed on another rank");}}
+            detail::agree_failure(g.world,error,"phb2st: spatial sink drain");}
     }else{
         assert(std::size_t(std::max(hw,tail)-host_base)<=host_bytes);
         host_chase<T,false,false,true>(band,b.n,b.band,diagonal,off,ring,phases,phase_count,nullptr,nullptr,&domain,dc,wc);
     }
 }
 #define DDLA_SPATIAL_SIZE(T) template void phb2st_spatial_gather_workspace_size<T>(const Phb2stSpatialPlan&,std::size_t*,std::size_t*); \
- template void phb2st_spatial_workspace_size<T>(const Phb2stSpatialPlan&,std::size_t*,std::size_t*);
-DDLA_SPATIAL_SIZE(float)
-DDLA_SPATIAL_SIZE(double)
-DDLA_SPATIAL_SIZE(std::complex<float>)
-DDLA_SPATIAL_SIZE(std::complex<double>)
+ template void phb2st_spatial_workspace_size<T>(const Phb2stSpatialPlan&,std::size_t*,std::size_t*)
+DDLA_FOR_EACH_TYPE(DDLA_SPATIAL_SIZE)
 #undef DDLA_SPATIAL_SIZE
 #define DDLA_SPATIAL_RUN(B,T,R) template void phb2st_spatial_gather_run<B,T>(const DdlaHandle_t&,const Phb2stSpatialPlan&,const T*,T*,void*,std::size_t,void*,std::size_t); \
  template void phb2st_spatial_run<B,T>(const DdlaHandle_t&,const Phb2stSpatialPlan&,const T*,R*,R*,detail::DistributedHistory<T>&,T*,std::size_t&,Hb2stSink<T>*,void*,std::size_t,void*,std::size_t);

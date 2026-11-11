@@ -74,6 +74,7 @@
 #include "Eigensolver/eig_cpu_kernels.h"
 #include "Eigensolver/eig_params.h"
 #include "hb2st_sink.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <atomic>
@@ -254,6 +255,46 @@ void givens_gen(T f, T g, typename real_type<T>::type& c, T& s, T& r)
         c = ft / tt;
         s = (f / ft) * std::conj(g) / tt;
         r = c * f + s * g;
+    }
+}
+
+// ZLAR2V on one bulge: the two-sided rotation (c, s) of the 2 x 2 diagonal
+// block whose band entries are the diagonals x, y and the subdiagonal z.
+// Every chase driver below applies it in its innermost loop (hence the forced
+// inlining); the inputs are read before any is written.
+template <typename T>
+__attribute__((always_inline)) inline void lar2v_pair(typename real_type<T>::type c, T sv, T& x, T& y, T& z)
+{
+    using rt = typename real_type<T>::type;
+    if constexpr (is_real_v<T>) {
+        const rt xi = x;
+        const rt yi = y;
+        const rt zi = z;
+        const rt t1 = sv * zi;
+        const rt t2 = c * zi;
+        const rt t3 = t2 - sv * xi;
+        const rt t4 = t2 + sv * yi;
+        const rt t5 = c * xi + t1;
+        const rt t6 = c * yi - t1;
+        x = c * t5 + sv * t4;
+        y = c * t6 - sv * t3;
+        z = c * t4 - sv * t5;
+    } else {
+        const rt xi = x.real();
+        const rt yi = y.real();
+        const T zi = z;
+        const rt t1r = sv.real() * zi.real() - sv.imag() * zi.imag();
+        const rt t1i = sv.real() * zi.imag() + sv.imag() * zi.real();
+        const T t2 = c * zi;
+        const T t3 = t2 - std::conj(sv) * xi;
+        const T t4 = std::conj(t2) + sv * yi;
+        const rt t5 = c * xi + t1r;
+        const rt t6 = c * yi - t1r;
+        x = T(c * t5 + (sv.real() * t4.real()
+                        + sv.imag() * t4.imag()), rt(0));
+        y = T(c * t6 - (sv.real() * t3.real()
+                        - sv.imag() * t3.imag()), rt(0));
+        z = c * t3 + std::conj(sv) * T(t6, t1i);
     }
 }
 
@@ -495,38 +536,7 @@ void host_chase(T* band, int n, int kd,
                     {
                         const int colx = idx - 1;
                         const int coly = idx;
-                        const rt c = dc[idx-column_offset];
-                        const T sv = wc[idx-column_offset];
-                        if constexpr (is_real_v<T>) {
-                            const rt xi = B(kd, colx);
-                            const rt yi = B(kd, coly);
-                            const rt zi = B(kd - 1, coly);
-                            const rt t1 = sv * zi;
-                            const rt t2 = c * zi;
-                            const rt t3 = t2 - sv * xi;
-                            const rt t4 = t2 + sv * yi;
-                            const rt t5 = c * xi + t1;
-                            const rt t6 = c * yi - t1;
-                            B(kd, colx) = c * t5 + sv * t4;
-                            B(kd, coly) = c * t6 - sv * t3;
-                            B(kd - 1, coly) = c * t4 - sv * t5;
-                        } else {
-                            const rt xi = B(kd, colx).real();
-                            const rt yi = B(kd, coly).real();
-                            const T zi = B(kd - 1, coly);
-                            const rt t1r = sv.real() * zi.real() - sv.imag() * zi.imag();
-                            const rt t1i = sv.real() * zi.imag() + sv.imag() * zi.real();
-                            const T t2 = c * zi;
-                            const T t3 = t2 - std::conj(sv) * xi;
-                            const T t4 = std::conj(t2) + sv * yi;
-                            const rt t5 = c * xi + t1r;
-                            const rt t6 = c * yi - t1r;
-                            B(kd, colx) = T(c * t5 + (sv.real() * t4.real()
-                                                      + sv.imag() * t4.imag()), rt(0));
-                            B(kd, coly) = T(c * t6 - (sv.real() * t3.real()
-                                                      - sv.imag() * t3.imag()), rt(0));
-                            B(kd - 1, coly) = c * t3 + std::conj(sv) * T(t6, t1i);
-                        }
+                        lar2v_pair<T>(dc[idx-column_offset], wc[idx-column_offset], B(kd, colx), B(kd, coly), B(kd - 1, coly));
                     }
                     // ---- make the sine Hermitian before the left update ----
                     if constexpr (!is_real_v<T>) {
@@ -1043,38 +1053,7 @@ void host_chase_par(T* band, int n, int kd,
                             const int colx = j1 - 2 + t * kd1;
                             const int coly = j1 - 1 + t * kd1;
                             const int idx = j1 - 1 + t * kd1;
-                            const rt c = dc[idx];
-                            const T sv = wc[idx];
-                            if constexpr (is_real_v<T>) {
-                                const rt xi = B(kd, colx);
-                                const rt yi = B(kd, coly);
-                                const rt zi = B(kd - 1, coly);
-                                const rt t1 = sv * zi;
-                                const rt t2 = c * zi;
-                                const rt t3 = t2 - sv * xi;
-                                const rt t4 = t2 + sv * yi;
-                                const rt t5 = c * xi + t1;
-                                const rt t6 = c * yi - t1;
-                                B(kd, colx) = c * t5 + sv * t4;
-                                B(kd, coly) = c * t6 - sv * t3;
-                                B(kd - 1, coly) = c * t4 - sv * t5;
-                            } else {
-                                const rt xi = B(kd, colx).real();
-                                const rt yi = B(kd, coly).real();
-                                const T zi = B(kd - 1, coly);
-                                const rt t1r = sv.real() * zi.real() - sv.imag() * zi.imag();
-                                const rt t1i = sv.real() * zi.imag() + sv.imag() * zi.real();
-                                const T t2 = c * zi;
-                                const T t3 = t2 - std::conj(sv) * xi;
-                                const T t4 = std::conj(t2) + sv * yi;
-                                const rt t5 = c * xi + t1r;
-                                const rt t6 = c * yi - t1r;
-                                B(kd, colx) = T(c * t5 + (sv.real() * t4.real()
-                                                          + sv.imag() * t4.imag()), rt(0));
-                                B(kd, coly) = T(c * t6 - (sv.real() * t3.real()
-                                                          - sv.imag() * t3.imag()), rt(0));
-                                B(kd - 1, coly) = c * t3 + std::conj(sv) * T(t6, t1i);
-                            }
+                            lar2v_pair<T>(dc[idx], wc[idx], B(kd, colx), B(kd, coly), B(kd - 1, coly));
                         }
                         if constexpr (!is_real_v<T>) {
                             for (int t = tlo; t < thi; ++t) {
@@ -1841,38 +1820,7 @@ void host_chase_team(const ChaseTeam<T>& v, int n, int kd, int m)
                 {
                     const int colx = idx - 1;
                     const int coly = idx;
-                    const rt c = dc[idx];
-                    const T sv = wc[idx];
-                    if constexpr (is_real_v<T>) {
-                        const rt xi = B(kd, colx);
-                        const rt yi = B(kd, coly);
-                        const rt zi = B(kd - 1, coly);
-                        const rt t1 = sv * zi;
-                        const rt t2 = c * zi;
-                        const rt t3 = t2 - sv * xi;
-                        const rt t4 = t2 + sv * yi;
-                        const rt t5 = c * xi + t1;
-                        const rt t6 = c * yi - t1;
-                        B(kd, colx) = c * t5 + sv * t4;
-                        B(kd, coly) = c * t6 - sv * t3;
-                        B(kd - 1, coly) = c * t4 - sv * t5;
-                    } else {
-                        const rt xi = B(kd, colx).real();
-                        const rt yi = B(kd, coly).real();
-                        const T zi = B(kd - 1, coly);
-                        const rt t1r = sv.real() * zi.real() - sv.imag() * zi.imag();
-                        const rt t1i = sv.real() * zi.imag() + sv.imag() * zi.real();
-                        const T t2 = c * zi;
-                        const T t3 = t2 - std::conj(sv) * xi;
-                        const T t4 = std::conj(t2) + sv * yi;
-                        const rt t5 = c * xi + t1r;
-                        const rt t6 = c * yi - t1r;
-                        B(kd, colx) = T(c * t5 + (sv.real() * t4.real()
-                                                  + sv.imag() * t4.imag()), rt(0));
-                        B(kd, coly) = T(c * t6 - (sv.real() * t3.real()
-                                                  - sv.imag() * t3.imag()), rt(0));
-                        B(kd - 1, coly) = c * t3 + std::conj(sv) * T(t6, t1i);
-                    }
+                    lar2v_pair<T>(dc[idx], wc[idx], B(kd, colx), B(kd, coly), B(kd - 1, coly));
                 }
                 if constexpr (!is_real_v<T>) {
                     wc[idx] = std::conj(wc[idx]);
@@ -2380,15 +2328,11 @@ template<class T>std::unique_ptr<Phb2stTeamResources<T>> phb2st_team_prepare(con
 {
     std::unique_ptr<PreparedChaseTeam<T>> resource;std::exception_ptr error;
     try{resource.reset(new PreparedChaseTeam<T>(h,p));}catch(...){error=std::current_exception();}
-    int failed=error?1:0;MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&failed,1,MPI_INT,MPI_MAX,h->comm));
-    if(failed){if(error)std::rethrow_exception(error);throw std::runtime_error("phb2st: worker preparation failed on another rank");}
+    detail::agree_failure(h->comm,error,"phb2st: worker preparation");
     resource->prepare();return resource;
 }
-#define DDLA_TEAM_CHASE(T) template std::unique_ptr<Phb2stTeamResources<T>> phb2st_team_prepare<T>(const DdlaHandle_t&,const Phb2stTeamPlan&);
-DDLA_TEAM_CHASE(float)
-DDLA_TEAM_CHASE(double)
-DDLA_TEAM_CHASE(std::complex<float>)
-DDLA_TEAM_CHASE(std::complex<double>)
+#define DDLA_TEAM_CHASE(T) template std::unique_ptr<Phb2stTeamResources<T>> phb2st_team_prepare<T>(const DdlaHandle_t&,const Phb2stTeamPlan&)
+DDLA_FOR_EACH_TYPE(DDLA_TEAM_CHASE)
 #undef DDLA_TEAM_CHASE
 // Scratch is carved in the order phb2st_host_workspace_size counts it.
 template<class T>
@@ -2519,12 +2463,7 @@ void phb2st_band_run(const DdlaHandle_t& h,const Phb2stBandPlan& p,const T* A,T*
     }
 }
 #define DDLA_BAND_RUN(B,T) template void phb2st_band_run<B,T>(const DdlaHandle_t&,const Phb2stBandPlan&,const T*,T*,void*,std::size_t)
-DDLA_BAND_RUN(DdlaBackend::CPU,float);DDLA_BAND_RUN(DdlaBackend::CPU,double);
-DDLA_BAND_RUN(DdlaBackend::CPU,std::complex<float>);DDLA_BAND_RUN(DdlaBackend::CPU,std::complex<double>);
-#if DDLA_HAS_GPU
-DDLA_BAND_RUN(DdlaBackend::GPU,float);DDLA_BAND_RUN(DdlaBackend::GPU,double);
-DDLA_BAND_RUN(DdlaBackend::GPU,std::complex<float>);DDLA_BAND_RUN(DdlaBackend::GPU,std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_BAND_RUN)
 #undef DDLA_BAND_RUN
 } // namespace spectral_impl
 
@@ -2644,7 +2583,7 @@ template<DdlaBackend B,class T>void phb2st_run(const DdlaHandle_t& h,const Phb2s
 #endif
     if(team->available()){
         team->reset_run(band);const auto stream=team->stream();
-        if(sink){try{spatial_allocate(h->comm,[&]{sink->start_stager_run(stream.records,stream.capacity,stream.emitted,
+        if(sink){try{detail::agree_local(h->comm,"phb2st spatial allocation",[&]{sink->start_stager_run(stream.records,stream.capacity,stream.emitted,
             stream.window.ring?&stream.window:nullptr,stream.aborted,stream.chase_threads,p.sink.roles_in_team);});}catch(...){sink->cancel_run();throw;}}
         struct Handoff {const SpatialGrid& topology;const Phb2stTeamStream<T>& producer;detail::DistributedHistory<T>& history;long long handed=0;};
         Handoff handoff{grid,stream,resources.history()};
@@ -2661,7 +2600,7 @@ template<DdlaBackend B,class T>void phb2st_run(const DdlaHandle_t& h,const Phb2s
         hb2st_rot<T>* local_records=p.local.bounded?detail::take<hb2st_rot<T>>(hw,std::size_t(p.local.record_capacity)):nullptr;
         const std::size_t local_bytes=host_bytes-std::size_t(hw-host_base);
         std::atomic<long long> emitted{0},consumed{0};std::atomic<int> aborted{0};StreamWindow window;window.ring=p.local.record_capacity;window.consumed=&consumed;
-        if(sink){try{spatial_allocate(h->comm,[&]{sink->start_stager_run(local_records,p.local.record_capacity,&emitted,&window,&aborted,1,false);});}catch(...){sink->cancel_run();throw;}}
+        if(sink){try{detail::agree_local(h->comm,"phb2st spatial allocation",[&]{sink->start_stager_run(local_records,p.local.record_capacity,&emitted,&window,&aborted,1,false);});}catch(...){sink->cancel_run();throw;}}
         struct Publish {const Phb2stPlan& p;detail::DistributedHistory<T>& history;std::atomic<long long>& emitted;std::atomic<long long>& consumed;
             std::atomic<int>& aborted;long long handed=0;};Publish publish{p,resources.history(),emitted,consumed,aborted};
         auto emit=[](void* pointer,long long end,const hb2st_rot<T>* ring,bool last){auto& c=*static_cast<Publish*>(pointer);
@@ -2672,8 +2611,7 @@ template<DdlaBackend B,class T>void phb2st_run(const DdlaHandle_t& h,const Phb2s
         catch(...){aborted.store(1,std::memory_order_release);if(sink)sink->cancel_run();throw;}
         if(sink)sink->mark_chase_done();
     }
-    if(sink){std::exception_ptr error;try{sink->drain_stage2_run();}catch(...){error=std::current_exception();}int failed=error?1:0;
-        MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&failed,1,MPI_INT,MPI_MAX,h->comm));if(failed){if(error)std::rethrow_exception(error);throw std::runtime_error("phb2st: sink drain failed on another rank");}}
+    if(sink){std::exception_ptr error;try{sink->drain_stage2_run();}catch(...){error=std::current_exception();}detail::agree_failure(h->comm,error,"phb2st: sink drain");}
 }
 #define DDLA_PHB_TYPE(T,R) template Phb2stPlan phb2st_check<T>(const DdlaHandle_t&,DdlaBackend,int,int,const T*,const int*,R*,R*,T*,std::size_t,const Phb2stTopology&,Phb2stOutput,Phb2stSinkPolicy);template Phb2stResources<T>::Phb2stResources(const DdlaHandle_t&,const Phb2stPlan&,detail::DistributedHistory<T>*);
 DDLA_PHB_TYPE(float,float)
@@ -2729,7 +2667,7 @@ void phb2st_node(
         const auto output=keep_stream?spectral_impl::Phb2stOutput::History:spectral_impl::Phb2stOutput::None;
         const auto plan=spectral_impl::phb2st_policy(handle,input,*topology,output);
         std::size_t backend_bytes=0,host_bytes=0;vector<char> backend_work(handle);std::vector<char> host_work;
-        spatial_allocate(handle->comm,[&]{
+        detail::agree_local(handle->comm,"phb2st spatial allocation",[&]{
             spectral_impl::phb2st_workspace_size<T>(plan,&backend_bytes,&host_bytes);
             phases.resize(std::is_same<T,typename real_type<T>::type>::value?0:std::size_t(n-1));
             backend_work.resize(backend_bytes);host_work.resize(host_bytes);
@@ -2752,17 +2690,7 @@ void phb2st_node(
         typename real_type<TYPE>::type*, typename real_type<TYPE>::type*,          \
         detail::DistributedHistory<TYPE>&, std::vector<TYPE>&, bool, int&)
 
-INSTANTIATE_PHB2ST_NODE(DdlaBackend::CPU, float);
-INSTANTIATE_PHB2ST_NODE(DdlaBackend::CPU, double);
-INSTANTIATE_PHB2ST_NODE(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PHB2ST_NODE(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PHB2ST_NODE(DdlaBackend::GPU, float);
-INSTANTIATE_PHB2ST_NODE(DdlaBackend::GPU, double);
-INSTANTIATE_PHB2ST_NODE(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PHB2ST_NODE(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PHB2ST_NODE)
 
 #undef INSTANTIATE_PHB2ST_NODE
 

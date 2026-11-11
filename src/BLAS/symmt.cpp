@@ -2,6 +2,7 @@
 #include <ddla/ddla_vector.h>
 #include "hemmt_impl.h"
 #include "blas_impl.h"
+#include "instantiate.h"
 
 namespace ddla {
 template <DdlaBackend Backend,typename T>
@@ -16,12 +17,6 @@ void symmt(const DdlaHandle_t& h,char side,char uploA,char uploC,int n,
         n,alpha,A,lda,B,ldb,beta,C,ldc,work.data(),bytes,false);
 }
 #define INSTANTIATE(B,T) template void symmt<B,T>(const DdlaHandle_t&,char,char,char,int,const T&,const T*,int,const T*,int,const T&,T*,int)
-#define TYPES(B) \
- INSTANTIATE(B,float); INSTANTIATE(B,double); INSTANTIATE(B,std::complex<float>); INSTANTIATE(B,std::complex<double>)
-TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-TYPES(DdlaBackend::GPU);
-#endif
-#undef TYPES
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE)
 #undef INSTANTIATE
 }

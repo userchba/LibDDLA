@@ -2,6 +2,7 @@
 #include <ddla/ddla_vector.h>
 #include "phemm_impl.h"
 #include "BLAS/blas_impl.h"
+#include "instantiate.h"
 #include <vector>
 namespace ddla {
 template <DdlaBackend Backend,typename T>
@@ -20,13 +21,7 @@ void phemmt(const DdlaHandle_t& h,char side,char uploA,char uploC,int n,
         work.data(),bytes,host.data(),host_bytes,uploC);
 }
 #define INSTANTIATE(B,T) template void phemmt<B,T>(const DdlaHandle_t&,char,char,char,int,const T&,const T*,const int*,const T*,const int*,const T&,T*,const int*)
-#define TYPES(B) \
- INSTANTIATE(B,float); INSTANTIATE(B,double); INSTANTIATE(B,std::complex<float>); INSTANTIATE(B,std::complex<double>)
-TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-TYPES(DdlaBackend::GPU);
-#endif
-#undef TYPES
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE)
 #undef INSTANTIATE
 template <DdlaBackend Backend,typename R>
 void phemmt(const DdlaHandle_t& h,char side,char ua,char uc,int n,

@@ -2,6 +2,7 @@
 #include "helpers.h"
 #include "require_backend.h"
 #include "ddla_stream.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <complex>
@@ -119,10 +120,7 @@ INSTANTIATE(B,float,float); INSTANTIATE(B,double,double); \
 INSTANTIATE(B,std::complex<float>,std::complex<float>); \
 INSTANTIATE(B,std::complex<double>,std::complex<double>); \
 INSTANTIATE(B,std::complex<float>,float); INSTANTIATE(B,std::complex<double>,double)
-TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-TYPES(DdlaBackend::GPU);
-#endif
+DDLA_FOR_EACH_BACKEND(TYPES)
 #undef TYPES
 #undef INSTANTIATE
 } // namespace ddla

@@ -9,6 +9,8 @@
 
 #include "ddla_connector.h"
 #include "ddla_stream.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 // CPU BLAS Level-1 SCAL bindings (Fortran ABI), declared by hand rather than
 // via a vendor header -- same convention as gemm.cpp's sgemm_/dgemm_/cgemm_/
@@ -88,28 +90,12 @@ inline gpublasStatus_t gpublasScal(gpublasHandle_t handle, int64_t n, const std:
 } // anonymous namespace
 #endif // DDLA_HAS_GPU
 
-inline const char* scal_backend_name(DdlaBackend backend)
-{
-    return backend == DdlaBackend::CPU ? "CPU" : "GPU";
-}
-
 namespace blas_impl {
 
 template <DdlaBackend Backend, typename T>
 void scal_check(const DdlaHandle_t& handle, int n, const T& alpha, T* x, int incx)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU scal is not available in this LibDDLA build");
-
-    if (handle == nullptr) {
-        throw std::runtime_error("scal: null handle");
-    }
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("scal: template backend ") + scal_backend_name(Backend) +
-            " does not match handle backend " + scal_backend_name(actual));
-    }
+    detail::require_backend<Backend>(handle, "scal");
     if (n <= 0) return;
 
 }
@@ -199,55 +185,27 @@ scal(const DdlaHandle_t& h,int m,int n,const Alpha& alpha,T* a,int lda)
 #define MATRIX_RUN_TYPES(B) MATRIX_RUN(B,float);MATRIX_RUN(B,double); \
  MATRIX_RUN(B,std::complex<float>);MATRIX_RUN(B,std::complex<double>); \
  MIXED_SCAL(B,float);MIXED_SCAL(B,double)
-MATRIX_RUN_TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-MATRIX_RUN_TYPES(DdlaBackend::GPU);
-#endif
+DDLA_FOR_EACH_BACKEND(MATRIX_RUN_TYPES)
 #undef MATRIX_RUN_TYPES
 #undef MATRIX_RUN
 #undef MIXED_SCAL
 
 #define MATRIX_SCAL(B,T) template void scal<B,T>(const DdlaHandle_t&,int,int,const T&,T*,int)
-#define MATRIX_TYPES(B) MATRIX_SCAL(B,float); MATRIX_SCAL(B,double); \
-    MATRIX_SCAL(B,std::complex<float>); MATRIX_SCAL(B,std::complex<double>)
-MATRIX_TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-MATRIX_TYPES(DdlaBackend::GPU);
-#endif
-#undef MATRIX_TYPES
+DDLA_FOR_EACH_BACKEND_TYPE(MATRIX_SCAL)
 #undef MATRIX_SCAL
 
 #define INSTANTIATE_SCAL(BACKEND, TYPE)                                      \
     template void scal<BACKEND, TYPE>(                                       \
         const DdlaHandle_t&, int, const TYPE&, TYPE*, int)
 
-INSTANTIATE_SCAL(DdlaBackend::CPU, float);
-INSTANTIATE_SCAL(DdlaBackend::CPU, double);
-INSTANTIATE_SCAL(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_SCAL(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_SCAL(DdlaBackend::GPU, float);
-INSTANTIATE_SCAL(DdlaBackend::GPU, double);
-INSTANTIATE_SCAL(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_SCAL(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_SCAL)
 
 #undef INSTANTIATE_SCAL
 
 
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::scal_check<BACKEND, TYPE>(const DdlaHandle_t& handle, int n, const TYPE& alpha, TYPE* x, int incx); \
-    template void blas_impl::scal_run<BACKEND, TYPE>(const DdlaHandle_t& handle, int n, const TYPE& alpha, TYPE* x, int incx);
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#if DDLA_HAS_GPU
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
-#endif
+    template void blas_impl::scal_run<BACKEND, TYPE>(const DdlaHandle_t& handle, int n, const TYPE& alpha, TYPE* x, int incx)
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_INSTANTIATE_PHASES)
 #undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

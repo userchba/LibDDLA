@@ -22,6 +22,8 @@
 #include "blas_enums.h"
 #include "ddla_connector.h"
 #include "ddla_stream.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 extern "C" {
 // Real: xHEMV has no real-scalar BLAS counterpart, so the real types use xSYMV.
@@ -136,20 +138,7 @@ void hemv_check(
     const T& beta,
     T* y, int incy)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU hemv is not available in this LibDDLA build");
-
-    if (handle == nullptr) {
-        throw std::runtime_error("hemv: null handle");
-    }
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("hemv: template backend ") +
-            (Backend == DdlaBackend::CPU ? "CPU" : "GPU") +
-            " does not match handle backend " +
-            (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
-    }
+    detail::require_backend<Backend>(handle, "hemv");
 
     if constexpr (Backend == DdlaBackend::GPU) {
         (void)detail::to_fill_mode(uplo);
@@ -228,33 +217,14 @@ void hemv(
         const TYPE&, const TYPE*, int, const TYPE*, int,                       \
         const TYPE&, TYPE*, int)
 
-INSTANTIATE_HEMV(DdlaBackend::CPU, float);
-INSTANTIATE_HEMV(DdlaBackend::CPU, double);
-INSTANTIATE_HEMV(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_HEMV(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_HEMV(DdlaBackend::GPU, float);
-INSTANTIATE_HEMV(DdlaBackend::GPU, double);
-INSTANTIATE_HEMV(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_HEMV(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_HEMV)
 
 #undef INSTANTIATE_HEMV
 
 
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::hemv_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE* x, int incx, const TYPE& beta, TYPE* y, int incy); \
-    template void blas_impl::hemv_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE* x, int incx, const TYPE& beta, TYPE* y, int incy);
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#if DDLA_HAS_GPU
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
-#endif
+    template void blas_impl::hemv_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char uplo, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE* x, int incx, const TYPE& beta, TYPE* y, int incy)
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_INSTANTIATE_PHASES)
 #undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

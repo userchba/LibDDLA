@@ -6,6 +6,7 @@
 #include "row_swap.h"
 #include "matrix_transfer.h"
 #include "plan_util.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <cassert>
@@ -204,18 +205,10 @@ void panel_gather(const DdlaHandle_t& h, int m, int n, int width, T* A, int ia, 
 
 #define INST(B,T) template void panel_gather<B,T>(const DdlaHandle_t&, int, int, int, T*, int, int, const int*, \
     int*, int&, int, void*, std::size_t, void*, std::size_t)
-#define INST_TYPES(B) INST(B,float); INST(B,double); INST(B,std::complex<float>); INST(B,std::complex<double>)
-INST_TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-INST_TYPES(DdlaBackend::GPU);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INST)
 #define INST_SIZE(T) template void gather_workspace_size<T>(const DdlaHandle_t&, int, int, int, T*, int, int, \
     const int*, int, std::size_t*, std::size_t*)
-INST_SIZE(float);
-INST_SIZE(double);
-INST_SIZE(std::complex<float>);
-INST_SIZE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INST_SIZE)
 #undef INST_SIZE
-#undef INST_TYPES
 #undef INST
 } // namespace ddla::lu_impl

@@ -7,6 +7,7 @@
 #include "plan_util.h"
 #include "Eigensolver/pvector_redist.h"
 #include "helpers.h"
+#include "instantiate.h"
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -27,22 +28,6 @@ namespace detail {
 namespace {
 template <class T> auto re(T x) {
     return std::real(x);
-}
-
-template <class F> void agree(const DdlaHandle_t& h, F&& f) {
-    std::exception_ptr error;
-    try {
-        f();
-    } catch (...) {
-        error = std::current_exception();
-    }
-    int failed = error ? 1 : 0;
-    MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &failed, 1, MPI_INT, MPI_MAX, ddlaGetCommunicator(h)));
-    if (failed) {
-        if (error)
-            std::rethrow_exception(error);
-        throw std::runtime_error("one-stage eigensolver failed on another rank");
-    }
 }
 
 #if DDLA_GPU_VENDOR
@@ -444,7 +429,7 @@ void factor_one(const DdlaHandle_t& h, int j, T* a, bool lower, int nb, int ld, 
 #if DDLA_GPU_VENDOR && defined(DDLA_USE_CCL) && !defined(DDLA_USE_GPU_CPU_TUNNEL)
     if constexpr (B == DdlaBackend::GPU) {
         using D = DeviceScalarT<T>;
-        agree(h, [&] {
+        detail::agree_local(h,"one-stage eigensolver", [&] {
             if (mc == owner) {
                 const T* column = nr ? a + triangle_offset(lower, ld, 0, localj) : nullptr;
                 scaled_pack_kernel<D, R><<<1, 256, 0, static_cast<gpuStream_t>(h->stream)>>>(
@@ -453,7 +438,7 @@ void factor_one(const DdlaHandle_t& h, int j, T* a, bool lower, int nb, int ld, 
                 DDLA_CHECK(ddlaGetLastError(h));
             }
         });
-        agree(h, [&] {
+        detail::agree_local(h,"one-stage eigensolver", [&] {
             if (mc == owner) {
                 const R* packets = norm_work;
                 if (pr > 1) {
@@ -476,7 +461,7 @@ void factor_one(const DdlaHandle_t& h, int j, T* a, bool lower, int nb, int ld, 
     }
 #endif
     R packet[3] = {0, 0, 0};
-    agree(h, [&] {
+    detail::agree_local(h,"one-stage eigensolver", [&] {
         // The row broadcast writes every live entry on nonowners. Neither
         // MPI nor the host-staged path consumes their receive buffer first.
         if (mc != owner)
@@ -547,7 +532,7 @@ void factor_one(const DdlaHandle_t& h, int j, T* a, bool lower, int nb, int ld, 
         for (int q = 0; q < rescales; ++q)
             beta *= safmin;
     }
-    agree(h, [&] {
+    detail::agree_local(h,"one-stage eigensolver", [&] {
         if (!std::isfinite(std::abs(t)) || !std::isfinite(beta))
             throw std::runtime_error("one-stage Householder is not finite");
         T* column = mc == owner && nr ? a + triangle_offset(lower, ld, 0, localj) : nullptr;
@@ -809,7 +794,7 @@ void reduce(const DdlaHandle_t& h, char uplo, int n, T* a, const int* desc, T* t
     R* gathered = take<R>(hw, std::size_t(3) * pr);
     assert(static_cast<std::size_t>(hw - static_cast<char*>(host_work)) <= host_bytes);
     (void)host_bytes;
-    agree(h, [&] {
+    detail::agree_local(h,"one-stage eigensolver", [&] {
         resources.begin_reduction();
         if (invalid)
             DDLA_CHECK(ddlaMemset(h, invalid, 0, sizeof(int)));
@@ -953,7 +938,7 @@ void reduce(const DdlaHandle_t& h, char uplo, int n, T* a, const int* desc, T* t
 #endif
     }
     int failed = 0;
-    agree(h, [&] {
+    detail::agree_local(h,"one-stage eigensolver", [&] {
         DDLA_CHECK(ddlaMemcpy(h, de, packed, static_cast<std::size_t>(2) * n * sizeof(R)));
         if (invalid)
             DDLA_CHECK(ddlaMemcpy(h, &failed, invalid, sizeof(int)));
@@ -1063,7 +1048,7 @@ template<DdlaBackend B,class T>void phetrd_run(const DdlaHandle_t& h,const Hetrd
         if(p.stored_only)detail::reduce<true,B,T>(h,p.uplo,p.n,A,p.a.data(),tau,de,resources,work,bytes,host,host_bytes);
         else detail::reduce<false,B,T>(h,p.uplo,p.n,A,p.a.data(),tau,de,resources,work,bytes,host,host_bytes);
 #if defined(DDLA_GPUBLAS_HAS_HEURISTICS_CACHE) && DDLA_GPUBLAS_HAS_HEURISTICS_CACHE
-        if constexpr(B==DdlaBackend::GPU)detail::agree(h,[&]{resources.end_reduction();});
+        if constexpr(B==DdlaBackend::GPU)detail::agree_local(h,"one-stage eigensolver",[&]{resources.end_reduction();});
 #endif
     } catch(...) {
         if constexpr(B==DdlaBackend::GPU){try{(void)ddlaSynchronize(h);}catch(...){}}
@@ -1090,17 +1075,11 @@ template<DdlaBackend B,class T>void phetrd(const DdlaHandle_t& h,char uplo,int n
 #define DDLA_HETRD(B,T) \
  template void phetrd<B,T>(const DdlaHandle_t&,char,int,T*,const int*,typename real_type<T>::type*,typename real_type<T>::type*,T*,int&); \
  template void spectral_impl::phetrd_run<B,T>(const DdlaHandle_t&,const spectral_impl::HetrdPlan&,spectral_impl::HetrdResources&,T*,T*,typename real_type<T>::type*,int&,void*,std::size_t,void*,std::size_t)
-#define DDLA_HETRD_TYPES(B) \
- DDLA_HETRD(B,float);DDLA_HETRD(B,double);DDLA_HETRD(B,std::complex<float>);DDLA_HETRD(B,std::complex<double>)
-DDLA_HETRD_TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-DDLA_HETRD_TYPES(DdlaBackend::GPU);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_HETRD)
 #define DDLA_HETRD_PLAN(T) \
  template spectral_impl::HetrdPlan spectral_impl::phetrd_check<T>(const DdlaHandle_t&,DdlaBackend,char,int,const T*,const int*,const typename real_type<T>::type*,const typename real_type<T>::type*,const T*); \
  template void spectral_impl::phetrd_workspace_size<T>(const DdlaHandle_t&,const spectral_impl::HetrdPlan&,std::size_t*,std::size_t*)
-DDLA_HETRD_PLAN(float);DDLA_HETRD_PLAN(double);DDLA_HETRD_PLAN(std::complex<float>);DDLA_HETRD_PLAN(std::complex<double>);
+DDLA_FOR_EACH_TYPE(DDLA_HETRD_PLAN)
 #undef DDLA_HETRD_PLAN
-#undef DDLA_HETRD_TYPES
 #undef DDLA_HETRD
 } // namespace ddla

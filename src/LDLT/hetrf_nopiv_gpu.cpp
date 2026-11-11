@@ -2,6 +2,7 @@
 #include "BLAS/hemmt_impl.h"
 #include "hetrf_native.h"
 #include "ldlt_impl.h"
+#include "instantiate.h"
 #include <algorithm>
 
 namespace ddla::ldlt_impl
@@ -122,10 +123,7 @@ void hetrf_nopiv_gpu(const DdlaHandle_t& h, char u, int n, T* a, int lda, int& i
     }
     DDLA_CHECK(ddlaSynchronize(h));
 }
-#define INSTANCE(T) template void hetrf_nopiv_gpu<T>(const DdlaHandle_t&, char, int, T*, int, int&);
-INSTANCE(float)
-INSTANCE(double)
-INSTANCE(std::complex<float>)
-INSTANCE(std::complex<double>)
+#define INSTANCE(T) template void hetrf_nopiv_gpu<T>(const DdlaHandle_t&, char, int, T*, int, int&)
+DDLA_FOR_EACH_TYPE(INSTANCE)
 #undef INSTANCE
 } // namespace ddla::ldlt_impl

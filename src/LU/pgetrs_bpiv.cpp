@@ -14,6 +14,7 @@
 #include "lu_panel.h"
 #include "pgetrs_impl.h"
 #include "PBLAS/ptrtrs_impl.h"
+#include "instantiate.h"
 
 namespace ddla {
 
@@ -145,42 +146,19 @@ void pgetrs_bpiv_run(const DdlaHandle_t& handle, char side, char trans, int n, i
             }
         };
 
-        if(side == 'L'){
-            if(trans == 'N'){
-                // A = Q^T * L * U => X = U^-1 * L^-1 * (Q * B)
-                apply_pivots(/*columns=*/false, /*forward=*/true);
-                ptrtrs_impl::ptrtrs_run<Backend, T>(handle, 'L', 'L', 'N', 'U', b_rows, b_cols, A, array_descA, B, array_descB,
-                                                    backend_work, backend_bytes, hw, host_bytes - host_used);
-                ptrtrs_impl::ptrtrs_run<Backend, T>(handle, 'L', 'U', 'N', 'N', b_rows, b_cols, A, array_descA, B, array_descB,
-                                                    backend_work, backend_bytes, hw, host_bytes - host_used);
-            }else{
-                // op(A)^T = U^T * L^T * Q => X = Q^T * L^-T * U^-T * B
-                ptrtrs_impl::ptrtrs_run<Backend, T>(handle, 'L', 'U', trans, 'N', b_rows, b_cols, A, array_descA, B, array_descB,
-                                                    backend_work, backend_bytes, hw, host_bytes - host_used);
-                ptrtrs_impl::ptrtrs_run<Backend, T>(handle, 'L', 'L', trans, 'U', b_rows, b_cols, A, array_descA, B, array_descB,
-                                                    backend_work, backend_bytes, hw, host_bytes - host_used);
-                apply_pivots(/*columns=*/false, /*forward=*/false);
-            }
-        }else{
-            if(trans == 'N'){
-                // X * P * L * U = B => X = B * U^-1 * L^-1 * P^T
-                ptrtrs_impl::ptrtrs_run<Backend, T>(handle, 'R', 'U', 'N', 'N', b_rows, b_cols, A, array_descA, B, array_descB,
-                                                    backend_work, backend_bytes, hw, host_bytes - host_used);
-                ptrtrs_impl::ptrtrs_run<Backend, T>(handle, 'R', 'L', 'N', 'U', b_rows, b_cols, A, array_descA, B, array_descB,
-                                                    backend_work, backend_bytes, hw, host_bytes - host_used);
-                // Columns compose opposite to rows: column swaps applied in the
-                // laswp order right-multiply to Z*P, not Z*P^T; apply backward.
-                apply_pivots(/*columns=*/true, /*forward=*/false);
-            }else{
-                // X * U^T * L^T * P^T = B => X = B * P * L^-T * U^-T
-                // Column swaps in the laswp order give B*P; apply forward.
-                apply_pivots(/*columns=*/true, /*forward=*/true);
-                ptrtrs_impl::ptrtrs_run<Backend, T>(handle, 'R', 'L', trans, 'U', b_rows, b_cols, A, array_descA, B, array_descB,
-                                                    backend_work, backend_bytes, hw, host_bytes - host_used);
-                ptrtrs_impl::ptrtrs_run<Backend, T>(handle, 'R', 'U', trans, 'N', b_rows, b_cols, A, array_descA, B, array_descB,
-                                                    backend_work, backend_bytes, hw, host_bytes - host_used);
-            }
-        }
+        // The triangular solves are pgetrs_nopiv's; the permutation goes before them where it multiplies B first
+        // and after them otherwise (A = P*L*U):
+        //   side 'L', trans 'N':  X = U^-1 * L^-1 * (P^T * B)     rows, forward, before
+        //   side 'L', trans T/C:  X = P * L^-T * U^-T * B         rows, backward, after
+        //   side 'R', trans 'N':  X = B * U^-1 * L^-1 * P^T       columns, backward, after
+        //   side 'R', trans T/C:  X = (B * P) * L^-T * U^-T       columns, forward, before
+        // Columns compose opposite to rows: column swaps in the laswp order right-multiply by P, not P^T.
+        const bool columns = side != 'L';
+        const bool before = (side == 'L') == (trans == 'N');
+        if (before) apply_pivots(columns, /*forward=*/true);
+        pgetrs_nopiv_run<Backend, T>(handle, side, trans, n, nrhs, A, array_descA, B, array_descB,
+                                     backend_work, backend_bytes, hw, host_bytes - host_used);
+        if (!before) apply_pivots(columns, /*forward=*/false);
     } catch (...) {
         // Retire queued host reads before the caller reuses or releases scratch.
         if (ddlaGetBackend(handle) == DdlaBackend::GPU)
@@ -260,24 +238,9 @@ void pgetrs_bpiv(
     const int*)
 
 
-INSTANTIATE_PGETRS_BPIV_CHECK(DdlaBackend::CPU);
-INSTANTIATE_PGETRS_BPIV(DdlaBackend::CPU, float);
-INSTANTIATE_PGETRS_BPIV(DdlaBackend::CPU, double);
-INSTANTIATE_PGETRS_BPIV(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PGETRS_BPIV(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PGETRS_BPIV_CHECK(DdlaBackend::GPU);
-INSTANTIATE_PGETRS_BPIV(DdlaBackend::GPU, float);
-INSTANTIATE_PGETRS_BPIV(DdlaBackend::GPU, double);
-INSTANTIATE_PGETRS_BPIV(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PGETRS_BPIV(DdlaBackend::GPU, std::complex<double>);
-#endif
-
-INSTANTIATE_PGETRS_BPIV_SIZE(float);
-INSTANTIATE_PGETRS_BPIV_SIZE(double);
-INSTANTIATE_PGETRS_BPIV_SIZE(std::complex<float>);
-INSTANTIATE_PGETRS_BPIV_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_PGETRS_BPIV_CHECK)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PGETRS_BPIV)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PGETRS_BPIV_SIZE)
 
 #undef INSTANTIATE_PGETRS_BPIV_SIZE
 #undef INSTANTIATE_PGETRS_BPIV_CHECK

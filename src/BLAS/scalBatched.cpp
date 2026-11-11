@@ -2,6 +2,7 @@
 #include "ddla_stream.h"
 #include "host_threads.h"
 #include "require_backend.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <complex>
@@ -72,12 +73,6 @@ MIXED_BATCH(DdlaBackend::GPU,float);MIXED_BATCH(DdlaBackend::GPU,double);
 #define INSTANTIATE(B,T) \
     template void scalBatched<B,T>(const DdlaHandle_t&,int,int,const T&,T* const*,int,int); \
     template void blas_impl::scalBatched_run<B,T>(const DdlaHandle_t&,int,int,const T&,T* const*,int,int)
-#define TYPES(B) INSTANTIATE(B,float); INSTANTIATE(B,double); \
-    INSTANTIATE(B,std::complex<float>); INSTANTIATE(B,std::complex<double>)
-TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-TYPES(DdlaBackend::GPU);
-#endif
-#undef TYPES
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE)
 #undef INSTANTIATE
 }

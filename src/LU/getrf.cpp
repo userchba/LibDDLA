@@ -21,6 +21,8 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 #include "lapack_impl.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 // Host LAPACK ?getrf (Fortran ABI; the CPU BLAS library must provide LAPACK -- OpenBLAS and MKL do).
 extern "C" {
@@ -33,11 +35,6 @@ void zgetrf_(const int*, const int*, std::complex<double>*, const int*, int*, in
 namespace ddla {
 
 namespace {
-
-inline const char* getrf_backend_name(DdlaBackend backend)
-{
-    return backend == DdlaBackend::CPU ? "CPU" : "GPU";
-}
 
 inline void cpu_getrf(int m, int n, float* A, int lda, int* ipiv, int* info)
 {
@@ -131,18 +128,7 @@ template <DdlaBackend Backend>
 void getrf_check(const DdlaHandle_t& handle, int m, int n, const void* A, int lda,
                  const int* ipiv, const int* info)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU getrf is not available in this LibDDLA build");
-
-    if (handle == nullptr) {
-        throw std::runtime_error("getrf: null handle");
-    }
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("getrf: template backend ") + getrf_backend_name(Backend) +
-            " does not match handle backend " + getrf_backend_name(actual));
-    }
+    detail::require_backend<Backend>(handle, "getrf");
     if (m < 0 || n < 0) throw std::runtime_error("getrf: negative matrix size");
     if (info == nullptr) throw std::runtime_error("getrf: null info");
 
@@ -232,10 +218,7 @@ INSTANTIATE_GETRF(DdlaBackend::GPU, std::complex<float>);
 INSTANTIATE_GETRF(DdlaBackend::GPU, std::complex<double>);
 #endif
 
-INSTANTIATE_GETRF_SIZE(float);
-INSTANTIATE_GETRF_SIZE(double);
-INSTANTIATE_GETRF_SIZE(std::complex<float>);
-INSTANTIATE_GETRF_SIZE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INSTANTIATE_GETRF_SIZE)
 
 #undef INSTANTIATE_GETRF_SIZE
 #undef INSTANTIATE_GETRF

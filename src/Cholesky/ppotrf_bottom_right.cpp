@@ -18,6 +18,7 @@
 #include "plan_util.h"
 #include "require_backend.h"
 #include "comm_traits.h"
+#include "instantiate.h"
 
 namespace ddla{
 
@@ -364,17 +365,7 @@ void ppotrf_bottom_right(
 #define INSTANTIATE_PPOTRF_BOTTOM_RIGHT(BACKEND, TYPE)                                   \
     template void ppotrf_bottom_right<BACKEND, TYPE>(const DdlaHandle_t&, char, int, TYPE*, const int*, int&)
 
-INSTANTIATE_PPOTRF_BOTTOM_RIGHT(DdlaBackend::CPU, float);
-INSTANTIATE_PPOTRF_BOTTOM_RIGHT(DdlaBackend::CPU, double);
-INSTANTIATE_PPOTRF_BOTTOM_RIGHT(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PPOTRF_BOTTOM_RIGHT(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PPOTRF_BOTTOM_RIGHT(DdlaBackend::GPU, float);
-INSTANTIATE_PPOTRF_BOTTOM_RIGHT(DdlaBackend::GPU, double);
-INSTANTIATE_PPOTRF_BOTTOM_RIGHT(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PPOTRF_BOTTOM_RIGHT(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PPOTRF_BOTTOM_RIGHT)
 
 #undef INSTANTIATE_PPOTRF_BOTTOM_RIGHT
 

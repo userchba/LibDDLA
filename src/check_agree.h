@@ -126,6 +126,42 @@ auto agree_check(const DdlaHandle_t& h, const char* name, Fn&& fn)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Collective failure agreement for the steps after the check.
+//
+// Sizing the scratch, an allocation or starting a worker team can still fail
+// on one rank only.  agree_local runs such a rank-local step and reduces its
+// outcome, so every rank leaves together instead of waiting in a later
+// collective: the failing rank rethrows its own exception, the others throw
+// std::runtime_error("<what> failed on another rank").  agree_failure is the
+// reduction alone, for a caller that caught the exception itself.
+// ---------------------------------------------------------------------------
+inline void agree_failure(MPI_Comm comm, const std::exception_ptr& failure, const char* what)
+{
+    int failed = failure ? 1 : 0;
+    MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &failed, 1, MPI_INT, MPI_MAX, comm));
+    if (failed) {
+        if (failure) std::rethrow_exception(failure);
+        throw std::runtime_error(std::string(what) + " failed on another rank");
+    }
+}
+inline void agree_failure(const DdlaHandle_t& h, const std::exception_ptr& failure, const char* what)
+{
+    agree_failure(ddlaGetCommunicator(h), failure, what);
+}
+
+template <typename Comm, typename Fn>
+void agree_local(const Comm& comm_or_handle, const char* what, Fn&& fn)
+{
+    std::exception_ptr failure;
+    try {
+        fn();
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    agree_failure(comm_or_handle, failure, what);
+}
+
 } // namespace detail
 } // namespace ddla
 

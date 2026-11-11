@@ -8,6 +8,8 @@
 
 #include "ddla_connector.h"
 #include "ddla_stream.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 extern "C" {
 void saxpy_(const int*, const float*, const float*, const int*, float*, const int*);
@@ -21,11 +23,6 @@ void zaxpy_(const int*, const std::complex<double>*, const std::complex<double>*
 namespace ddla {
 
 namespace {
-
-inline const char* axpy_backend_name(DdlaBackend backend)
-{
-    return backend == DdlaBackend::CPU ? "CPU" : "GPU";
-}
 
 inline void cpu_axpy(int n, const float& alpha, const float* x, int incx,
                      float* y, int incy)
@@ -101,18 +98,7 @@ template <DdlaBackend Backend, typename T>
 void axpy_check(const DdlaHandle_t& handle, int n, const T& alpha,
           const T* x, int incx, T* y, int incy)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU axpy is not available in this LibDDLA build");
-
-    if (handle == nullptr) {
-        throw std::runtime_error("axpy: null handle");
-    }
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("axpy: template backend ") + axpy_backend_name(Backend) +
-            " does not match handle backend " + axpy_backend_name(actual));
-    }
+    detail::require_backend<Backend>(handle, "axpy");
     if (n <= 0) return;
 
 }
@@ -146,33 +132,14 @@ void axpy(const DdlaHandle_t& handle, int n, const T& alpha,
     template void axpy<BACKEND, TYPE>(                                       \
         const DdlaHandle_t&, int, const TYPE&, const TYPE*, int, TYPE*, int)
 
-INSTANTIATE_AXPY(DdlaBackend::CPU, float);
-INSTANTIATE_AXPY(DdlaBackend::CPU, double);
-INSTANTIATE_AXPY(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_AXPY(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_AXPY(DdlaBackend::GPU, float);
-INSTANTIATE_AXPY(DdlaBackend::GPU, double);
-INSTANTIATE_AXPY(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_AXPY(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_AXPY)
 
 #undef INSTANTIATE_AXPY
 
 
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::axpy_check<BACKEND, TYPE>(const DdlaHandle_t& handle, int n, const TYPE& alpha, const TYPE* x, int incx, TYPE* y, int incy); \
-    template void blas_impl::axpy_run<BACKEND, TYPE>(const DdlaHandle_t& handle, int n, const TYPE& alpha, const TYPE* x, int incx, TYPE* y, int incy);
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#if DDLA_HAS_GPU
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
-#endif
+    template void blas_impl::axpy_run<BACKEND, TYPE>(const DdlaHandle_t& handle, int n, const TYPE& alpha, const TYPE* x, int incx, TYPE* y, int incy)
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_INSTANTIATE_PHASES)
 #undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

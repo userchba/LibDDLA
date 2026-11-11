@@ -5,6 +5,7 @@
 #include "helpers.h"
 #include "require_backend.h"
 #include "check_agree.h"
+#include "instantiate.h"
 #include <complex>
 #include <stdexcept>
 #include <type_traits>
@@ -136,13 +137,8 @@ void pdam(const DdlaHandle_t& handle, const T1& alpha, T2* A, const int* array_d
     INSTANTIATE_PDAM(BACKEND, double, std::complex<double>);                 \
     INSTANTIATE_PDAM(BACKEND, std::complex<double>, std::complex<double>)
 
-INSTANTIATE_PDAM_CHECK(DdlaBackend::CPU);
-INSTANTIATE_PDAM_ALL(DdlaBackend::CPU);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PDAM_CHECK(DdlaBackend::GPU);
-INSTANTIATE_PDAM_ALL(DdlaBackend::GPU);
-#endif
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_PDAM_CHECK)
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_PDAM_ALL)
 
 #undef INSTANTIATE_PDAM_CHECK
 #undef INSTANTIATE_PDAM_ALL

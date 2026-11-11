@@ -32,6 +32,8 @@
 #include "blas_enums.h"
 #include "ddla_connector.h"
 #include "ddla_stream.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 // ---------------------------------------------------------------------------
 // GPU arm: the vendor calls.  Kept as free gpublasGeam overloads so the
@@ -229,11 +231,6 @@ void cpu_geam(bool ta, bool ca, bool tb, bool cb, T alpha, const T* A, std::size
 
 namespace {
 
-inline const char* geam_backend_name(DdlaBackend backend)
-{
-    return backend == DdlaBackend::CPU ? "CPU" : "GPU";
-}
-
 // 'N'/'T'/'C' in either case; anything else is a caller bug, not a silent default.
 inline char geam_op(char trans)
 {
@@ -256,18 +253,7 @@ void geam_check(const DdlaHandle_t& handle, char transa, char transb, int m, int
           const T& beta, const T* B, int ldb,
           T* C, int ldc)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU geam is not available in this LibDDLA build");
-
-    if (handle == nullptr) {
-        throw std::runtime_error("geam: null handle");
-    }
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("geam: template backend ") + geam_backend_name(Backend) +
-            " does not match handle backend " + geam_backend_name(actual));
-    }
+    detail::require_backend<Backend>(handle, "geam");
     const char ta = geam_op(transa);
     const char tb = geam_op(transb);
     if (m <= 0 || n <= 0) return;
@@ -328,33 +314,14 @@ void geam(const DdlaHandle_t& handle, char transa, char transb, int m, int n,
         const DdlaHandle_t&, char, char, int, int,                             \
         const TYPE&, const TYPE*, int, const TYPE&, const TYPE*, int, TYPE*, int)
 
-INSTANTIATE_GEAM(DdlaBackend::CPU, float);
-INSTANTIATE_GEAM(DdlaBackend::CPU, double);
-INSTANTIATE_GEAM(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_GEAM(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_GEAM(DdlaBackend::GPU, float);
-INSTANTIATE_GEAM(DdlaBackend::GPU, double);
-INSTANTIATE_GEAM(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_GEAM(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_GEAM)
 
 #undef INSTANTIATE_GEAM
 
 
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::geam_check<BACKEND, TYPE>(const DdlaHandle_t& handle, char transa, char transb, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE& beta, const TYPE* B, int ldb, TYPE* C, int ldc); \
-    template void blas_impl::geam_run<BACKEND, TYPE>(const DdlaHandle_t& handle, char transa, char transb, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE& beta, const TYPE* B, int ldb, TYPE* C, int ldc);
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#if DDLA_HAS_GPU
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
-#endif
+    template void blas_impl::geam_run<BACKEND, TYPE>(const DdlaHandle_t& handle, char transa, char transb, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE& beta, const TYPE* B, int ldb, TYPE* C, int ldc)
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_INSTANTIATE_PHASES)
 #undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

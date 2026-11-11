@@ -23,6 +23,8 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 #include "lapack_impl.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 // Host LAPACK ?potrf (Fortran ABI; the CPU BLAS library must provide LAPACK -- OpenBLAS and MKL do).
 extern "C" {
@@ -35,11 +37,6 @@ void zpotrf_(const char*, const int*, std::complex<double>*, const int*, int*);
 namespace ddla {
 
 namespace {
-
-inline const char* potrf_backend_name(DdlaBackend backend)
-{
-    return backend == DdlaBackend::CPU ? "CPU" : "GPU";
-}
 
 inline void cpu_potrf(char uplo, int n, float* A, int lda, int* info)
 {
@@ -135,18 +132,7 @@ namespace lapack_impl {
 template <DdlaBackend Backend>
 char potrf_check(const DdlaHandle_t& handle, char uplo, int n, const void* A, int lda, const int* info)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU potrf is not available in this LibDDLA build");
-
-    if (handle == nullptr) {
-        throw std::runtime_error("potrf: null handle");
-    }
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("potrf: template backend ") + potrf_backend_name(Backend) +
-            " does not match handle backend " + potrf_backend_name(actual));
-    }
+    detail::require_backend<Backend>(handle, "potrf");
     // 'U' / 'L' in either case; anything else throws instead of silently picking a triangle.
     const gpublasFillMode_t fill = detail::to_fill_mode(uplo);
     if (n < 0) throw std::runtime_error("potrf: negative matrix size");
@@ -242,10 +228,7 @@ INSTANTIATE_POTRF(DdlaBackend::GPU, std::complex<float>);
 INSTANTIATE_POTRF(DdlaBackend::GPU, std::complex<double>);
 #endif
 
-INSTANTIATE_POTRF_SIZE(float);
-INSTANTIATE_POTRF_SIZE(double);
-INSTANTIATE_POTRF_SIZE(std::complex<float>);
-INSTANTIATE_POTRF_SIZE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INSTANTIATE_POTRF_SIZE)
 
 #undef INSTANTIATE_POTRF_SIZE
 #undef INSTANTIATE_POTRF

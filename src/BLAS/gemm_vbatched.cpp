@@ -7,6 +7,7 @@
 #include "ddla_stream.h"
 
 #include "vbatched/gemm_vbatched_compat.h"
+#include "instantiate.h"
 
 #include <array>
 #include <cassert>
@@ -411,17 +412,8 @@ void gemmVbatched(
 }
 #define DDLA_VBATCHED_PHASES(BACKEND,TYPE) \
     template void blas_impl::gemmVbatched_check<BACKEND,TYPE>( const DdlaHandle_t& handle, char transA, char transB, int* d_m, int* d_n, int* d_k, TYPE alpha, const TYPE* const* d_A_array, int* d_lda, const TYPE* const* d_B_array, int* d_ldb, TYPE beta, TYPE** d_C_array, int* d_ldc, int batch_count); \
-    template void blas_impl::gemmVbatched_run<BACKEND,TYPE>( const DdlaHandle_t& handle, int maximum_m, int maximum_n, int maximum_k, char transA, char transB, int* d_m, int* d_n, int* d_k, TYPE alpha, const TYPE* const* d_A_array, int* d_lda, const TYPE* const* d_B_array, int* d_ldb, TYPE beta, TYPE** d_C_array, int* d_ldc, int batch_count);
-DDLA_VBATCHED_PHASES(DdlaBackend::CPU,float)
-DDLA_VBATCHED_PHASES(DdlaBackend::CPU,double)
-DDLA_VBATCHED_PHASES(DdlaBackend::CPU,std::complex<float>)
-DDLA_VBATCHED_PHASES(DdlaBackend::CPU,std::complex<double>)
-#if DDLA_HAS_GPU
-DDLA_VBATCHED_PHASES(DdlaBackend::GPU,float)
-DDLA_VBATCHED_PHASES(DdlaBackend::GPU,double)
-DDLA_VBATCHED_PHASES(DdlaBackend::GPU,std::complex<float>)
-DDLA_VBATCHED_PHASES(DdlaBackend::GPU,std::complex<double>)
-#endif
+    template void blas_impl::gemmVbatched_run<BACKEND,TYPE>( const DdlaHandle_t& handle, int maximum_m, int maximum_n, int maximum_k, char transA, char transB, int* d_m, int* d_n, int* d_k, TYPE alpha, const TYPE* const* d_A_array, int* d_lda, const TYPE* const* d_B_array, int* d_ldb, TYPE beta, TYPE** d_C_array, int* d_ldc, int batch_count)
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_VBATCHED_PHASES)
 #undef DDLA_VBATCHED_PHASES
 
 
@@ -531,17 +523,8 @@ void gemmVbatched2s(
 }
 #define DDLA_VBATCHED_PHASES(BACKEND,TYPE) \
     template void blas_impl::gemmVbatched2s_check<BACKEND,TYPE>( const DdlaHandle_t& handle, char transA_0, char transB_0, int* d_m_0, int* d_n_0, int* d_k_0, TYPE alpha_0, const TYPE* const* d_A_array_0, int* d_lda_0, const TYPE* const* d_B_array_0, int* d_ldb_0, TYPE beta_0, TYPE** d_C_array_0, int* d_ldc_0, char transA_1, char transB_1, int* d_m_1, int* d_n_1, int* d_k_1, TYPE alpha_1, const TYPE* const* d_AB_array_1, int* d_lda_1, int* d_ldb_1, TYPE beta_1, TYPE** d_C_array_1, int* d_ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count); \
-    template void blas_impl::gemmVbatched2s_run<BACKEND,TYPE>( const DdlaHandle_t& handle, int maximum_m_0, int maximum_n_0, int maximum_k_0, int maximum_m_1, int maximum_n_1, int maximum_k_1, char transA_0, char transB_0, int* d_m_0, int* d_n_0, int* d_k_0, TYPE alpha_0, const TYPE* const* d_A_array_0, int* d_lda_0, const TYPE* const* d_B_array_0, int* d_ldb_0, TYPE beta_0, TYPE** d_C_array_0, int* d_ldc_0, char transA_1, char transB_1, int* d_m_1, int* d_n_1, int* d_k_1, TYPE alpha_1, const TYPE* const* d_AB_array_1, int* d_lda_1, int* d_ldb_1, TYPE beta_1, TYPE** d_C_array_1, int* d_ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
-DDLA_VBATCHED_PHASES(DdlaBackend::CPU,float)
-DDLA_VBATCHED_PHASES(DdlaBackend::CPU,double)
-DDLA_VBATCHED_PHASES(DdlaBackend::CPU,std::complex<float>)
-DDLA_VBATCHED_PHASES(DdlaBackend::CPU,std::complex<double>)
-#if DDLA_HAS_GPU
-DDLA_VBATCHED_PHASES(DdlaBackend::GPU,float)
-DDLA_VBATCHED_PHASES(DdlaBackend::GPU,double)
-DDLA_VBATCHED_PHASES(DdlaBackend::GPU,std::complex<float>)
-DDLA_VBATCHED_PHASES(DdlaBackend::GPU,std::complex<double>)
-#endif
+    template void blas_impl::gemmVbatched2s_run<BACKEND,TYPE>( const DdlaHandle_t& handle, int maximum_m_0, int maximum_n_0, int maximum_k_0, int maximum_m_1, int maximum_n_1, int maximum_k_1, char transA_0, char transB_0, int* d_m_0, int* d_n_0, int* d_k_0, TYPE alpha_0, const TYPE* const* d_A_array_0, int* d_lda_0, const TYPE* const* d_B_array_0, int* d_ldb_0, TYPE beta_0, TYPE** d_C_array_0, int* d_ldc_0, char transA_1, char transB_1, int* d_m_1, int* d_n_1, int* d_k_1, TYPE alpha_1, const TYPE* const* d_AB_array_1, int* d_lda_1, int* d_ldb_1, TYPE beta_1, TYPE** d_C_array_1, int* d_ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_VBATCHED_PHASES)
 #undef DDLA_VBATCHED_PHASES
 
 

@@ -10,6 +10,7 @@
 #include "plan_util.h"
 #include "pgeadd_impl.h"
 #include "BLAS/blas_impl.h"
+#include "instantiate.h"
 #include <algorithm>
 #include <cassert>
 #include <cctype>
@@ -719,22 +720,9 @@ void pgeadd(const DdlaHandle_t& h, char transa, char transb, int m, int n,
 #define INSTANTIATE_PGEADD_SIZE(T) \
     template void pgeadd_impl::pgeadd_workspace_size<T>(const DdlaHandle_t&,char,char,bool,bool,int,int,const int*, \
         std::size_t*,std::size_t*,const int*,const int*,bool)
-INSTANTIATE_PGEADD_CHECK(DdlaBackend::CPU);
-INSTANTIATE_PGEADD(DdlaBackend::CPU,float);
-INSTANTIATE_PGEADD(DdlaBackend::CPU,double);
-INSTANTIATE_PGEADD(DdlaBackend::CPU,std::complex<float>);
-INSTANTIATE_PGEADD(DdlaBackend::CPU,std::complex<double>);
-#if DDLA_HAS_GPU
-INSTANTIATE_PGEADD_CHECK(DdlaBackend::GPU);
-INSTANTIATE_PGEADD(DdlaBackend::GPU,float);
-INSTANTIATE_PGEADD(DdlaBackend::GPU,double);
-INSTANTIATE_PGEADD(DdlaBackend::GPU,std::complex<float>);
-INSTANTIATE_PGEADD(DdlaBackend::GPU,std::complex<double>);
-#endif
-INSTANTIATE_PGEADD_SIZE(float);
-INSTANTIATE_PGEADD_SIZE(double);
-INSTANTIATE_PGEADD_SIZE(std::complex<float>);
-INSTANTIATE_PGEADD_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_PGEADD_CHECK)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PGEADD)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PGEADD_SIZE)
 #undef INSTANTIATE_PGEADD_SIZE
 #undef INSTANTIATE_PGEADD_CHECK
 #undef INSTANTIATE_PGEADD

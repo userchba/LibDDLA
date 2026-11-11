@@ -1,5 +1,6 @@
 #include <ddla/ddla.h>
 #include "prankk_impl.h"
+#include "instantiate.h"
 
 namespace ddla {
 
@@ -17,10 +18,7 @@ void pherk(const DdlaHandle_t& h, char uplo, char trans, int n, int k,
  template void pherk<B,T>(const DdlaHandle_t&,char,char,int,int,const typename real_type<T>::type&,const T*,const int*,const typename real_type<T>::type&,T*,const int*)
 #define INSTANTIATE_TYPES(B) \
  INSTANTIATE(B,std::complex<float>); INSTANTIATE(B,std::complex<double>)
-INSTANTIATE_TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-INSTANTIATE_TYPES(DdlaBackend::GPU);
-#endif
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_TYPES)
 #undef INSTANTIATE_TYPES
 #undef INSTANTIATE
 } // namespace ddla

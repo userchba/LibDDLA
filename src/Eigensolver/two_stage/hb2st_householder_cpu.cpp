@@ -16,6 +16,8 @@
 #include "comm_traits.h"
 #include "plan_util.h"
 #include "dc_threads.h"
+#include "instantiate.h"
+#include "check_agree.h"
 
 #include <algorithm>
 #include <array>
@@ -57,18 +59,9 @@ std::size_t align_shared(std::size_t bytes) {
 }
 
 // Numeric preparation can fail on one rank. All callers reach the agreement
-// before any following window/communication phase; only application threads
-// execute MPI. Arbitrary MPI failures follow MPI_CHECK's abort contract.
-template<class F> void collective_local(MPI_Comm comm,F&& work) {
-    std::exception_ptr failure;
-    try {work();}catch(...){failure=std::current_exception();}
-    int ok=failure?0:1,all_ok=0;
-    MPI_CHECK(MPI_Allreduce(&ok,&all_ok,1,MPI_INT,MPI_MIN,comm));
-    if(!all_ok) {
-        if(failure)std::rethrow_exception(failure);
-        throw std::runtime_error("CPU Householder preparation failed on another rank");
-    }
-}
+// (detail::agree_local) before any following window/communication phase; only
+// application threads execute MPI. Arbitrary MPI failures follow MPI_CHECK's
+// abort contract.
 
 struct SharedWindow {
     MPI_Win window=MPI_WIN_NULL;
@@ -88,7 +81,7 @@ struct SharedWindow {
         // aligned base. Reserve an interior alignment allowance independently
         // in every nonempty owner segment; zero-byte segments remain zero.
         std::size_t allocated=0;
-        collective_local(world,[&] {
+        detail::agree_local(world,"CPU Householder preparation",[&] {
             if(bytes&&bytes>std::numeric_limits<std::size_t>::max()-(shared_alignment-1))
                 throw std::overflow_error("CPU Householder alignment allowance overflow");
             allocated=bytes?bytes+(shared_alignment-1):0;
@@ -99,7 +92,7 @@ struct SharedWindow {
         MPI_CHECK(MPI_Allgather(&payload,1,MPI_UINT64_T,payloads.data(),1,MPI_UINT64_T,world));
         MPI_CHECK(MPI_Win_allocate_shared(static_cast<MPI_Aint>(allocated),1,MPI_INFO_NULL,node,&local,&window));
         MPI_CHECK(MPI_Win_set_errhandler(window,MPI_ERRORS_RETURN));
-        collective_local(world,[&] {
+        detail::agree_local(world,"CPU Householder preparation",[&] {
             int flag=0;int* model=nullptr;
             MPI_CHECK(MPI_Win_get_attr(window,MPI_WIN_MODEL,&model,&flag));
             if(reject_model||!flag||!model||*model!=MPI_WIN_UNIFIED)
@@ -128,7 +121,7 @@ struct SharedWindow {
         // any shared object or opening its passive access epoch.
         MPI_CHECK(MPI_Allreduce(offsets.data(),min_offsets.data(),static_cast<int>(offsets.size()),MPI_UINT64_T,MPI_MIN,world));
         MPI_CHECK(MPI_Allreduce(offsets.data(),max_offsets.data(),static_cast<int>(offsets.size()),MPI_UINT64_T,MPI_MAX,world));
-        collective_local(world,[&] {
+        detail::agree_local(world,"CPU Householder preparation",[&] {
             for(std::size_t q=0;q<offsets.size();++q)
                 if(min_offsets[q]!=max_offsets[q])
                     throw std::runtime_error("CPU Householder shared alignment offsets differ across ranks");
@@ -176,7 +169,7 @@ Hb2stHouseholderCpuPlan hh_cpu_check(const DdlaHandle_t& h,int n,int band,bool k
 {
     if(!h)throw std::invalid_argument("CPU Householder: null handle");
     const auto world=h->comm;
-    collective_local(world,[&]{
+    detail::agree_local(world,"CPU Householder preparation",[&]{
         using O=Hb2stHouseholderCpuOptions;
         if(h->backend!=DdlaBackend::CPU||n<0||band<1||h->nprocs<1||
             (options.stage2!=O::Stage2::Scalar&&options.stage2!=O::Stage2::Blas)||int(options.stage4)<0||int(options.stage4)>int(O::Stage4::GroupedReal6))
@@ -185,7 +178,7 @@ Hb2stHouseholderCpuPlan hh_cpu_check(const DdlaHandle_t& h,int n,int band,bool k
     });
     const int input[5]={n,band,int(keep),int(options.stage2),int(options.stage4)};int lower[5]{},upper[5]{};
     MPI_CHECK(MPI_Allreduce(input,lower,5,MPI_INT,MPI_MIN,world));MPI_CHECK(MPI_Allreduce(input,upper,5,MPI_INT,MPI_MAX,world));
-    collective_local(world,[&]{for(int i=0;i<5;++i)if(lower[i]!=upper[i])throw std::invalid_argument("CPU Householder dimensions differ across ranks");});
+    detail::agree_local(world,"CPU Householder preparation",[&]{for(int i=0;i<5;++i)if(lower[i]!=upper[i])throw std::invalid_argument("CPU Householder dimensions differ across ranks");});
     return hh_cpu_geometry(h,n,band,keep,options,host_omp_threads_for_node(h->nprocs));
 }
 template<class T> void hh_cpu_reduce_workspace_size(const DdlaHandle_t&,int band,int chase_threads,std::size_t* backend_bytes)
@@ -275,10 +268,10 @@ template<class T> struct Hb2stHouseholderCpu<T>::Impl {
     void setup(const DdlaHandle_t& h,const Hb2stHouseholderCpuPlan& p) {
         handle=h;world=h->comm;rank=p.rank;ranks=p.ranks;options=p.options;n=p.n;b=p.band;keep=p.keep_history;threads=p.threads;
         MPI_CHECK(MPI_Allreduce(&p.chase_threads,&chase_threads,1,MPI_INT,MPI_MIN,world));
-        collective_local(world,[&]{if(chase_threads>1)chase_team=std::make_unique<DcHostTeam>(chase_threads);});
-        collective_local(world,[&]{injected(Hb2stHouseholderCpuOptions::Failure::Metadata);});
+        detail::agree_local(world,"CPU Householder preparation",[&]{if(chase_threads>1)chase_team=std::make_unique<DcHostTeam>(chase_threads);});
+        detail::agree_local(world,"CPU Householder preparation",[&]{injected(Hb2stHouseholderCpuOptions::Failure::Metadata);});
         std::vector<Index> own_prefix;
-        collective_local(world,[&] {
+        detail::agree_local(world,"CPU Householder preparation",[&] {
             band_ld=std::max(1,hh::band_rows(n,b));band_elements=checked_multiply(n,band_ld);
             band_offset=align_shared(sizeof(ChaseControl));checked_add(band_offset,checked_bytes(band_elements,sizeof(T)));
             sweeps=hh::sweep_count(n,b);
@@ -304,16 +297,16 @@ template<class T> struct Hb2stHouseholderCpu<T>::Impl {
         });
         MPI_CHECK(MPI_Comm_split_type(world,MPI_COMM_TYPE_SHARED,rank,MPI_INFO_NULL,&node));
         MPI_CHECK(MPI_Comm_set_errhandler(node,MPI_ERRORS_RETURN));
-        collective_local(world,[&] {
+        detail::agree_local(world,"CPU Householder preparation",[&] {
             int node_size=0,node_rank=0;
             MPI_CHECK(MPI_Comm_size(node,&node_size));MPI_CHECK(MPI_Comm_rank(node,&node_rank));
             if(node_size!=ranks||node_rank!=rank)
                 throw std::runtime_error("CPU Householder prototype requires one shared-memory node");
         });
-        collective_local(world,[&] {injected(Hb2stHouseholderCpuOptions::Failure::Band);});
+        detail::agree_local(world,"CPU Householder preparation",[&] {injected(Hb2stHouseholderCpuOptions::Failure::Band);});
         const std::size_t band_bytes=rank==0?static_cast<std::size_t>(checked_add(band_offset,checked_bytes(band_elements,sizeof(T)))):0;
         band_window.allocate(node,world,band_bytes,options.reject_memory_model);
-        collective_local(world,[&] {
+        detail::agree_local(world,"CPU Householder preparation",[&] {
             auto* base=static_cast<unsigned char*>(band_window.bases[0]);
             if(!base||band_window.sizes[0]<static_cast<MPI_Aint>(band_offset+checked_bytes(band_elements,sizeof(T))))
                 throw std::runtime_error("CPU Householder band mapping is too short");
@@ -325,10 +318,10 @@ template<class T> struct Hb2stHouseholderCpu<T>::Impl {
         });
         band_window.sync();MPI_CHECK(MPI_Barrier(node));band_window.sync();
         if(keep) {
-            collective_local(world,[&] {injected(Hb2stHouseholderCpuOptions::Failure::History);});
+            detail::agree_local(world,"CPU Householder preparation",[&] {injected(Hb2stHouseholderCpuOptions::Failure::History);});
             const std::size_t bytes=static_cast<std::size_t>(checked_add(history_offset,checked_bytes(local_elements,sizeof(T))));
             history_window.allocate(node,world,bytes,false);
-            collective_local(world,[&] {
+            detail::agree_local(world,"CPU Householder preparation",[&] {
                 for(int owner=0;owner<ranks;++owner) {
                     auto* base=static_cast<unsigned char*>(history_window.bases[owner]);
                     if(!base||history_window.sizes[owner]<static_cast<MPI_Aint>(history_offset))
@@ -340,7 +333,7 @@ template<class T> struct Hb2stHouseholderCpu<T>::Impl {
                 for(Index q=0;q<local_elements;++q)::new(static_cast<void*>(owner_coeff[rank]+q)) T();
             });
             history_window.sync();MPI_CHECK(MPI_Barrier(node));history_window.sync();
-            collective_local(world,[&] {
+            detail::agree_local(world,"CPU Householder preparation",[&] {
                 for(int owner=0;owner<ranks;++owner) {
                     const Index count=owner_prefix[owner][sweeps];
                     const Index expected=checked_add(history_offset,checked_bytes(count,sizeof(T)));
@@ -350,7 +343,7 @@ template<class T> struct Hb2stHouseholderCpu<T>::Impl {
             });
         }
 #if DDLA_HAS_GPU
-        collective_local(world,[&] {
+        detail::agree_local(world,"CPU Householder preparation",[&] {
             if(options.stage2!=Hb2stHouseholderCpuOptions::Stage2::Gpu)return;
             if(h->backend!=DdlaBackend::GPU||b>64)
                 throw std::invalid_argument("GPU Householder stage2 requires a GPU handle and band<=64");
@@ -382,7 +375,7 @@ template<class T> struct Hb2stHouseholderCpu<T>::Impl {
         const std::size_t required_bytes=checked_bytes(required,sizeof(T));
         if(factor_window.window==MPI_WIN_NULL) {
             factor_window.allocate(node,world,rank==0?required_bytes:0,false);
-            collective_local(world,[&] {
+            detail::agree_local(world,"CPU Householder preparation",[&] {
                 auto* base=factor_window.bases[0];
                 if(!base||factor_window.sizes[0]<static_cast<MPI_Aint>(required_bytes))
                     throw std::runtime_error("CPU Householder factor mapping is too short");
@@ -394,7 +387,7 @@ template<class T> struct Hb2stHouseholderCpu<T>::Impl {
             });
             factor_window.sync();MPI_CHECK(MPI_Barrier(node));factor_window.sync();
         }
-        collective_local(world,[&] {
+        detail::agree_local(world,"CPU Householder preparation",[&] {
             if(!factors||required>factor_capacity_elements||factor_window.sizes[0]<static_cast<MPI_Aint>(required_bytes))
                 throw std::runtime_error("CPU Householder factor capacity changed");
         });
@@ -427,7 +420,7 @@ Hb2stHouseholderCpu<T>::Hb2stHouseholderCpu(const DdlaHandle_t& h,int n,int b,bo
     :Hb2stHouseholderCpu(h,hh_cpu_check(h,n,b,keep,options)) {}
 template<class T>
 Hb2stHouseholderCpu<T>::Hb2stHouseholderCpu(const DdlaHandle_t& h,const Hb2stHouseholderCpuPlan& p) {
-    collective_local(h->comm,[&]{impl_.reset(new Impl);});
+    detail::agree_local(h->comm,"CPU Householder preparation",[&]{impl_.reset(new Impl);});
     try{impl_->setup(h,p);}catch(...){impl_->close();throw;}
 }
 
@@ -447,7 +440,7 @@ void Hb2stHouseholderCpu<T>::reduce_run(const T* A,const int* desc,R* d,R* e,T* 
     const auto reset_range=s.band_share();for(std::size_t q=reset_range.first;q<reset_range.second;++q)s.band[q]=T(0);
     s.band_window.sync();MPI_CHECK(MPI_Barrier(s.node));s.band_window.sync();
     int nr=0,nc=0,pr=0,pc=0;ddlaGetGridDims(s.handle,nr,nc);ddlaGetGridCoords(s.handle,pr,pc);
-    collective_local(s.world,[&] {
+    detail::agree_local(s.world,"CPU Householder preparation",[&] {
         const int mb=desc[DDLA_MB_],nb=desc[DDLA_NB_],rs=desc[DDLA_RSRC_],cs=desc[DDLA_CSRC_],ld=desc[DDLA_LLD_];
         for(int col=0;col<s.n;++col) {
             if((col/nb+cs)%nc!=pc)continue;
@@ -472,7 +465,7 @@ void Hb2stHouseholderCpu<T>::reduce_run(const T* A,const int* desc,R* d,R* e,T* 
         else local_max=std::max(local_max,hh::component_scale(s.band[q]));
     }
     int all_finite=0;MPI_CHECK(MPI_Allreduce(&finite,&all_finite,1,MPI_INT,MPI_MIN,s.world));
-    collective_local(s.world,[&] {if(!all_finite)throw std::invalid_argument("CPU Householder band contains non-finite values");});
+    detail::agree_local(s.world,"CPU Householder preparation",[&] {if(!all_finite)throw std::invalid_argument("CPU Householder band contains non-finite values");});
     MPI_CHECK(MPI_Allreduce(&local_max,&s.scale,1,mpi_datatype<R>(),MPI_MAX,s.world));
     if(s.scale==R(0))s.scale=R(1);
     for(std::size_t q=range.first;q<range.second;++q)s.band[q]=hh::divide_real(s.band[q],s.scale);
@@ -482,7 +475,7 @@ void Hb2stHouseholderCpu<T>::reduce_run(const T* A,const int* desc,R* d,R* e,T* 
         const Index last=Index(3)*static_cast<Index>(s.n-3),inject_level=last/2;
 #if DDLA_HAS_GPU
         if(s.options.stage2==Hb2stHouseholderCpuOptions::Stage2::Gpu) {
-            collective_local(s.world,[&] {
+            detail::agree_local(s.world,"CPU Householder preparation",[&] {
                 DDLA_CHECK(ddlaMemcpy(s.handle,s.gpu_band->data(),s.band+std::size_t(s.gpu_first)*s.band_ld,
                     std::size_t(s.gpu_last-s.gpu_first)*s.band_ld*sizeof(T)));
                 DDLA_CHECK(ddlaMemset(s.handle,s.gpu_failure->data(),0,sizeof(int)));
@@ -490,7 +483,7 @@ void Hb2stHouseholderCpu<T>::reduce_run(const T* A,const int* desc,R* d,R* e,T* 
             });
             for(int first=0;first<=int(last);first+=s.packet_levels) {
                 const int levels=std::min(s.packet_levels,int(last)+1-first);
-                collective_local(s.world,[&] {
+                detail::agree_local(s.world,"CPU Householder preparation",[&] {
                     if(s.inject(Hb2stHouseholderCpuOptions::Failure::Reduce)&&
                        Index(first)<=inject_level&&inject_level<Index(first+levels))
                         throw std::runtime_error("GPU Householder injected reduction failure");
@@ -605,7 +598,7 @@ void Hb2stHouseholderCpu<T>::reduce_run(const T* A,const int* desc,R* d,R* e,T* 
         }
     } else if(s.inject(Hb2stHouseholderCpuOptions::Failure::Reduce))s.control->abort.store(1,std::memory_order_release);
     s.band_window.sync();s.history_window.sync();
-    collective_local(s.world,[&] {
+    detail::agree_local(s.world,"CPU Householder preparation",[&] {
         if(s.control->abort.load(std::memory_order_acquire))throw std::runtime_error("CPU Householder chase failed; all levels drained");
         T previous=T(1);
         for(int i=0;i<s.n;++i) {
@@ -662,13 +655,13 @@ void Hb2stHouseholderCpu<T>::apply_wy_run(T* columns,int ld,int ncols,void* back
     T* const work=compact?nullptr:take<T>(cursor,std::size_t(factor_width)*std::size_t(ncols));
     assert(std::size_t(cursor-static_cast<char*>(backend_work))<=backend_bytes);(void)backend_bytes;
     std::array<T,factor_width> tri_work;
-    collective_local(s.world,[&]{s.injected(Hb2stHouseholderCpuOptions::Failure::Factors);});
+    detail::agree_local(s.world,"CPU Householder preparation",[&]{s.injected(Hb2stHouseholderCpuOptions::Failure::Factors);});
     if(s.sweeps==0)return;
     int sweep=0,panel=0;
     while(sweep<s.sweeps) {
         std::array<hh::Panel,factor_batch> batch;
         int count=0;
-        collective_local(s.world,[&] {
+        detail::agree_local(s.world,"CPU Householder preparation",[&] {
             while(count<factor_batch&&sweep<s.sweeps) {
                 if(!hh::panel_geometry(s.n,s.b,factor_width,sweep,panel,batch[count]))
                     throw std::logic_error("CPU Householder replay panel geometry is invalid");
@@ -698,7 +691,7 @@ void Hb2stHouseholderCpu<T>::apply_wy_run(T* columns,int ld,int ncols,void* back
             s.factor_window.sync();
         });
         s.factor_window.sync();
-        collective_local(s.world,[&] {
+        detail::agree_local(s.world,"CPU Householder preparation",[&] {
             s.injected(Hb2stHouseholderCpuOptions::Failure::Apply);
             if(ncols==0)return;
             if(device_rows) {
@@ -748,13 +741,13 @@ void Hb2stHouseholderCpu<T>::apply_tiles_run(R* tiles,int width,int ncols) {
     auto& s=*impl_;
     const int threads=s.threads;
     const Index record_capacity=Index(s.b)*factor_width;
-    collective_local(s.world,[&]{s.injected(Hb2stHouseholderCpuOptions::Failure::Factors);});
+    detail::agree_local(s.world,"CPU Householder preparation",[&]{s.injected(Hb2stHouseholderCpuOptions::Failure::Factors);});
     if(s.sweeps==0)return;
     int sweep=0,panel=0;
     while(sweep<s.sweeps) {
         std::array<hh::Panel,factor_batch> batch;
         int count=0;
-        collective_local(s.world,[&] {
+        detail::agree_local(s.world,"CPU Householder preparation",[&] {
             while(count<factor_batch&&sweep<s.sweeps) {
                 if(!hh::panel_geometry(s.n,s.b,factor_width,sweep,panel,batch[count]))
                     throw std::logic_error("CPU Householder paired panel geometry is invalid");
@@ -793,7 +786,7 @@ void Hb2stHouseholderCpu<T>::apply_tiles_run(R* tiles,int width,int ncols) {
         });
         // Retain the owner's current publish barrier/Win_sync ordering.
         s.factor_window.sync();
-        collective_local(s.world,[&] {
+        detail::agree_local(s.world,"CPU Householder preparation",[&] {
             s.injected(Hb2stHouseholderCpuOptions::Failure::Apply);
             if(ncols==0)return;
             auto run=[&](auto tag) {
@@ -870,7 +863,7 @@ void Hb2stHouseholderCpu<T>::apply_tiles_run(R* tiles,int width,int ncols) {
 template<class T>
 void Hb2stHouseholderCpu<T>::reduce_check(const T* A,const int* desc,R* d,R* e,T* phases,std::size_t phase_count)const {
     const auto& s=*impl_;
-    collective_local(s.world,[&]{
+    detail::agree_local(s.world,"CPU Householder preparation",[&]{
         if(s.released||s.reduced)throw std::logic_error("CPU Householder reduce called in wrong state");
         check_desc(desc,s.handle);
         if(s.n>desc[DDLA_M_]||s.n>desc[DDLA_N_]||(s.n&&(!d||!e)))throw std::invalid_argument("CPU Householder input/output is invalid");
@@ -884,13 +877,13 @@ template<class T>
 void Hb2stHouseholderCpu<T>::reduce(const T* A,const int* desc,R* d,R* e,std::vector<T>& phases){
     auto& s=*impl_;
     try{std::size_t backend_bytes=0;hh_cpu_reduce_workspace_size<T>(s.handle,s.b,s.chase_threads,&backend_bytes);ddla::vector<char> backend_work(s.handle);
-        collective_local(s.world,[&]{if constexpr(std::is_same<T,R>::value)phases.clear();else phases.resize(std::size_t(std::max(s.n-1,0)));backend_work.resize(backend_bytes);});
+        detail::agree_local(s.world,"CPU Householder preparation",[&]{if constexpr(std::is_same<T,R>::value)phases.clear();else phases.resize(std::size_t(std::max(s.n-1,0)));backend_work.resize(backend_bytes);});
         reduce_check(A,desc,d,e,phases.data(),phases.size());reduce_run(A,desc,d,e,phases.data(),backend_work.data(),backend_bytes);
     }catch(...){s.close();throw;}
 }
 template<class T>
 void Hb2stHouseholderCpu<T>::apply_columns_check(T* columns,int ld,int count)const{
-    const auto& s=*impl_;collective_local(s.world,[&]{
+    const auto& s=*impl_;detail::agree_local(s.world,"CPU Householder preparation",[&]{
         if(s.released||!s.reduced||!s.keep)throw std::logic_error("CPU Householder apply called in wrong state");
         if(count<0||ld<std::max(s.n,1)||(count&&s.n&&!columns))throw std::invalid_argument("CPU Householder column strip is invalid");
     });
@@ -899,13 +892,13 @@ template<class T>
 void Hb2stHouseholderCpu<T>::apply_columns(T* columns,int ld,int count){
     auto& s=*impl_;try{apply_columns_check(columns,ld,count);
         std::size_t backend_bytes=0;hh_cpu_apply_columns_workspace_size<T>(s.handle,count,&backend_bytes);
-        ddla::vector<char> backend_work(s.handle);collective_local(s.world,[&]{backend_work.resize(backend_bytes);});
+        ddla::vector<char> backend_work(s.handle);detail::agree_local(s.world,"CPU Householder preparation",[&]{backend_work.resize(backend_bytes);});
         apply_columns_run(columns,ld,count,backend_work.data(),backend_bytes);
     }catch(...){s.close();throw;}
 }
 template<class T>
 void Hb2stHouseholderCpu<T>::apply_tiles_check(R* tiles,int width,int columns)const{
-    const auto& s=*impl_;collective_local(s.world,[&]{
+    const auto& s=*impl_;detail::agree_local(s.world,"CPU Householder preparation",[&]{
         if(s.released||!s.reduced||!s.keep)throw std::logic_error("CPU Householder paired apply called in wrong state");
         if(columns<0||(width!=8&&width!=16&&width!=32&&width!=64)||(columns&&s.n&&!tiles))throw std::invalid_argument("CPU Householder tile strip is invalid");
         std::size_t count=0;if(!hhpair::layout_elements(s.n,columns,width,hhpair::planes<T>,count))throw std::overflow_error("CPU Householder tile strip overflow");checked_bytes(count,sizeof(R));
@@ -927,7 +920,7 @@ template<class T> bool Hb2stHouseholderCpu<T>::paired_replay()const{return impl_
 template<class T> typename Hb2stHouseholderCpu<T>::R Hb2stHouseholderCpu<T>::eigenvalue_scale()const{return impl_->scale;}
 
 #define INSTANTIATE(T) template void hh_cpu_reduce_workspace_size<T>(const DdlaHandle_t&,int,int,std::size_t*); template void hh_cpu_apply_columns_workspace_size<T>(const DdlaHandle_t&,int,std::size_t*); template class Hb2stHouseholderCpu<T>; template bool hh_event_blas_cpu<T>(const DdlaHandle_t&,hh::BandView<T>,const hh::Event&,T*,T*,T*,typename real_type<T>::type&) noexcept
-INSTANTIATE(float);INSTANTIATE(double);INSTANTIATE(std::complex<float>);INSTANTIATE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INSTANTIATE)
 #undef INSTANTIATE
 template void hh_gpu_apply_workspace_size<float>(int,int,bool,std::size_t*);
 template void hh_gpu_apply_workspace_size<double>(int,int,bool,std::size_t*);

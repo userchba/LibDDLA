@@ -30,6 +30,7 @@
 #include "ddla_connector.h"
 #include "ddla_stream.h"
 #include "lapack_impl.h"
+#include "require_backend.h"
 
 // Host LAPACK ?laswp (Fortran ABI; the CPU BLAS library must provide LAPACK -- OpenBLAS and MKL do).
 extern "C" {
@@ -42,11 +43,6 @@ void zlaswp_(const int*, std::complex<double>*, const int*, const int*, const in
 namespace ddla {
 
 namespace {
-
-inline const char* laswp_backend_name(DdlaBackend backend)
-{
-    return backend == DdlaBackend::CPU ? "CPU" : "GPU";
-}
 
 inline void cpu_laswp(int n, float* A, int lda, int k1, int k2, const int* ipiv, int incx)
 {
@@ -160,18 +156,7 @@ template <DdlaBackend Backend>
 void laswp_check(const DdlaHandle_t& handle, int n, const void* A, int lda, int k1, int k2,
                  const int* ipiv, int incx)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU laswp is not available in this LibDDLA build");
-
-    if (handle == nullptr) {
-        throw std::runtime_error("laswp: null handle");
-    }
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("laswp: template backend ") + laswp_backend_name(Backend) +
-            " does not match handle backend " + laswp_backend_name(actual));
-    }
+    detail::require_backend<Backend>(handle, "laswp");
     if (n <= 0 || k1 > k2) return;   // nothing to swap: the pointers are not read
     if (k1 < 1) throw std::runtime_error("laswp: k1 must be >= 1");
     if (incx == 0) throw std::runtime_error("laswp: incx must be nonzero");

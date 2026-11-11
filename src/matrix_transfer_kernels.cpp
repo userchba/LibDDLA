@@ -2,6 +2,7 @@
 #include "matrix_transfer.h"
 #include "ddla_desc.h"
 #include "ddla_stream.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -86,10 +87,7 @@ void map_gpu(const DdlaHandle_t& h, bool scatter, const Block<T>* blocks, int co
 
 #define INST(T) \
     template void map_gpu<T>(const DdlaHandle_t&, bool, const Block<T>*, int, const int*, int, int, int, int, T*, int)
-INST(float);
-INST(double);
-INST(std::complex<float>);
-INST(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INST)
 #undef INST
 
 template <typename rt, bool complex_out>
@@ -120,10 +118,7 @@ void convert_rows_gpu(const DdlaHandle_t& h, const typename real_type<T>::type* 
     DDLA_CHECK(ddlaGetLastError(h));
 }
 #define INST_ROWS(T) template void convert_rows_gpu<T>(const DdlaHandle_t&,const real_type<T>::type*,int,T*,int,int,int,bool)
-INST_ROWS(float);
-INST_ROWS(double);
-INST_ROWS(std::complex<float>);
-INST_ROWS(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INST_ROWS)
 #undef INST_ROWS
 
 } // namespace ddla::matrix_impl

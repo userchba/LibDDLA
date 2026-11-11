@@ -5,6 +5,7 @@
 #include "check_agree.h"
 #include "plan_util.h"
 #include "row_share.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <cassert>
@@ -470,18 +471,11 @@ void scatter_rows(const DdlaHandle_t& h,int k,const typename real_type<T>::type*
  template void scatter_rows<B,T>(const DdlaHandle_t&,int,const real_type<T>::type*,int,bool,int,int,T*,const int*); \
  template void scatter_rows_check<B,T>(const DdlaHandle_t&,int,const real_type<T>::type*,int,bool,int,int,T*,const int*); \
  template void scatter_rows_run<B,T>(const DdlaHandle_t&,int,const real_type<T>::type*,int,bool,int,int,T*,const int*,void*,std::size_t,void*,std::size_t)
-#define INST_ROWS_BACKEND(B) \
- INST_ROWS(B,float); INST_ROWS(B,double); \
- INST_ROWS(B,std::complex<float>); INST_ROWS(B,std::complex<double>)
-INST_ROWS_BACKEND(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-INST_ROWS_BACKEND(DdlaBackend::GPU);
-#endif
-#undef INST_ROWS_BACKEND
+DDLA_FOR_EACH_BACKEND_TYPE(INST_ROWS)
 #undef INST_ROWS
 
 #define INST_ROW_SIZE(T) template void scatter_rows_workspace_size<T>(const DdlaHandle_t&,int,std::size_t*,std::size_t*)
-INST_ROW_SIZE(float); INST_ROW_SIZE(double); INST_ROW_SIZE(std::complex<float>); INST_ROW_SIZE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INST_ROW_SIZE)
 #undef INST_ROW_SIZE
 
 } // namespace ddla::matrix_impl
@@ -532,20 +526,11 @@ void scatter(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
                                const int*, int, T*, int); \
     template void scatter<B, T>(const DdlaHandle_t&, int, int, T*, int, int, \
                                 const int*, int, const T*, int)
-#define TYPES(B) \
-    INST(B, float); \
-    INST(B, double); \
-    INST(B, std::complex<float>); \
-    INST(B, std::complex<double>)
-TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-TYPES(DdlaBackend::GPU);
-#endif
-#undef TYPES
+DDLA_FOR_EACH_BACKEND_TYPE(INST)
 #undef INST
 
 #define INST_TRANSFER_SIZE(T) template void matrix_impl::transfer_workspace_size<T>(const DdlaHandle_t&,int,int,int,int,const int*,int,std::size_t*,std::size_t*)
-INST_TRANSFER_SIZE(float); INST_TRANSFER_SIZE(double); INST_TRANSFER_SIZE(std::complex<float>); INST_TRANSFER_SIZE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INST_TRANSFER_SIZE)
 #undef INST_TRANSFER_SIZE
 
 } // namespace ddla

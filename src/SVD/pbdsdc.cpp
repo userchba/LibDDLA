@@ -1041,8 +1041,7 @@ void pbdsdc(const DdlaHandle_t& h,char uplo,int n,R* d,R* e,R* s,R* U,R* V,int l
     try{spectral_impl::pbdsdc_workspace_size<R>(h,p,&backend_bytes,&host_bytes);
         backend_work.resize(backend_bytes);host_work.resize(host_bytes);team.emplace(p.threads);}
     catch(...){failure=std::current_exception();}
-    int bad=failure?1:0;MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&bad,1,MPI_INT,MPI_MAX,h->comm));
-    if(bad){if(failure)std::rethrow_exception(failure);throw std::runtime_error("pbdsdc: workspace preparation failed on another rank");}
+    detail::agree_failure(h->comm,failure,"pbdsdc: workspace preparation");
     spectral_impl::pbdsdc_run<B,R>(h,p,*team,d,e,s,U,V,info,
         backend_work.data(),backend_bytes,host_work.data(),host_bytes);
 }

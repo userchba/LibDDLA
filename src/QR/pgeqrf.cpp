@@ -92,6 +92,7 @@
 #include "matrix_transfer.h"
 #include "plan_util.h"
 #include "require_backend.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <cassert>
@@ -411,10 +412,7 @@ T* qr_block_run(const DdlaHandle_t& handle, T* A, const int* descA, const QrPlan
     template void qr_block_workspace_size<TYPE>(const DdlaHandle_t&, const QrPlan&,   \
         bool, bool, bool, TYPE*, int, TYPE*, std::size_t*, std::size_t*)
 
-INSTANTIATE_QR_SETUP(float);
-INSTANTIATE_QR_SETUP(double);
-INSTANTIATE_QR_SETUP(std::complex<float>);
-INSTANTIATE_QR_SETUP(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INSTANTIATE_QR_SETUP)
 
 #undef INSTANTIATE_QR_SETUP
 
@@ -422,17 +420,7 @@ INSTANTIATE_QR_SETUP(std::complex<double>);
     template TYPE* qr_block_run<BACKEND, TYPE>(const DdlaHandle_t&, TYPE*, const int*, const QrPlan&,     \
         bool, bool, bool, TYPE*, int, TYPE*, int, void*, std::size_t, void*, std::size_t)
 
-INSTANTIATE_QR_BLOCK(DdlaBackend::CPU, float);
-INSTANTIATE_QR_BLOCK(DdlaBackend::CPU, double);
-INSTANTIATE_QR_BLOCK(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_QR_BLOCK(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_QR_BLOCK(DdlaBackend::GPU, float);
-INSTANTIATE_QR_BLOCK(DdlaBackend::GPU, double);
-INSTANTIATE_QR_BLOCK(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_QR_BLOCK(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_QR_BLOCK)
 
 #undef INSTANTIATE_QR_BLOCK
 
@@ -449,16 +437,11 @@ namespace qr_impl {
 template <DdlaBackend Backend>
 bool pgeqrf_check(const DdlaHandle_t& handle, char uplo, int m, int n, const int* descA, const void* tau)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU pgeqrf is not available in this LibDDLA build");
     const char* name = uplo == 'L' || uplo == 'l' ? "pgeqlf" : "pgeqrf";
     return detail::agree_check(handle, name, [&](detail::Agree& agree) {
-        if (handle == nullptr)
-            throw std::runtime_error(std::string(name) + ": null handle");
+        detail::require_backend<Backend>(handle, name);
         uplo = normalize_uplo(uplo, name);
         agree.mode("QR/QL factorization", int(uplo));
-        if (ddlaGetBackend(handle) != Backend)
-            throw std::runtime_error(std::string(name) + ": template backend does not match handle backend");
         qr_check_args(handle, descA, m, n, /*ja=*/0, name);
         const QrPlan p = qr_geometry(handle, descA, uplo, m, n, /*ja=*/0);
         const int k = p.jr_hi - p.jr_lo;   // min(m, n) reflectors
@@ -593,10 +576,7 @@ INSTANTIATE_PGEQRF(DdlaBackend::GPU, std::complex<float>);
 INSTANTIATE_PGEQRF(DdlaBackend::GPU, std::complex<double>);
 #endif
 
-INSTANTIATE_PGEQRF_SIZE(float);
-INSTANTIATE_PGEQRF_SIZE(double);
-INSTANTIATE_PGEQRF_SIZE(std::complex<float>);
-INSTANTIATE_PGEQRF_SIZE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PGEQRF_SIZE)
 
 #undef INSTANTIATE_PGEQRF_SIZE
 #undef INSTANTIATE_PGEQRF

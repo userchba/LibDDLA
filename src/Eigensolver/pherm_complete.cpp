@@ -33,6 +33,8 @@
 #include "pherm_complete_workspace.h"
 #include "eig_workspace.h"
 #include "plan_util.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 #include <mpi.h>
 
@@ -61,16 +63,6 @@ struct HermPlan {
     std::size_t send_total=0,recv_total=0;
 };
 
-void pherm_agree_failure(const DdlaHandle_t& handle, const std::exception_ptr& failure)
-{
-    int failed = failure ? 1 : 0;
-    MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &failed, 1, MPI_INT, MPI_MAX,
-                            ddlaGetCommunicator(handle)));
-    if (failed) {
-        if (failure) std::rethrow_exception(failure);
-        throw std::runtime_error("pherm_complete: preparation failed on another rank");
-    }
-}
 
 int pherm_checked_count(long long count)
 {
@@ -186,7 +178,7 @@ void pherm_exec_cpu(const DdlaHandle_t& handle,const HermPlan& p,bool upper,T* A
         pherm_for_blocks(p.pack, p.npack, nth, xpose(A, sendbuf));
         pherm_for_blocks(p.local, p.nlocal, nth, xpose(A, A));   // disjoint source and destination blocks
     } catch (...) { failure = std::current_exception(); }
-    pherm_agree_failure(handle, failure);
+    detail::agree_failure(handle,failure,"pherm_complete: preparation");
 
     // grid-wide collective: every rank calls it, including ranks with nothing to exchange
     commAlltoallv<DdlaBackend::CPU>(handle, CommScope::Grid, nprocs,
@@ -287,7 +279,7 @@ void pherm_exec_gpu(const DdlaHandle_t& handle,const HermPlan& p,bool upper,T* A
             DDLA_CHECK(ddlaGetLastError(handle));
         }
     } catch (...) { failure = std::current_exception(); }
-    pherm_agree_failure(handle, failure);
+    detail::agree_failure(handle,failure,"pherm_complete: preparation");
 
     // grid-wide collective: every rank calls it, including ranks with nothing to exchange
     commAlltoallv<DdlaBackend::GPU>(handle, CommScope::Grid, nprocs,
@@ -318,8 +310,7 @@ HermitianPlan pherm_complete_check(const DdlaHandle_t& handle,DdlaBackend backen
 {
     auto p=detail::agree_check(handle,"pherm_complete",[&](detail::Agree& agreement)->HermitianPlan {
         agreement.mode("spectral operation",3104);
-    if(!handle)throw std::runtime_error("pherm_complete: null handle");
-    if(ddlaGetBackend(handle)!=backend)throw std::runtime_error("pherm_complete: template backend does not match handle backend");
+    detail::require_backend(handle,backend,"pherm_complete");
     if(uplo!='U'&&uplo!='L')throw std::runtime_error("pherm_complete: uplo must be 'U' or 'L'");
     check_desc(descA,handle);
     if(descA[DDLA_MB_]!=descA[DDLA_NB_])throw std::runtime_error("pherm_complete: requires square blocks (mb == nb)");
@@ -425,7 +416,7 @@ void detail::pherm_complete_with_workspace(const DdlaHandle_t& handle,char uplo,
         spectral_impl::pherm_complete_workspace_size<T>(handle,p,capacity,&backend_bytes,&host_bytes);
         backend_work.resize(backend_bytes);host_work.resize(host_bytes);
     } catch(...){failure=std::current_exception();}
-    if(n>0)pherm_agree_failure(handle,failure);
+    if(n>0)detail::agree_failure(handle,failure,"pherm_complete: preparation");
     else if(failure)std::rethrow_exception(failure);
     spectral_impl::pherm_complete_run<Backend,T>(handle,p,A,scratch,capacity,
         backend_work.data(),backend_bytes,host_work.data(),host_bytes);
@@ -449,22 +440,8 @@ void pherm_complete(const DdlaHandle_t& handle, char uplo, int n,
     template void spectral_impl::pherm_complete_workspace_size<TYPE>(const DdlaHandle_t&, \
         const spectral_impl::HermitianPlan&,std::size_t,std::size_t*,std::size_t*)
 
-INSTANTIATE_PHERM_COMPLETE(DdlaBackend::CPU, float);
-INSTANTIATE_PHERM_COMPLETE(DdlaBackend::CPU, double);
-INSTANTIATE_PHERM_COMPLETE(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PHERM_COMPLETE(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PHERM_COMPLETE(DdlaBackend::GPU, float);
-INSTANTIATE_PHERM_COMPLETE(DdlaBackend::GPU, double);
-INSTANTIATE_PHERM_COMPLETE(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PHERM_COMPLETE(DdlaBackend::GPU, std::complex<double>);
-#endif
-
-INSTANTIATE_PHERM_COMPLETE_SIZE(float);
-INSTANTIATE_PHERM_COMPLETE_SIZE(double);
-INSTANTIATE_PHERM_COMPLETE_SIZE(std::complex<float>);
-INSTANTIATE_PHERM_COMPLETE_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PHERM_COMPLETE)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PHERM_COMPLETE_SIZE)
 
 #undef INSTANTIATE_PHERM_COMPLETE_SIZE
 #undef INSTANTIATE_PHERM_COMPLETE

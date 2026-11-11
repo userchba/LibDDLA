@@ -3,6 +3,8 @@
 #include "ddla_stream.h"
 #include "comm_traits.h"
 #include "helpers.h"
+#include "instantiate.h"
+#include "check_agree.h"
 #include <exception>
 #include <type_traits>
 #include <complex>
@@ -181,8 +183,7 @@ void Phb2stResources<T>::device_setup(const DdlaHandle_t& h,const Phb2stPlan& p)
             DDLA_CHECK(ddlaSynchronize(h));
         }
     }catch(...){error=std::current_exception();}
-    int ok=error?0:1;MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&ok,1,MPI_INT,MPI_MIN,h->comm));
-    if(!ok){if(error)std::rethrow_exception(error);throw std::runtime_error("GPU Givens resource allocation failed on another rank");}
+    detail::agree_failure(h->comm,error,"GPU Givens resource allocation");
 }
 
 template<class T>
@@ -237,8 +238,7 @@ void Phb2stResources<T>::device_run(const DdlaHandle_t& h,const Phb2stPlan& p,T*
                 }
             }
         }catch(...){error=std::current_exception();}
-        int ok=error?0:1;MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&ok,1,MPI_INT,MPI_MIN,h->comm));
-        if(!ok){if(error)std::rethrow_exception(error);throw std::runtime_error("GPU Givens reduction failed on another rank");}
+        detail::agree_failure(h->comm,error,"GPU Givens reduction");
         if(keep) {
             MPI_CHECK(MPI_Barrier(h->comm));
             history().capture(before.base,cursor.base,ring,capacity);
@@ -267,7 +267,7 @@ void Phb2stResources<T>::device_run(const DdlaHandle_t& h,const Phb2stPlan& p,T*
 }
 #define GPU_GIVENS(T) template void Phb2stResources<T>::device_setup(const DdlaHandle_t&,const Phb2stPlan&); \
  template void Phb2stResources<T>::device_run(const DdlaHandle_t&,const Phb2stPlan&,T*,hb2st_rot<T>*,long long)
-GPU_GIVENS(float);GPU_GIVENS(double);GPU_GIVENS(std::complex<float>);GPU_GIVENS(std::complex<double>);
+DDLA_FOR_EACH_TYPE(GPU_GIVENS)
 #undef GPU_GIVENS
 
 } }

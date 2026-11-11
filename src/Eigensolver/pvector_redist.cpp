@@ -14,18 +14,15 @@
 #include <stdexcept>
 #include <limits>
 #include "ddla_desc.h"
+#include "instantiate.h"
+#include "require_backend.h"
 #include <string>
+#include <numeric>
 #include <vector>
 
 namespace ddla {
 
 namespace {
-
-inline int pv_gcd(int a, int b)
-{
-    while (b != 0) { const int t = a % b; a = b; b = t; }
-    return a;
-}
 
 // Number of blocks of the round starting at global block @p first (stride
 // @p lcm) among @p nblks_tot blocks.
@@ -94,7 +91,7 @@ std::size_t ptranspose_vectors_work_elems(const DdlaHandle_t& handle,
     ddlaGetGridDims(handle, nprows, npcols);
     const int nblks_tot = (n + nb - 1) / nb;
     if (nblks_tot <= 0 || nvc <= 0) return 0;
-    const int lcm = nprows / pv_gcd(nprows, npcols) * npcols;
+    const int lcm = nprows / std::gcd(nprows, npcols) * npcols;
     const int max_round_blks = (nblks_tot + lcm - 1) / lcm;
     return static_cast<std::size_t>(nb) * max_round_blks * nvc;
 }
@@ -108,7 +105,7 @@ VectorRedistPlan ptranspose_vectors_geometry(const DdlaHandle_t& handle,DdlaBack
     ddlaGetGridDims(handle,p.nprows,p.npcols);ddlaGetGridCoords(handle,p.myprow,p.mypcol);
     if(to_rows){std::swap(p.nprows,p.npcols);std::swap(p.myprow,p.mypcol);}
     p.nblks=n/nb+(n%nb!=0);
-    const long long lcm=static_cast<long long>(p.nprows/pv_gcd(p.nprows,p.npcols))*p.npcols;
+    const long long lcm=static_cast<long long>(p.nprows/std::gcd(p.nprows,p.npcols))*p.npcols;
     p.lcm=static_cast<int>(lcm);
     p.max_round_blocks=p.nblks/p.lcm+(p.nblks%p.lcm!=0);
     return p;
@@ -118,12 +115,10 @@ VectorRedistPlan ptranspose_vectors_check(const DdlaHandle_t& handle,DdlaBackend
 {
     const auto p=detail::agree_check(handle,"ptranspose_vectors",[&](detail::Agree& agreement)->VectorRedistPlan {
         agreement.mode("spectral operation",3105);
-    if(!handle)throw std::runtime_error("ptranspose_vectors: null handle");
-    if(ddlaGetBackend(handle)!=backend)
-        throw std::runtime_error("ptranspose_vectors: template backend does not match handle backend");
+    detail::require_backend(handle,backend,"ptranspose_vectors");
     if(n<0||nvc<0||nb<=0)throw std::invalid_argument("ptranspose_vectors: invalid dimensions");
     int pr=0,pc=0;ddlaGetGridDims(handle,pr,pc);
-    if(static_cast<long long>(pr/pv_gcd(pr,pc))*pc>std::numeric_limits<int>::max())
+    if(static_cast<long long>(pr/std::gcd(pr,pc))*pc>std::numeric_limits<int>::max())
         throw std::overflow_error("ptranspose_vectors: grid LCM overflow");
     const auto p=ptranspose_vectors_geometry(handle,backend,n,nvc,nb,ld_src,ld_dst,accumulate,to_rows);
     if(n&&nvc&&(ld_src<std::max(1,num_loc(n,nb,p.myprow,0,p.nprows))||
@@ -366,22 +361,8 @@ void preduce_add_vectors(
     template void spectral_impl::ptranspose_vectors_workspace_size<TYPE>(const DdlaHandle_t&,int,int,int,std::size_t*); \
     template void spectral_impl::preduce_add_vectors_workspace_size<TYPE>(const DdlaHandle_t&,int,int,int,int,std::size_t*)
 
-INSTANTIATE_PVECTOR_REDIST(DdlaBackend::CPU, float);
-INSTANTIATE_PVECTOR_REDIST(DdlaBackend::CPU, double);
-INSTANTIATE_PVECTOR_REDIST(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PVECTOR_REDIST(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PVECTOR_REDIST(DdlaBackend::GPU, float);
-INSTANTIATE_PVECTOR_REDIST(DdlaBackend::GPU, double);
-INSTANTIATE_PVECTOR_REDIST(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PVECTOR_REDIST(DdlaBackend::GPU, std::complex<double>);
-#endif
-
-INSTANTIATE_PVECTOR_REDIST_SIZE(float);
-INSTANTIATE_PVECTOR_REDIST_SIZE(double);
-INSTANTIATE_PVECTOR_REDIST_SIZE(std::complex<float>);
-INSTANTIATE_PVECTOR_REDIST_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PVECTOR_REDIST)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PVECTOR_REDIST_SIZE)
 
 #undef INSTANTIATE_PVECTOR_REDIST_SIZE
 #undef INSTANTIATE_PVECTOR_REDIST

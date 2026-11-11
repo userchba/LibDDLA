@@ -22,6 +22,8 @@
 #include "blas_enums.h"
 #include "ddla_connector.h"
 #include "ddla_stream.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 extern "C" {
 void strsm_(const char*, const char*, const char*, const char*, const int*, const int*,
@@ -130,20 +132,7 @@ void trsm_check(
     T* A, int lda,
     T* B, int ldb)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU trsm is not available in this LibDDLA build");
-
-    if (handle == nullptr) {
-        throw std::runtime_error("trsm: null handle");
-    }
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("trsm: template backend ") +
-            (Backend == DdlaBackend::CPU ? "CPU" : "GPU") +
-            " does not match handle backend " +
-            (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
-    }
+    detail::require_backend<Backend>(handle, "trsm");
 
     if constexpr (Backend == DdlaBackend::GPU) {
         (void)detail::to_side_mode(side);
@@ -218,33 +207,14 @@ void trsm(
         const DdlaHandle_t&, char, char, char, char, int, int,                 \
         const TYPE&, TYPE*, int, TYPE*, int)
 
-INSTANTIATE_TRSM(DdlaBackend::CPU, float);
-INSTANTIATE_TRSM(DdlaBackend::CPU, double);
-INSTANTIATE_TRSM(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_TRSM(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_TRSM(DdlaBackend::GPU, float);
-INSTANTIATE_TRSM(DdlaBackend::GPU, double);
-INSTANTIATE_TRSM(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_TRSM(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_TRSM)
 
 #undef INSTANTIATE_TRSM
 
 
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::trsm_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char side, char uplo, char trans, char diag, int m, int n, const TYPE& alpha, TYPE* A, int lda, TYPE* B, int ldb); \
-    template void blas_impl::trsm_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char side, char uplo, char trans, char diag, int m, int n, const TYPE& alpha, TYPE* A, int lda, TYPE* B, int ldb);
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#if DDLA_HAS_GPU
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
-#endif
+    template void blas_impl::trsm_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char side, char uplo, char trans, char diag, int m, int n, const TYPE& alpha, TYPE* A, int lda, TYPE* B, int ldb)
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_INSTANTIATE_PHASES)
 #undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

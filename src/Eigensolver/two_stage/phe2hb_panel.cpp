@@ -31,6 +31,7 @@
 #include "ddla_connector.h"
 #include "ddla_desc.h"
 #include "QR/pgeqrf_impl.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <complex>
@@ -115,22 +116,8 @@ bool phe2hb_cpu_qr_inplace(const DdlaHandle_t& h,int n,const int* desc,int nbw)
         const DdlaHandle_t&, TYPE*, const int*, int, int, int, bool, TYPE*, int, TYPE*, \
         void*, std::size_t, void*, std::size_t)
 
-INSTANTIATE_PHE2HB_PANEL_SIZE(float);
-INSTANTIATE_PHE2HB_PANEL_SIZE(double);
-INSTANTIATE_PHE2HB_PANEL_SIZE(std::complex<float>);
-INSTANTIATE_PHE2HB_PANEL_SIZE(std::complex<double>);
-
-INSTANTIATE_PHE2HB_PANEL(DdlaBackend::CPU, float);
-INSTANTIATE_PHE2HB_PANEL(DdlaBackend::CPU, double);
-INSTANTIATE_PHE2HB_PANEL(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PHE2HB_PANEL(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PHE2HB_PANEL(DdlaBackend::GPU, float);
-INSTANTIATE_PHE2HB_PANEL(DdlaBackend::GPU, double);
-INSTANTIATE_PHE2HB_PANEL(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PHE2HB_PANEL(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PHE2HB_PANEL_SIZE)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PHE2HB_PANEL)
 
 #undef INSTANTIATE_PHE2HB_PANEL
 #undef INSTANTIATE_PHE2HB_PANEL_SIZE

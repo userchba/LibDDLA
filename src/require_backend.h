@@ -15,21 +15,27 @@
 namespace ddla {
 namespace detail {
 
+// For the phases that take the backend as an argument instead of a template parameter.
+inline void require_backend(const DdlaHandle_t& handle, DdlaBackend backend, const char* routine_name)
+{
+    if (handle == nullptr) {
+        throw std::runtime_error(std::string(routine_name) + ": null handle");
+    }
+    if (ddlaGetBackend(handle) != backend) {
+        throw std::runtime_error(
+            std::string(routine_name) + ": template backend " +
+            (backend == DdlaBackend::CPU ? "CPU" : "GPU") +
+            " does not match the handle backend " +
+            (backend == DdlaBackend::CPU ? "GPU" : "CPU"));
+    }
+}
+
 template <DdlaBackend Backend>
 inline void require_backend(const DdlaHandle_t& handle, const char* routine_name)
 {
     static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                   "the GPU backend is not available in this LibDDLA build");
-    if (handle == nullptr) {
-        throw std::runtime_error(std::string(routine_name) + ": null handle");
-    }
-    if (ddlaGetBackend(handle) != Backend) {
-        throw std::runtime_error(
-            std::string(routine_name) + ": template backend " +
-            (Backend == DdlaBackend::CPU ? "CPU" : "GPU") +
-            " does not match the handle backend " +
-            (Backend == DdlaBackend::CPU ? "GPU" : "CPU"));
-    }
+    require_backend(handle, Backend, routine_name);
 }
 
 } // namespace detail

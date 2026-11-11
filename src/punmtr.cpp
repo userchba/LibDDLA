@@ -7,6 +7,7 @@
 #include "ddla_desc.h"
 #include "ddla_stream.h"
 #include "plan_util.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <cctype>
@@ -130,18 +131,11 @@ template<DdlaBackend B,class T>void punmtr(const DdlaHandle_t& h,char side,char 
     template void detail::punmtr_run<B,T>(const DdlaHandle_t&,char,char,char,int,int,int,int,int,int,int,bool,const T*,const T*,T*,T*,T*); \
     template void detail::punmtr_project_run<B,T>(const DdlaHandle_t&,char,int,int,int,int,int,int,const T*,const T*,T*); \
     template void detail::punmtr_update_run<B,T>(const DdlaHandle_t&,char,int,int,int,int,int,int,const T*,const T*,T*)
-#define DDLA_UNMTR_TYPES(B) \
-    DDLA_UNMTR_INSTANTIATE(B,float); DDLA_UNMTR_INSTANTIATE(B,double); \
-    DDLA_UNMTR_INSTANTIATE(B,std::complex<float>); DDLA_UNMTR_INSTANTIATE(B,std::complex<double>)
-DDLA_UNMTR_TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-DDLA_UNMTR_TYPES(DdlaBackend::GPU);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_UNMTR_INSTANTIATE)
 #define DDLA_UNMTR_SIZE(T) \
     template void detail::punmtr_check<T>(const DdlaHandle_t&,DdlaBackend,char,char,char,int,int,int,const T*,int,const T*,int,T*,const int*); \
     template void detail::punmtr_workspace_size<T>(const DdlaHandle_t&,char,int,int,int,int,bool,std::size_t*)
-DDLA_UNMTR_SIZE(float);DDLA_UNMTR_SIZE(double);DDLA_UNMTR_SIZE(std::complex<float>);DDLA_UNMTR_SIZE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(DDLA_UNMTR_SIZE)
 #undef DDLA_UNMTR_SIZE
-#undef DDLA_UNMTR_TYPES
 #undef DDLA_UNMTR_INSTANTIATE
 } // namespace ddla

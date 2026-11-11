@@ -8,6 +8,8 @@
 
 #include "ddla_connector.h"
 #include "ddla_stream.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 extern "C" {
 void sger_(const int*, const int*, const float*, const float*, const int*,
@@ -27,11 +29,6 @@ void zgeru_(const int*, const int*, const std::complex<double>*,
 namespace ddla {
 
 namespace {
-
-inline const char* geru_backend_name(DdlaBackend backend)
-{
-    return backend == DdlaBackend::CPU ? "CPU" : "GPU";
-}
 
 inline void cpu_geru(int m, int n, const float& alpha,
                      const float* x, int incx, const float* y, int incy,
@@ -111,18 +108,7 @@ template <DdlaBackend Backend, typename T>
 void geru_check(const DdlaHandle_t& handle, int m, int n, const T& alpha,
           const T* x, int incx, const T* y, int incy, T* A, int lda)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU geru is not available in this LibDDLA build");
-
-    if (handle == nullptr) {
-        throw std::runtime_error("geru: null handle");
-    }
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("geru: template backend ") + geru_backend_name(Backend) +
-            " does not match handle backend " + geru_backend_name(actual));
-    }
+    detail::require_backend<Backend>(handle, "geru");
     if (m <= 0 || n <= 0) return;
 
     if constexpr (Backend == DdlaBackend::CPU) {
@@ -159,33 +145,14 @@ void geru(const DdlaHandle_t& handle, int m, int n, const T& alpha,
         const DdlaHandle_t&, int, int, const TYPE&, const TYPE*, int,        \
         const TYPE*, int, TYPE*, int)
 
-INSTANTIATE_GERU(DdlaBackend::CPU, float);
-INSTANTIATE_GERU(DdlaBackend::CPU, double);
-INSTANTIATE_GERU(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_GERU(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_GERU(DdlaBackend::GPU, float);
-INSTANTIATE_GERU(DdlaBackend::GPU, double);
-INSTANTIATE_GERU(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_GERU(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_GERU)
 
 #undef INSTANTIATE_GERU
 
 
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::geru_check<BACKEND, TYPE>(const DdlaHandle_t& handle, int m, int n, const TYPE& alpha, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* A, int lda); \
-    template void blas_impl::geru_run<BACKEND, TYPE>(const DdlaHandle_t& handle, int m, int n, const TYPE& alpha, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* A, int lda);
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#if DDLA_HAS_GPU
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
-#endif
+    template void blas_impl::geru_run<BACKEND, TYPE>(const DdlaHandle_t& handle, int m, int n, const TYPE& alpha, const TYPE* x, int incx, const TYPE* y, int incy, TYPE* A, int lda)
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_INSTANTIATE_PHASES)
 #undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

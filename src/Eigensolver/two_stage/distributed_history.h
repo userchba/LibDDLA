@@ -3,6 +3,7 @@
 
 #include <ddla/ddla.h>
 #include "ddla_connector.h"
+#include "check_agree.h"
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -160,12 +161,7 @@ public:
                 throw std::overflow_error("distributed history: MPI byte count overflow");
             out=records(static_cast<std::size_t>(count));
         } catch(...) { failure=std::current_exception(); }
-        int ok=failure?0:1,all_ok=0;
-        MPI_CHECK(MPI_Allreduce(&ok,&all_ok,1,MPI_INT,MPI_MIN,comm));
-        if(!all_ok) {
-            if(failure) std::rethrow_exception(failure);
-            throw std::runtime_error("distributed history: fetch allocation failed on another rank");
-        }
+        detail::agree_failure(comm,failure,"distributed history: fetch allocation");
         const int owner=static_cast<int>(q%ranks);
         Header h{};
         std::int64_t wire[9]={};

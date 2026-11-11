@@ -3,6 +3,7 @@
 #include "ddla_stream.h"
 #include "helpers.h"
 #include "hb2st_householder_kernels.h"
+#include "instantiate.h"
 #include <complex>
 #include <cstddef>
 #include <stdexcept>
@@ -139,8 +140,7 @@ void hh_gpu_panel_run(const DdlaHandle_t& h, T* rows, int ld, int columns,
     DDLA_CHECK(ddlaGetLastError(h));
 }
 #define HH_INSTANTIATE(T) template void hh_gpu_panel_run<T>(const DdlaHandle_t&,T*,int,int,int,int,int,int,const T*)
-HH_INSTANTIATE(float); HH_INSTANTIATE(double);
-HH_INSTANTIATE(std::complex<float>); HH_INSTANTIATE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(HH_INSTANTIATE)
 #undef HH_INSTANTIATE
 } }
 
@@ -267,6 +267,6 @@ void hh_gpu_reduce_levels(const DdlaHandle_t& h,int n,int b,int ld,int first,int
     DDLA_CHECK(ddlaGetLastError(h));
 }
 #define REDUCE(T) template void hh_gpu_reduce_levels<T>(const DdlaHandle_t&,int,int,int,int,int,int,int,int,T*,T*,int*)
-REDUCE(float);REDUCE(double);REDUCE(std::complex<float>);REDUCE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(REDUCE)
 #undef REDUCE
 } }
