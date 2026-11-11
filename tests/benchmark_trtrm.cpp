@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include "trtrm_test_common.h"
 #include <chrono>
 #include <iomanip>
@@ -74,7 +75,7 @@ void bench(DdlaHandle_t h, int n, char uplo)
 }
 int main(int argc,char** argv)
 {
-    MPI_Init(&argc,&argv); int bad=0, np=0; MPI_Comm_size(MPI_COMM_WORLD,&np);
+    ddla_test_mpi_init(&argc,&argv); int bad=0, np=0; MPI_Comm_size(MPI_COMM_WORLD,&np);
     try {
         if(np!=1) throw std::runtime_error("benchmark_trtrm requires one MPI process");
         constexpr auto Backend=default_backend_v;

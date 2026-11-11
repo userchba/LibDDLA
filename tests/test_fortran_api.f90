@@ -29,6 +29,7 @@ program test_fortran_api
   type(c_ptr) :: h
   integer(c_int) :: st, be
   integer(c_int) :: desca(9), descb(9), descx(9), descm(9)
+  integer :: provided
   integer :: ierr, me, nproc
   integer(c_int) :: nprow, npcol, mypr, mypc
   integer(c_int) :: n, nrhs, mb, nb
@@ -48,7 +49,9 @@ program test_fortran_api
   real(c_double), parameter :: TOL = 1.0d-8
 
   nfail = 0
-  call mpi_init(ierr)
+  call MPI_Init_thread(MPI_THREAD_FUNNELED, provided, ierr)
+  if (ierr /= MPI_SUCCESS) stop 1
+  if (provided < MPI_THREAD_FUNNELED) call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
   call mpi_comm_rank(MPI_COMM_WORLD, me, ierr)
   call mpi_comm_size(MPI_COMM_WORLD, nproc, ierr)
 

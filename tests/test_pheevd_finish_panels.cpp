@@ -137,7 +137,7 @@ template <ddla::DdlaBackend Backend> void run_checks(const ddla::DdlaHandle_t& h
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
     try {
         check_widths();
         int P = 0; MPI_Comm_size(MPI_COMM_WORLD, &P);

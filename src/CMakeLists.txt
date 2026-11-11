@@ -53,6 +53,7 @@ target_sources(ddla_lib PRIVATE
     write_matrix.cpp
     random_generate.cpp
     matrix_transfer.cpp
+    matrix_transfer_kernels.cpp
     ddla_handle_t.cpp
     ddla_stream.cpp
     ddla_desc.cpp
@@ -60,9 +61,7 @@ target_sources(ddla_lib PRIVATE
     punmtr.cpp
 )
 if(DDLA_HAS_GPU)
-    # GPU copy kernels of ddla::matrix_transfer (matrix_transfer.cpp keeps the
-    # distributed driver and the CPU arm).
-    target_sources(ddla_lib PRIVATE matrix_transfer_kernels.cpp memory_tri_kernels.cpp)
+    target_sources(ddla_lib PRIVATE memory_tri_kernels.cpp)
 endif()
 if(DDLA_USE_CUDA)
     set_source_files_properties(matrix_transfer_kernels.cpp memory_tri_kernels.cpp TARGET_DIRECTORY ddla_lib

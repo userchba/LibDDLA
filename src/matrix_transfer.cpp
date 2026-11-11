@@ -87,43 +87,6 @@ int transfer_peer_blocks(const DdlaHandle_t& h, int m, int n, int ia, int ja, co
     return count;
 }
 
-// Copies between blocks and their entries of the root's window: scatter copies
-// window -> blocks, gather blocks -> window. Local rows inside one distribution
-// block are contiguous in the window too, so on the host each such run of a
-// column is one memcpy, column by column (tile-sized 2D copies touch many
-// columns at once and measured slower). On the GPU a copy call costs more than
-// the data it moves, so one kernel maps whole blocks.
-} // namespace
-
-template <DdlaBackend B, typename T>
-void map_blocks(const DdlaHandle_t& h, bool scatter, const Block<T>* blocks, int count,
-         const int* d, int ia, int ja, int m, int n, T* window, int ldw)
-{
-    if constexpr (B == DdlaBackend::GPU) {
-        map_gpu(h, scatter, blocks, count, d, ia, ja, m, n, window, ldw);
-    } else {
-        for (int k = 0; k < count; ++k) {
-            const Block<T>& b = blocks[k];
-            if (!b.p.rows || !b.p.cols) continue;
-            for (int c = 0; c < b.p.cols; ++c) {
-                const int wc = indxl2g(b.p.col0 + c, d[DDLA_NB_], b.p.pcol, d[DDLA_CSRC_], h->npcols_) - ja;
-                T* const column = b.data + std::size_t(c) * b.ld;
-                T* const wcolumn = window + std::size_t(wc) * ldw;
-                for (int r = 0; r < b.p.rows;) {
-                    const int lr = b.p.row0 + r;
-                    const int rows = std::min(b.p.rows - r, d[DDLA_MB_] - lr % d[DDLA_MB_]);
-                    T* const w = wcolumn + indxl2g(lr, d[DDLA_MB_], b.p.prow, d[DDLA_RSRC_], h->nprows_) - ia;
-                    if (scatter) std::memcpy(column + r, w, rows * sizeof(T));
-                    else std::memcpy(w, column + r, rows * sizeof(T));
-                    r += rows;
-                }
-            }
-        }
-    }
-}
-
-namespace {
-
 // The MPI paths of commSend/commRecv take an int count, so long messages go
 // in pieces. An empty message sends nothing.
 template <DdlaBackend B, typename T>
@@ -515,7 +478,6 @@ void scatter(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
 }
 
 #define INST(B, T) \
-    template void matrix_impl::map_blocks<B,T>(const DdlaHandle_t&,bool,const matrix_impl::Block<T>*,int,const int*,int,int,int,int,T*,int); \
     template void matrix_impl::gather_check<B,T>(const DdlaHandle_t&,int,int,const T*,int,int,const int*,int,T*,int); \
     template void matrix_impl::scatter_check<B,T>(const DdlaHandle_t&,int,int,T*,int,int,const int*,int,const T*,int); \
     template void matrix_impl::gather_run<B,T>(const DdlaHandle_t&,int,int,const T*,int,int,const int*,int,T*,int, \

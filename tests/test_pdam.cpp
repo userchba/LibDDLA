@@ -1,4 +1,4 @@
-#include <mpi.h>
+#include "mpi_test_init.h"
 #include <iostream>
 #include <vector>
 #include <complex>
@@ -82,7 +82,7 @@ void check_pdam(int n, const DdlaHandle_t& handle, const T1& alpha)
 
 int main(int argc, char* argv[])
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
 
     DdlaHandle_t handle = nullptr;
     ddlaInit(handle);

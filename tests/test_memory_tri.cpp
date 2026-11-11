@@ -313,7 +313,7 @@ void run(DdlaBackend backend, bool sanitizer)
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
     try {
         bool sanitizer = false;
         if (argc == 2 && std::string(argv[1]) == "--sanitizer") sanitizer = true;

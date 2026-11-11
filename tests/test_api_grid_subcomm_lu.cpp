@@ -33,7 +33,7 @@ void run_factorization_case(const ddla::DdlaHandle_t& handle,
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
 
     int world_rank = 0;
     int world_size = 0;

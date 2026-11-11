@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include <ddla/ddla.h>
 #include <ddla/ddla_vector.h>
 #include "comm_traits.h"
@@ -212,7 +213,7 @@ template<DdlaBackend B>void run(MPI_Comm comm,int pr,int pc)
 }
 int main(int argc,char** argv)
 {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         int size,rank;MPI_Comm_size(MPI_COMM_WORLD,&size);MPI_Comm_rank(MPI_COMM_WORLD,&rank);
         MPI_Comm reversed;MPI_Comm_split(MPI_COMM_WORLD,0,size-rank,&reversed);

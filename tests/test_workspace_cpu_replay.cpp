@@ -128,6 +128,6 @@ void run(MPI_Comm comm,int pr,int pc,char major){DdlaHandle_t h=nullptr;ddlaInit
 #undef CASE
     rows_case<double>(h,800,8,64,true,true);if(!h->myid)std::cout<<"workspace CPU replay PASS grid="<<pr<<"x"<<pc<<" major="<<major<<std::endl;ddlaDestroy(h);}
 }
-int main(int argc,char**argv){int provided=0;MPI_Init_thread(&argc,&argv,MPI_THREAD_FUNNELED,&provided);int size;MPI_Comm_size(MPI_COMM_WORLD,&size);TestOptions options;std::string error;if(!parse_options(argc,argv,size,options,error)){std::cerr<<error<<std::endl;MPI_Abort(MPI_COMM_WORLD,2);}for(auto grid:options.grids)for(char major:{'R','C'}){
+int main(int argc,char**argv){ddla_test_mpi_init(&argc, &argv);int size;MPI_Comm_size(MPI_COMM_WORLD,&size);TestOptions options;std::string error;if(!parse_options(argc,argv,size,options,error)){std::cerr<<error<<std::endl;MPI_Abort(MPI_COMM_WORLD,2);}for(auto grid:options.grids)for(char major:{'R','C'}){
     run(MPI_COMM_WORLD,grid.first,grid.second,major);
 }MPI_Finalize();return 0;}

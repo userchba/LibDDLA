@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include "matrix_test_common.h"
 #include <ddla/ddla_vector.h>
 #include <cctype>
@@ -409,7 +410,7 @@ void run(MPI_Comm comm,int pr,int pc,char major,bool local) {
 } // namespace
 
 int main(int argc,char** argv) {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         const std::string mode=argc>1 ? argv[1] : "all";
         if(mode!="all" && mode!="cpu" && mode!="gpu") throw std::runtime_error("usage: test_gemmt [all|cpu|gpu] [grid_rows grid_cols]");

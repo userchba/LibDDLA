@@ -291,7 +291,7 @@ int pick_iters(int n)
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
 
     int nprocs = 0;
     int rank = 0;

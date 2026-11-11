@@ -176,7 +176,7 @@ void run(MPI_Comm comm,int pr,int pc,char major,bool stress) {
 } // namespace
 
 int main(int argc,char** argv) {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         int np,rank; MPI_Comm_size(MPI_COMM_WORLD,&np); MPI_Comm_rank(MPI_COMM_WORLD,&rank);
         api_grid_test::TestOptions options; std::string error;

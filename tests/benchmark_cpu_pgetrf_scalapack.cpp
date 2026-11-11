@@ -28,7 +28,7 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-#include <mpi.h>
+#include "mpi_test_init.h"
 
 extern "C" {
 /* BLACS C interface */
@@ -355,7 +355,7 @@ static int run_type(const DdlaHandle_t& handle, int ictxt, int myid,
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
 
     int myid, nprocs;
     MPI_Comm_rank(MPI_COMM_WORLD, &myid);

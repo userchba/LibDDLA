@@ -74,6 +74,12 @@ template<DdlaBackend B,class T> void cases(const DdlaHandle_t& h,int size,int pr
         one<B,T>(h,31,27,3,5,rs,cs,5,7,19,3,root); // column fast path or arbitrary root
         one<B,T>(h,2,1,3,5,rs,cs,1,1,2,1,root);   // root may own nothing
     }
+    // Above the CPU parallel-copy threshold: partial rows/columns, then tall
+    // and wide single-axis windows. Keep exceptional values and padding exact.
+    one<B,T>(h,65547,137,127,31,pr-1,pc-1,3,4,65539,129,size-1);
+    const int long_size=int((32<<20)/sizeof(T))+17;
+    one<B,T>(h,long_size+8,5,127,3,pr-1,pc-1,3,2,long_size,1,size-1);
+    one<B,T>(h,3,long_size+6,2,257,pr-1,pc-1,2,2,1,long_size,size-1);
     int empty[DDLA_DLEN_];DDLA_CHECK(ddlaDescInit(empty,h,0,0,3,5,0,0));
     ddla::gather<B,T>(h,0,0,nullptr,1,1,empty,size-1,nullptr,-1);
     ddla::scatter<B,T>(h,0,0,nullptr,1,1,empty,size-1,nullptr,-1);
@@ -139,7 +145,7 @@ template<DdlaBackend B> void run(MPI_Comm comm,int pr,int pc,char major) {
 }
 }
 int main(int argc,char**argv) {
-    MPI_Init(&argc,&argv);int size;MPI_Comm_size(MPI_COMM_WORLD,&size);
+    ddla_test_mpi_init(&argc,&argv);int size;MPI_Comm_size(MPI_COMM_WORLD,&size);
     TestOptions opts;std::string error;
     if(!parse_options(argc,argv,size,opts,error)){std::cerr<<error<<std::endl;MPI_Abort(MPI_COMM_WORLD,2);}
     for(auto grid:opts.grids)for(char major:{'R','C'}) {

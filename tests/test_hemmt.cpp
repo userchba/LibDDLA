@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include "pblas_structured_test_common.h"
 #include "workspace_test_common.h"
 #include "BLAS/hemmt_impl.h"
@@ -199,7 +200,7 @@ template <DdlaBackend Backend> void run(int pr,int pc,bool large,char order) {
 }
 }
 int main(int argc,char** argv) {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         const std::string mode=argc>1?argv[1]:"all";int size=0;MPI_Comm_size(MPI_COMM_WORLD,&size);
         const int pr=argc>2?std::stoi(argv[2]):1,pc=argc>3?std::stoi(argv[3]):size;

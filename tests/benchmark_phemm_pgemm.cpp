@@ -1,6 +1,6 @@
 #include <ddla/ddla.h>
 #include "PBLAS/pgemm_impl.h"
-#include <mpi.h>
+#include "mpi_test_init.h"
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -170,7 +170,7 @@ void run(int pr,int pc,int nb,int reps,bool smoke) {
 } // namespace
 
 int main(int argc,char** argv) {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         if(argc!=7) throw std::runtime_error("usage: benchmark_phemm_pgemm cpu|gpu pr pc nb repeats smoke|standard");
         const int pr=std::stoi(argv[2]),pc=std::stoi(argv[3]),nb=std::stoi(argv[4]),reps=std::stoi(argv[5]);

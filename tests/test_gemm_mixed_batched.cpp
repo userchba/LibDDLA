@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include "pblas_structured_test_common.h"
 #include "workspace_test_common.h"
 #include "BLAS/blas_impl.h"
@@ -49,7 +50,7 @@ template <DdlaBackend Backend> void run(bool large) {
 }
 }
 int main(int argc,char** argv) {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         const std::string mode=argc>1?argv[1]:"all";
         const bool large=std::getenv("DDLA_MIXED_LARGE_TEST")!=nullptr;

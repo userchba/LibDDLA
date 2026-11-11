@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include "pgemm_test_common.h"
 #include <iomanip>
 
@@ -58,7 +59,7 @@ void run(int pr,int pc,int m,int n,int k,char ta,char tb,int nb,int reps,char ty
 }
 
 int main(int argc,char** argv) {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         if(argc!=12) throw std::runtime_error("usage: benchmark_pgemm_branches cpu|gpu pr pc m n k ta tb nb repeats d|z");
         const int pr=std::stoi(argv[2]),pc=std::stoi(argv[3]),m=std::stoi(argv[4]),n=std::stoi(argv[5]),k=std::stoi(argv[6]);

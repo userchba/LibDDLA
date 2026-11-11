@@ -54,17 +54,12 @@ void scatter_run(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
     void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes);
 
 // Local copy between distributed blocks and their global-order window.
-// Uses the same mapping as gather/scatter; no communication or allocation.
+// Uses the same mapping as gather/scatter; no communication or extra packing workspace.
+// Blocks describe disjoint window entries and have separate storage, which
+// must not overlap the window. CPU copies may use the handle's host threads.
 template <DdlaBackend B, typename T>
 void map_blocks(const DdlaHandle_t& h, bool scatter, const Block<T>* blocks, int count,
                 const int* desc, int ia, int ja, int m, int n, T* window, int ldw);
-
-// GPU copy between count blocks and their entries of the window
-// (matrix_transfer_kernels.cpp), one launch per batch of blocks. scatter
-// copies window -> blocks. The blocks must not overlap each other or the window.
-template <typename T>
-void map_gpu(const DdlaHandle_t& h, bool scatter, const Block<T>* blocks, int count,
-             const int* desc, int ia, int ja, int m, int n, T* window, int ldw);
 
 // Convert a real contiguous RowShare(k,P) slab to a block-cyclic output.
 // The k-by-k factor may be transposed; logical m-by-n extensions are zeroed.

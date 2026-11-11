@@ -103,7 +103,7 @@ void reject_unshared(DdlaHandle_t h) {
     topology->release();
 }
 int main(int argc,char**argv) {
-    int provided=0;MPI_Init_thread(&argc,&argv,MPI_THREAD_FUNNELED,&provided);
+    ddla_test_mpi_init(&argc, &argv);
     try {
         int P=0;MPI_Comm_size(MPI_COMM_WORLD,&P);DdlaHandle_t h=nullptr;ddlaInit(h,DdlaBackend::GPU);ddlaSet(h,MPI_COMM_WORLD,P>=4?2:1,P/(P>=4?2:1));
         const bool phase_only=argc>1&&std::string(argv[1])=="--phase-range-only";

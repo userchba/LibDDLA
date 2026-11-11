@@ -27,7 +27,7 @@ double hash01(std::uint64_t i,int tag)
 }
 int main(int argc,char** argv)
 {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         int rank=0,P=1;MPI_Comm_rank(MPI_COMM_WORLD,&rank);MPI_Comm_size(MPI_COMM_WORLD,&P);
         int kind=0,reps=3,check_max=6000;std::vector<int> sizes;

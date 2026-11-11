@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <mpi.h>
+#include "mpi_test_init.h"
 
 #include <cal.h>
 #include <cuComplex.h>
@@ -310,10 +310,10 @@ static double benchmark_one(int64_t n,
 
 int main(int argc, char** argv)
 {
-    const int mpi_init_status = MPI_Init(&argc, &argv);
+    const int mpi_init_status = ddla_test_mpi_init(&argc, &argv);
     if (mpi_init_status != MPI_SUCCESS)
     {
-        fprintf(stderr, "MPI_Init failed with status %d\n", mpi_init_status);
+        fprintf(stderr, "MPI_Init_thread failed with status %d\n", mpi_init_status);
         return EXIT_FAILURE;
     }
 

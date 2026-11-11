@@ -384,7 +384,7 @@ bool parse_test_options(int argc, char** argv, Options& options, std::string& er
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
 
     int nprocs = 0;
     int rank = 0;

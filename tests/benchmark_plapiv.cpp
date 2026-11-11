@@ -5,7 +5,7 @@
 #include <iostream>
 #include <vector>
 
-#include <mpi.h>
+#include "mpi_test_init.h"
 
 #include <ddla/ddla.h>
 #include "test_desc_helpers.h"
@@ -96,7 +96,7 @@ double benchmark_plapiv(char direc, char rowcol, int m, int n,
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
 
     int nprocs = 0;
     int rank = 0;

@@ -319,7 +319,7 @@ template <DdlaBackend B> void run(int pr, int pc, char major) {
 }
 } // namespace
 int main(int argc, char **argv) {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
     int ranks;
     MPI_Comm_size(MPI_COMM_WORLD, &ranks);
     TestOptions options;

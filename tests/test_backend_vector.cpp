@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include <ddla/ddla_vector.h>
 #include "workspace_test_common.h"
 
@@ -142,7 +143,7 @@ void check_handles(DdlaHandle_t first, DdlaHandle_t second)
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
     int rank = 0;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     int failures = 0;

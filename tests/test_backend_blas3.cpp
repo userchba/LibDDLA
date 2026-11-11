@@ -28,7 +28,7 @@
 #include <vector>
 #include <cstdio>
 
-#include <mpi.h>
+#include "mpi_test_init.h"
 
 #include <ddla/ddla.h>
 
@@ -834,7 +834,7 @@ int check_rejections()
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
     int rank = 0;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 

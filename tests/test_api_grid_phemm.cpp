@@ -285,7 +285,7 @@ void run(MPI_Comm comm,int pr,int pc,char major,bool quick,bool uninitialized,bo
 } // namespace
 
 int main(int argc,char** argv) {
-    MPI_Init(&argc,&argv);int size,rank;MPI_Comm_size(MPI_COMM_WORLD,&size);MPI_Comm_rank(MPI_COMM_WORLD,&rank);
+    ddla_test_mpi_init(&argc,&argv);int size,rank;MPI_Comm_size(MPI_COMM_WORLD,&size);MPI_Comm_rank(MPI_COMM_WORLD,&rank);
     bool quick=false,uninitialized=false,stress=false;int ac=1;
     for(int i=1;i<argc;++i) {
         const std::string arg=argv[i];

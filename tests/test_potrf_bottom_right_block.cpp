@@ -7,7 +7,7 @@
 #include <type_traits>
 #include <vector>
 
-#include <mpi.h>
+#include "mpi_test_init.h"
 
 #include "ddla_connector.h"
 #include "ddla_stream.h"
@@ -315,7 +315,7 @@ bool run_type(const DdlaHandle_t& handle)
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
 
     int nprocs = 0;
     MPI_Comm_size(MPI_COMM_WORLD, &nprocs);

@@ -1,7 +1,7 @@
 #include "ddla_connector.h"
 #include "pblas_structured_test_common.h"
 #include "ddla_stream.h"
-#include <mpi.h>
+#include "mpi_test_init.h"
 #include <cstring>
 #include <iomanip>
 #include <iostream>
@@ -297,7 +297,7 @@ void run(int pr,int pc,int nb,int repetitions,int warmup,const std::vector<int>&
 }
 }
 int main(int argc,char** argv) {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         if(argc<6 || argc>8)throw std::runtime_error("usage: benchmark_pblas_structured cpu|gpu PR PC NB REPEATS [SIZES_CSV=1024,2048,4096] [WARMUP=2]");
         int size;MPI_Comm_size(MPI_COMM_WORLD,&size);

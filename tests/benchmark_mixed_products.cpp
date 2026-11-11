@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include "pblas_structured_test_common.h"
 #include "BLAS/hemmt_impl.h"
 #include "PBLAS/pgemmt_impl.h"
@@ -117,7 +118,7 @@ template <DdlaBackend Backend,typename R> void run(int n,int pr,int pc,int reps)
 }
 }
 int main(int argc,char** argv) {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         const std::string backend=argc>1?argv[1]:"cpu";const int n=argc>2?std::stoi(argv[2]):1024;
         int size,rank;MPI_Comm_size(MPI_COMM_WORLD,&size);MPI_Comm_rank(MPI_COMM_WORLD,&rank);

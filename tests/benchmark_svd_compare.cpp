@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 // End-to-end thin SVD benchmark. Input reset is excluded; workspace query,
 // allocation, solve and completion are included for every implementation.
 // Usage: benchmark_svd_compare cpu|gpu PRxPC M N NB REPEATS d|z
@@ -306,7 +307,7 @@ int positive(const char* s){std::size_t end=0;int v=std::stoi(s,&end);if(v<=0||e
 
 int main(int argc,char**argv)
 {
-    MPI_Init(&argc,&argv);int rank=0,np=0;MPI_Comm_rank(MPI_COMM_WORLD,&rank);MPI_Comm_size(MPI_COMM_WORLD,&np);
+    ddla_test_mpi_init(&argc,&argv);int rank=0,np=0;MPI_Comm_rank(MPI_COMM_WORLD,&rank);MPI_Comm_size(MPI_COMM_WORLD,&np);
     try{
         if(argc!=9)throw std::runtime_error("usage: benchmark_svd_compare cpu|gpu PRxPC M N NB REPEATS d|z ddla|lapack|scalapack|cusolver");
         const std::string backend=argv[1],grid=argv[2],type=argv[7],mode=argv[8];

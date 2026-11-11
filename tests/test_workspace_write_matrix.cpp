@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include <ddla/ddla.h>
 #include <ddla/ddla_vector.h>
 #include "write_matrix.h"
@@ -107,7 +108,7 @@ template<DdlaBackend B>void backend(const std::string& filename)
 }
 int main(int argc,char**argv)
 {
-    MPI_Init(&argc,&argv);int rank=0;MPI_Comm_rank(MPI_COMM_WORLD,&rank);int failed=0;
+    ddla_test_mpi_init(&argc,&argv);int rank=0;MPI_Comm_rank(MPI_COMM_WORLD,&rank);int failed=0;
     const auto filename="/tmp/libddla_workspace_write_matrix_"+std::to_string(::getpid())+"_"+std::to_string(rank)+".txt";
     try{
         backend<DdlaBackend::CPU>(filename);

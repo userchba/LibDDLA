@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include "pgemm_test_common.h"
 #include "ddla_stream.h"
 
@@ -129,7 +130,7 @@ template <DdlaBackend Backend> void run(int pr,int pc) {
     DDLA_CHECK(ddlaDestroy(h));
 }
 int main(int argc,char**argv) {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         const std::string mode=argc>1?argv[1]:"all";
         if(mode!="all" && mode!="cpu" && mode!="gpu")throw std::runtime_error("invalid backend mode");

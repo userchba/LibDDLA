@@ -73,7 +73,7 @@ template<class T>void checked_policy(DdlaHandle_t h,int n,const char* band,char 
 #endif
 }
 int main(int argc,char**argv) {
-    int provided=0;MPI_Init_thread(&argc,&argv,MPI_THREAD_FUNNELED,&provided);
+    ddla_test_mpi_init(&argc, &argv);
     try {
         local_policy();
 #if DDLA_HAS_GPU
