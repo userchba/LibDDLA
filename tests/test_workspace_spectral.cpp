@@ -248,9 +248,12 @@ template<DdlaBackend B>void checker_cases(DdlaHandle_t h)
     upload(h,A.ptr,original);upload(h,C.ptr,original);
     const int faulty=h->nprocs-1;
     if constexpr(B==DdlaBackend::CPU) {
-        // Deliberately warm just one rank's cache. A checker must not let
-        // that rank skip the topology collective entered by its peers.
-        if(h->myid==0)(void)detail::host_omp_threads_for_node(1);
+        // A prior handle on a subset must not change participation in the
+        // world checker or its independently configured worker budget.
+        if(h->myid==0) {
+            DdlaHandle_t previous=nullptr;ddlaInit(previous,DdlaBackend::CPU);
+            ddlaSet(previous,MPI_COMM_SELF,'R');ddlaDestroy(previous);
+        }
     }
     const auto hp=pherm_complete_check(h,B,'U',7,A.ptr,da);
     require_close(h,"completion checker freezes a valid local thread budget",hp.threads>=1?0:1,0);

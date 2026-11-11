@@ -2,9 +2,16 @@ add_library(ddla_lib SHARED)
 
 
 set_target_properties(ddla_lib PROPERTIES
+  EXPORT_NAME ddla
   OUTPUT_NAME ${LIB_NAME}
   VERSION ${CMAKE_PROJECT_VERSION}
   SOVERSION ${CMAKE_PROJECT_SOVERSION_MAJOR}
+)
+target_compile_features(ddla_lib PUBLIC cxx_std_17)
+target_include_directories(ddla_lib PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 message(STATUS "Building ddla library version ${CMAKE_PROJECT_VERSION}")
 
@@ -103,7 +110,8 @@ endif()
 if(DDLA_USE_HIP)
     target_compile_definitions(ddla_lib PRIVATE DDLA_USE_HIP __HIP_PLATFORM_AMD__ HIPBLAS_V1)
     # Host C++ sources and dependent targets also include rocThrust headers.
-    target_compile_definitions(ddla_lib PUBLIC THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
+    target_compile_definitions(ddla_lib PUBLIC
+        $<BUILD_INTERFACE:THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP>)
 endif()
 if(NOT DDLA_HAS_GPU)
     target_compile_definitions(ddla_lib PRIVATE DDLA_USE_CPU)
@@ -125,7 +133,7 @@ if(DDLA_USE_CUDA)
     # include path from nvcc itself.  PUBLIC: test targets also include
     # ddla_connector.h from their own sources.
     target_include_directories(ddla_lib PUBLIC
-        ${CUDAToolkit_INCLUDE_DIRS}
+        "$<BUILD_INTERFACE:${CUDAToolkit_INCLUDE_DIRS}>"
     )
 endif()
 
@@ -137,7 +145,7 @@ if(DDLA_USE_HIP)
     # CPATH; the GitHub rocm container does not). PUBLIC: test targets also
     # include ddla_connector.h from their own sources.
     target_include_directories(ddla_lib PUBLIC
-        "${ROCM_PATH}/include"
+        $<BUILD_INTERFACE:${ROCM_PATH}/include>
     )
     target_link_directories(ddla_lib PUBLIC
         "${ROCM_PATH}/lib"
@@ -151,7 +159,7 @@ if(DDLA_USE_HIP)
 endif()
 target_link_libraries(ddla_lib PUBLIC ${math_libs})
 
-install(TARGETS ddla_lib
+install(TARGETS ddla_lib EXPORT LibDDLATargets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}

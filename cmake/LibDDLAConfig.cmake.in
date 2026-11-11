@@ -1,54 +1,16 @@
 @PACKAGE_INIT@
 
-# LibDDLA CMake package configuration.
-#
-# Provides the imported target ddla::ddla (the shared library) plus the
-# transitive MPI dependency required by the public headers.
-#
-# Usage:
-#   find_package(LibDDLA REQUIRED)
-#   target_link_libraries(myapp PRIVATE ddla::ddla)
-
+# The exported target carries the shared library's actual filename, SONAME,
+# include directories, C++ standard and link interface from its build target.
+# Public headers use MPI and the generated DDLA_HAS_GPU capability; consumers
+# do not need private DDLA_USE_* vendor or communication definitions.
 include(CMakeFindDependencyMacro)
-find_dependency(MPI)
-
-# The public headers (ddla_connector.h) require the same backend macro the
-# library was compiled with (DDLA_USE_CUDA / DDLA_USE_HIP / DDLA_USE_CPU),
-# otherwise local_backend_v is undefined in the consumer TU.
-# Propagate it as an INTERFACE compile definition so consumers compile out of
-# the box. In a dual (CPU+GPU) build the library itself is compiled with the
-# GPU macro, so GPU wins here as well.
-set(_ddla_interface_defs)
-if(@DDLA_USE_CUDA@)
-  list(APPEND _ddla_interface_defs DDLA_USE_CUDA)
-elseif(@DDLA_USE_HIP@)
-  list(APPEND _ddla_interface_defs DDLA_USE_HIP __HIP_PLATFORM_AMD__)
-else()
-  list(APPEND _ddla_interface_defs DDLA_USE_CPU)
+find_dependency(MPI COMPONENTS CXX)
+if(@DDLA_PACKAGE_NEEDS_CUDATOOLKIT@)
+    find_dependency(CUDAToolkit)
 endif()
-if(@DDLA_USE_CCL@)
-  list(APPEND _ddla_interface_defs DDLA_USE_CCL)
+if(@DDLA_PACKAGE_NEEDS_NCCL@)
+    find_dependency(NCCL)
 endif()
-if(@DDLA_USE_GPU_CPU_TUNNEL@)
-  list(APPEND _ddla_interface_defs DDLA_USE_GPU_CPU_TUNNEL)
-endif()
-if(@DDLA_USE_DEBUG@)
-  list(APPEND _ddla_interface_defs DDLA_USE_DEBUG)
-endif()
-
-# The CPU backend links against a concrete BLAS library (OpenBLAS in the
-# HPC3 build); propagate its full path so consumers can link libddla.so.
-set(_ddla_link_libs MPI::MPI_CXX)
-list(APPEND _ddla_link_libs "@DDLA_CPU_BLAS_LIBRARIES@")
-
-if(NOT TARGET ddla::ddla)
-  add_library(ddla::ddla SHARED IMPORTED)
-  set_target_properties(ddla::ddla PROPERTIES
-    IMPORTED_LOCATION "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/libddla.so"
-    INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@"
-    INTERFACE_LINK_LIBRARIES "${_ddla_link_libs}"
-    INTERFACE_COMPILE_DEFINITIONS "${_ddla_interface_defs}"
-  )
-endif()
-
+include("${CMAKE_CURRENT_LIST_DIR}/LibDDLATargets.cmake")
 check_required_components(LibDDLA)

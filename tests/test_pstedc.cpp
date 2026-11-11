@@ -58,6 +58,7 @@ void solve(DdlaHandle_t h,int n,int padding,const char* kind,bool borrowed,R sca
     const std::vector<R> initial(std::size_t(ld)*parentcols+2,sentinel);
     DeviceBuffer<R> output(h,initial.size());upload(h,output.ptr,initial);
     const auto plan=pstedc_check<R>(h,'V',n,d.data()+1,e.data()+1,w.data()+1,nr?output.ptr+1:nullptr,ld);
+    if(n>0)require_close(h,"pstedc plan retains configured two-worker budget",plan.rows.threads==2?0:1,0);
     if(h->nprocs>1&&n>1)
         require_close(h,"pstedc nontrivial multi-rank solve never has a full-size leaf",pstedc_leaves(n,plan.rows.leaf)>1&&plan.rows.leaf<n?0:1,0);
     if(h->nprocs>1&&n>1){
@@ -121,7 +122,7 @@ void solve(DdlaHandle_t h,int n,int padding,const char* kind,bool borrowed,R sca
 
 template<DdlaBackend B,class R>void cases(DdlaHandle_t h)
 {
-    Env leaf("DDLA_EIG_DC_LEAF","8");Env threads("DDLA_EIG_THREADS","2");
+    Env leaf("DDLA_EIG_DC_LEAF","8");
     for(int n:{0,1,2,3,7,33})solve<B,R>(h,n,3,"random",true);
     solve<B,R>(h,2,0,"random",true);solve<B,R>(h,7,0,"random",true);
     solve<B,R>(h,73,5,"random",true);solve<B,R>(h,73,3,"split",true);
@@ -165,7 +166,9 @@ template<DdlaBackend B,class R>void cases(DdlaHandle_t h)
 }
 template<DdlaBackend B>void run(int pr,int pc,char major)
 {
+    Env threads("DDLA_EIG_THREADS","2");
     DdlaHandle_t h=nullptr;ddlaInit(h,B);ddlaSet(h,MPI_COMM_WORLD,pr,pc,major);
+    require_close(h,"pstedc handle configures two host workers",h->host_threads==2?0:1,0);
     cases<B,float>(h);cases<B,double>(h);
     if(h->myid==0)std::cout<<"PSTEDC PASS backend="<<int(B)<<" grid="<<pr<<"x"<<pc<<" major="<<major<<std::endl;
     ddlaDestroy(h);

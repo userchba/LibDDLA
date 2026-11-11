@@ -58,9 +58,6 @@ inline DdlaBackend pheevd_gpu_householder_reduction(int n) noexcept
     return n >= 16384 ? DdlaBackend::GPU : DdlaBackend::CPU;
 }
 
-// Collective on the handle's grid for multi-rank CPU calls. The native chase
-// requires one shared-memory domain; the worker count is part of its selection policy.
-bool pheevd_cpu_householder_selected(const DdlaHandle_t&,int n,int nb,int nbw);
 } }
 
 namespace ddla { namespace detail {

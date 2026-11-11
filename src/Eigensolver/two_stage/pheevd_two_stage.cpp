@@ -59,39 +59,6 @@
 namespace ddla
 {
 
-namespace detail
-{
-bool pheevd_cpu_householder_selected(const DdlaHandle_t &h, int n, int nb, int nbw)
-{
-    int pr = 0, pc = 0;
-    ddlaGetGridDims(h, pr, pc);
-    const long long ranks = static_cast<long long>(pr) * pc;
-    const MPI_Comm comm = ddlaGetCommunicator(h);
-    MPI_Comm node = MPI_COMM_NULL;
-    MPI_CHECK(MPI_Comm_split_type(comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &node));
-    int local_size = 0;
-    MPI_CHECK(MPI_Comm_size(node, &local_size));
-    MPI_CHECK(MPI_Comm_free(&node));
-    // Every rank enters the topology collective before the noncollective
-    // cache query. A previous solve on a subset may have warmed only some
-    // process caches; host_omp_threads(comm) is not safe at this boundary.
-    const int workers = host_omp_threads_for_node(local_size);
-    bool legacy_requested = false;
-    if (const char *mode = std::getenv("DDLA_EIG_CPU_ACCUM"))
-        for (const char *known : {"1", "on", "force", "0", "off", "replay"})
-            legacy_requested = legacy_requested || std::strcmp(mode, known) == 0;
-    if (const char *team = std::getenv("DDLA_EIG_CHASE_TEAM_THREADS"))
-        legacy_requested = legacy_requested || *team != '\0';
-    int eligible = (local_size == ranks && !legacy_requested &&
-                    pheevd_cpu_householder_shape(n, nb, nbw, pr, pc, workers))
-                       ? 1
-                       : 0;
-    int agreed = 0;
-    MPI_CHECK(MPI_Allreduce(&eligible, &agreed, 1, MPI_INT, MPI_MIN, comm));
-    return agreed != 0;
-}
-} // namespace detail
-
 namespace spectral_impl
 {
 namespace
@@ -175,6 +142,7 @@ PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, ch
             }
 #endif
             p.backend = backend;
+            p.workers = h->host_threads;
             p.job = job;
             p.uplo = uplo;
             p.n = n;
@@ -212,7 +180,6 @@ PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, ch
     if (reduction_backend == DdlaBackend::GPU &&
         (p.band > 64 || topology.groups() != 1))
         throw std::invalid_argument("pheevd: GPU stage2 requires one node and band<=64");
-    p.workers = detail::host_omp_threads_for_node(topology.node_size());
     const int mode = pheevd_accum_mode();
     bool legacy_requested = mode != 0;
     if (const char *e = std::getenv("DDLA_EIG_CHASE_TEAM_THREADS"))

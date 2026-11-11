@@ -543,7 +543,7 @@ PstedcVectorPlan pstedc_policy(const DdlaHandle_t& h, int n)
     MPI_CHECK(MPI_Comm_split_type(h->comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &node));
     MPI_CHECK(MPI_Comm_size(node, &onnode));
     MPI_CHECK(MPI_Comm_free(&node));
-    p.threads = detail::host_omp_threads_for_node(onnode);
+    p.threads = h->host_threads;
     p.profile = eig_profile_enabled();
     const auto rows = (static_cast<unsigned long long>(n) + p.ranks - 1) / p.ranks;
     auto width =

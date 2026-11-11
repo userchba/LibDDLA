@@ -1330,7 +1330,7 @@ struct ChaseTeam {
     void* handoff_context=nullptr;void (*handoff_run)(void*,long long)=nullptr;
     bool has_handoff() const noexcept{return handoff_run||bool(handoff);}
     void publish(long long end) const {if(handoff_run)handoff_run(handoff_context,end);else handoff(end);}
-    bool frozen_policy=false,profile=false,prefault=false;
+    bool profile=false,prefault=false;
     long long batch_records = detail::DistributedHistory<T>::chunk_size;
     bool is_member = true;       // node_rank < participants
     int members = 1;             // participants * tpr
@@ -1421,16 +1421,16 @@ inline long long chase_ring_records(int n, int kd)
 }
 
 // Split the handle's communicator into node groups, allocate the shared
-// window (the node leader allocates, all ranks query), and let the leader
-// stage the gathered band.  Collective over handle->comm and node_comm.
+// window (the node leader allocates, all ranks query). reset_run stages
+// the gathered band after preparation.  Collective over handle->comm and node_comm.
 // Returns false when the team must not run (single-member node, kd <= 1,
 // window allocation failed) -- a node-uniform decision, so the node's ranks
 // stay consistent; the caller falls back to the replicated chase.
 template <typename T>
-bool chase_team_setup(const DdlaHandle_t& handle, int n, int kd,
-                      const T* h_band, ChaseTeam<T>& tm, long long ring_request = 0, bool ring_has_consumers = false,
-                      bool ring_elastic = false,const spectral_impl::Phb2stTeamPlan* frozen=nullptr)
+bool chase_team_setup(const DdlaHandle_t& handle,
+                      const spectral_impl::Phb2stTeamPlan& plan, ChaseTeam<T>& tm)
 {
+    const int n = plan.n, kd = plan.band;
     MPI_Comm split = MPI_COMM_NULL;
     if (MPI_Comm_split_type(handle->comm, MPI_COMM_TYPE_SHARED, 0,
                             MPI_INFO_NULL, &split) != MPI_SUCCESS)
@@ -1443,35 +1443,15 @@ bool chase_team_setup(const DdlaHandle_t& handle, int n, int kd,
     tm.myid = handle->myid;
     MPI_Comm_rank(split, &tm.node_rank);
     MPI_Comm_size(split, &tm.node_size);
-    // CPU handles with few ranks per node get a default team of about kCpuTeamMembers members: the
-    // chase has tens of microseconds of work per step, so a team pays off up to ~4 members (1.9x at 4,
-    // n=5000, 6 cpus) and is a loss at 40 (15.8 s vs 11 s serial at n=10000).  The GPU default stays 1
-    // (the extra member competes with the sink's consumer thread).  The members are OpenMP threads, so
-    // OMP_PROC_BIND/OMP_PLACES place them; an explicit DDLA_EIG_CHASE_TEAM_THREADS always wins.
-    if(frozen){tm.tpr=frozen->tpr;tm.participants=frozen->participants;tm.frozen_policy=true;tm.profile=frozen->profile;tm.prefault=frozen->prefault;
-        int mismatch=tm.node_rank!=frozen->node_rank||tm.node_size!=frozen->node_size;
-        MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&mismatch,1,MPI_INT,MPI_MAX,tm.node_comm));
-        if(mismatch){MPI_CHECK(MPI_Comm_free(&tm.node_comm));throw std::runtime_error("phb2st: prepared topology changed");}}
-    else {
-    int cpu_default = 1;
-    if (ddlaGetBackend(handle) == DdlaBackend::CPU) {
-        constexpr int kCpuTeamMembers = 4;
-        const int thr = detail::host_omp_threads(handle->comm);   // collective: every rank is here
-        cpu_default = std::max(1, std::min(thr, kCpuTeamMembers / std::max(1, tm.node_size)));
-    }
-    tm.tpr = chase_team_threads_per_rank(cpu_default);
-    // CPU handles with many ranks per node: only the first ~4/tpr ranks of the node run chase members, the others wait
-    // in the end-of-chase barrier and then read the result from the window like everybody else (a 40-member team took
-    // 15.8-17.7 s at n=10000, slower than the serial chase; 4 members take ~5 s).  DDLA_EIG_CHASE_TEAM_RANKS (>= 1)
-    // overrides the cap.  GPU handles keep every rank a member.
-    tm.participants = tm.node_size;
-    if (ddlaGetBackend(handle) == DdlaBackend::CPU) {
-        constexpr int kCpuTeamMembers = 4;
-        int cap = 0;
-        if (const char* e = std::getenv("DDLA_EIG_CHASE_TEAM_RANKS")) cap = std::atoi(e);
-        if (cap <= 0) cap = std::max(1, kCpuTeamMembers / tm.tpr);
-        tm.participants = std::min(tm.node_size, cap);
-    }
+    tm.tpr = plan.tpr;
+    tm.participants = plan.participants;
+    tm.profile = plan.profile;
+    tm.prefault = plan.prefault;
+    int mismatch = tm.node_rank != plan.node_rank || tm.node_size != plan.node_size;
+    MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &mismatch, 1, MPI_INT, MPI_MAX, tm.node_comm));
+    if (mismatch) {
+        MPI_CHECK(MPI_Comm_free(&tm.node_comm));
+        throw std::runtime_error("phb2st: prepared topology changed");
     }
     tm.is_member = tm.node_rank < tm.participants;
     tm.members = tm.participants * tm.tpr;
@@ -1483,7 +1463,7 @@ bool chase_team_setup(const DdlaHandle_t& handle, int n, int kd,
 
     // the record area: the whole stream (n^2/2 + 64 slots) or, when the caller asked for a ring and it is smaller, the
     // ring.  The leader's value defines the layout for the whole node.
-    long long ring_in[3] = {ring_request, ring_has_consumers ? 1 : 0, ring_elastic ? 1 : 0};
+    long long ring_in[3] = {plan.ring_request, plan.consumers ? 1 : 0, plan.elastic ? 1 : 0};
     MPI_Bcast(ring_in, 3, MPI_LONG_LONG, 0, tm.node_comm);
     const long long ring = ring_in[0];
     const long long full_capacity = static_cast<long long>(n) * n / 2 + 64;
@@ -1589,17 +1569,6 @@ bool chase_team_setup(const DdlaHandle_t& handle, int n, int kd,
             new (tm.consumed + q) ChaseTeamFlag();
         if (tm.guard != nullptr)
             for (std::size_t q = 0; q < kChaseRingGuardWords; ++q) tm.guard[q] = kChaseRingGuardPattern;
-        if(h_band){
-        std::memcpy(tm.band, h_band,
-                    static_cast<std::size_t>(kd + 1) * static_cast<std::size_t>(n) * sizeof(T));
-        if constexpr (!is_real_v<T>) {
-            using rt = typename real_type<T>::type;
-            const int kd1 = kd + 1;
-            for (int col = 0; col < n; ++col)
-                tm.band[static_cast<std::size_t>(col) * kd1 + kd] =
-                    T(tm.band[static_cast<std::size_t>(col) * kd1 + kd].real(), rt(0));
-        }
-        }
         for (int i = 0; i < n + 2; ++i) { tm.dc[i] = typename real_type<T>::type(0); tm.wc[i] = T(0); }
         tm.ctl->progress.v.store(0, std::memory_order_relaxed);
         tm.ctl->switch_pos.v.store(std::numeric_limits<long long>::max(), std::memory_order_relaxed);
@@ -1619,7 +1588,7 @@ bool chase_team_setup(const DdlaHandle_t& handle, int n, int kd,
     // DDLA_EIG_CHASE_TEAM_DEBUG_MAPS=1: print the window's /proc/self/maps
     // line -- identifies the backing (anonymous vs which file), which decides
     // where its page faults come from
-    if (frozen?frozen->debug_maps:std::getenv("DDLA_EIG_CHASE_TEAM_DEBUG_MAPS")!=nullptr) {
+    if (plan.debug_maps) {
         std::FILE* f = std::fopen("/proc/self/maps", "r");
         if (f != nullptr) {
             char line[512];
@@ -1712,7 +1681,7 @@ void host_chase_team(const ChaseTeam<T>& v, int n, int kd, int m)
     // team profile (DDLA_EIG_PROFILE=1): per-member cycle accumulators and
     // thread rusage deltas; when the switch is off this costs one
     // predictable branch per measurement point and records nothing
-    const bool prof = v.frozen_policy?v.profile:eig_profile_enabled();
+    const bool prof = v.profile;
     unsigned long long c_pass1 = 0, c_wait = 0, c_pass2 = 0,
                        c_tail_wait = 0, c_tail = 0, c_barrier = 0;
     long long prof_steps = 0;
@@ -2086,7 +2055,7 @@ template <typename T>
 void chase_team_run(ChaseTeam<T>& tm,int n,int kd,Hb2stSink<T>* sink=nullptr,detail::DcHostTeam* prepared_team=nullptr)
 {
     const int my_first = tm.node_rank * tm.tpr;
-    const bool prof = tm.frozen_policy?tm.profile:eig_profile_enabled();
+    const bool prof = tm.profile;
     struct rusage ru0 {}, ru1 {};
     if (prof) {
         // TSC calibration for the member lines
@@ -2096,7 +2065,7 @@ void chase_team_run(ChaseTeam<T>& tm,int n,int kd,Hb2stSink<T>* sink=nullptr,det
         tm.tsc_ghz = static_cast<double>(chase_cycles() - c0)
                      / ((MPI_Wtime() - t0) * 1e9);
     }
-    const bool prefault = tm.frozen_policy?tm.prefault:chase_team_prefault_enabled();
+    const bool prefault = tm.prefault;
     const double tp0 = MPI_Wtime();
     double touch_s = 0.0;
     long pf_minflt = 0, pf_majflt = 0;
@@ -2250,7 +2219,7 @@ public:
         if(bytes>static_cast<long double>(std::numeric_limits<MPI_Aint>::max()))
             throw std::overflow_error("phb2st: shared mapping exceeds MPI_Aint");
     }
-    void prepare(){if(wanted())available_=chase_team_setup<T>(h_,p_.n,p_.band,nullptr,team_,p_.ring_request,p_.consumers,p_.elastic,&p_);}
+    void prepare(){if(wanted())available_=chase_team_setup<T>(h_,p_,team_);}
     bool available() const noexcept override{return available_;}
     T* band_data() noexcept override{return available_?team_.band:nullptr;}
     detail::DcHostTeam& workers() noexcept override{return workers_;}
@@ -2492,7 +2461,7 @@ Phb2stPlan phb2st_policy(const DdlaHandle_t& h,const Phb2stBandPlan& b,const Phb
         p.local.record_capacity=static_cast<long long>(cap);}
     p.local.threads=p.local.bounded?1:chase_thread_count();
     auto& t=p.team;t.n=b.n;t.band=b.band;t.node_rank=topology.node_rank();t.node_size=topology.node_size();
-    const int workers=detail::host_omp_threads_for_node(t.node_size);
+    const int workers=h->host_threads;
     int default_threads=1;
     if(b.backend==DdlaBackend::CPU)
         default_threads=std::max(1,std::min(workers,4/std::max(1,t.node_size)));

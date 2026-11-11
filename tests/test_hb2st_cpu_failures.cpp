@@ -138,7 +138,7 @@ void sink_failure(const ddla::DdlaHandle_t& h,bool team,int groups,int rank,int 
     setenv("DDLA_EIG_CHASE_TEAM",team?"1":"0",1);
     ddla::detail::set_phb2st_test_partitions(groups);
     auto topology=ddla::spectral_impl::phb2st_topology_prepare(h);
-    const auto sp=ddla::detail::hb2st_accum_host_check(h,n,kd,ddla::detail::host_omp_threads(MPI_COMM_WORLD));
+    const auto sp=ddla::detail::hb2st_accum_host_check(h,n,kd,h->host_threads);
     int desc[9];
     require(ddla::ddlaDescInit(desc,h,n,n,8,8,0,0)==ddla::ddlaStatus_t::DDLA_STATUS_SUCCESS,"descriptor");
     auto a=api_grid_test::make_local<double>(h,desc,[](int i,int j) {

@@ -1,19 +1,10 @@
 #ifndef DDLA_HOST_THREADS_H
 #define DDLA_HOST_THREADS_H
 
-// ---------------------------------------------------------------------------
-// How many threads a CPU handle may use for its own host loops (geam, gemmBatched).
-//
-// COLLECTIVE over the communicator (one MPI_Comm_split_type), so it is called once, from ddlaSet, which is
-// collective over exactly that communicator already; the result lives in the handle (DdlaStream::host_threads).
-// A routine that only some ranks reach (a panel owner calling geam alone) therefore never has to communicate.
-//
-// The rule, shared with the CPU eigensolver kernels (README, "CPU threads"):
-//   OMP_NUM_THREADS >= 1  -> that many (an OpenMP-built BLAS follows the same variable);
-//   otherwise             -> the CPUs this process may run on divided by the ranks of its node, so an unset
-//                            environment never oversubscribes;
-//   DDLA_EIG_THREADS >= 1 -> overrides both.
-// ---------------------------------------------------------------------------
+// The host-loop and eigensolver budget is prepared collectively by ddlaSet
+// and retained by that handle. Disjoint rank bindings retain their CPUs;
+// ranks whose masks overlap share those CPUs. OMP_NUM_THREADS >= 1 wins
+// over the default, and DDLA_EIG_THREADS >= 1 wins over both (cap 512).
 
 #include <mpi.h>
 
@@ -51,30 +42,16 @@ inline int host_allowed_cpus()
     return hw > 0 ? static_cast<int>(hw) : 1;
 }
 
-inline int host_thread_budget(MPI_Comm comm)
-{
-    int ranks_on_node = 1;
-    MPI_Comm node = MPI_COMM_NULL;
-    if (MPI_Comm_split_type(comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &node) == MPI_SUCCESS) {
-        MPI_Comm_size(node, &ranks_on_node);
-        MPI_Comm_free(&node);
-    }
-    int t = 0;
-    if (const char* env = std::getenv("OMP_NUM_THREADS")) t = std::atoi(env);
-    if (t < 1) t = std::max(1, host_allowed_cpus() / std::max(1, ranks_on_node));
-    if (const char* env = std::getenv("DDLA_EIG_THREADS")) {
-        const int v = std::atoi(env);
-        if (v >= 1) t = v;
-    }
-    return std::max(1, std::min(t, 512));
-}
+// Collective over comm, with no process-global cache. Called at handle setup,
+// never from a kernel that only a subset of ranks may reach.
+int host_thread_budget(MPI_Comm comm);
 
 // ---------------------------------------------------------------------------
 // ScopedBlasThreads: hold the BLAS library's OWN thread count at `n` for the lifetime of the object, then put it back.
 //
 // A host loop that gives every OpenMP thread whole BLAS calls (gemmBatched: one matrix product per core) must keep the BLAS
 // from starting a thread pool of its own inside each call.  An OpenMP-built OpenBLAS already drops to one thread inside a parallel
-// region, but a pthreads-built one (the OpenBLAS the CPU builds link on hpc3) does not, and MKL needs the same call.  So, as LibRI
+// region, but a pthreads-built one does not, and MKL needs the same call.  So, as LibRI
 // does for MKL (mkl_get_max_threads / mkl_set_num_threads around its loop), the count is saved, set to `n`, and restored -- here by
 // the destructor, so an exception cannot leave the BLAS pinned.
 //

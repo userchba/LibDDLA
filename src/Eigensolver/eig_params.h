@@ -47,9 +47,10 @@ namespace ddla {
 //                           dense GEMM (the phase-1 port, kept for A/B).
 //                           Summation order differs between the two, so the
 //                           value is read on rank 0 and broadcast.
-//   DDLA_EIG_THREADS        CPU handles: host threads per rank for the library's own loops (stage-4 replay,
-//                           stage-3 divide and conquer).  Default: OMP_NUM_THREADS when set, otherwise the CPUs
-//                           the process may run on divided by the ranks of its node.  Read once, collectively.
+//   DDLA_EIG_THREADS        Host workers per handle, fixed by ddlaSet. A positive value overrides
+//                           OMP_NUM_THREADS. Without a positive override, each allowed CPU contributes
+//                           1 / the node-local ranks sharing it; floor the sum, minimum one.
+//                           Environment/affinity changes take effect after another ddlaSet.
 //   DDLA_EIG_REPLAY_TILE    CPU stage-4 replay column-tile width, 8|16|32|64.  Default: a 256-byte row
 //                           segment (32 real double, 16 complex double, 64 float).
 //   DDLA_EIG_REPLAY_WAVE    CPU stage-4 replay order.  0 = step by step (the recorded order); 1 (default) = regroup the

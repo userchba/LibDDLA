@@ -66,6 +66,7 @@ void solve_case(DdlaHandle_t h,char jobz,int n,bool split_e=false)
     pstedc<R>(h,jobz,n,refd.data()+1,refe.data()+1,refw.data()+1,jobz=='V'?reference.ptr+1:nullptr,ld,info);
     const auto expected=download(h,reference.ptr,initial.size());
     const auto plan=pstedc_check<R>(h,jobz,n,diag.data()+1,off.data()+1,values.data()+1,jobz=='V'?z.ptr+1:nullptr,ld);
+    if(n>0)require_close(h,"pstedc workspace plan retains configured two-worker budget",plan.rows.threads==2?0:1,0);
     MPI_Barrier(h->comm);bool local=true;
     if(h->myid==0){
         workspace_test::Scope scope(true);std::size_t backend=0,host=0;
@@ -171,7 +172,6 @@ template<DdlaBackend B,class R>void cases(DdlaHandle_t h)
                 h->nprocs>1 && plan.root_chunk>=n ? 1 : 0,0);
         }
     }
-    Env threads("DDLA_EIG_THREADS","2");
     {
         // Ranks without eigenvector rows may provide no output allocation.
         std::vector<R> d(1,R(2)),e(1,R(0)),w(1);
@@ -192,7 +192,9 @@ template<DdlaBackend B,class R>void cases(DdlaHandle_t h)
 }
 template<DdlaBackend B>void run(MPI_Comm comm,int pr,int pc,char major)
 {
+    Env threads("DDLA_EIG_THREADS","2");
     DdlaHandle_t h=nullptr;ddlaInit(h,B);ddlaSet(h,comm,pr,pc,major);
+    require_close(h,"pstedc workspace handle configures two host workers",h->host_threads==2?0:1,0);
     cases<B,float>(h);cases<B,double>(h);
     if(h->myid==0)std::cout<<"workspace pstedc PASS backend="<<int(B)<<" grid="<<pr<<"x"<<pc<<" major="<<major<<std::endl;
     ddlaDestroy(h);

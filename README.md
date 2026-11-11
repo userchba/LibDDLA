@@ -55,7 +55,9 @@ selection per handle at runtime. All functions live in the `ddla` namespace.
 - An **installable CMake package config** is provided: after
   `cmake --install` (or `make install`), downstream builds can use
   `find_package(LibDDLA)` and link `ddla::ddla`. The package config locates
-  MPI automatically and carries the include/library directories.
+  MPI automatically and exports the real library target, including its SONAME,
+  C++17 requirement and link dependencies. Private backend macros are not
+  required by public headers.
 
 ## Prerequisites
 
@@ -73,7 +75,7 @@ selection per handle at runtime. All functions live in the `ddla` namespace.
   complex dot products always call the library, with no scalar fallback.
 - **CUDA backend:** CUDA Toolkit with cuBLAS, cuSOLVER, cuRAND
 - **HIP backend:** ROCm / DTK with hipBLAS, hipSOLVER, hipRAND, and a CMake
-  version with first-class HIP language support
+  version ≥ 3.21 for first-class HIP language support
 - **Host LAPACK:** required by every source build.
   Use `-DDDLA_LAPACK_LIBRARY=/path/to/libopenblas.so` when it is not already
   supplied by `DDLA_CPU_BLAS_LIBRARY` or found by `find_package(LAPACK)`.
@@ -89,6 +91,14 @@ selected.
 The build system does **not** enforce a minimum CUDA/ROCm/NCCL version; use
 toolchains that are compatible with C++17, the GPU hardware, and the required
 math/solver libraries.
+
+CUDA dependency discovery prefers `CUDA::cublas`, `CUDA::cublasLt`,
+`CUDA::curand`, `CUDA::cusolver` and `CUDA::cudart` from `FindCUDAToolkit`.
+Explicit `CUBLAS_LIBRARY`, `CUBLASLT_LIBRARY`, `CURAND_LIBRARY`,
+`CUSOLVER_LIBRARY` and `CUDART_LIBRARY` paths override those selections.
+For a split NVHPC layout, `DDLA_CUDA_MATH_LIBRARY_DIR` can supply a fallback
+math-library directory; standard CUDA searches remain enabled. Configuration
+reports `DDLA_CUDA_LIBRARY_PROVIDERS` for inspection.
 
 ## Quick build
 
@@ -145,9 +155,14 @@ cover (the stage-4 rotation replay, the stage-3 divide-and-conquer loops, the st
 OpenMP threads (`DDLA_USE_OPENMP`, default ON when OpenMP is found; without it they run serially with
 identical results).  Rules for a threaded run:
 
-- Set `OMP_NUM_THREADS` to the threads per rank.  If it is unset each rank uses the CPUs it may run on
-  divided by the ranks of its node, so an unset environment never oversubscribes.  `DDLA_EIG_THREADS`
-  overrides both.
+- Set `OMP_NUM_THREADS` to the threads per rank; `DDLA_EIG_THREADS` takes precedence.
+  Without either positive override, each rank derives its budget from its allowed
+  CPU affinity: each CPU contributes one divided by the number of node-local
+  ranks allowed on that CPU, and the total is rounded down (minimum one).
+  Disjoint ten-core bindings retain ten workers per rank; four ranks sharing
+  forty allowed CPUs also receive ten. Partially overlapping masks share only
+  their common CPUs. The budget is fixed when `ddlaSet` sets up the handle;
+  later environment or affinity changes take effect after another `ddlaSet`.
 - On CPU handles, `pheevd` / `pstedc` temporarily set recognized BLAS thread controls to one while
   multiple LAPACK STEDC leaves run on multiple host threads. The previous count is restored after the
   joined leaf loop, before merge GEMMs, and when that loop exits by exception. One-leaf and one-host-thread
@@ -161,9 +176,8 @@ identical results).  Rules for a threaded run:
   (`--ntasks=P --cpus-per-task=T`) and use `mpirun -np P --map-by slot:PE=T --bind-to core`.
 - Results are bitwise independent of the thread count for the library's own loops; a threaded BLAS may
   change the last bits of the GEMM-based stages, as it does between BLAS builds.
-- `geam` (matrix add / transpose-copy) on a CPU handle runs its loop on the same budget of threads, fixed
-  when the handle is set up with `ddlaSet` (`OMP_NUM_THREADS`, else the CPUs divided among the node's ranks;
-  `DDLA_EIG_THREADS` overrides); its result is bitwise independent of the thread count.
+- `geam` (matrix add / transpose-copy) on a CPU handle uses the same per-handle
+  budget fixed by `ddlaSet`; its result is bitwise independent of the thread count.
 - `gemmBatched` on a CPU handle uses the same budget: each OpenMP thread computes whole matrix products, so
   every core handles one multiplication at a time.  For the duration of that loop the BLAS library's own
   thread count (OpenBLAS `openblas_set_num_threads`, MKL `mkl_set_num_threads`, found at run time) is held at
@@ -810,6 +824,14 @@ The [HPC3 validation guide](.ci/hpc3/README.md) describes the CPU and four-/six-
 jobs, their resource requests and result logs. The
 [KSSG validation guide](.ci/kssg/README.md) describes the manual HIP workflow.
 
+To check an installation independently of the source build, run
+`tests/install_consumer/check_install.sh <build-dir> <new-scratch-dir>` in the
+validation allocation. It installs and relocates a temporary prefix, then uses
+only `find_package(LibDDLA)` and `ddla::ddla` to build a separate C++ consumer.
+The one-rank smoke checks the installed capability header and CPU computation;
+a dual installation also links a GPU specialization without initializing a GPU.
+See [the consumer fixture](tests/install_consumer/README.md) for audit outputs.
+
 ## Repository layout
 
 ```
@@ -821,7 +843,7 @@ LibDDLA/
 │   ├── ddla_vector.h     Owned, uninitialized storage in the handle's memory space
 │   └── ddla_config.h.in  Generated config header template (ddla_config.h at build time)
 ├── src/                  Implementation (one routine per .cpp) and private headers,
-│                         grouped per algorithm: LU/ Cholesky/ QR/ Eigensolver/ SVD/
+│                         grouped per algorithm: LU/ Cholesky/ LDLT/ QR/ Eigensolver/ SVD/
 │                         BLAS/ PBLAS/ (plus gpu/ and vbatched/); shared
 │                         infrastructure (comm_traits.h, ddla_connector.h, ...) at root
 │   └── comm_traits.h     Unified communication layer (commSend/commRecv/
@@ -841,7 +863,8 @@ checks and execution helpers are declared in `src/BLAS/blas_impl.h` and
 `src/lapack_impl.h`; callers use the public functions in `<ddla/ddla.h>`.
 The stream implementation, workspace helpers and vendor aliases also stay
 private. Operation sources are grouped under `src/BLAS`, `src/PBLAS`,
-`src/LU`, `src/Cholesky`, `src/QR` and `src/vbatched`.
+`src/LU`, `src/Cholesky`, `src/LDLT`, `src/QR`, `src/Eigensolver`,
+`src/SVD` and `src/vbatched`.
 
 CPU support is unconditional. The public `DDLA_HAS_GPU` macro describes GPU
 availability. Private `DDLA_USE_CUDA` / `DDLA_USE_HIP` definitions select the
@@ -892,14 +915,27 @@ back-transform. Both drivers return eigenvectors in the caller's 2D output
 descriptor and reuse caller-sized workspace across these phases. No dense
 secular factor is replicated.
 
-The private GPU Householder route uses the native host band-to-tridiagonal
+The GPU Householder route supports native host or GPU band-to-tridiagonal
 reduction and a device back-transform. Reflector history is partitioned across
-MPI shared windows on one node; each GPU receives bounded panels, rather than
-a complete history. Narrow panels use register windows, and wider panels use
-cooperative warps. A GPU BLAS/WY reference handles other widths and supports
-direct comparisons. The public GPU two-stage default remains Givens.
-Run `test_pheevd_householder_gpu` for numerical and layout checks; the private
-`detail::pheevd_householder_gpu` entry selects the new route for benchmarks.
+MPI shared windows on one node; each GPU receives bounded panels. Narrow
+panels use register windows, wider panels use cooperative warps, and a GPU
+BLAS/WY reference supports comparisons.
+
+Automatic Householder selection is scoped to the measured CUDA SM70/NCCL
+profile: one node, eight ranks in a row-major 2×4 grid, one host worker per
+rank and block size 64, with full eigenvectors. Double defaults to
+Householder/band64 from n=4096; complex double from n=16384. Stage 2 uses CPU
+below n=16384 and GPU from n=16384. An explicit `DDLA_EIG_NBW=64` also
+permits complex double from n=8192; explicit band16 selects Householder only
+for double from n=32768. Other widths, scalar types, eigenvalues-only calls
+and GPU profiles keep their existing policy. These thresholds describe this
+scoped dispatch policy, not a performance guarantee on other hardware.
+
+`test_pheevd_householder_gpu` checks numerical and layout behavior. Private
+comparison entry points are the backend-templated `detail::pheevd_givens`,
+`detail::pheevd_householder` and `detail::pheevd_householder_stage4`, declared
+in `src/Eigensolver/two_stage/pheevd_impl.h`; the reduction-backend argument
+selects CPU or GPU stage 2 independently of matrix storage.
 
 Panel extraction and redistribution use `pgeadd` followed by row/column
 broadcasts. `pgeadd` accepts independent block sizes, owners, and submatrix

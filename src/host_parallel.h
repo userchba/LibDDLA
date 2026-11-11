@@ -5,15 +5,6 @@
 #include <memory>
 #include <type_traits>
 namespace ddla { namespace detail {
-/// Threads for this rank's host kernels.  Collective over comm the first time it is called
-/// (one MPI_Comm_split_type), cached afterwards.
-int host_omp_threads(MPI_Comm comm);
-
-// Reads/initializes the same worker cache without MPI. The caller supplies
-// its already computed shared-communicator size. This permits collective
-// preflight when ranks have different prior cache histories.
-int host_omp_threads_for_node(int ranks_on_node);
-
 /// f(lo, hi) over [0, n) in chunks of `grain` indices (dynamic schedule) on up to nthreads OpenMP threads,
 /// the caller included; nthreads <= 1 or a single chunk runs f inline.  f runs concurrently, so it may only
 /// write disjoint output ranges; it must not call MPI.  An exception thrown by f is rethrown here.
