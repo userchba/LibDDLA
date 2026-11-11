@@ -1,6 +1,7 @@
 // Shared host-only threading used by Hermitian completion and eigensolver kernels.
 #include "host_parallel.h"
 #include "host_threads.h"
+#include "ddla_connector.h"
 #include <algorithm>
 #include <cstdlib>
 #include <exception>
@@ -8,46 +9,42 @@
 #include <omp.h>
 #endif
 namespace ddla { namespace detail {
-namespace {
-int& host_worker_cache()
+int host_thread_budget(MPI_Comm comm)
 {
-    static int cached = 0;
-    return cached;
-}
-}
-
-int host_omp_threads_for_node(int ranks_on_node)
-{
-    (void)ranks_on_node;
-    int& cached=host_worker_cache();
-    if (cached > 0) return cached;
-    int t = 1;
-#ifdef _OPENMP
-    if (const char* env = std::getenv("OMP_NUM_THREADS")) {
-        const int v = std::atoi(env);
-        t = v >= 1 ? v : omp_get_max_threads();
-    } else {
-        t = std::max(1, host_allowed_cpus() / std::max(1, ranks_on_node));
+    MPI_Comm node = MPI_COMM_NULL;
+    MPI_CHECK(MPI_Comm_split_type(comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &node));
+    int ranks = 1;
+    MPI_CHECK(MPI_Comm_size(node, &ranks));
+    int budget = std::max(1, host_allowed_cpus() / std::max(1, ranks));
+#if defined(__linux__) && defined(CPU_COUNT)
+    cpu_set_t mask;
+    CPU_ZERO(&mask);
+    int valid = sched_getaffinity(0, sizeof(mask), &mask) == 0 && CPU_COUNT(&mask) > 0;
+    int all_valid = 0;
+    MPI_CHECK(MPI_Allreduce(&valid, &all_valid, 1, MPI_INT, MPI_MIN, node));
+    if (all_valid) {
+        // Each CPU contributes one worker divided among the ranks allowed
+        // to run on it. This also covers partially overlapping bindings.
+        int mine[CPU_SETSIZE]{}, sharing[CPU_SETSIZE]{};
+        for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu)
+            mine[cpu] = CPU_ISSET(cpu, &mask) ? 1 : 0;
+        MPI_CHECK(MPI_Allreduce(mine, sharing, CPU_SETSIZE, MPI_INT, MPI_SUM, node));
+        double available = 0;
+        for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu)
+            if (mine[cpu]) available += 1.0 / sharing[cpu];
+        budget = std::max(1, static_cast<int>(available + 1e-9));
     }
 #endif
+    MPI_CHECK(MPI_Comm_free(&node));
+    if (const char* env = std::getenv("OMP_NUM_THREADS")) {
+        const int requested = std::atoi(env);
+        if (requested >= 1) budget = requested;
+    }
     if (const char* env = std::getenv("DDLA_EIG_THREADS")) {
-        const int v = std::atoi(env);
-        if (v >= 1) t = v;
+        const int requested = std::atoi(env);
+        if (requested >= 1) budget = requested;
     }
-    cached = std::max(1, std::min(t, 512));
-    return cached;
-}
-
-int host_omp_threads(MPI_Comm comm)
-{
-    if(host_worker_cache()>0)return host_worker_cache();
-    int ranks_on_node=1;
-    MPI_Comm node=MPI_COMM_NULL;
-    if(MPI_Comm_split_type(comm,MPI_COMM_TYPE_SHARED,0,MPI_INFO_NULL,&node)==MPI_SUCCESS) {
-        MPI_Comm_size(node,&ranks_on_node);
-        MPI_Comm_free(&node);
-    }
-    return host_omp_threads_for_node(ranks_on_node);
+    return std::max(1, std::min(budget, 512));
 }
 
 void host_parallel_for(long long n,long long grain,int nthreads,void* context,

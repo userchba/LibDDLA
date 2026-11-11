@@ -18,7 +18,7 @@ struct CpuReplayPolicy
     int threads = 1, tile = 0, wave_mode = 1, row_block = 512, level_block = 32;
     bool waves = true, profile = false, stage_profile = false;
 };
-CpuReplayPolicy cpu_replay_policy(MPI_Comm);
+CpuReplayPolicy cpu_replay_policy(const DdlaHandle_t&);
 // Composition already holding node topology can freeze the same environment
 // policy with its resolved thread budget, without creating another communicator.
 CpuReplayPolicy cpu_replay_policy_for_threads(int);

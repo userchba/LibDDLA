@@ -326,12 +326,12 @@ HermitianPlan pherm_complete_check(const DdlaHandle_t& handle,DdlaBackend backen
     detail::descriptor_signature(signature+6,descA);
     detail::agree_signature(handle,"pherm_complete",signature);
     if(n>0&&backend==DdlaBackend::CPU) {
-        // Every rank enters topology discovery, even if only some worker
-        // caches were warmed by previous calls on a different communicator.
+        // Preserve collective topology discovery; the worker budget itself
+        // belongs to the handle and cannot be warmed by an unrelated call.
         MPI_Comm node=MPI_COMM_NULL;int ranks_on_node=1;
         MPI_CHECK(MPI_Comm_split_type(ddlaGetCommunicator(handle),MPI_COMM_TYPE_SHARED,0,MPI_INFO_NULL,&node));
         MPI_CHECK(MPI_Comm_size(node,&ranks_on_node));MPI_CHECK(MPI_Comm_free(&node));
-        p.threads=detail::host_omp_threads_for_node(ranks_on_node);
+        p.threads=handle->host_threads;
     }
     return p;
 }

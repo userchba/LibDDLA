@@ -5,9 +5,9 @@
 // compiled by the plain host C++ compiler in EVERY build (never by nvcc/hipcc), so OpenMP pragmas
 // work in dual and GPU builds too; callers in nvcc-compiled files only see these declarations.
 //
-// Threading contract: a CPU handle runs the kernels on host_omp_threads(comm) threads -- OMP_NUM_THREADS
-// when the user sets it (an OpenMP-built BLAS follows the same variable), otherwise the CPUs this process
-// may run on divided by the ranks of its node, so an unset environment never oversubscribes.
+// Threading contract: kernels copy the host budget frozen at ddlaSet -- OMP_NUM_THREADS
+// when the user sets it (an OpenMP-built BLAS follows the same variable), otherwise each CPU
+// in this rank's affinity mask is shared among the node ranks allowed to run on it.
 // DDLA_EIG_THREADS (>= 1) overrides both.  A build without OpenMP runs every kernel serially.
 
 #include <mpi.h>

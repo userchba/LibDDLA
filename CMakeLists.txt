@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.18)
 
 project(LibDDLA NONE)
 
@@ -17,6 +17,8 @@ set(CMAKE_PROJECT_SOVERSION_MAJOR "${libddla_major_version}")
 set(CMAKE_PROJECT_VERSION "${version}")
 set(LIB_NAME            "ddla")
 set(math_libs "")
+set(DDLA_PACKAGE_NEEDS_CUDATOOLKIT OFF)
+set(DDLA_PACKAGE_NEEDS_NCCL OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
@@ -77,6 +79,9 @@ message(STATUS "CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}")
 
 
 if(DDLA_USE_HIP)
+    if(CMAKE_VERSION VERSION_LESS 3.21)
+        message(FATAL_ERROR "DDLA_USE_HIP requires CMake 3.21 or newer (HIP language support)")
+    endif()
     enable_language(HIP)
     if(NOT DEFINED ROCM_PATH)
         if(DEFINED ENV{ROCM_PATH} AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
@@ -199,34 +204,18 @@ if(DDLA_USE_CUDA)
     enable_language(CUDA)
     message(STATUS "CMAKE_CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
 
-    # Use CUDAToolkit for the runtime and to locate the toolkit, then pick up
-    # the math libraries (cublas, curand, cusolver) from the HPC SDK math_libs tree.
+    # Prefer the toolkit's imported targets for standard CUDA installations.
+    # NVHPC releases may keep math libraries outside the CUDA toolkit; the
+    # helper retains explicit overrides and that split-layout fallback.
     find_package(CUDAToolkit REQUIRED)
-    get_filename_component(_cuda_lib_parent "${CUDAToolkit_LIBRARY_DIR}" DIRECTORY)
-    get_filename_component(_cuda_version "${_cuda_lib_parent}" NAME)
-    get_filename_component(_cuda_root "${_cuda_lib_parent}" DIRECTORY)
-    get_filename_component(_sdk_root "${_cuda_root}" DIRECTORY)
-    set(_math_lib_dir "${_sdk_root}/math_libs/${_cuda_version}/lib64")
-    message(STATUS "Looking for CUDA math libraries in: ${_math_lib_dir}")
-
-    find_library(CUBLAS_LIBRARY NAMES cublas PATHS ${_math_lib_dir} NO_DEFAULT_PATH REQUIRED)
-    find_library(CUBLASLT_LIBRARY NAMES cublasLt PATHS ${_math_lib_dir} NO_DEFAULT_PATH REQUIRED)
-    find_library(CURAND_LIBRARY NAMES curand PATHS ${_math_lib_dir} NO_DEFAULT_PATH REQUIRED)
-    find_library(CUSOLVER_LIBRARY NAMES cusolver PATHS ${_math_lib_dir} NO_DEFAULT_PATH REQUIRED)
-
-    list(APPEND math_libs
-        ${CUBLAS_LIBRARY}
-        ${CUBLASLT_LIBRARY}
-        ${CURAND_LIBRARY}
-        ${CUSOLVER_LIBRARY}
-        ${CUDAToolkit_LIBRARY_DIR}/libcudart.so
-    )
+    include(${PROJECT_SOURCE_DIR}/cmake/DDLACudaLibraries.cmake)
 
     if(DDLA_USE_CCL)
         # NCCL is not shipped with the CUDA toolkit in this HPC SDK layout;
         # try the CMake config first, otherwise fall back to the plain library.
         find_package(NCCL QUIET)
-        if(NCCL_FOUND)
+        if(TARGET NCCL::nccl)
+            set(DDLA_PACKAGE_NEEDS_NCCL ON)
             list(APPEND math_libs NCCL::nccl)
         else()
             message(STATUS "NCCL CMake package not found, linking -lnccl directly")
@@ -268,6 +257,11 @@ endif()
 # Installable CMake package config (find_package(LibDDLA))
 # ---------------------------------------------------------------------------
 include(CMakePackageConfigHelpers)
+install(EXPORT LibDDLATargets
+    FILE LibDDLATargets.cmake
+    NAMESPACE ddla::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibDDLA
+)
 set(LIBDDLA_CMAKE_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/LibDDLA")
 configure_package_config_file(
     ${PROJECT_SOURCE_DIR}/cmake/LibDDLAConfig.cmake.in

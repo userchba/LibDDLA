@@ -608,12 +608,9 @@ bool host_run_team(int nthreads,const std::function<void(int)>& function)
 
 CpuReplayPolicy cpu_replay_policy_for_threads(int threads)
 {return replay_policy_for_threads(threads);}
-CpuReplayPolicy cpu_replay_policy(MPI_Comm comm)
+CpuReplayPolicy cpu_replay_policy(const DdlaHandle_t& h)
 {
-    // All ranks enter the topology preflight, even if some previously warmed
-    // the legacy worker cache and others did not.
-    int ranks=1;MPI_Comm node=MPI_COMM_NULL;MPI_CHECK(MPI_Comm_split_type(comm,MPI_COMM_TYPE_SHARED,0,MPI_INFO_NULL,&node));
-    MPI_CHECK(MPI_Comm_size(node,&ranks));MPI_CHECK(MPI_Comm_free(&node));return replay_policy_for_threads(host_omp_threads_for_node(ranks));
+    return replay_policy_for_threads(h->host_threads);
 }
 
 namespace {
@@ -1055,7 +1052,7 @@ template<class T>Hb2stCpuReplayPlan hb2st_cpu_replay_check(const DdlaHandle_t& h
     });
     const long long metadata[2]={history.kd,history.total};long long history_min[2],history_max[2];MPI_CHECK(MPI_Allreduce(metadata,history_min,2,MPI_LONG_LONG,MPI_MIN,h->comm));MPI_CHECK(MPI_Allreduce(metadata,history_max,2,MPI_LONG_LONG,MPI_MAX,h->comm));
     if(history_min[0]!=history_max[0]||history_min[1]!=history_max[1])throw std::invalid_argument("CPU replay: inconsistent history geometry");
-    return hb2st_cpu_replay_geometry<T>(h,n,history.kd,history.total,ldy,phase_count,desc,cpu_replay_policy(h->comm),panel);
+    return hb2st_cpu_replay_geometry<T>(h,n,history.kd,history.total,ldy,phase_count,desc,cpu_replay_policy(h),panel);
 }
 template<class T>void hb2st_cpu_replay_workspace_size(const DdlaHandle_t& h,const Hb2stCpuReplayPlan& p,std::size_t* backend_bytes)
 {

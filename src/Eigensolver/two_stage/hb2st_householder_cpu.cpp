@@ -179,7 +179,7 @@ Hb2stHouseholderCpuPlan hh_cpu_check(const DdlaHandle_t& h,int n,int band,bool k
     const int input[5]={n,band,int(keep),int(options.stage2),int(options.stage4)};int lower[5]{},upper[5]{};
     MPI_CHECK(MPI_Allreduce(input,lower,5,MPI_INT,MPI_MIN,world));MPI_CHECK(MPI_Allreduce(input,upper,5,MPI_INT,MPI_MAX,world));
     detail::agree_local(world,"CPU Householder preparation",[&]{for(int i=0;i<5;++i)if(lower[i]!=upper[i])throw std::invalid_argument("CPU Householder dimensions differ across ranks");});
-    return hh_cpu_geometry(h,n,band,keep,options,host_omp_threads_for_node(h->nprocs));
+    return hh_cpu_geometry(h,n,band,keep,options,h->host_threads);
 }
 template<class T> void hh_cpu_reduce_workspace_size(const DdlaHandle_t&,int band,int chase_threads,std::size_t* backend_bytes)
 {*backend_bytes=3*padded_bytes<T>(std::size_t(std::max(band,1))*std::max(chase_threads,1));}

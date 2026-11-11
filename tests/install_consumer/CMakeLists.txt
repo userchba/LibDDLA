@@ -1,0 +1,35 @@
+cmake_minimum_required(VERSION 3.18)
+project(LibDDLAInstalledConsumer LANGUAGES CXX)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+find_package(LibDDLA REQUIRED CONFIG)
+
+# This is deliberately a separate project: no LibDDLA source/build include
+# directories or private connector definitions are inherited from its build.
+get_target_property(_ddla_includes ddla::ddla INTERFACE_INCLUDE_DIRECTORIES)
+get_target_property(_ddla_links ddla::ddla INTERFACE_LINK_LIBRARIES)
+get_target_property(_ddla_definitions ddla::ddla INTERFACE_COMPILE_DEFINITIONS)
+get_target_property(_ddla_features ddla::ddla INTERFACE_COMPILE_FEATURES)
+foreach(_ddla_include IN LISTS _ddla_includes)
+    foreach(_ddla_forbidden IN LISTS DDLA_FORBIDDEN_PREFIXES)
+        string(FIND "${_ddla_include}" "${_ddla_forbidden}/" _ddla_match)
+        if(_ddla_match EQUAL 0 OR _ddla_include STREQUAL _ddla_forbidden)
+            message(FATAL_ERROR "Installed target refers to forbidden prefix: ${_ddla_include}")
+        endif()
+    endforeach()
+endforeach()
+if(_ddla_definitions MATCHES "DDLA_USE_(CUDA|HIP|CPU|CCL|GPU_CPU_TUNNEL)")
+    message(FATAL_ERROR "Public target exports private connector definitions: ${_ddla_definitions}")
+endif()
+message(STATUS "ddla::ddla includes: ${_ddla_includes}")
+message(STATUS "ddla::ddla links: ${_ddla_links}")
+message(STATUS "ddla::ddla definitions: ${_ddla_definitions}")
+message(STATUS "ddla::ddla features: ${_ddla_features}")
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/installed-target.txt" CONTENT
+    "library=$<TARGET_FILE:ddla::ddla>\nincludes=${_ddla_includes}\nlinks=${_ddla_links}\ndefinitions=${_ddla_definitions}\nfeatures=${_ddla_features}\n")
+add_executable(installed_consumer main.cpp)
+target_link_libraries(installed_consumer PRIVATE ddla::ddla)
+enable_testing()
+find_package(MPI REQUIRED COMPONENTS CXX)
+add_test(NAME installed_consumer_mpi
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1
+            ${MPIEXEC_PREFLAGS} $<TARGET_FILE:installed_consumer> ${MPIEXEC_POSTFLAGS})

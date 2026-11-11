@@ -1786,8 +1786,10 @@ void gemmBatched(const DdlaHandle_t& handle, char transa, char transb, int m, in
  *   there) and, for beta == 0, aliases B to A.
  * - alpha == 1 with beta == 0 on a CPU handle moves the bits of A unchanged (-0.0, Inf and NaN survive).
  * - C may be A (or B) when that operand is 'N' and the leading dimensions agree.
- * - A CPU handle runs the loop on OpenMP threads: OMP_NUM_THREADS, else the CPUs this process may use divided
- *   by the ranks of its node; DDLA_EIG_THREADS overrides.  The result does not depend on the thread count.
+ * - A CPU handle uses its OpenMP budget fixed by ddlaSet: positive DDLA_EIG_THREADS overrides
+ *   OMP_NUM_THREADS; otherwise each allowed CPU contributes 1 / the node-local ranks sharing it,
+ *   with the sum rounded down to at least one. Environment/affinity changes require another ddlaSet.
+ *   The result does not depend on the thread count.
  * - Throws std::runtime_error for a null handle, a template backend that differs from the handle's, an
  *   invalid flag, a null A or C, a null B with beta != 0, or a leading dimension smaller than the row count of
  *   its matrix.  m <= 0 or n <= 0 returns without touching memory.
