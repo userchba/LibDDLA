@@ -192,7 +192,7 @@ void run_case(const ddla::DdlaHandle_t& handle, int n, int nb, int nbw, const st
         upload(handle, d_Z.ptr, h_I);
         check_ddla_sync(handle);
         int info5 = 0;
-        ddla::punmtr_he2hb(handle, trans, n, nbw, d_A.ptr, desc, d_tmat.ptr,
+        ddla::punmtr_he2hb<DdlaBackend::CPU>(handle, trans, n, nbw, d_A.ptr, desc, d_tmat.ptr,
                            d_Z.ptr, descZ, info5);
         check_ddla_sync(handle);
         if (info5 != 0) {
@@ -293,4 +293,8 @@ template<class T>void run_type(const DdlaHandle_t&h){
 }
 void check_body(const DdlaHandle_t&h,const Shape&){if(ddlaGetBackend(h)!=DdlaBackend::CPU)throw std::runtime_error("CPU upper test needs CPU");run_type<float>(h);run_type<double>(h);run_type<std::complex<float>>(h);run_type<std::complex<double>>(h);}
 } // namespace
-int main(int argc,char**argv){return run_grid_test(argc,argv,"test_phe2hb_upper_cpu",check_body);}
+int main(int argc, char** argv)
+{
+    return run_grid_test(argc, argv, "test_phe2hb_upper_cpu", check_body,
+                         DdlaBackend::CPU);
+}
