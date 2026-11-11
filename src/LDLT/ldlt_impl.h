@@ -42,7 +42,8 @@ void zhetrs_(const char *, const int *, const int *, const std::complex<double> 
 }
 namespace ddla {
 namespace ldlt_impl {
-inline void factor(std::integral_constant<bool, false>, char u, int n, float *a, int ld, int *piv,
+template <bool H>
+inline void factor(std::integral_constant<bool, H>, char u, int n, float *a, int ld, int *piv,
                    int &info) {
     float query;
     int lwork = -1;
@@ -53,26 +54,14 @@ inline void factor(std::integral_constant<bool, false>, char u, int n, float *a,
     std::vector<float> work(lwork);
     ssytrf_(&u, &n, a, &ld, piv, work.data(), &lwork, &info);
 }
-inline void solve(std::integral_constant<bool, false>, char u, int n, int nrhs, const float *a,
+template <bool H>
+inline void solve(std::integral_constant<bool, H>, char u, int n, int nrhs, const float *a,
                   int ld, const int *piv, float *b, int ldb, int &info) {
     ssytrs_(&u, &n, &nrhs, a, &ld, piv, b, &ldb, &info);
 }
-inline void factor(std::integral_constant<bool, true>, char u, int n, float *a, int ld, int *piv,
-                   int &info) {
-    float query;
-    int lwork = -1;
-    ssytrf_(&u, &n, a, &ld, piv, &query, &lwork, &info);
-    if (info)
-        return;
-    lwork = static_cast<int>(std::real(query));
-    std::vector<float> work(lwork);
-    ssytrf_(&u, &n, a, &ld, piv, work.data(), &lwork, &info);
-}
-inline void solve(std::integral_constant<bool, true>, char u, int n, int nrhs, const float *a,
-                  int ld, const int *piv, float *b, int ldb, int &info) {
-    ssytrs_(&u, &n, &nrhs, a, &ld, piv, b, &ldb, &info);
-}
-inline void factor(std::integral_constant<bool, false>, char u, int n, double *a, int ld, int *piv,
+
+template <bool H>
+inline void factor(std::integral_constant<bool, H>, char u, int n, double *a, int ld, int *piv,
                    int &info) {
     double query;
     int lwork = -1;
@@ -83,25 +72,12 @@ inline void factor(std::integral_constant<bool, false>, char u, int n, double *a
     std::vector<double> work(lwork);
     dsytrf_(&u, &n, a, &ld, piv, work.data(), &lwork, &info);
 }
-inline void solve(std::integral_constant<bool, false>, char u, int n, int nrhs, const double *a,
+template <bool H>
+inline void solve(std::integral_constant<bool, H>, char u, int n, int nrhs, const double *a,
                   int ld, const int *piv, double *b, int ldb, int &info) {
     dsytrs_(&u, &n, &nrhs, a, &ld, piv, b, &ldb, &info);
 }
-inline void factor(std::integral_constant<bool, true>, char u, int n, double *a, int ld, int *piv,
-                   int &info) {
-    double query;
-    int lwork = -1;
-    dsytrf_(&u, &n, a, &ld, piv, &query, &lwork, &info);
-    if (info)
-        return;
-    lwork = static_cast<int>(std::real(query));
-    std::vector<double> work(lwork);
-    dsytrf_(&u, &n, a, &ld, piv, work.data(), &lwork, &info);
-}
-inline void solve(std::integral_constant<bool, true>, char u, int n, int nrhs, const double *a,
-                  int ld, const int *piv, double *b, int ldb, int &info) {
-    dsytrs_(&u, &n, &nrhs, a, &ld, piv, b, &ldb, &info);
-}
+
 inline void factor(std::integral_constant<bool, false>, char u, int n, std::complex<float> *a,
                    int ld, int *piv, int &info) {
     std::complex<float> query;
@@ -253,6 +229,21 @@ void local(const DdlaHandle_t &h, char u, int n, int nrhs, T *a, int ld, int *pi
     u = local_check<B, Pivot, Solve, T>(h, u, n, nrhs, a, ld, piv, b, ldb, info);
     if (!n || (Solve && !nrhs))
         return;
+    if constexpr (B == DdlaBackend::CPU) {
+        // Validation and no-pivot diagonal checks precede RHS writes. LAPACK
+        // touches only the selected triangle; padding remains caller-owned.
+        if constexpr (Solve) {
+            if constexpr (Pivot) {
+                check_pivots(u, n, piv);
+                solve(std::bool_constant<H>{}, u, n, nrhs, a, ld, piv, b, ldb, info);
+            } else
+                solve_nopiv<H>(h, u, n, nrhs, a, ld, b, ldb, info);
+        } else if constexpr (Pivot)
+            factor(std::bool_constant<H>{}, u, n, a, ld, piv, info);
+        else
+            factor_nopiv<H>(h, u, n, a, ld, info);
+        return;
+    }
     std::vector<T> host_a(std::size_t(n) * n), host_b(Solve ? std::size_t(n) * nrhs : 0);
     DDLA_CHECK(ddlaMemcpyTri(h, u, n, n, host_a.data(), n, a, ld));
     DDLA_CHECK(ddlaSynchronize(h));
@@ -324,98 +315,13 @@ char distributed_check(const DdlaHandle_t &h, char u, int n, int nrhs, T *a, con
     info = 0;
     return u;
 }
-// Root-host baseline. All failure-prone setup is agreed before transfers.
-template <DdlaBackend B, bool H, bool Pivot, bool Solve, typename T>
-void distributed(const DdlaHandle_t &h, char u, int n, int nrhs, T *a, const int *da, int *piv,
-                 T *b, const int *db, int &info) {
-    u = distributed_check<B, H, Pivot, Solve, T>(h, u, n, nrhs, a, da, piv, b, db, info);
-    if (!n || (Solve && !nrhs)) return;
-    vector<T> window(h), rhs(h);
-    std::vector<T> ha, hb;
-    std::vector<int> root_piv;
-    detail::agree_check(h, "pldlt storage", [&](detail::Agree &) {
-        if (h->myid == 0) {
-            window.resize(std::size_t(n) * n);
-            ha.resize(std::size_t(n) * n);
-            if constexpr (Solve) {
-                rhs.resize(std::size_t(n) * nrhs);
-                hb.resize(std::size_t(n) * nrhs);
-            }
-            if constexpr (Pivot) {
-                root_piv.resize(n);
-                if constexpr (Solve)
-                    std::copy_n(piv, n, root_piv.data());
-            }
-        }
-    });
-    for (int j = 0; j < n; ++j) {
-        const int first = u == 'L' ? j : 0, count = u == 'L' ? n - j : j + 1;
-        gather<B, T>(h, count, 1, a, first + 1, j + 1, da, 0,
-                     h->myid == 0 ? window.data() + first + std::size_t(j) * n : nullptr, n);
-    }
-    detail::agree_check(h, "pldlt factor copy", [&](detail::Agree &) {
-        if (h->myid == 0) {
-            DDLA_CHECK(ddlaMemcpyTri(h, u, n, n, ha.data(), n, window.data(), n));
-            DDLA_CHECK(ddlaSynchronize(h));
-        }
-    });
-    if constexpr (Solve) {
-        gather<B, T>(h, n, nrhs, b, 1, 1, db, 0, rhs.data(), n);
-        detail::agree_check(h, "pldlt RHS copy", [&](detail::Agree &) {
-            if (h->myid == 0) {
-                DDLA_CHECK(ddlaMemcpy(h, hb.data(), rhs.data(), std::size_t(n) * nrhs * sizeof(T)));
-                DDLA_CHECK(ddlaSynchronize(h));
-            }
-        });
-    }
-    detail::agree_check(h, "pldlt arithmetic", [&](detail::Agree &) {
-        if (h->myid == 0) {
-            if constexpr (Solve) {
-                if constexpr (Pivot) {
-                    check_pivots(u, n, root_piv.data());
-                    solve(std::bool_constant<H>{}, u, n, nrhs, ha.data(), n, root_piv.data(),
-                          hb.data(), n, info);
-                } else
-                    solve_nopiv<H>(h, u, n, nrhs, ha.data(), n, hb.data(), n, info);
-            } else {
-                if constexpr (Pivot)
-                    factor(std::bool_constant<H>{}, u, n, ha.data(), n, root_piv.data(), info);
-                else
-                    factor_nopiv<H>(h, u, n, ha.data(), n, info);
-            }
-        }
-    });
-    MPI_CHECK(MPI_Bcast(&info, 1, MPI_INT, 0, h->comm));
-    if constexpr (Pivot && !Solve) {
-        if (h->myid == 0)
-            std::copy_n(root_piv.data(), n, piv);
-        MPI_CHECK(MPI_Bcast(piv, n, MPI_INT, 0, h->comm));
-    }
-    if constexpr (Solve) {
-        if (info)
-            return;
-        detail::agree_check(h, "pldlt RHS upload", [&](detail::Agree &) {
-            if (h->myid == 0) {
-                DDLA_CHECK(ddlaMemcpy(h, rhs.data(), hb.data(), std::size_t(n) * nrhs * sizeof(T)));
-                DDLA_CHECK(ddlaSynchronize(h));
-            }
-        });
-        scatter<B, T>(h, n, nrhs, b, 1, 1, db, 0, rhs.data(), n);
-    } else {
-        detail::agree_check(h, "pldlt factor upload", [&](detail::Agree &) {
-            if (h->myid == 0) {
-                DDLA_CHECK(ddlaMemcpyTri(h, u, n, n, window.data(), n, ha.data(), n));
-                DDLA_CHECK(ddlaSynchronize(h));
-            }
-        });
-        for (int j = 0; j < n; ++j) {
-            const int first = u == 'L' ? j : 0, count = u == 'L' ? n - j : j + 1;
-            scatter<B, T>(h, count, 1, a, first + 1, j + 1, da, 0,
-                          h->myid == 0 ? window.data() + first + std::size_t(j) * n : nullptr, n);
-        }
-    }
-}
+// Shared distributed SY/HE engines; definitions and instantiations live in
+// phetrf.cpp and phetrs.cpp so both public families use the same algorithm.
+template <DdlaBackend B, bool H, bool Pivot, class T>
+void distributed_factor(const DdlaHandle_t&, char, int, T*, const int*, int*, int&);
+template <DdlaBackend B, bool H, bool Pivot, class T>
+void distributed_solve(const DdlaHandle_t&, char, int, int, const T*, const int*, const int*,
+                       T*, const int*, int&);
 } // namespace ldlt_impl
 } // namespace ddla
-
-#endif // DDLA_LDLT_IMPL_H
+#endif

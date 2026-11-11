@@ -25,7 +25,7 @@ constexpr int panel_width = 64;
 // Gathered pivoting uses an extra matrix with the input's 2D ownership.
 // In-place pivoting and no-pivot update the caller's triangle. L/W contain at
 // most 64 replicated vectors; all remaining scratch is bounded by a panel.
-template <DdlaBackend B, bool Pivot, class T> class DistributedFactor
+template <DdlaBackend B, bool H, bool Pivot, class T> class DistributedFactor
 {
     const DdlaHandle_t& h;
     const bool gathered;
@@ -111,25 +111,28 @@ template <DdlaBackend B, bool Pivot, class T> class DistributedFactor
             return;
         if (gathered)
         {
-            copy_factor<B, T>(h, u, n, a, da, matrix, df, true);
+            copy_factor<B, H, T>(h, u, n, a, da, matrix, df, true);
             return;
         }
         // Hermitian interchanges must never propagate ignored imaginary diagonals.
-        for (int j = 0; j < n;)
+        if constexpr (H)
         {
-            const int width = std::min({capacity, n - j, df[DDLA_MB_] - j % df[DDLA_MB_],
-                                        df[DDLA_NB_] - j % df[DDLA_NB_]});
-            const int row = indx_g2l_r(df, h, j), col = indx_g2l_c(df, h, j);
-            if (row >= 0 && col >= 0)
-                blas_impl::real_diagonal<B, T>(h, width, matrix + row + std::size_t(col) * ld, ld);
-            j += width;
+            for (int j = 0; j < n;)
+            {
+                const int width = std::min({capacity, n - j, df[DDLA_MB_] - j % df[DDLA_MB_],
+                                            df[DDLA_NB_] - j % df[DDLA_NB_]});
+                const int row = indx_g2l_r(df, h, j), col = indx_g2l_c(df, h, j);
+                if (row >= 0 && col >= 0)
+                    blas_impl::real_diagonal<B, T>(h, width, matrix + row + std::size_t(col) * ld, ld);
+                j += width;
+            }
         }
     }
     void finish(char u, T* a, const int* da)
     {
         if constexpr (Pivot)
             if (gathered)
-                stored_update<B, T>(h, u, n, da, matrix, ld, a, da[DDLA_LLD_]);
+                stored_update<B, H, T>(h, u, n, da, matrix, ld, a, da[DDLA_LLD_]);
         DDLA_CHECK(ddlaSynchronize(h));
     }
 
@@ -185,7 +188,7 @@ template <DdlaBackend B, bool Pivot, class T> class DistributedFactor
                                       std::size_t(row_count) * sizeof(T)));
                 local_rectangle<B, T>(h, false, matrix, df, j, row_first, 1, row_count,
                                       mirror.data() + row_first, 1);
-                blas_impl::geam_run<B, T>(h, 'C', 'C', row_count, 1, T(1),
+                blas_impl::geam_run<B, T>(h, H ? 'C' : 'T', H ? 'C' : 'T', row_count, 1, T(1),
                                           mirror.data() + row_first, 1, T(0),
                                           mirror.data() + row_first, 1, raw + row_first, row_count);
             }
@@ -210,12 +213,12 @@ template <DdlaBackend B, bool Pivot, class T> class DistributedFactor
             {
                 if (q)
                 {
-                    blas_impl::geam_run<B, T>(h, 'C', 'C', q, 1, T(1), w.data() + j, n, T(0),
+                    blas_impl::geam_run<B, T>(h, H ? 'C' : 'T', H ? 'C' : 'T', q, 1, T(1), w.data() + j, n, T(0),
                                               w.data() + j, n, coeff.data(), q);
                     blas_impl::gemv_run<B, T>(h, 'N', count, q, T(-1), l.data() + first, n,
                                               coeff.data(), 1, T(1), target + first, 1);
                 }
-                column_record<B, T>(h, target, first, count, j, summary.data());
+                column_record<B, H, T>(h, target, first, count, j, summary.data());
                 DDLA_CHECK(ddlaMemcpy(h, &record, summary.data(), sizeof(record)));
                 DDLA_CHECK(ddlaSynchronize(h));
                 decide(record, control);
@@ -270,7 +273,7 @@ template <DdlaBackend B, bool Pivot, class T> class DistributedFactor
             read_column(hi, first, count, swap_b.data());
             commBcast<B>(h, CommScope::Grid, swap_a.data() + first, std::size_t(count), 0);
             commBcast<B>(h, CommScope::Grid, swap_b.data() + first, std::size_t(count), 0);
-            symmetric_interchange<B, T>(h, uplo, n, df, matrix, ld, first, count, lo, hi,
+            symmetric_interchange<B, H, T>(h, uplo, n, df, matrix, ld, first, count, lo, hi,
                                         swap_a.data(), swap_b.data());
         }
         if (q)
@@ -317,16 +320,16 @@ template <DdlaBackend B, bool Pivot, class T> class DistributedFactor
         {
             const int ldp = std::max(1, rows);
             if (Pivot && gathered)
-                blas_impl::gemm_run<B, T>(h, 'N', 'C', r1 - r0, cend - cstart, q, T(-1),
+                blas_impl::gemm_run<B, T>(h, 'N', H ? 'C' : 'T', r1 - r0, cend - cstart, q, T(-1),
                                           lr.data() + r0, ldp, wc.data() + cstart, ldw, T(1),
                                           matrix + r0 + std::size_t(cstart) * ld, ld);
             else
                 for (int col = cstart; col < cend; col += capacity)
                 {
                     const int width = std::min(capacity, cend - col);
-                    blas_impl::gemm_run<B, T>(h, 'N', 'C', r1 - r0, width, q, T(1), lr.data() + r0,
+                    blas_impl::gemm_run<B, T>(h, 'N', H ? 'C' : 'T', r1 - r0, width, q, T(1), lr.data() + r0,
                                               ldp, wc.data() + col, ldw, T(0), product.data(), ldp);
-                    stored_update<B, T>(h, uplo, n, df, product.data(), ldp, matrix, ld, r0, col,
+                    stored_update<B, H, T>(h, uplo, n, df, product.data(), ldp, matrix, ld, r0, col,
                                         r1 - r0, width, true);
                 }
         }
@@ -394,7 +397,7 @@ template <DdlaBackend B, bool Pivot, class T> class DistributedFactor
                 T* l1 = step == 2 ? l0 + n : nullptr;
                 T* w0 = w.data() + std::size_t(q) * n;
                 T* w1 = step == 2 ? w0 + n : nullptr;
-                normalize_columns<B, T>(h, first, count, current, neighbor, step, interchange, kp,
+                normalize_columns<B, H, T>(h, first, count, current, neighbor, step, interchange, kp,
                                         first_column, c1.data(), l0, l1, w0, w1);
                 local_panel(true, first, count, current, 1, l0);
                 piv[current] = step == 1 ? kp + 1 : -(kp + 1);
@@ -433,10 +436,10 @@ template <DdlaBackend B, bool Pivot, class T> class DistributedFactor
                 {
                     if (h->myid != owner)
                         return;
-                    blas_impl::diagonal_block_run<B, T>(h, u == 'U', true, b,
+                    blas_impl::diagonal_block_run<B, T>(h, u == 'U', H, b,
                                                         matrix + row + std::size_t(col) * ld, ld,
                                                         diagonal.data(), capacity);
-                    diagonal_factor<B, T>(h, u, b, diagonal.data(), capacity, status.data());
+                    diagonal_factor<B, H, T>(h, u, b, diagonal.data(), capacity, status.data());
                     DDLA_CHECK(ddlaMemcpy(h, &failure, status.data(), sizeof(failure)));
                     DDLA_CHECK(ddlaSynchronize(h));
                 });
@@ -447,7 +450,7 @@ template <DdlaBackend B, bool Pivot, class T> class DistributedFactor
             if (q)
             {
                 if (h->myid == owner)
-                    stored_update<B, T>(h, u, n, df, d, capacity, matrix, ld, row + inside,
+                    stored_update<B, H, T>(h, u, n, df, d, capacity, matrix, ld, row + inside,
                                         col + inside, q, q);
                 const int first = u == 'L' ? pivot_start + q : 0;
                 const int count = u == 'L' ? n - first : pivot_start;
@@ -459,7 +462,7 @@ template <DdlaBackend B, bool Pivot, class T> class DistributedFactor
                                         {
                                             if (h->myid == owner)
                                                 blas_impl::trsm_run<B, T>(
-                                                    h, 'R', u, 'C', 'U', count, q, T(1), d,
+                                                    h, 'R', u, H ? 'C' : 'T', 'U', count, q, T(1), d,
                                                     capacity, w.data() + first, n);
                                         });
                     // One packet contains the weighted panel and D's diagonal.
@@ -484,7 +487,7 @@ template <DdlaBackend B, bool Pivot, class T> class DistributedFactor
                                                 packet + std::size_t(count) * q, sizeof(T),
                                                 sizeof(T), q));
                     }
-                    diagonal_divide<B, T>(h, count, q, d, capacity, w.data() + first, n,
+                    diagonal_divide<B, H, T>(h, count, q, d, capacity, w.data() + first, n,
                                           l.data() + first, n);
                     local_panel(true, first, count, pivot_start, q, l.data());
                     trailing(u, first, count, q);
@@ -507,11 +510,11 @@ template <DdlaBackend B, bool Pivot, class T> class DistributedFactor
 };
 } // namespace
 
-template <DdlaBackend B, bool Pivot, class T>
+template <DdlaBackend B, bool H, bool Pivot, class T>
 void distributed_factor(const DdlaHandle_t& h, char u, int n, T* a, const int* da, int* piv,
                         int& info)
 {
-    u = distributed_check<B, true, Pivot, false, T>(h, u, n, 0, a, da, piv, nullptr, nullptr, info);
+    u = distributed_check<B, H, Pivot, false, T>(h, u, n, 0, a, da, piv, nullptr, nullptr, info);
     bool gathered = true;
     if constexpr (Pivot)
         detail::agree_check(h, "phetrf panel method",
@@ -541,7 +544,7 @@ void distributed_factor(const DdlaHandle_t& h, char u, int n, T* a, const int* d
                                 [&](detail::Agree&)
                                 {
                                     if (h->myid == root)
-                                        factor(std::true_type{}, u, n, a, da[DDLA_LLD_], piv, info);
+                                        factor(std::bool_constant<H>{}, u, n, a, da[DDLA_LLD_], piv, info);
                                 });
             MPI_CHECK(MPI_Bcast(&info, 1, MPI_INT, root, h->comm));
             MPI_CHECK(MPI_Bcast(piv, n, MPI_INT, root, h->comm));
@@ -549,7 +552,7 @@ void distributed_factor(const DdlaHandle_t& h, char u, int n, T* a, const int* d
         }
     }
 #if DDLA_HAS_GPU
-    if constexpr (B == DdlaBackend::GPU)
+    if constexpr (B == DdlaBackend::GPU && H)
     {
         if constexpr (!Pivot || std::is_same_v<T, std::complex<double>>)
             if (local || owned)
@@ -572,7 +575,7 @@ void distributed_factor(const DdlaHandle_t& h, char u, int n, T* a, const int* d
             }
     }
 #endif
-    std::optional<DistributedFactor<B, Pivot, T>> f;
+    std::optional<DistributedFactor<B, H, Pivot, T>> f;
     detail::agree_check(h, "phetrf distributed storage",
                         [&](detail::Agree&) { f.emplace(h, n, a, da, gathered, u); });
     f->initialize(u, a, da);
@@ -583,6 +586,11 @@ void distributed_factor(const DdlaHandle_t& h, char u, int n, T* a, const int* d
         f->unpivoted(u, info);
     f->finish(u, a, da);
 }
+#define ENGINE(B, T) \
+    template void distributed_factor<B, false, true, T>(const DdlaHandle_t&, char, int, T*, const int*, int*, int&); \
+    template void distributed_factor<B, false, false, T>(const DdlaHandle_t&, char, int, T*, const int*, int*, int&)
+DDLA_FOR_EACH_BACKEND_TYPE(ENGINE)
+#undef ENGINE
 } // namespace ddla::ldlt_impl
 
 namespace ddla
@@ -590,12 +598,12 @@ namespace ddla
 template <DdlaBackend B, class T>
 void phetrf(const DdlaHandle_t& h, char u, int n, T* a, const int* da, int* p, int& info)
 {
-    ldlt_impl::distributed_factor<B, true, T>(h, u, n, a, da, p, info);
+    ldlt_impl::distributed_factor<B, true, true, T>(h, u, n, a, da, p, info);
 }
 template <DdlaBackend B, class T>
 void phetrf_nopiv(const DdlaHandle_t& h, char u, int n, T* a, const int* da, int& info)
 {
-    ldlt_impl::distributed_factor<B, false, T>(h, u, n, a, da, nullptr, info);
+    ldlt_impl::distributed_factor<B, true, false, T>(h, u, n, a, da, nullptr, info);
 }
 
 #define INSTANCE(B, T)                                                                             \

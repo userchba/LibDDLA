@@ -25,7 +25,7 @@ double random_value(int i, int j, unsigned salt)
     x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
     return double((x ^ (x >> 31)) % 2001) / 1000 - 1;
 }
-template <class T> T entry(int i, int j, int n, int pattern)
+template <class T> T hermitian_entry(int i, int j, int n, int pattern)
 {
     if (pattern == 4)
         return T(0);
@@ -64,6 +64,30 @@ template <class T> T entry(int i, int j, int n, int pattern)
                      .02 * random_value(lo, hi, 71) / std::max(1, n) * (i < j ? 1 : -1));
 }
 
+// SY fixtures retain complex diagonal entries and use the same off-diagonal
+// value on both sides, so conjugating either the panel or solve is observable.
+template <class T, bool H = true> T entry(int i, int j, int n, int pattern)
+{
+    if constexpr (H || std::is_arithmetic_v<T>)
+        return hermitian_entry<T>(i, j, n, pattern);
+    else {
+        if (pattern == 8)
+            return i == j ? number<T>(0, 1 + .1 * (i % 7)) : T(0);
+        if (pattern == 7) {
+            const int k = n / 2;
+            if (i == j)
+                return i == k || i == k + 1 ? number<T>(.01, .02 * (i == k ? 1 : -2))
+                                             : number<T>(i & 1 ? -2 : 2, .13);
+            return (i == k && j == k + 1) || (j == k && i == k + 1)
+                       ? number<T>(1, .35) : T(0);
+        }
+        T value = hermitian_entry<T>(std::min(i, j), std::max(i, j), n, pattern);
+        if (i == j && value != T(0))
+            value.imag(.17 * (1 + i % 3));
+        return value;
+    }
+}
+
 struct Trace
 {
     using Reset = void (*)();
@@ -77,7 +101,7 @@ struct Trace
     Bytes host = reinterpret_cast<Bytes>(dlsym(RTLD_DEFAULT, "ddla_zhetrf_trace_host_largest"));
 };
 
-template <DdlaBackend Backend, class T>
+template <DdlaBackend Backend, class T, bool H = true>
 void test(DdlaHandle_t h, DdlaHandle_t cpu, const Trace &trace, int op, int n, int nrhs, char u,
           int pattern, int mb, int nb, bool shifted, int repeats, double scale = 1)
 {
@@ -98,9 +122,9 @@ void test(DdlaHandle_t h, DdlaHandle_t cpu, const Trace &trace, int op, int n, i
             const int gi = indx_l2g_r(da, h, i), gj = indx_l2g_c(da, h, j);
             if (gi < n && gj < n)
             {
-                T value = (u == 'L' ? gi >= gj : gi <= gj) ? entry<T>(gi, gj, n, pattern) * T(scale)
+                T value = (u == 'L' ? gi >= gj : gi <= gj) ? entry<T, H>(gi, gj, n, pattern) * T(scale)
                                                            : nan;
-                if constexpr (!std::is_arithmetic_v<T>)
+                if constexpr (H && !std::is_arithmetic_v<T>)
                     if (gi == gj)
                         value.imag(NAN);
                 input[i + std::size_t(j) * da[DDLA_LLD_]] = value;
@@ -121,12 +145,12 @@ void test(DdlaHandle_t h, DdlaHandle_t cpu, const Trace &trace, int op, int n, i
             full_rhs.resize(std::size_t(n) * nrhs);
             for (int j = 0; j < n; ++j)
                 for (int i = 0; i < n; ++i)
-                    original[i + std::size_t(j) * n] = entry<T>(i, j, n, pattern) * T(scale);
+                    original[i + std::size_t(j) * n] = entry<T, H>(i, j, n, pattern) * T(scale);
             dense = original;
             if (pivot)
-                ldlt_impl::factor(std::true_type{}, u, n, dense.data(), n, piv.data(), factor_info);
+                ldlt_impl::factor(std::bool_constant<H>{}, u, n, dense.data(), n, piv.data(), factor_info);
             else
-                ldlt_impl::factor_nopiv<true>(cpu, u, n, dense.data(), n, factor_info);
+                ldlt_impl::factor_nopiv<H>(cpu, u, n, dense.data(), n, factor_info);
             std::vector<T> exact(std::size_t(n) * nrhs);
             for (int j = 0; j < nrhs; ++j)
                 for (int i = 0; i < n; ++i)
@@ -175,14 +199,30 @@ void test(DdlaHandle_t h, DdlaHandle_t cpu, const Trace &trace, int op, int n, i
         if (trace.reset)
             trace.reset();
         const auto start = std::chrono::steady_clock::now();
-        if (op == 1)
-            phetrf<Backend, T>(h, u, n, a.data(), da, piv.data(), info);
-        if (op == 2)
-            phetrf_nopiv<Backend, T>(h, u, n, a.data(), da, info);
-        if (op == 3)
-            phetrs<Backend, T>(h, u, n, nrhs, a.data(), da, piv.data(), b.data(), db, info);
-        if (op == 4)
-            phetrs_nopiv<Backend, T>(h, u, n, nrhs, a.data(), da, b.data(), db, info);
+        if (op == 1) {
+            if constexpr (H)
+                phetrf<Backend, T>(h, u, n, a.data(), da, piv.data(), info);
+            else
+                psytrf<Backend, T>(h, u, n, a.data(), da, piv.data(), info);
+        }
+        if (op == 2) {
+            if constexpr (H)
+                phetrf_nopiv<Backend, T>(h, u, n, a.data(), da, info);
+            else
+                psytrf_nopiv<Backend, T>(h, u, n, a.data(), da, info);
+        }
+        if (op == 3) {
+            if constexpr (H)
+                phetrs<Backend, T>(h, u, n, nrhs, a.data(), da, piv.data(), b.data(), db, info);
+            else
+                psytrs<Backend, T>(h, u, n, nrhs, a.data(), da, piv.data(), b.data(), db, info);
+        }
+        if (op == 4) {
+            if constexpr (H)
+                phetrs_nopiv<Backend, T>(h, u, n, nrhs, a.data(), da, b.data(), db, info);
+            else
+                psytrs_nopiv<Backend, T>(h, u, n, nrhs, a.data(), da, b.data(), db, info);
+        }
         DDLA_CHECK(ddlaSynchronize(h));
         double elapsed =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
@@ -224,6 +264,10 @@ void test(DdlaHandle_t h, DdlaHandle_t cpu, const Trace &trace, int op, int n, i
                   << " expected=" << expected << std::endl;
         throw std::runtime_error("Wrong INFO");
     }
+    if constexpr (!H && !std::is_arithmetic_v<T>)
+        if (pivot && n == 127 && (pattern == 6 || pattern == 7) && !info && nrhs)
+            if (piv[63] >= 0 || piv[63] != piv[64])
+                throw std::runtime_error("Fixture lost its 2x2 pivot across column64");
     std::vector<T> result(input.size());
     DDLA_CHECK(ddlaMemcpy(h, result.data(), a.data(), result.size() * sizeof(T)));
     DDLA_CHECK(ddlaSynchronize(h));
@@ -281,14 +325,14 @@ void test(DdlaHandle_t h, DdlaHandle_t cpu, const Trace &trace, int op, int n, i
             DDLA_CHECK(ddlaSynchronize(h));
             for (int i = 0; i < n; ++i)
                 for (int k = 0; k < n; ++k)
-                    right[i] += entry<T>(i, k, n, pattern) * T(scale) *
+                    right[i] += entry<T, H>(i, k, n, pattern) * T(scale) *
                                 number<T>(1 + .01 * (k % 7), .05 * (k % 3));
             int status = 0;
             if (pivot)
-                ldlt_impl::solve(std::true_type{}, u, n, 1, dense.data(), n, piv.data(),
+                ldlt_impl::solve(std::bool_constant<H>{}, u, n, 1, dense.data(), n, piv.data(),
                                  right.data(), n, status);
             else
-                ldlt_impl::solve_nopiv<true>(cpu, u, n, 1, dense.data(), n, right.data(), n,
+                ldlt_impl::solve_nopiv<H>(cpu, u, n, 1, dense.data(), n, right.data(), n,
                                              status);
             if (status)
                 throw std::runtime_error("Independent solve rejected factors");
@@ -300,7 +344,7 @@ void test(DdlaHandle_t h, DdlaHandle_t cpu, const Trace &trace, int op, int n, i
     if (!std::isfinite(error) ||
         error > 300 * std::max(n, 1) * std::numeric_limits<typename real_type<T>::type>::epsilon())
     {
-        std::cerr << "ERROR backend=" << int(Backend) << " op=" << op << " n=" << n
+        std::cerr << "ERROR backend=" << int(Backend) << " symmetry=" << (H ? "he" : "sy") << " op=" << op << " n=" << n
                   << " rhs=" << nrhs << " u=" << u << " pattern=" << pattern << " error=" << error
                   << std::endl;
         throw std::runtime_error("Solution mismatch");
@@ -314,7 +358,7 @@ void test(DdlaHandle_t h, DdlaHandle_t cpu, const Trace &trace, int op, int n, i
             if (rank == h->myid)
                 std::cout
                     << std::setprecision(9) << "LDLT_SHARED_BENCH backend=" << int(Backend)
-                    << " op=" << op << " n=" << n << " nrhs=" << nrhs << " uplo=" << u << " mode="
+                    << " symmetry=" << (H ? "he" : "sy") << " op=" << op << " n=" << n << " nrhs=" << nrhs << " uplo=" << u << " mode="
                     << (std::getenv("DDLA_LDLT_PANEL") ? std::getenv("DDLA_LDLT_PANEL") : "default")
                     << " grid=" << h->nprows_ << "x" << h->npcols_ << " rank=" << rank
                     << " median_s=" << times[times.size() / 2] << " peak=" << peak
@@ -325,7 +369,7 @@ void test(DdlaHandle_t h, DdlaHandle_t cpu, const Trace &trace, int op, int n, i
         }
     }
     else if (!h->myid)
-        std::cout << "LDLT_SHARED_PASS backend=" << int(Backend) << " op=" << op
+        std::cout << "LDLT_SHARED_PASS backend=" << int(Backend) << " symmetry=" << (H ? "he" : "sy") << " op=" << op
                   << " bytes=" << sizeof(T) << " n=" << n << " rhs=" << nrhs << " u=" << u
                   << " pattern=" << pattern << " shifted=" << shifted << " error=" << error
                   << std::endl;
@@ -393,7 +437,7 @@ int main(int argc, char **argv)
         while (world % pr)
             --pr;
         int pc = world / pr, n = -1, nrhs = 3, op = -1, repeats = 0, pattern = -1;
-        std::string backend = "all", scalar = "z";
+        std::string backend = "all", scalar = "z", symmetry = "all";
         for (int i = 1; i < argc; ++i)
         {
             std::string s = argv[i];
@@ -418,6 +462,8 @@ int main(int argc, char **argv)
                 backend = argv[++i];
             else if (s == "--scalar")
                 scalar = argv[++i];
+            else if (s == "--symmetry")
+                symmetry = argv[++i];
             else if (s == "--pattern")
                 pattern = std::stoi(argv[++i]);
             else
@@ -435,51 +481,70 @@ int main(int argc, char **argv)
             auto typed = [&](auto tag)
             {
                 using T = decltype(tag);
-                if (n >= 0)
-                {
-                    for (int method : {1, 2, 3, 4})
-                        if (op < 0 || op == method)
+                auto family = [&](auto htag) {
+                    constexpr bool H = decltype(htag)::value;
+                    if (n >= 0)
+                    {
+                        for (int method : {1, 2, 3, 4})
+                            if (op < 0 || op == method)
+                                for (char u : {'L', 'U'})
+                                    test<B, T, H>(h, cpu, trace, method, n, nrhs, u,
+                                               pattern < 0 ? (method == 1 || method == 3 ? 1 : 0)
+                                                           : pattern,
+                                               64, 64, false, repeats);
+                    }
+                    else
+                    {
+                        for (int size : {0, 1, 2, 17, 65, 129})
                             for (char u : {'L', 'U'})
-                                test<B, T>(h, cpu, trace, method, n, nrhs, u,
-                                           pattern < 0 ? (method == 1 || method == 3 ? 1 : 0)
-                                                       : pattern,
-                                           64, 64, false, repeats);
-                }
-                else
-                {
-                    for (int size : {0, 1, 2, 17, 65, 129})
+                                for (int method : {1, 2, 3, 4})
+                                    test<B, T, H>(h, cpu, trace, method, size, 3, u,
+                                               method == 1 || method == 3 ? 2 : 0, 3, 4, true, 0);
+                        for (char u : {'L', 'U'})
+                            for (int layout : {0, 1})
+                            {
+                                for (int pat : {0, 1, 2, 3, 6})
+                                    test<B, T, H>(h, cpu, trace, 3, 127, 17, u, pat, 64, 64, layout, 0);
+                                for (int pat : {0, 4, 5, 6})
+                                    test<B, T, H>(h, cpu, trace, 4, 127, 17, u, pat, 64, 64, layout, 0);
+                                test<B, T, H>(h, cpu, trace, 1, 127, 3, u, 1, 64, 64, layout, 0);
+                                test<B, T, H>(h, cpu, trace, 1, 129, 3, u, 3, 16, 24, layout, 0);
+                                test<B, T, H>(h, cpu, trace, 2, 129, 3, u, 0, 16, 24, layout, 0);
+                            }
+                        for (char u : {'L', 'U'})
+                        {
+                            for (int method : {3, 4})
+                                test<B, T, H>(h, cpu, trace, method, 65, 0, u, 0, 3, 4, true, 0);
+                            for (int method : {1, 2})
+                                for (int pat : {4, 5, 6})
+                                    test<B, T, H>(h, cpu, trace, method, 129, 3, u, pat, 16, 24, true, 0);
+                        }
                         for (char u : {'L', 'U'})
                             for (int method : {1, 2, 3, 4})
-                                test<B, T>(h, cpu, trace, method, size, 3, u,
-                                           method == 1 || method == 3 ? 2 : 0, 3, 4, true, 0);
-                    for (char u : {'L', 'U'})
-                        for (int layout : {0, 1})
-                        {
-                            for (int pat : {0, 1, 2, 3, 6})
-                                test<B, T>(h, cpu, trace, 3, 127, 17, u, pat, 64, 64, layout, 0);
-                            for (int pat : {0, 4, 5, 6})
-                                test<B, T>(h, cpu, trace, 4, 127, 17, u, pat, 64, 64, layout, 0);
-                            test<B, T>(h, cpu, trace, 1, 127, 3, u, 1, 64, 64, layout, 0);
-                            test<B, T>(h, cpu, trace, 1, 129, 3, u, 3, 16, 24, layout, 0);
-                            test<B, T>(h, cpu, trace, 2, 129, 3, u, 0, 16, 24, layout, 0);
-                        }
-                    for (char u : {'L', 'U'})
-                    {
-                        for (int method : {3, 4})
-                            test<B, T>(h, cpu, trace, method, 65, 0, u, 0, 3, 4, true, 0);
-                        for (int method : {1, 2})
-                            for (int pat : {4, 5, 6})
-                                test<B, T>(h, cpu, trace, method, 129, 3, u, pat, 16, 24, true, 0);
+                                for (double scale :
+                                     {sizeof(typename real_type<T>::type) == 4 ? 1e-20 : 1e-100,
+                                      sizeof(typename real_type<T>::type) == 4 ? 1e20 : 1e100})
+                                    test<B, T, H>(h, cpu, trace, method, 65, 3, u,
+                                               method == 1 || method == 3 ? 1 : 0, 16, 24, true, 0,
+                                               scale);
                     }
-                    for (char u : {'L', 'U'})
-                        for (int method : {1, 2, 3, 4})
-                            for (double scale :
-                                 {sizeof(typename real_type<T>::type) == 4 ? 1e-20 : 1e-100,
-                                  sizeof(typename real_type<T>::type) == 4 ? 1e20 : 1e100})
-                                test<B, T>(h, cpu, trace, method, 65, 3, u,
-                                           method == 1 || method == 3 ? 1 : 0, 16, 24, true, 0,
-                                           scale);
-                }
+                    if constexpr (!H && !std::is_arithmetic_v<T>)
+                        if (n < 0)
+                            for (char u : {'L', 'U'})
+                                for (int method : {1, 3})
+                                    test<B, T, H>(h, cpu, trace, method, 127, 17, u, 7,
+                                                  16, 24, true, 0);
+                    if constexpr (!H && !std::is_arithmetic_v<T>)
+                        if (n < 0)
+                            for (char u : {'L', 'U'})
+                                for (int method : {1, 2, 3, 4})
+                                    test<B, T, H>(h, cpu, trace, method, 65, 3, u, 8,
+                                                  3, 4, true, 0);
+                };
+                if (symmetry == "all" || symmetry == "he")
+                    family(std::true_type{});
+                if (symmetry == "all" || symmetry == "sy")
+                    family(std::false_type{});
             };
             if (n < 0 || scalar == "s")
                 typed(float{});

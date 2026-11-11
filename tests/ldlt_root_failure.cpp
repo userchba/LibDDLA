@@ -6,7 +6,7 @@ namespace ddla::ldlt_impl
 {
 template <>
 void summarize_column<std::complex<double>>(const DdlaHandle_t&, std::complex<double>*, int, int,
-                                            int, PivotSummary*)
+                                            int, PivotSummary*, bool)
 {
     throw std::runtime_error("injected root pivot failure");
 }

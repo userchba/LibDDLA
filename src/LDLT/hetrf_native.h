@@ -12,20 +12,20 @@ struct PivotSummary
 static_assert(sizeof(PivotSummary) == 2 * sizeof(double) + 2 * sizeof(int));
 template <class T>
 void summarize_column(const DdlaHandle_t& h, T* column, int first, int count, int diagonal,
-                      PivotSummary* output);
+                      PivotSummary* output, bool hermitian = true);
 template <class T>
 void hetrf_nopiv_gpu(const DdlaHandle_t& h, char uplo, int n, T* a, int lda, int& info);
 // Hermitian 1x1 pivots: local leaves up to256, distributed diagonal tiles up
 // to64.
 template <class T>
-void nopiv_diagonal(const DdlaHandle_t& h, char uplo, int n, T* a, int lda, int* info);
+void nopiv_diagonal(const DdlaHandle_t& h, char uplo, int n, T* a, int lda, int* info, bool hermitian = true);
 template <class T>
 void divide_panel(const DdlaHandle_t& h, int rows, int cols, const T* diagonal, int ldd,
-                  const T* weighted, int ldw, T* factors, int ldf);
+                  const T* weighted, int ldw, T* factors, int ldf, bool hermitian = true);
 // Updated column(s) -> D and normalized factors, retaining weighted columns.
 template <class T>
 void pivot_columns(const DdlaHandle_t& h, int first, int count, int current, int neighbor, int step,
-                   int swap_a, int swap_b, const T* c0, const T* c1, T* l0, T* l1, T* w0, T* w1);
+                   int swap_a, int swap_b, const T* c0, const T* c1, T* l0, T* l1, T* w0, T* w1, bool hermitian = true);
 // Same ownership, possibly different pitches; only the caller's triangle
 // changes. Optional local offsets describe a bounded source tile. subtract
 // accumulates a GEMM tile into that triangle without reading the unused output
@@ -33,9 +33,9 @@ void pivot_columns(const DdlaHandle_t& h, int first, int count, int current, int
 template <class T>
 void copy_stored(const DdlaHandle_t& h, char uplo, int n, const int* desc, const T* src, int lds,
                  T* dst, int ldd, int row0 = 0, int col0 = 0, int rows = -1, int cols = -1,
-                 bool subtract = false);
+                 bool subtract = false, bool hermitian = true);
 template <class T>
 void swap_stored(const DdlaHandle_t& h, char u, int n, const int* d, T* a, int ld, int first,
-                 int count, int row_a, int row_b, const T* col_a, const T* col_b);
+                 int count, int row_a, int row_b, const T* col_a, const T* col_b, bool hermitian = true);
 } // namespace ddla::ldlt_impl
 #endif

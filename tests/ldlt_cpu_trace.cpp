@@ -146,9 +146,40 @@ TRACE_HETRS(ssytrs,float)
 TRACE_HETRS(dsytrs,double)
 TRACE_HETRS(chetrs,std::complex<float>)
 TRACE_HETRS(zhetrs,std::complex<double>)
+TRACE_HETRS(csytrs,std::complex<float>)
+TRACE_HETRS(zsytrs,std::complex<double>)
 TRACE_TRSM(strsm,float)
 TRACE_TRSM(dtrsm,double)
 TRACE_TRSM(ctrsm,std::complex<float>)
 TRACE_TRSM(ztrsm,std::complex<double>)
 #undef TRACE_HETRS
 #undef TRACE_TRSM
+
+#define TRACE_SYTRF(NAME, T) \
+extern "C" void NAME##_(const char* u, const int* n, T* a, const int* lda, int* piv, \
+                        T* work, const int* lwork, int* info) { \
+    using F = void (*)(const char*, const int*, T*, const int*, int*, T*, const int*, int*); \
+    static auto original = reinterpret_cast<F>(dlsym(RTLD_NEXT, #NAME "_")); \
+    if (!original) throw std::runtime_error("CPU SYTRF trace lookup failed"); \
+    ++calls; \
+    original(u, n, a, lda, piv, work, lwork, info); \
+}
+TRACE_SYTRF(csytrf, std::complex<float>)
+TRACE_SYTRF(zsytrf, std::complex<double>)
+#undef TRACE_SYTRF
+
+// Complex SY no-pivot's former host fallback uses SYRK rather than HERK.
+#define TRACE_SYRK(NAME, T) \
+extern "C" void NAME##_(const char* u, const char* trans, const int* n, const int* k, \
+                        const T* alpha, const T* a, const int* lda, const T* beta, \
+                        T* c, const int* ldc) { \
+    using F = void (*)(const char*, const char*, const int*, const int*, const T*, const T*, \
+                       const int*, const T*, T*, const int*); \
+    static auto original = reinterpret_cast<F>(dlsym(RTLD_NEXT, #NAME "_")); \
+    if (!original) throw std::runtime_error("CPU SYRK trace lookup failed"); \
+    ++calls; \
+    original(u, trans, n, k, alpha, a, lda, beta, c, ldc); \
+}
+TRACE_SYRK(csyrk, std::complex<float>)
+TRACE_SYRK(zsyrk, std::complex<double>)
+#undef TRACE_SYRK

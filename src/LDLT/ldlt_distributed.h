@@ -31,10 +31,10 @@ void local_rectangle(const DdlaHandle_t& h, bool scatter, T* a, const int* d, in
     matrix_impl::map_blocks<B, T>(h, scatter, &block, 1, d, i, j, m, n, window, ldw);
 }
 
-// Copy a stored triangle with bounded transport and optional Hermitian
+// Copy a stored triangle with bounded transport and optional SY/HE
 // completion. Supports unrelated block sizes and sources, without touching
 // the caller's unused triangle or gathering a dense matrix on one rank.
-template <DdlaBackend B, class T>
+template <DdlaBackend B, bool H, class T>
 void copy_factor(const DdlaHandle_t& h, char u, int n, const T* a, const int* da, T* f,
                  const int* df, bool complete)
 {
@@ -48,9 +48,9 @@ void copy_factor(const DdlaHandle_t& h, char u, int n, const T* a, const int* da
                         [&](detail::Agree&)
                         {
                             std::size_t db = 0, hb = 0;
-                            for (char trans : {'N', 'C'})
+                            for (char trans : {'N', H ? 'C' : 'T'})
                             {
-                                if (trans == 'C' && !complete)
+                                if (trans != 'N' && !complete)
                                     continue;
                                 std::size_t d = 0, s = 0;
                                 pgeadd_impl::pgeadd_workspace_size<T>(
@@ -73,7 +73,7 @@ void copy_factor(const DdlaHandle_t& h, char u, int n, const T* a, const int* da
         {
             if (r >= 0 && c >= 0)
                 blas_impl::diagonal_block_run<B, T>(
-                    h, u == 'U', true, b, a + r + std::size_t(c) * da[DDLA_LLD_], da[DDLA_LLD_],
+                    h, u == 'U', H, b, a + r + std::size_t(c) * da[DDLA_LLD_], da[DDLA_LLD_],
                     f + r + std::size_t(c) * df[DDLA_LLD_], df[DDLA_LLD_]);
         }
         else
@@ -81,7 +81,7 @@ void copy_factor(const DdlaHandle_t& h, char u, int n, const T* a, const int* da
             const int owner = h->rc_to_rank(indxg2p(j, da[DDLA_MB_], da[DDLA_RSRC_], h->nprows_),
                                             indxg2p(j, da[DDLA_NB_], da[DDLA_CSRC_], h->npcols_));
             if (h->myid == owner)
-                blas_impl::diagonal_block_run<B, T>(h, u == 'U', true, b,
+                blas_impl::diagonal_block_run<B, T>(h, u == 'U', H, b,
                                                     a + r + std::size_t(c) * da[DDLA_LLD_],
                                                     da[DDLA_LLD_], diagonal.data(), b);
             commBcast<B>(h, CommScope::Grid, diagonal.data(), std::size_t(b) * b, owner);
@@ -94,7 +94,7 @@ void copy_factor(const DdlaHandle_t& h, char u, int n, const T* a, const int* da
                                           T(0), nullptr, 1, 1, da, f, first + 1, j + 1, df,
                                           device.data(), device.size(), host.data(), host.size());
             if (complete)
-                pgeadd_impl::pgeadd_run<B, T>(h, 'C', 'N', b, count, T(1), a, first + 1, j + 1, da,
+                pgeadd_impl::pgeadd_run<B, T>(h, H ? 'C' : 'T', 'N', b, count, T(1), a, first + 1, j + 1, da,
                                               T(0), nullptr, 1, 1, da, f, j + 1, first + 1, df,
                                               device.data(), device.size(), host.data(),
                                               host.size());
@@ -105,18 +105,18 @@ void copy_factor(const DdlaHandle_t& h, char u, int n, const T* a, const int* da
 }
 // Backend leaves shared by the two distributed panel methods. CPU uses
 // existing BLAS/no-pivot kernels; GPU keeps the native fused operations.
-template <DdlaBackend B, class T>
+template <DdlaBackend B, bool H, class T>
 void diagonal_factor(const DdlaHandle_t& h, char u, int n, T* a, int ld, int* info)
 {
     if constexpr (B == DdlaBackend::CPU)
     {
         *info = 0;
-        factor_nopiv<true>(h, u, n, a, ld, *info);
+        factor_nopiv<H>(h, u, n, a, ld, *info);
     }
     else
-        nopiv_diagonal(h, u, n, a, ld, info);
+        nopiv_diagonal(h, u, n, a, ld, info, H);
 }
-template <DdlaBackend B, class T>
+template <DdlaBackend B, bool H, class T>
 void diagonal_divide(const DdlaHandle_t& h, int rows, int cols, const T* d, int ldd, const T* w,
                      int ldw, T* l, int ldl)
 {
@@ -124,20 +124,22 @@ void diagonal_divide(const DdlaHandle_t& h, int rows, int cols, const T* d, int 
     {
         DDLA_CHECK(ddlaMemcpy2D(h, l, std::size_t(ldl) * sizeof(T), w, std::size_t(ldw) * sizeof(T),
                                 std::size_t(rows) * sizeof(T), cols));
-        for (int j = 0; j < cols; ++j)
-            blas_impl::scal_run<B, T>(h, rows, T(1) / T(std::real(d[j + std::size_t(j) * ldd])),
-                                      l + std::size_t(j) * ldl, 1);
+        for (int j = 0; j < cols; ++j) {
+            const T value = d[j + std::size_t(j) * ldd];
+            const T pivot = H ? T(std::real(value)) : value;
+            blas_impl::scal_run<B, T>(h, rows, T(1) / pivot, l + std::size_t(j) * ldl, 1);
+        }
     }
     else
-        divide_panel(h, rows, cols, d, ldd, w, ldw, l, ldl);
+        divide_panel(h, rows, cols, d, ldd, w, ldw, l, ldl, H);
 }
-template <DdlaBackend B, class T>
+template <DdlaBackend B, bool H, class T>
 void column_record(const DdlaHandle_t& h, T* c, int first, int count, int diagonal,
                    PivotSummary* result)
 {
     if constexpr (B == DdlaBackend::CPU)
     {
-        const T d = T(std::real(c[diagonal]));
+        const T d = H ? T(std::real(c[diagonal])) : c[diagonal];
         c[diagonal] = T(0);
         int index = 0;
         blas_impl::iamax_run<B, T>(h, count, c + first, 1, index);
@@ -149,12 +151,17 @@ void column_record(const DdlaHandle_t& h, T* c, int first, int count, int diagon
         else
             maximum = std::abs(z.real()) + std::abs(z.imag());
         c[diagonal] = d;
-        *result = {double(std::abs(std::real(d))), maximum, index, 0};
+        double magnitude;
+        if constexpr (H || std::is_arithmetic_v<T>)
+            magnitude = std::abs(std::real(d));
+        else
+            magnitude = std::abs(d.real()) + std::abs(d.imag());
+        *result = {magnitude, maximum, index, 0};
     }
     else
-        summarize_column(h, c, first, count, diagonal, result);
+        summarize_column(h, c, first, count, diagonal, result, H);
 }
-template <DdlaBackend B, class T>
+template <DdlaBackend B, bool H, class T>
 void normalize_columns(const DdlaHandle_t& h, int first, int count, int current, int neighbor,
                        int step, int swap_a, int swap_b, const T* c0, const T* c1, T* l0, T* l1,
                        T* w0, T* w1)
@@ -166,8 +173,8 @@ void normalize_columns(const DdlaHandle_t& h, int first, int count, int current,
         if (step == 1)
         {
             DDLA_CHECK(ddlaMemcpy(h, l0 + first, w0 + first, std::size_t(count) * sizeof(T)));
-            const auto d = std::real(w0[current]);
-            if (d != 0)
+            const T d = H ? T(std::real(w0[current])) : w0[current];
+            if (d != T(0))
                 blas_impl::scal_run<B, T>(h, count, T(1) / T(d), l0 + first, 1);
             l0[current] = T(d);
         }
@@ -175,12 +182,15 @@ void normalize_columns(const DdlaHandle_t& h, int first, int count, int current,
         {
             DDLA_CHECK(ddlaMemcpy(h, w1 + first, c1 + first, std::size_t(count) * sizeof(T)));
             blas_impl::swap_run<B, T>(h, 1, w1 + swap_a, 1, w1 + swap_b, 1);
-            const auto d0 = std::real(w0[current]), d1 = std::real(w1[neighbor]);
+            const T d0 = H ? T(std::real(w0[current])) : w0[current];
+            const T d1 = H ? T(std::real(w1[neighbor])) : w1[neighbor];
             const T e = w0[neighbor];
             const auto scale = std::abs(e);
-            const auto a = d0 / scale, b = d1 / scale, m = (1 / (a * b - 1)) / scale;
-            const T lower = -(e / scale) * m;
-            const T inverse[4] = {T(b * m), lower, detail::host_conj(lower), T(a * m)};
+            const T a = d0 / scale, b = d1 / scale, z = e / scale;
+            const T multiplier = (T(1) / (a * b - (H ? T(1) : z * z))) / scale;
+            const T lower = -z * multiplier;
+            const T inverse[4] = {b * multiplier, lower,
+                                  H ? detail::host_conj(lower) : lower, a * multiplier};
             blas_impl::gemm_run<B, T>(h, 'N', 'N', count, 2, 2, T(1), w0 + first, int(w1 - w0),
                                       inverse, 2, T(0), l0 + first, int(l1 - l0));
             l0[current] = T(d0);
@@ -191,9 +201,9 @@ void normalize_columns(const DdlaHandle_t& h, int first, int count, int current,
     }
     else
         pivot_columns(h, first, count, current, neighbor, step, swap_a, swap_b, c0, c1, l0, l1, w0,
-                      w1);
+                      w1, H);
 }
-template <DdlaBackend B, class T>
+template <DdlaBackend B, bool H, class T>
 void stored_update(const DdlaHandle_t& h, char u, int n, const int* d, const T* src, int lds,
                    T* dst, int ldd, int row0 = 0, int col0 = 0, int rows = -1, int cols = -1,
                    bool subtract = false)
@@ -225,17 +235,17 @@ void stored_update(const DdlaHandle_t& h, char u, int n, const int* d, const T* 
             else
                 DDLA_CHECK(ddlaMemcpy(h, target, source, std::size_t(end - begin) * sizeof(T)));
             const int diagonal = indx_g2l_r(d, h, gj);
-            if (diagonal >= begin && diagonal < end)
+            if (H && diagonal >= begin && diagonal < end)
                 dst[diagonal + std::size_t(col0 + j) * ldd] =
                     T(std::real(dst[diagonal + std::size_t(col0 + j) * ldd]));
         }
     }
     else
-        copy_stored(h, u, n, d, src, lds, dst, ldd, row0, col0, rows, cols, subtract);
+        copy_stored(h, u, n, d, src, lds, dst, ldd, row0, col0, rows, cols, subtract, H);
 }
 // Selected-triangle symmetric interchange, using two replicated raw columns.
 // No BLAS permutation supports the required conjugating row/column exchange.
-template <DdlaBackend B, class T>
+template <DdlaBackend B, bool H, class T>
 void symmetric_interchange(const DdlaHandle_t& h, char u, int n, const int* d, T* a, int ld,
                            int first, int count, int row_a, int row_b, const T* col_a,
                            const T* col_b)
@@ -254,15 +264,16 @@ void symmetric_interchange(const DdlaHandle_t& h, char u, int n, const int* d, T
                 if (u == 'L' ? r < c : r > c)
                 {
                     std::swap(r, c);
-                    value = detail::host_conj(value);
+                    if constexpr (H)
+                        value = detail::host_conj(value);
                 }
                 const int lr = indx_g2l_r(d, h, r), lc = indx_g2l_c(d, h, c);
                 if (lr >= 0 && lc >= 0)
-                    a[lr + std::size_t(lc) * ld] = r == c ? T(std::real(value)) : value;
+                    a[lr + std::size_t(lc) * ld] = H && r == c ? T(std::real(value)) : value;
             }
     }
     else
-        swap_stored(h, u, n, d, a, ld, first, count, row_a, row_b, col_a, col_b);
+        swap_stored(h, u, n, d, a, ld, first, count, row_a, row_b, col_a, col_b, H);
 }
 } // namespace ddla::ldlt_impl
 #endif
