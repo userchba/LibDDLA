@@ -7,6 +7,7 @@
 #include <limits>
 #include <thread>
 #include <cerrno>
+#include "allocation_probe_ddla.h"
 
 // Executable-only allocation injection. No production hooks. Only the main
 // thread is armed, so MPI/OpenMP background threads are unaffected.

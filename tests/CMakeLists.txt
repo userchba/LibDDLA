@@ -578,6 +578,13 @@ foreach(_hh_private_test test_hb2st_householder_kernel_state test_hb2st_househol
     endif()
 endforeach()
 
+foreach(_allocation_probe_test test_pheevd_cpu_replay test_hb2st_householder_kernel_rows)
+    if(TARGET ${_allocation_probe_test})
+        target_link_libraries(${_allocation_probe_test} PRIVATE ${CMAKE_DL_LIBS})
+        set_target_properties(${_allocation_probe_test} PROPERTIES ENABLE_EXPORTS ON)
+    endif()
+endforeach()
+
 foreach(_stage5_test test_punmtr_he2hb_grouped test_punmtr_he2hb_grouped_integration)
     add_test_executable(${_stage5_test})
     if(TARGET ${_stage5_test})
