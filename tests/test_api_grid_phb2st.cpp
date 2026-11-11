@@ -236,8 +236,7 @@ void check_phb2st(const ddla::DdlaHandle_t &handle, int n, int nblk, int nbw, co
     {
         std::vector<rt> dd(d_eigs), ee(e_off), teigs(n);
         int info3 = 0;
-        ddla::pstedc<rt>(handle, 'N', n, dd.data(), ee.data(), teigs.data(), static_cast<rt *>(nullptr),
-                         static_cast<const int *>(nullptr), info3);
+        ddla::pstedc<rt>(handle, 'N', n, dd.data(), ee.data(), teigs.data(), nullptr, 1, info3);
         require_close(handle, std::string(label) + " pstedc info", info3, 0.5);
         double dev = 0.0;
         for (int i = 0; i < n; ++i)

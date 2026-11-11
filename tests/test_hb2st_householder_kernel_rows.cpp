@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdio>
 #include <new>
+#include "allocation_probe_ddla.h"
 
 namespace allocation_probe {
 thread_local bool enabled=false,fired=false;
