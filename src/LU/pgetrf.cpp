@@ -15,6 +15,7 @@
 #include "plan_util.h"
 #include "lu_panel.h"
 #include "pgetrf_impl.h"
+#include "instantiate.h"
 
 namespace ddla{
 
@@ -186,24 +187,9 @@ void pgetrf(const DdlaHandle_t& handle, int m, int n, T* A, int ia, int ja,
     const int*, const int*)
 
 
-INSTANTIATE_PGETRF_CHECK(DdlaBackend::CPU);
-INSTANTIATE_PGETRF(DdlaBackend::CPU, float);
-INSTANTIATE_PGETRF(DdlaBackend::CPU, double);
-INSTANTIATE_PGETRF(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PGETRF(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PGETRF_CHECK(DdlaBackend::GPU);
-INSTANTIATE_PGETRF(DdlaBackend::GPU, float);
-INSTANTIATE_PGETRF(DdlaBackend::GPU, double);
-INSTANTIATE_PGETRF(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PGETRF(DdlaBackend::GPU, std::complex<double>);
-#endif
-
-INSTANTIATE_PGETRF_SIZE(float);
-INSTANTIATE_PGETRF_SIZE(double);
-INSTANTIATE_PGETRF_SIZE(std::complex<float>);
-INSTANTIATE_PGETRF_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_PGETRF_CHECK)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PGETRF)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PGETRF_SIZE)
 
 #undef INSTANTIATE_PGETRF_SIZE
 #undef INSTANTIATE_PGETRF_CHECK

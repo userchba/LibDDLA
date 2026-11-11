@@ -44,6 +44,7 @@
 #include "hb2st_wave_schedule.h"
 #include "mpi_datatype.h"
 #include "plan_util.h"
+#include "instantiate.h"
 
 #include <mpi.h>
 
@@ -713,11 +714,8 @@ template<class T>std::unique_ptr<Hb2stAccumHostResources<T>> hb2st_accum_host_pr
 #define DDLA_HOST_ACCUM_INSTANTIATE(T) \
 template void hb2st_accum_host_qband_workspace_size<T>(const DdlaHandle_t&,const Hb2stAccumHostPlan&,std::size_t*); \
 template void hb2st_accum_host_workspace_size<T>(const DdlaHandle_t&,const Hb2stAccumHostPlan&,std::size_t*); \
-template std::unique_ptr<Hb2stAccumHostResources<T>> hb2st_accum_host_prepare<T>(const DdlaHandle_t&,const Hb2stAccumHostPlan&);
-DDLA_HOST_ACCUM_INSTANTIATE(float)
-DDLA_HOST_ACCUM_INSTANTIATE(double)
-DDLA_HOST_ACCUM_INSTANTIATE(std::complex<float>)
-DDLA_HOST_ACCUM_INSTANTIATE(std::complex<double>)
+template std::unique_ptr<Hb2stAccumHostResources<T>> hb2st_accum_host_prepare<T>(const DdlaHandle_t&,const Hb2stAccumHostPlan&)
+DDLA_FOR_EACH_TYPE(DDLA_HOST_ACCUM_INSTANTIATE)
 #undef DDLA_HOST_ACCUM_INSTANTIATE
 
 template<class T>Hb2stFinishHostPlan hb2st_finish_host_geometry(const DdlaHandle_t& h,int n,int ldy,
@@ -880,8 +878,7 @@ void hb2st_finish_rows_host(const DdlaHandle_t& h,int n,const typename real_type
     const auto p=hb2st_finish_host_check<T>(h,n,Y,ldy,phases.data(),phases.size(),Z,desc,threads,panel_columns);
     std::size_t backend_bytes=0;vector<char> backend_work(h);std::exception_ptr error;
     try{hb2st_finish_host_workspace_size<T>(h,p,&backend_bytes);backend_work.resize(backend_bytes);}catch(...){error=std::current_exception();}
-    int failed=error?1:0;MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&failed,1,MPI_INT,MPI_MAX,h->comm));
-    if(failed){if(error)std::rethrow_exception(error);throw std::runtime_error("hb2st CPU finish: preparation failed on another rank");}
+    detail::agree_failure(h->comm,error,"hb2st CPU finish: preparation");
     hb2st_finish_host_run<T>(h,p,Y,phases.data(),Z,const_cast<void*>(static_cast<const void*>(&pack)),
         [](void* c,T* a,int lo,int count){(*static_cast<const std::function<void(T*,int,int)>*>(c))(a,lo,count);},
         backend_work.data(),backend_bytes);

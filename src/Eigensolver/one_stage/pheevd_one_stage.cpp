@@ -13,6 +13,7 @@
 #include "Eigensolver/pheevd_alias.h"
 #include "matrix_transfer.h"
 #include "Eigensolver/pherm_complete_workspace.h"
+#include "instantiate.h"
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -300,10 +301,7 @@ void one_stage_run(const DdlaHandle_t& h, const OneStagePlan& p, OneStageResourc
                                              const T*, const int*);                                          \
     template void one_stage_workspace_size<T>(const DdlaHandle_t&, const OneStagePlan&, std::size_t*,        \
                                               std::size_t*)
-INST_ONE_STAGE_CHECK(float);
-INST_ONE_STAGE_CHECK(double);
-INST_ONE_STAGE_CHECK(std::complex<float>);
-INST_ONE_STAGE_CHECK(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INST_ONE_STAGE_CHECK)
 #undef INST_ONE_STAGE_CHECK
 } // namespace spectral_impl
 
@@ -322,16 +320,7 @@ void pheevd_one_stage(const DdlaHandle_t& h, char job, char uplo, int n, T* a, c
                                          typename real_type<T>::type*, T*, const int*, int&);                \
     template void detail::pheevd_one_stage_timed<B, T>(const DdlaHandle_t&, char, char, int, T*, const int*, \
                                                        typename real_type<T>::type*, T*, const int*, int&,   \
-                                                       detail::OneStageTimes*);
-INST(DdlaBackend::CPU, float)
-INST(DdlaBackend::CPU, double)
-INST(DdlaBackend::CPU, std::complex<float>)
-INST(DdlaBackend::CPU, std::complex<double>)
-#if DDLA_HAS_GPU
-INST(DdlaBackend::GPU, float)
-INST(DdlaBackend::GPU, double)
-INST(DdlaBackend::GPU, std::complex<float>)
-INST(DdlaBackend::GPU, std::complex<double>)
-#endif
+                                                       detail::OneStageTimes*)
+DDLA_FOR_EACH_BACKEND_TYPE(INST)
 #undef INST
 } // namespace ddla

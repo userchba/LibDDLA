@@ -9,6 +9,8 @@
 
 #include "ddla_connector.h"
 #include "ddla_stream.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 extern "C" {
 void sgemm_(const char*, const char*, const int*, const int*, const int*,
@@ -47,18 +49,7 @@ void gemm_check(
     const T& beta,
     T* C, int ldc)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU gemm is not available in this LibDDLA build");
-
-    if (handle == nullptr) {
-        throw std::runtime_error("gemm: null handle");
-    }
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("gemm: template backend ") + backend_name(Backend) +
-            " does not match handle backend " + backend_name(actual));
-    }
+    detail::require_backend<Backend>(handle, "gemm");
     // Fortran LSAME is case-insensitive, so accept either case on both
     // backends; anything else would otherwise reach cuBLAS as OP_C.
     const char ta = upper(transa), tb = upper(transb);
@@ -162,33 +153,14 @@ void gemm(
         const TYPE&, const TYPE*, int, const TYPE*, int,                      \
         const TYPE&, TYPE*, int)
 
-INSTANTIATE_GEMM(DdlaBackend::CPU, float);
-INSTANTIATE_GEMM(DdlaBackend::CPU, double);
-INSTANTIATE_GEMM(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_GEMM(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_GEMM(DdlaBackend::GPU, float);
-INSTANTIATE_GEMM(DdlaBackend::GPU, double);
-INSTANTIATE_GEMM(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_GEMM(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_GEMM)
 
 #undef INSTANTIATE_GEMM
 
 
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::gemm_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k, const TYPE& alpha, const TYPE* A, int lda, const TYPE* B, int ldb, const TYPE& beta, TYPE* C, int ldc); \
-    template void blas_impl::gemm_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k, const TYPE& alpha, const TYPE* A, int lda, const TYPE* B, int ldb, const TYPE& beta, TYPE* C, int ldc);
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#if DDLA_HAS_GPU
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
-#endif
+    template void blas_impl::gemm_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k, const TYPE& alpha, const TYPE* A, int lda, const TYPE* B, int ldb, const TYPE& beta, TYPE* C, int ldc)
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_INSTANTIATE_PHASES)
 #undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

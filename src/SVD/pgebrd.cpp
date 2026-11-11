@@ -94,6 +94,8 @@
 #include "mpi_datatype.h"
 #include "plan_util.h"
 #include "svd_workspace.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 #include <algorithm>
 #include <cassert>
@@ -183,9 +185,7 @@ PgebrdPlan pgebrd_check(const DdlaHandle_t& handle,DdlaBackend backend,int m,int
 {
     const auto p=detail::agree_check(handle,"pgebrd",[&](detail::Agree& agreement)->PgebrdPlan {
         agreement.mode("spectral operation",3101);
-    if(handle==nullptr)throw std::runtime_error("pgebrd: null handle");
-    if(ddlaGetBackend(handle)!=backend)
-        throw std::runtime_error("pgebrd: template backend does not match handle backend");
+    detail::require_backend(handle,backend,"pgebrd");
     check_desc(descA,handle);
     if(m<0||m>descA[DDLA_M_]||n<0||n>descA[DDLA_N_])
         throw std::runtime_error("pgebrd: m/n outside the descriptor dimensions");
@@ -758,22 +758,8 @@ void pgebrd(const DdlaHandle_t& handle,int m,int n,T* A,const int* descA,
     template void spectral_impl::pgebrd_workspace_size<TYPE>(const DdlaHandle_t&, \
         const spectral_impl::PgebrdPlan&,std::size_t*)
 
-INSTANTIATE_PGEBRD(DdlaBackend::CPU, float);
-INSTANTIATE_PGEBRD(DdlaBackend::CPU, double);
-INSTANTIATE_PGEBRD(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PGEBRD(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PGEBRD(DdlaBackend::GPU, float);
-INSTANTIATE_PGEBRD(DdlaBackend::GPU, double);
-INSTANTIATE_PGEBRD(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PGEBRD(DdlaBackend::GPU, std::complex<double>);
-#endif
-
-INSTANTIATE_PGEBRD_SIZE(float);
-INSTANTIATE_PGEBRD_SIZE(double);
-INSTANTIATE_PGEBRD_SIZE(std::complex<float>);
-INSTANTIATE_PGEBRD_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PGEBRD)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PGEBRD_SIZE)
 
 #undef INSTANTIATE_PGEBRD_SIZE
 #undef INSTANTIATE_PGEBRD

@@ -4,6 +4,7 @@
 #include "ddla_desc.h"
 #include "ddla_stream.h"
 #include "require_backend.h"
+#include "instantiate.h"
 
 #include <complex>
 #include <stdexcept>
@@ -49,12 +50,6 @@ MIXED_PSCAL(DdlaBackend::GPU,float);MIXED_PSCAL(DdlaBackend::GPU,double);
 #undef MIXED_PSCAL
 
 #define INSTANTIATE(B,T) template void pscal<B,T>(const DdlaHandle_t&,int,int,const T&,T*,const int*)
-#define TYPES(B) INSTANTIATE(B,float); INSTANTIATE(B,double); \
-    INSTANTIATE(B,std::complex<float>); INSTANTIATE(B,std::complex<double>)
-TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-TYPES(DdlaBackend::GPU);
-#endif
-#undef TYPES
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE)
 #undef INSTANTIATE
 }

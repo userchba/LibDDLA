@@ -13,6 +13,7 @@
 #include "row_swap.h"
 #include "pswap_impl.h"
 #include "plan_util.h"
+#include "instantiate.h"
 namespace ddla{
 
 namespace detail {
@@ -245,32 +246,10 @@ void pswap(
     template void detail::swap_rows<BACKEND, TYPE>(const DdlaHandle_t&, \
     TYPE*, const int*, int, int, TYPE*, const int*, int, int, int, TYPE*, TYPE*)
 
-INSTANTIATE_PSWAP_CHECK(DdlaBackend::CPU);
-INSTANTIATE_PSWAP(DdlaBackend::CPU, float);
-INSTANTIATE_PSWAP(DdlaBackend::CPU, double);
-INSTANTIATE_PSWAP(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PSWAP(DdlaBackend::CPU, std::complex<double>);
-INSTANTIATE_SWAP_ROWS(DdlaBackend::CPU, float);
-INSTANTIATE_SWAP_ROWS(DdlaBackend::CPU, double);
-INSTANTIATE_SWAP_ROWS(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_SWAP_ROWS(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PSWAP_CHECK(DdlaBackend::GPU);
-INSTANTIATE_PSWAP(DdlaBackend::GPU, float);
-INSTANTIATE_PSWAP(DdlaBackend::GPU, double);
-INSTANTIATE_PSWAP(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PSWAP(DdlaBackend::GPU, std::complex<double>);
-INSTANTIATE_SWAP_ROWS(DdlaBackend::GPU, float);
-INSTANTIATE_SWAP_ROWS(DdlaBackend::GPU, double);
-INSTANTIATE_SWAP_ROWS(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_SWAP_ROWS(DdlaBackend::GPU, std::complex<double>);
-#endif
-
-INSTANTIATE_PSWAP_SIZE(float);
-INSTANTIATE_PSWAP_SIZE(double);
-INSTANTIATE_PSWAP_SIZE(std::complex<float>);
-INSTANTIATE_PSWAP_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_PSWAP_CHECK)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PSWAP)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_SWAP_ROWS)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PSWAP_SIZE)
 
 #undef INSTANTIATE_PSWAP_SIZE
 #undef INSTANTIATE_PSWAP_CHECK

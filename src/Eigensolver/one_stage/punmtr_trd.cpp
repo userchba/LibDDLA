@@ -10,6 +10,7 @@
 #include "check_agree.h"
 #include "plan_util.h"
 #include "helpers.h"
+#include "instantiate.h"
 #include <algorithm>
 #include <cassert>
 #include <cctype>
@@ -177,17 +178,11 @@ template<DdlaBackend B,class T>void punmtr(const DdlaHandle_t& h,char side,char 
 #define DDLA_UNMTR_TRD(B,T) \
  template void punmtr<B,T>(const DdlaHandle_t&,char,char,char,int,int,const T*,const int*,const T*,T*,const int*); \
  template void spectral_impl::punmtr_trd_run<B,T>(const DdlaHandle_t&,const spectral_impl::UnmtrTrdPlan&,const T*,const T*,T*,void*,std::size_t)
-#define DDLA_UNMTR_TRD_TYPES(B) \
- DDLA_UNMTR_TRD(B,float);DDLA_UNMTR_TRD(B,double);DDLA_UNMTR_TRD(B,std::complex<float>);DDLA_UNMTR_TRD(B,std::complex<double>)
-DDLA_UNMTR_TRD_TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-DDLA_UNMTR_TRD_TYPES(DdlaBackend::GPU);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_UNMTR_TRD)
 #define DDLA_UNMTR_TRD_PLAN(T) \
  template spectral_impl::UnmtrTrdPlan spectral_impl::punmtr_trd_check<T>(const DdlaHandle_t&,DdlaBackend,char,char,char,int,int,const T*,const int*,const T*,T*,const int*); \
  template void spectral_impl::punmtr_trd_workspace_size<T>(const DdlaHandle_t&,const spectral_impl::UnmtrTrdPlan&,std::size_t*)
-DDLA_UNMTR_TRD_PLAN(float);DDLA_UNMTR_TRD_PLAN(double);DDLA_UNMTR_TRD_PLAN(std::complex<float>);DDLA_UNMTR_TRD_PLAN(std::complex<double>);
+DDLA_FOR_EACH_TYPE(DDLA_UNMTR_TRD_PLAN)
 #undef DDLA_UNMTR_TRD_PLAN
-#undef DDLA_UNMTR_TRD_TYPES
 #undef DDLA_UNMTR_TRD
 } // namespace ddla

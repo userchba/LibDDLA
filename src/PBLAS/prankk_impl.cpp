@@ -12,6 +12,7 @@
 #include "check_agree.h"
 #include "require_backend.h"
 #include "plan_util.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <cassert>
@@ -440,16 +441,8 @@ void run(const DdlaHandle_t& h, char symmetry, char uplo, char ta, char tb, bool
 #define INSTANTIATE(B,T) \
  template bool ddla::prankk_impl::check<B,T>(const ddla::DdlaHandle_t&,char,char,char,char,int,int,const T&,const T*,const int*,const T*,const int*,const T&,const T*,const int*,bool); \
  template void ddla::prankk_impl::run<B,T>(const ddla::DdlaHandle_t&,char,char,char,char,bool,bool,int,int,const T&,const T*,const int*,const T*,const int*,const T&,T*,const int*,void*,std::size_t,void*,std::size_t)
-#define INSTANTIATE_TYPES(B) \
- INSTANTIATE(B,float); INSTANTIATE(B,double); \
- INSTANTIATE(B,std::complex<float>); INSTANTIATE(B,std::complex<double>)
-INSTANTIATE_TYPES(ddla::DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-INSTANTIATE_TYPES(ddla::DdlaBackend::GPU);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE)
 #define INSTANTIATE_SIZE(T) template void ddla::prankk_impl::workspace_size<T>(const ddla::DdlaHandle_t&,char,char,char,char,bool,bool,int,int,const int*,const int*,const int*,std::size_t*,std::size_t*)
-INSTANTIATE_SIZE(float); INSTANTIATE_SIZE(double);
-INSTANTIATE_SIZE(std::complex<float>); INSTANTIATE_SIZE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INSTANTIATE_SIZE)
 #undef INSTANTIATE_SIZE
-#undef INSTANTIATE_TYPES
 #undef INSTANTIATE

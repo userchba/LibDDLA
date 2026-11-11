@@ -4,6 +4,7 @@
 #include "blas_enums.h"
 #include "ddla_stream.h"
 #include "require_backend.h"
+#include "instantiate.h"
 #include <type_traits>
 
 extern "C" {
@@ -76,10 +77,7 @@ void syrk(const DdlaHandle_t& h, char uplo, char trans, int n, int k,
     template void blas_impl::syrk_run<B,T>(const DdlaHandle_t&,char,char,int,int,const T&,const T*,int,const T&,T*,int);
 #define TYPES(B) INSTANTIATE(B,float) INSTANTIATE(B,double) \
     INSTANTIATE(B,std::complex<float>) INSTANTIATE(B,std::complex<double>)
-TYPES(DdlaBackend::CPU)
-#if DDLA_HAS_GPU
-TYPES(DdlaBackend::GPU)
-#endif
+DDLA_FOR_EACH_BACKEND(TYPES)
 #undef TYPES
 #undef INSTANTIATE
 } // namespace ddla

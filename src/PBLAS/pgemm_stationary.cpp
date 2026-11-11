@@ -3,6 +3,7 @@
 #include "pblas_workspace.h"
 #include "comm_traits.h"
 #include "plan_util.h"
+#include "instantiate.h"
 #include <algorithm>
 #include <cassert>
 #include <initializer_list>
@@ -332,10 +333,7 @@ void stationary_run(const DdlaHandle_t& h, bool keep_a, char ta,char tb,
 #define DDLA_INSTANTIATE_STATIONARY_SIZE(T, TA, TB) \
     template void stationary_workspace_size<T,TA,TB>(const DdlaHandle_t&, bool, char, char, int, int, int, bool, \
         const int*, const int*, const int*, std::size_t*, std::size_t*)
-DDLA_INSTANTIATE_STATIONARY_BACKEND(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-DDLA_INSTANTIATE_STATIONARY_BACKEND(DdlaBackend::GPU);
-#endif
+DDLA_FOR_EACH_BACKEND(DDLA_INSTANTIATE_STATIONARY_BACKEND)
 DDLA_INSTANTIATE_STATIONARY_SIZE(float, float, float);
 DDLA_INSTANTIATE_STATIONARY_SIZE(double, double, double);
 DDLA_INSTANTIATE_STATIONARY_SIZE(std::complex<float>, std::complex<float>, std::complex<float>);

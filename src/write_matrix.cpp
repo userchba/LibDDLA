@@ -1,4 +1,5 @@
 #include "write_matrix.h"
+#include "instantiate.h"
 
 #include <cassert>
 #include <cmath>
@@ -80,17 +81,7 @@ void write_matrix(const T* A, int m, int n, const char* filename)
     template void matrix_io_impl::write_matrix_run<BACKEND, TYPE>(             \
         const TYPE*, int, int, std::ostream&, void*, std::size_t)
 
-INSTANTIATE_WRITE_MATRIX(DdlaBackend::CPU, float);
-INSTANTIATE_WRITE_MATRIX(DdlaBackend::CPU, double);
-INSTANTIATE_WRITE_MATRIX(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_WRITE_MATRIX(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_WRITE_MATRIX(DdlaBackend::GPU, float);
-INSTANTIATE_WRITE_MATRIX(DdlaBackend::GPU, double);
-INSTANTIATE_WRITE_MATRIX(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_WRITE_MATRIX(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_WRITE_MATRIX)
 
 #undef INSTANTIATE_WRITE_MATRIX
 

@@ -73,6 +73,23 @@ void pgetrf_run(const DdlaHandle_t& handle, bool gather, int m, int n, T* A, int
                 void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes);
 
 // ===========================================================================
+// The block LU of the leading m x n block behind pgetrf_nopiv and pgetrf_bpiv (pgetrf_bpiv.cpp): one right-looking
+// schedule, `pivot` selecting getrf + row swaps or getrf_nopiv for the diagonal block.  Without pivoting it needs no
+// pivots, no A for the size query and no host scratch.
+// ===========================================================================
+template <DdlaBackend Backend>
+void pgetrf_block_check(const DdlaHandle_t& handle, const char* name, int m, int n, const int* descA);
+
+template <typename T>
+void pgetrf_block_workspace_size(const DdlaHandle_t& handle, bool pivot, int m, int n, T* A, const int* descA,
+                                 std::size_t* backend_bytes, std::size_t* host_bytes);
+
+template <DdlaBackend Backend, typename T>
+void pgetrf_block_run(const DdlaHandle_t& handle, bool pivot, int m, int n, T* A, const int* descA, int* pivots,
+                      int& info, void* backend_work, std::size_t backend_bytes,
+                      void* host_work, std::size_t host_bytes);
+
+// ===========================================================================
 // pgetrf_nopiv: LU without pivoting of the leading m x n block
 // ===========================================================================
 

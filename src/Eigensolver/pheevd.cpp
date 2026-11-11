@@ -1,5 +1,6 @@
 #include <ddla/ddla.h>
 #include "check_agree.h"
+#include "instantiate.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -40,17 +41,7 @@ void pheevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
         TYPE*, const int*, typename real_type<TYPE>::type*,                      \
         TYPE*, const int*, int&)
 
-INSTANTIATE_PHEEVD(DdlaBackend::CPU, float);
-INSTANTIATE_PHEEVD(DdlaBackend::CPU, double);
-INSTANTIATE_PHEEVD(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PHEEVD(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PHEEVD(DdlaBackend::GPU, float);
-INSTANTIATE_PHEEVD(DdlaBackend::GPU, double);
-INSTANTIATE_PHEEVD(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PHEEVD(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PHEEVD)
 
 #undef INSTANTIATE_PHEEVD
 

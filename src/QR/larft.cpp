@@ -44,6 +44,8 @@
 #include "pgeqrf_kernels.h"
 #include "plan_util.h"
 #include "reflector_build_T.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 // Host LAPACK ?larft (Fortran ABI; the CPU BLAS library must provide LAPACK -- OpenBLAS and MKL do).  V is not const: LAPACK
 // releases before 3.10 overwrite the unit entries of V while they run and put the old values back.
@@ -59,11 +61,6 @@ void zlarft_(const char*, const char*, const int*, const int*, std::complex<doub
 namespace ddla {
 
 namespace {
-
-inline const char* larft_backend_name(DdlaBackend backend)
-{
-    return backend == DdlaBackend::CPU ? "CPU" : "GPU";
-}
 
 inline void lapack_larft(char direct, int n, int k, float* V, int ldv, const float* tau, float* t, int ldt)
 {
@@ -151,18 +148,7 @@ template <DdlaBackend Backend>
 char larft_check(const DdlaHandle_t& handle, char direct, char storev, int n, int k,
                  const void* V, int ldv, const void* tau, const void* Tmat, int ldt)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU larft is not available in this LibDDLA build");
-
-    if (handle == nullptr) {
-        throw std::runtime_error("larft: null handle");
-    }
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("larft: template backend ") + larft_backend_name(Backend) +
-            " does not match handle backend " + larft_backend_name(actual));
-    }
+    detail::require_backend<Backend>(handle, "larft");
     const char d = static_cast<char>(std::toupper(static_cast<unsigned char>(direct)));
     if (d != 'F' && d != 'B') throw std::runtime_error("larft: direct must be 'F' or 'B'");
     if (std::toupper(static_cast<unsigned char>(storev)) != 'C')
@@ -253,10 +239,7 @@ INSTANTIATE_LARFT(DdlaBackend::GPU, std::complex<float>);
 INSTANTIATE_LARFT(DdlaBackend::GPU, std::complex<double>);
 #endif
 
-INSTANTIATE_LARFT_SIZE(float);
-INSTANTIATE_LARFT_SIZE(double);
-INSTANTIATE_LARFT_SIZE(std::complex<float>);
-INSTANTIATE_LARFT_SIZE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INSTANTIATE_LARFT_SIZE)
 
 #undef INSTANTIATE_LARFT_SIZE
 #undef INSTANTIATE_LARFT

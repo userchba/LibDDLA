@@ -14,6 +14,7 @@
 #include "check_agree.h"
 #include "plan_util.h"
 #include "ptrtrs_impl.h"
+#include "instantiate.h"
 namespace ddla{
 
 namespace ptrtrs_impl {
@@ -403,24 +404,9 @@ void ptrtrs(
     template void ptrtrs_impl::ptrtrs_workspace_size<TYPE>(const DdlaHandle_t&, char, char, \
     int, int, const int*, const int*, std::size_t*, std::size_t*)
 
-INSTANTIATE_PTRTRS_CHECK(DdlaBackend::CPU);
-INSTANTIATE_PTRTRS(DdlaBackend::CPU, float);
-INSTANTIATE_PTRTRS(DdlaBackend::CPU, double);
-INSTANTIATE_PTRTRS(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PTRTRS(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PTRTRS_CHECK(DdlaBackend::GPU);
-INSTANTIATE_PTRTRS(DdlaBackend::GPU, float);
-INSTANTIATE_PTRTRS(DdlaBackend::GPU, double);
-INSTANTIATE_PTRTRS(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PTRTRS(DdlaBackend::GPU, std::complex<double>);
-#endif
-
-INSTANTIATE_PTRTRS_SIZE(float);
-INSTANTIATE_PTRTRS_SIZE(double);
-INSTANTIATE_PTRTRS_SIZE(std::complex<float>);
-INSTANTIATE_PTRTRS_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_PTRTRS_CHECK)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PTRTRS)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PTRTRS_SIZE)
 
 #undef INSTANTIATE_PTRTRS_SIZE
 #undef INSTANTIATE_PTRTRS_CHECK

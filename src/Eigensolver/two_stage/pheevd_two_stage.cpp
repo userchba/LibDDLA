@@ -37,6 +37,7 @@
 #include "QR/pgeqrf_impl.h"
 #include "check_agree.h"
 #include "phb2st_impl.h"
+#include "instantiate.h"
 
 #include <mpi.h>
 
@@ -95,17 +96,6 @@ namespace spectral_impl
 {
 namespace
 {
-inline void pheevd_prepare_agree(const DdlaHandle_t &h, const std::exception_ptr &error)
-{
-    int failed = error ? 1 : 0;
-    MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &failed, 1, MPI_INT, MPI_MAX, h->comm));
-    if (failed)
-    {
-        if (error)
-            std::rethrow_exception(error);
-        throw std::runtime_error("pheevd: preparation failed on another rank");
-    }
-}
 inline int pheevd_accum_mode()
 {
     if (const char *e = std::getenv("DDLA_EIG_CPU_ACCUM"))
@@ -556,7 +546,7 @@ PheevdResources<T>::PheevdResources(const DdlaHandle_t &h, const PheevdPlan &p,
     {
         failure = std::current_exception();
     }
-    pheevd_prepare_agree(h, failure);
+    detail::agree_failure(h,failure,"pheevd: preparation");
     if (p.engine == PheevdEngine::Householder)
         householder.emplace(h, p.householder);
     else
@@ -834,7 +824,7 @@ static void pheevd_two_stage_impl(const DdlaHandle_t &handle, char jobz, char up
     {
         failure = std::current_exception();
     }
-    spectral_impl::pheevd_prepare_agree(handle, failure);
+    detail::agree_failure(handle,failure,"pheevd: preparation");
     auto &profile = *prepared_profile;
     if (profiling)
         profile.phase("start");
@@ -866,7 +856,7 @@ static void pheevd_two_stage_impl(const DdlaHandle_t &handle, char jobz, char up
             {
                 failure = std::current_exception();
             }
-            spectral_impl::pheevd_prepare_agree(handle, failure);
+            detail::agree_failure(handle,failure,"pheevd: preparation");
             std::optional<spectral_impl::PheevdResources<T>> resources;
             try
             {
@@ -876,7 +866,7 @@ static void pheevd_two_stage_impl(const DdlaHandle_t &handle, char jobz, char up
             {
                 failure = std::current_exception();
             }
-            spectral_impl::pheevd_prepare_agree(handle, failure);
+            detail::agree_failure(handle,failure,"pheevd: preparation");
             if (profiling)
                 profile.phase("prepare");
             try
@@ -947,16 +937,7 @@ void pheevd_householder_stage4(const DdlaHandle_t& h, char job, char uplo, int n
         real_type<T>::type*, T*, const int*, int&, DdlaBackend); \
     template void pheevd_householder_stage4<B, T>(const DdlaHandle_t&, char, char, int, T*, const int*, \
         real_type<T>::type*, T*, const int*, int&, int, DdlaBackend)
-#define INSTANTIATE_BACKEND_METHODS(B) \
-    INSTANTIATE_METHODS(B, float); \
-    INSTANTIATE_METHODS(B, double); \
-    INSTANTIATE_METHODS(B, std::complex<float>); \
-    INSTANTIATE_METHODS(B, std::complex<double>)
-INSTANTIATE_BACKEND_METHODS(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-INSTANTIATE_BACKEND_METHODS(DdlaBackend::GPU);
-#endif
-#undef INSTANTIATE_BACKEND_METHODS
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_METHODS)
 #undef INSTANTIATE_METHODS
 } // namespace detail
 
@@ -965,17 +946,7 @@ INSTANTIATE_BACKEND_METHODS(DdlaBackend::GPU);
                                                   const int *, typename real_type<TYPE>::type *, TYPE *,     \
                                                   const int *, int &)
 
-INSTANTIATE_PHEEVD_TWO_STAGE(DdlaBackend::CPU, float);
-INSTANTIATE_PHEEVD_TWO_STAGE(DdlaBackend::CPU, double);
-INSTANTIATE_PHEEVD_TWO_STAGE(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PHEEVD_TWO_STAGE(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PHEEVD_TWO_STAGE(DdlaBackend::GPU, float);
-INSTANTIATE_PHEEVD_TWO_STAGE(DdlaBackend::GPU, double);
-INSTANTIATE_PHEEVD_TWO_STAGE(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PHEEVD_TWO_STAGE(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PHEEVD_TWO_STAGE)
 
 #undef INSTANTIATE_PHEEVD_TWO_STAGE
 

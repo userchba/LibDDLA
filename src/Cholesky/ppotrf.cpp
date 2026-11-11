@@ -15,6 +15,7 @@
 #include <cmath>
 #include <algorithm>
 #include "comm_traits.h"
+#include "instantiate.h"
 
 namespace ddla{
 
@@ -116,9 +117,6 @@ bool ppotrf_run(
     assert(static_cast<std::size_t>(hw - static_cast<char*>(host_work)) <= host_bytes);
     DDLA_CHECK(ddlaMemset(handle,info_buffer,0,sizeof(int)));
     int owner_row,owner_col,mm_row_start,mm_col_start,nb_real;
-    int num_row_block=m_loc_A/nb,num_col_block=n_loc_A/nb;
-    int h_info;
-    int i_batch_count, row_s, col_s, row_remain, col_remain, length_row, length_col;
     for(int n_s = 0; n_s < n; n_s += nb)
     {
         nb_real = std::min(nb, n - n_s);
@@ -204,254 +202,144 @@ bool ppotrf_run(
             DDLA_CHECK(ddlaSynchronize(handle));
             return false;
         }
-        if(uplo == 'L'){
-        if(myprow == owner_row)
-            mm_row_start += nb_real;
-        length_row = m_loc_A - mm_row_start;
-        if(mypcol == owner_col){
-            commBcast<Backend>(ddla_handle, CommScope::Col, block_diag, (std::size_t)nb_real * nb_real, owner_row);
-            if(length_row > 0){
+        // ---- the panel ----
+        // The off-diagonal part of the block's column ('L', held by the block's process column) or of its row ('U',
+        // held by its process row), solved against the diagonal block.  Both triangles run the same steps with rows
+        // and columns exchanged: `along` is the scope the panel's ranks share, `across` the other one.
+        const bool lower = uplo == 'L';
+        const bool holds_panel = lower ? mypcol == owner_col : myprow == owner_row;
+        const CommScope along = lower ? CommScope::Col : CommScope::Row;
+        const CommScope across = lower ? CommScope::Row : CommScope::Col;
+        // The panel starts after the block in its own direction.
+        if(lower ? myprow == owner_row : mypcol == owner_col)
+            (lower ? mm_row_start : mm_col_start) += nb_real;
+        const int length_panel = lower ? m_loc_A - mm_row_start : n_loc_A - mm_col_start;
+        if(holds_panel){
+            commBcast<Backend>(ddla_handle, along, block_diag, (std::size_t)nb_real * nb_real, lower ? owner_row : owner_col);
+            if(length_panel > 0){
+                // 'L': length x nb_real below the block; 'U': nb_real x length to its right.
+                const int panel_rows = lower ? length_panel : nb_real, panel_cols = lower ? nb_real : length_panel;
+                T* const panel = A + mm_row_start + std::size_t(mm_col_start) * lldA;
                 blas_impl::trsm_run<Backend, T>(
                     ddla_handle, side_char, uplo, 'C', 'N',
-                    length_row, nb_real, (T)1.0,
+                    panel_rows, panel_cols, (T)1.0,
                     block_diag, nb_real,
-                    A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA
+                    panel, lldA
                 );
-                DDLA_CHECK(ddlaMemcpy2D(ddla_handle, block_col, length_row * sizeof(T),
-                                        A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA * sizeof(T),
-                                        length_row * sizeof(T), nb_real));
+                // packed copy: its leading dimension is its row count
+                DDLA_CHECK(ddlaMemcpy2D(ddla_handle, first, panel_rows * sizeof(T),
+                                        panel, lldA * sizeof(T),
+                                        panel_rows * sizeof(T), panel_cols));
             }
         }
-        if(mypcol == owner_col)
-            mm_col_start += nb_real;
-        length_col = n_loc_A - mm_col_start;
-        if(length_row > 0){
-            commBcast<Backend>(ddla_handle, CommScope::Row, block_col, (std::size_t)length_row * nb_real, owner_col);
+        // The trailing matrix starts after the block in the other direction too.
+        if(lower ? mypcol == owner_col : myprow == owner_row)
+            (lower ? mm_col_start : mm_row_start) += nb_real;
+        const int length_row = m_loc_A - mm_row_start;
+        const int length_col = n_loc_A - mm_col_start;
+        // `first` is the panel, spread across; `second` is the same panel for the other index of the update: the
+        // diagonal processes hold both extents, so they copy it and spread it along.
+        const int length_mirror = lower ? length_col : length_row;
+        if(length_panel > 0){
+            commBcast<Backend>(ddla_handle, across, first, (std::size_t)length_panel * nb_real, lower ? owner_col : owner_row);
         }
         if(myprow == mypcol){
-            if(length_col > 0)
-                DDLA_CHECK(ddlaMemcpy(ddla_handle, block_row, block_col, length_col * nb_real * sizeof(T)));
+            if(length_mirror > 0)
+                DDLA_CHECK(ddlaMemcpy(ddla_handle, second, first, length_mirror * nb_real * sizeof(T)));
         }
-        if(length_col > 0){
-            commBcast<Backend>(ddla_handle, CommScope::Col, block_row, (std::size_t)nb_real * length_col, mypcol);
+        if(length_mirror > 0){
+            commBcast<Backend>(ddla_handle, along, second, (std::size_t)nb_real * length_mirror, lower ? mypcol : myprow);
         }
+
+        // ---- the trailing update ----
         if(myprow == mypcol){
-            if(length_row > 0)
+            // A diagonal process holds diagonal blocks: one herk on the stored triangle.
+            if(length_panel > 0)
                 blas_impl::herk_run<Backend, T>(
-                    ddla_handle, uplo, 'N',
-                    length_row, nb_real,
-                    -1.0, block_col, length_row,
+                    ddla_handle, uplo, lower ? 'N' : 'C',
+                    length_panel, nb_real,
+                    -1.0, first, lower ? length_panel : nb_real,
                     1.0, A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA
                 );
         }else{
-            // the first approach in which the unused block will be polluted
-            // if(length_row > 0 && length_col > 0)
-            //     gemm<Backend, T>(
-            //         ddla_handle, 'N', 'T',
-            //         length_row, length_col, nb_real,
-            //         (T)-1.0,
-            //         block_col, length_row,
-            //         block_row, length_col,
-            //         (T)1.0,
-            //         A + mm_row_start + mm_col_start * lldA, lldA
-            //     );
-            // the second method is to use the batched gemm which will not pollute the unused block
+            // An off-diagonal process holds whole nb x nb tiles that lie strictly inside or strictly outside the
+            // stored triangle.  One gemm over the whole trailing part would write the unused tiles, so only the
+            // tiles of the stored triangle are updated: the full ones in one batched gemm, the ones of a short
+            // last block row or column in one gemm each (the tiles kept there are contiguous).
             if(length_row <= 0 || length_col <= 0)
                 continue;
-            num_col_block = length_col / nb;
-            num_row_block = length_row / nb;
-            if(length_col % nb !=0)
-                num_col_block++;
-            if(length_row % nb !=0)
-                num_row_block++;
 
-            i_batch_count = 0;
+            // C(rows, cols) -= X(rows) * X(cols)^H ('L') or X(rows)^H * X(cols) ('U'); the row factor is cut from
+            // block_col and the column factor from block_row, at these offsets and leading dimensions.
+            const char op_rows = lower ? 'N' : 'C', op_cols = lower ? 'C' : 'N';
+            const int ld_rows = lower ? length_row : nb_real, ld_cols = lower ? length_col : nb_real;
+            auto rows_at = [&](int offset){ return block_col + (lower ? std::size_t(offset) : std::size_t(offset) * nb_real); };
+            auto cols_at = [&](int offset){ return block_row + (lower ? std::size_t(offset) : std::size_t(offset) * nb_real); };
+            auto tile_at = [&](int row_offset, int col_offset){
+                return A + mm_row_start + row_offset + std::size_t(mm_col_start + col_offset) * lldA; };
+            auto global_row = [&](int offset){ return indx_l2g_r(array_descA, handle, mm_row_start + offset); };
+            auto global_col = [&](int offset){ return indx_l2g_c(array_descA, handle, mm_col_start + offset); };
+            // Tiles follow the global order, so the stored ones of a tile row are a prefix ('L') or a suffix ('U')
+            // of the tile columns, and the other way round for a tile column.
+            auto stored = [&](int g_row, int g_col){ return lower ? g_row > g_col : g_row < g_col; };
 
-            col_s = nb;
-            row_remain = length_row % nb;
-            col_remain = length_col % nb;
-            row_s = nb + row_remain;
+            const int row_full = length_row / nb * nb, row_remain = length_row - row_full;
+            const int col_full = length_col / nb * nb, col_remain = length_col - col_full;
+
             if(row_remain != 0){
-                int g_row_s = indx_l2g_r(array_descA, handle, m_loc_A - row_remain);
-                int g_col_s;
-                int length_col_real =  length_col;
-                do{
-                    length_col_real -= nb;
-                    g_col_s = indx_l2g_c(array_descA, handle, mm_col_start + length_col_real);
-                }while(g_row_s < g_col_s);
-                length_col_real += nb;
-                if(length_col_real > 0)
-                    blas_impl::gemm_run<Backend, T>(ddla_handle, 'N', 'C',
-                        row_remain, length_col_real, nb_real, (T)-1.0,
-                        block_col + length_row - row_remain, length_row,
-                        block_row, length_col,
-                        (T)1.0, A + mm_row_start + std::size_t(mm_col_start) * lldA + (length_row - row_remain), lldA
+                // the short last tile row against every tile column
+                const int g_row = global_row(row_full);
+                int split = 0;   // first column offset on the other side of the diagonal
+                while(split < length_col && global_col(split) < g_row) split += nb;
+                split = std::min(split, length_col);
+                const int col_offset = lower ? 0 : split, cols = lower ? split : length_col - split;
+                if(cols > 0)
+                    blas_impl::gemm_run<Backend, T>(ddla_handle, op_rows, op_cols,
+                        row_remain, cols, nb_real, (T)-1.0,
+                        rows_at(row_full), ld_rows,
+                        cols_at(col_offset), ld_cols,
+                        (T)1.0, tile_at(row_full, col_offset), lldA
                     );
             }
             if(col_remain != 0){
-                int g_col_s = indx_l2g_c(array_descA, handle, n_loc_A - col_remain);
-                int g_row_s;
-                int length_row_real = length_row + nb;
-                do{
-                    length_row_real -= nb;
-                    g_row_s = indx_l2g_r(array_descA, handle, mm_row_start + length_row - length_row_real);
-                }while(g_row_s < g_col_s);
-                if(length_row_real > 0)
-                    blas_impl::gemm_run<Backend, T>(ddla_handle, 'N', 'C',
-                        length_row_real, col_remain, nb, (T)-1.0,
-                        block_col + length_row - length_row_real, length_row,
-                        block_row + length_col - col_remain, length_col,
-                        (T)1.0, A + mm_row_start + std::size_t(mm_col_start) * lldA + (length_row - length_row_real) + std::size_t(length_col - col_remain) * lldA, lldA
+                // the short last tile column against the full tile rows
+                const int g_col = global_col(col_full);
+                int split = 0;   // first row offset on the other side of the diagonal
+                while(split < row_full && global_row(split) < g_col) split += nb;
+                const int row_offset = lower ? split : 0, rows = lower ? row_full - split : split;
+                if(rows > 0)
+                    blas_impl::gemm_run<Backend, T>(ddla_handle, op_rows, op_cols,
+                        rows, col_remain, nb_real, (T)-1.0,
+                        rows_at(row_offset), ld_rows,
+                        cols_at(col_full), ld_cols,
+                        (T)1.0, tile_at(row_offset, col_full), lldA
                     );
             }
-            for(;row_s <= num_row_block * nb; row_s += nb){
-                int g_row_s = indx_l2g_r(array_descA, handle, m_loc_A - row_s);
-                int g_col_s;
-                col_s = col_remain;
-                do{
-                    col_s += nb;
-                    g_col_s = indx_l2g_c(array_descA, handle, n_loc_A - col_s);
-                }while(g_row_s < g_col_s);
-                for(; col_s <= num_col_block * nb; col_s += nb){
-                    h_A_array[i_batch_count] = block_col + length_row - row_s;
-                    h_B_array[i_batch_count] = block_row + length_col - col_s;
-                    h_C_array[i_batch_count] = A + m_loc_A - row_s + std::size_t(n_loc_A - col_s) * lldA;
+
+            int i_batch_count = 0;
+            for(int row_offset = 0; row_offset < row_full; row_offset += nb){
+                const int g_row = global_row(row_offset);
+                for(int col_offset = 0; col_offset < col_full; col_offset += nb){
+                    if(!stored(g_row, global_col(col_offset)))
+                        continue;
+                    h_A_array[i_batch_count] = rows_at(row_offset);
+                    h_B_array[i_batch_count] = cols_at(col_offset);
+                    h_C_array[i_batch_count] = tile_at(row_offset, col_offset);
                     i_batch_count++;
                 }
             }
-            if(i_batch_count == 0) continue;
-            DDLA_CHECK(ddlaMemcpy(ddla_handle, A_array, h_A_array, i_batch_count * sizeof(T*)));
-            DDLA_CHECK(ddlaMemcpy(ddla_handle, B_array, h_B_array, i_batch_count * sizeof(T*)));
-            DDLA_CHECK(ddlaMemcpy(ddla_handle, C_array, h_C_array, i_batch_count * sizeof(T*)));
-            blas_impl::gemmBatched_run<Backend, T>(
-                ddla_handle, 'N', 'C',
-                nb, nb, nb_real, (T)-1.0,
-                A_array, length_row,
-                B_array, length_col,
-                (T)1.0, C_array, lldA,
-                i_batch_count
-            );
-
-
-            DDLA_CHECK(ddlaSynchronize(ddla_handle));
-        }
-        }else{
-            if(mypcol == owner_col)
-                mm_col_start += nb_real;
-            length_col = n_loc_A - mm_col_start;
-            if(myprow == owner_row){
-                commBcast<Backend>(ddla_handle, CommScope::Row, block_diag, (std::size_t)nb_real * nb_real, owner_col);
-                if(length_col > 0){
-                    blas_impl::trsm_run<Backend, T>(
-                        ddla_handle, side_char, uplo, 'C', 'N',
-                        nb_real, length_col, (T)1.0,
-                        block_diag, nb_real,
-                        A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA
-                    );
-                    DDLA_CHECK(ddlaMemcpy2D(ddla_handle, block_row, nb_real * sizeof(T),
-                                            A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA * sizeof(T),
-                                            nb_real * sizeof(T), length_col));
-                }
-            }
-            if(myprow == owner_row)
-                mm_row_start += nb_real;
-            length_row = m_loc_A - mm_row_start;
-            if(length_col > 0){
-                commBcast<Backend>(ddla_handle, CommScope::Col, block_row, (std::size_t)nb_real * length_col, owner_row);
-            }
-            if(myprow == mypcol){
-                if(length_row > 0)
-                    DDLA_CHECK(ddlaMemcpy(ddla_handle, block_col, block_row, nb_real * length_row * sizeof(T)));
-            }
-            if(length_row > 0){
-                commBcast<Backend>(ddla_handle, CommScope::Row, block_col, (std::size_t)nb_real * length_row, myprow);
-            }
-            if(myprow == mypcol){
-                if(length_col > 0)
-                    blas_impl::herk_run<Backend, T>(
-                        ddla_handle, uplo, 'C',
-                        length_col, nb_real,
-                        -1.0, block_row, nb_real,
-                        1.0, A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA
-                    );
-            }else{
-                if(length_row <= 0 || length_col <= 0)
-                    continue;
-
-                const int row_full = length_row / nb * nb;
-                const int col_full = length_col / nb * nb;
-                const int row_remain = length_row - row_full;
-                const int col_remain = length_col - col_full;
-
-                if(row_remain != 0){
-                    const int row_offset = row_full;
-                    const int row_loc = mm_row_start + row_offset;
-                    const int g_row = indx_l2g_r(array_descA, handle, row_loc);
-                    for(int col_offset = 0; col_offset < length_col; col_offset += nb){
-                        const int col_loc = mm_col_start + col_offset;
-                        const int col_len = std::min(nb, length_col - col_offset);
-                        const int g_col = indx_l2g_c(array_descA, handle, col_loc);
-                        if(g_row >= g_col)
-                            continue;
-                        blas_impl::gemm_run<Backend, T>(ddla_handle, 'C', 'N',
-                            row_remain, col_len, nb_real,
-                            (T)-1.0,
-                            block_col + row_offset * nb_real, nb_real,
-                            block_row + col_offset * nb_real, nb_real,
-                            (T)1.0,
-                            A + row_loc + std::size_t(col_loc) * lldA, lldA
-                        );
-                    }
-                }
-
-                if(col_remain != 0){
-                    const int col_offset = col_full;
-                    const int col_loc = mm_col_start + col_offset;
-                    const int g_col = indx_l2g_c(array_descA, handle, col_loc);
-                    for(int row_offset = 0; row_offset < row_full; row_offset += nb){
-                        const int row_loc = mm_row_start + row_offset;
-                        const int g_row = indx_l2g_r(array_descA, handle, row_loc);
-                        if(g_row >= g_col)
-                            continue;
-                        blas_impl::gemm_run<Backend, T>(ddla_handle, 'C', 'N',
-                            nb, col_remain, nb_real,
-                            (T)-1.0,
-                            block_col + row_offset * nb_real, nb_real,
-                            block_row + col_offset * nb_real, nb_real,
-                            (T)1.0,
-                            A + row_loc + std::size_t(col_loc) * lldA, lldA
-                        );
-                    }
-                }
-
-                i_batch_count = 0;
-                for(int row_offset = 0; row_offset < row_full; row_offset += nb){
-                    const int row_loc = mm_row_start + row_offset;
-                    const int g_row = indx_l2g_r(array_descA, handle, row_loc);
-                    for(int col_offset = 0; col_offset < col_full; col_offset += nb){
-                        const int col_loc = mm_col_start + col_offset;
-                        const int g_col = indx_l2g_c(array_descA, handle, col_loc);
-                        if(g_row >= g_col)
-                            continue;
-                        h_A_array[i_batch_count] = block_col + row_offset * nb_real;
-                        h_B_array[i_batch_count] = block_row + col_offset * nb_real;
-                        h_C_array[i_batch_count] = A + row_loc + std::size_t(col_loc) * lldA;
-                        i_batch_count++;
-                    }
-                }
-                if(i_batch_count > 0){
-                    DDLA_CHECK(ddlaMemcpy(ddla_handle, A_array, h_A_array, i_batch_count * sizeof(T*)));
-                    DDLA_CHECK(ddlaMemcpy(ddla_handle, B_array, h_B_array, i_batch_count * sizeof(T*)));
-                    DDLA_CHECK(ddlaMemcpy(ddla_handle, C_array, h_C_array, i_batch_count * sizeof(T*)));
-                    blas_impl::gemmBatched_run<Backend, T>(
-                        ddla_handle, 'C', 'N',
-                        nb, nb, nb_real, (T)-1.0,
-                        A_array, nb_real,
-                        B_array, nb_real,
-                        (T)1.0, C_array, lldA,
-                        i_batch_count
-                    );
-                }
+            if(i_batch_count > 0){
+                DDLA_CHECK(ddlaMemcpy(ddla_handle, A_array, h_A_array, i_batch_count * sizeof(T*)));
+                DDLA_CHECK(ddlaMemcpy(ddla_handle, B_array, h_B_array, i_batch_count * sizeof(T*)));
+                DDLA_CHECK(ddlaMemcpy(ddla_handle, C_array, h_C_array, i_batch_count * sizeof(T*)));
+                blas_impl::gemmBatched_run<Backend, T>(
+                    ddla_handle, op_rows, op_cols,
+                    nb, nb, nb_real, (T)-1.0,
+                    A_array, ld_rows,
+                    B_array, ld_cols,
+                    (T)1.0, C_array, lldA,
+                    i_batch_count
+                );
             }
         }
         DDLA_CHECK(ddlaSynchronize(ddla_handle));
@@ -484,17 +372,7 @@ bool ppotrf(
     int& info, \
     bool is_head, int location)
 
-INSTANTIATE_PPOTRF(DdlaBackend::CPU, float);
-INSTANTIATE_PPOTRF(DdlaBackend::CPU, double);
-INSTANTIATE_PPOTRF(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PPOTRF(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PPOTRF(DdlaBackend::GPU, float);
-INSTANTIATE_PPOTRF(DdlaBackend::GPU, double);
-INSTANTIATE_PPOTRF(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PPOTRF(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PPOTRF)
 
 #undef INSTANTIATE_PPOTRF
 

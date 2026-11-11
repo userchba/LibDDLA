@@ -20,6 +20,7 @@
 #include "pgeqrf_impl.h"
 #include "reflector_build_T.h"
 #include "matrix_transfer.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -410,27 +411,10 @@ void qr_panel_distributed(const DdlaHandle_t& handle, T* A, const int* descA, Qr
 #define INSTANTIATE_QR_PANEL(BACKEND, TYPE)                                         \
     template void qr_panel_gathered<BACKEND, TYPE>(                                 \
         const DdlaHandle_t&, TYPE*, const int*, QrWorkspace<TYPE>&, char, int, int, int, int, int, int, int, \
-        int, TYPE*, TYPE*, TYPE*, bool);
+        int, TYPE*, TYPE*, TYPE*, bool)
 
-INSTANTIATE_QR_PANEL_DIST(DdlaBackend::CPU, float);
-INSTANTIATE_QR_PANEL_DIST(DdlaBackend::CPU, double);
-INSTANTIATE_QR_PANEL_DIST(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_QR_PANEL_DIST(DdlaBackend::CPU, std::complex<double>);
-INSTANTIATE_QR_PANEL(DdlaBackend::CPU, float);
-INSTANTIATE_QR_PANEL(DdlaBackend::CPU, double);
-INSTANTIATE_QR_PANEL(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_QR_PANEL(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_QR_PANEL_DIST(DdlaBackend::GPU, float);
-INSTANTIATE_QR_PANEL_DIST(DdlaBackend::GPU, double);
-INSTANTIATE_QR_PANEL_DIST(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_QR_PANEL_DIST(DdlaBackend::GPU, std::complex<double>);
-INSTANTIATE_QR_PANEL(DdlaBackend::GPU, float);
-INSTANTIATE_QR_PANEL(DdlaBackend::GPU, double);
-INSTANTIATE_QR_PANEL(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_QR_PANEL(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_QR_PANEL_DIST)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_QR_PANEL)
 
 #undef INSTANTIATE_QR_PANEL
 #undef INSTANTIATE_QR_PANEL_DIST

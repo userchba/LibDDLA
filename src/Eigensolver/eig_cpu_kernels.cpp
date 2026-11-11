@@ -38,6 +38,8 @@
 #include <vector>
 
 #include "host_threads.h"
+#include "instantiate.h"
+#include "check_agree.h"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -600,23 +602,9 @@ bool host_run_team(int nthreads,const std::function<void(int)>& function)
         [](void* context,int role){(*static_cast<const std::function<void(int)>*>(context))(role);});
 }
 
-namespace {
-// Local allocation or worker failures must be agreed before the next history
-// fetch (and before the caller's redistribution). MPI stays on this thread.
-template<class F>
-void replay_collective_local(MPI_Comm comm, F&& work)
-{
-    std::exception_ptr failure;
-    try { work(); } catch (...) { failure = std::current_exception(); }
-    int ok = failure ? 0 : 1, all_ok = 0;
-    MPI_CHECK(MPI_Allreduce(&ok, &all_ok, 1, MPI_INT, MPI_MIN, comm));
-    if (!all_ok) {
-        if (failure) std::rethrow_exception(failure);
-        throw std::runtime_error("distributed CPU replay failed on another rank");
-    }
-}
-
-} // namespace
+// Local allocation or worker failures are agreed (detail::agree_local) before
+// the next history fetch and before the caller's redistribution. MPI stays on
+// this thread.
 
 CpuReplayPolicy cpu_replay_policy_for_threads(int threads)
 {return replay_policy_for_threads(threads);}
@@ -682,12 +670,12 @@ template<class T,int W>void replay_pack_distributed(const CpuReplayPackPlan& p,c
 {
     using R=typename real_type<T>::type;
     const int tiles=int((std::int64_t(p.ncs)+W-1)/W);const auto stride=pack_tile_stride<T>(p);
-    replay_collective_local(comm,[&]{host_parallel_for(tiles,1,p.policy.threads,[&](long long lo,long long hi){for(auto t=lo;t<hi;++t)gather_tile<T,W>(data+t*stride,Y,ldy,columns+t*W,std::min(W,p.ncs-int(t)*W),p.n,phases);});});
+    detail::agree_local(comm,"distributed CPU replay",[&]{host_parallel_for(tiles,1,p.policy.threads,[&](long long lo,long long hi){for(auto t=lo;t<hi;++t)gather_tile<T,W>(data+t*stride,Y,ldy,columns+t*W,std::min(W,p.ncs-int(t)*W),p.n,phases);});});
     for(long long chunk=history.chunks();chunk-->0;){DistributedHistoryHeader header;history.fetch(chunk,comm,records,&header);
-        replay_collective_local(comm,[&]{if(p.ncs>=16)build_wave_schedule(schedule,p.n,records,header.count,p.policy.threads,p.policy,&header.cursor,header.offset);const auto view=schedule.view();
+        detail::agree_local(comm,"distributed CPU replay",[&]{if(p.ncs>=16)build_wave_schedule(schedule,p.n,records,header.count,p.policy.threads,p.policy,&header.cursor,header.offset);const auto view=schedule.view();
             host_parallel_for(tiles,1,p.policy.threads,[&](long long lo,long long hi){for(auto t=lo;t<hi;++t){R* x=data+t*stride;if(schedule.ok)wave_tile<T,W>(x,view);else rot_tile<T,W>(x,records,header.count,p.n);}});});
     }
-    replay_collective_local(comm,[&]{host_parallel_for(tiles,1,p.policy.threads,[&](long long lo,long long hi){for(auto t=lo;t<hi;++t)pack_tile<T,W>(data+t*stride,std::min(W,p.ncs-int(t)*W),p.n,rowoff,int(t)*W,sendbuf);});});
+    detail::agree_local(comm,"distributed CPU replay",[&]{host_parallel_for(tiles,1,p.policy.threads,[&](long long lo,long long hi){for(auto t=lo;t<hi;++t)pack_tile<T,W>(data+t*stride,std::min(W,p.ncs-int(t)*W),p.n,rowoff,int(t)*W,sendbuf);});});
 }
 }
 template<class T>CpuReplayPackPlan cpu_replay_pack_geometry(int n,int ncs,int mb,int npr,int kd,std::size_t records,CpuReplaySource source,const CpuReplayPolicy& policy)
@@ -750,7 +738,7 @@ void cpu_replay_pack_distributed(const typename real_type<T>::type* Y,std::size_
 {
     const auto p=cpu_replay_pack_geometry<T>(n,ncs,mb,npr,history.kd,std::size_t(std::min(history.total,history.chunk_size)),CpuReplaySource::Distributed,replay_policy_for_threads(nthreads));
     std::size_t host_bytes=0;std::vector<char> host_work;
-    replay_collective_local(comm,[&]{cpu_replay_pack_check<T>(p,Y,y_count,ldy,cols,nullptr,0,nullptr,&history,phases,sd,sendbuf);cpu_replay_pack_workspace_size<T>(p,&host_bytes);host_work.resize(host_bytes);});
+    detail::agree_local(comm,"distributed CPU replay",[&]{cpu_replay_pack_check<T>(p,Y,y_count,ldy,cols,nullptr,0,nullptr,&history,phases,sd,sendbuf);cpu_replay_pack_workspace_size<T>(p,&host_bytes);host_work.resize(host_bytes);});
     cpu_replay_pack_run<T>(p,Y,ldy,cols,nullptr,nullptr,&history,comm,phases,sd,sendbuf,host_work.data(),host_bytes);
 }
 template <typename T>
@@ -788,7 +776,7 @@ template<class T>bool node_wave_windows(const CpuNodeWavePlan& p,std::size_t* in
 }
 template<class T>CpuNodeWavePlan cpu_node_wave_check(MPI_Comm node,int n,const hb2st_rot<T>* records,std::size_t record_count,const CpuReplayPolicy& policy)
 {
-    replay_collective_local(node,[&]{if(n<0||(record_count&&!records)||policy.threads<1)throw std::invalid_argument("CPU shared replay: invalid dimensions or record pointer");});
+    detail::agree_local(node,"distributed CPU replay",[&]{if(n<0||(record_count&&!records)||policy.threads<1)throw std::invalid_argument("CPU shared replay: invalid dimensions or record pointer");});
     CpuNodeWavePlan p{n,record_count?records[0].j0:1,policy.threads,record_count,policy};int signature[6]={p.n,p.kd,policy.wave_mode,policy.row_block,policy.level_block,policy.waves?1:0},minimum[6],maximum[6];
     MPI_CHECK(MPI_Allreduce(signature,minimum,6,MPI_INT,MPI_MIN,node));MPI_CHECK(MPI_Allreduce(signature,maximum,6,MPI_INT,MPI_MAX,node));
     for(int k=0;k<6;++k)if(minimum[k]!=maximum[k])throw std::invalid_argument("CPU shared replay: inconsistent schedule metadata");
@@ -819,21 +807,21 @@ template<class T>bool cpu_node_wave_fill_run(const CpuNodeWavePlan& p,CpuNodeWav
     int rank=0,ranks=1;MPI_CHECK(MPI_Comm_rank(resources.node,&rank));MPI_CHECK(MPI_Comm_size(resources.node,&ranks));
     auto* wid=static_cast<int*>(resources.index.base);auto* pid=reinterpret_cast<std::uint8_t*>(wid+p.records);
     auto* woff=static_cast<std::int64_t*>(resources.table.base);auto* gjlo=reinterpret_cast<int*>(woff+p.records+1);auto* gcnt=gjlo+p.records;auto* order=gcnt+p.records;
-    long long header[3]={0,0,0};replay_collective_local(resources.node,[&]{if(rank==0){
+    long long header[3]={0,0,0};detail::agree_local(resources.node,"distributed CPU replay",[&]{if(rank==0){
         header[0]=plan_wave_schedule<T>(p.n,rots,p.records,wid,pid,schedule,p.policy)?1:0;
         header[1]=static_cast<long long>(schedule.nw);header[2]=schedule.ranked?1:0;
         if(header[0]){std::memcpy(woff,schedule.woff,(schedule.nw+1)*sizeof(*woff));std::memcpy(gjlo,schedule.gjlo,schedule.nw*sizeof(int));std::memcpy(gcnt,schedule.gcnt,schedule.nw*sizeof(int));if(header[2])std::memcpy(order,schedule.rank,schedule.nw*sizeof(int));}
     }});
     MPI_CHECK(MPI_Bcast(header,3,MPI_LONG_LONG,0,resources.node));if(!header[0])return false;MPI_CHECK(MPI_Barrier(resources.node));
     const auto first=p.records/std::size_t(ranks)*rank+std::min(std::size_t(rank),p.records%ranks),end=first+p.records/ranks+(std::size_t(rank)<p.records%ranks?1:0);
-    replay_collective_local(resources.node,[&]{regroup_records<T>(rots,first,end,wid,pid,header[2]?order:nullptr,woff,static_cast<hb2st_rot<T>*>(resources.records.base),p.threads);});MPI_CHECK(MPI_Barrier(resources.node));
+    detail::agree_local(resources.node,"distributed CPU replay",[&]{regroup_records<T>(rots,first,end,wid,pid,header[2]?order:nullptr,woff,static_cast<hb2st_rot<T>*>(resources.records.base),p.threads);});MPI_CHECK(MPI_Barrier(resources.node));
     out.ok=true;out.nw=std::size_t(header[1]);out.nrots=p.records;out.woff=woff;out.gjlo=gjlo;out.gcnt=gcnt;out.wrec=static_cast<const hb2st_rot<T>*>(resources.records.base);return true;
 }
 template <typename T>bool cpu_build_node_wave_schedule(MPI_Comm node,int n,const hb2st_rot<T>* rots,std::size_t nrots,int threads,WaveShared<T>& out)
 {
     out={};const auto p=cpu_node_wave_check<T>(node,n,rots,nrots,replay_policy_for_threads(threads));if(!p.policy.waves||!nrots||n<4)return false;
     std::size_t host_bytes=0;std::vector<char> host_work;
-    replay_collective_local(node,[&]{cpu_node_wave_workspace_size<T>(p,&host_bytes);host_work.resize(host_bytes);});if(!host_bytes)return false;
+    detail::agree_local(node,"distributed CPU replay",[&]{cpu_node_wave_workspace_size<T>(p,&host_bytes);host_work.resize(host_bytes);});if(!host_bytes)return false;
     std::optional<CpuNodeWaveResources<T>> prepared;try{prepared.emplace(node,p);}catch(const std::bad_alloc&){return false;}auto& resources=*prepared;
     try{if(!cpu_node_wave_fill_run<T>(p,resources,rots,out,host_work.data(),host_bytes)){resources.release();return false;}
         resources.release_plan();out.tab=resources.table;out.rec=resources.records;resources.table={};resources.records={};return true;
@@ -933,7 +921,7 @@ template<class T,int W>void replay_rows_input(const DdlaHandle_t& h,const Hb2stC
                 });
             },input_work,bytes-std::size_t(input_work-base));
     } else if(map.P==1) {
-        replay_collective_local(h->comm,[&] {
+        detail::agree_local(h->comm,"distributed CPU replay",[&] {
             host_parallel_for(map.ncs,4,threads,[&](long long lo,long long hi) {
                 for(long long j=lo;j<hi;++j)
                     for(int i=0;i<n;++i) put(static_cast<int>(j),i,Y[i+static_cast<std::size_t>(j)*ldy]);
@@ -941,7 +929,7 @@ template<class T,int W>void replay_rows_input(const DdlaHandle_t& h,const Hb2stC
         });
     } else {
         for(int first=0;first<map.maxcols;first+=map.width) {
-            replay_collective_local(h->comm,[&] {
+            detail::agree_local(h->comm,"distributed CPU replay",[&] {
                 map.input(first);
                 for(int q=0;q<map.P;++q) {
                     const int count=map.count(q,first);const auto columns=map.column(q);
@@ -956,7 +944,7 @@ template<class T,int W>void replay_rows_input(const DdlaHandle_t& h,const Hb2stC
             });
             MPI_CHECK(MPI_Alltoallv(send,map.sc,map.sd,mpi_datatype<R>(),
                 recv,map.rc,map.rd,mpi_datatype<R>(),h->comm));
-            replay_collective_local(h->comm,[&] {
+            detail::agree_local(h->comm,"distributed CPU replay",[&] {
                 host_parallel_for(map.count(map.me,first),4,threads,[&](long long lo,long long hi) {
                     for(long long k=lo;k<hi;++k)
                         for(int q=0;q<map.P;++q) {
@@ -983,7 +971,7 @@ template<class T,int W>void replay_rows_apply(const DdlaHandle_t& h,const Hb2stC
     for(long long chunk=history.chunks();chunk-->0;) {
         DistributedHistoryHeader header;
         history.fetch(chunk,h->comm,records,&header);
-        replay_collective_local(h->comm,[&] {
+        detail::agree_local(h->comm,"distributed CPU replay",[&] {
             if(map.ncs>=16)build_wave_schedule(schedule,n,records,header.count,threads,p.policy,&header.cursor,header.offset);
             const auto view=schedule.view();
             host_parallel_for(tiles,1,threads,[&](long long lo,long long hi) {
@@ -1000,7 +988,7 @@ template<class T,int W>void replay_rows_apply(const DdlaHandle_t& h,const Hb2stC
     };
     if(map.npr==1) {
         const auto columns=map.column(map.me);
-        replay_collective_local(h->comm,[&] {
+        detail::agree_local(h->comm,"distributed CPU replay",[&] {
             host_parallel_for(map.ncs,4,threads,[&](long long lo,long long hi) {
                 for(long long k=lo;k<hi;++k) {
                     const int j=columns[k],lj=(j/map.nb/map.npc)*map.nb+j%map.nb;
@@ -1011,7 +999,7 @@ template<class T,int W>void replay_rows_apply(const DdlaHandle_t& h,const Hb2stC
     } else {
         for(int first=0;first<map.maxoutcols;first+=map.width) {
             const int mine=map.output_count(map.me,first),start=map.output_first(map.me,first);
-            replay_collective_local(h->comm,[&] {
+            detail::agree_local(h->comm,"distributed CPU replay",[&] {
                 map.output(first);
                 host_parallel_for(n,32,threads,[&](long long lo,long long hi) {
                     for(long long i=lo;i<hi;++i) {
@@ -1022,7 +1010,7 @@ template<class T,int W>void replay_rows_apply(const DdlaHandle_t& h,const Hb2stC
             });
             MPI_CHECK(MPI_Alltoallv(send,map.osc,map.osd,mpi_datatype<T>(),
                 recv,map.orc,map.ord,mpi_datatype<T>(),h->col_comm));
-            replay_collective_local(h->comm,[&] {
+            detail::agree_local(h->comm,"distributed CPU replay",[&] {
                 for(int p=0;p<map.npr;++p) {
                     const int q=map.col_ranks[p],count=map.output_count(q,first),start=map.output_first(q,first);const auto columns=map.column(q);
                     host_parallel_for(count,4,threads,[&](long long lo,long long hi) {
@@ -1048,12 +1036,12 @@ template<class T>Hb2stCpuReplayPlan hb2st_cpu_replay_check(const DdlaHandle_t& h
     const DistributedHistory<T>& history,const T* phases,std::size_t phase_count,T* Z,const int* desc,int panel)
 {
     using R=typename real_type<T>::type;if(!h||ddlaGetBackend(h)!=DdlaBackend::CPU)throw std::invalid_argument("CPU replay: CPU handle required");
-    replay_collective_local(h->comm,[&]{check_desc(desc,h);if(n<0||n>desc[DDLA_M_]||n>desc[DDLA_N_]||panel<0)throw std::invalid_argument("CPU replay: invalid order or panel width");});
+    detail::agree_local(h->comm,"distributed CPU replay",[&]{check_desc(desc,h);if(n<0||n>desc[DDLA_M_]||n>desc[DDLA_N_]||panel<0)throw std::invalid_argument("CPU replay: invalid order or panel width");});
     int signature[6]={n,desc[DDLA_MB_],desc[DDLA_NB_],desc[DDLA_RSRC_],desc[DDLA_CSRC_],panel},minimum[6],maximum[6];
     MPI_CHECK(MPI_Allreduce(signature,minimum,6,MPI_INT,MPI_MIN,h->comm));MPI_CHECK(MPI_Allreduce(signature,maximum,6,MPI_INT,MPI_MAX,h->comm));
     for(int i=0;i<6;++i)if(minimum[i]!=maximum[i])throw std::invalid_argument("CPU replay: inconsistent shared metadata");
     const auto columns=cpu_replay_plan(h,n,desc,panel);
-    replay_collective_local(h->comm,[&]{
+    detail::agree_local(h->comm,"distributed CPU replay",[&]{
         const std::size_t nc=num_loc(n,columns.nb,columns.pc,columns.csrc,columns.npc);
         if(ldy<std::max(columns.nrl,1)||(n>0&&columns.nrl>0&&!Y)||(columns.outrows>0&&nc>0&&!Z)||!history.ready||history.n!=n||history.rank!=columns.me||history.ranks!=columns.P)throw std::invalid_argument("CPU replay: incompatible input/history/output");
         if(phase_count&&!phases)throw std::invalid_argument("CPU replay: null phases");
@@ -1109,11 +1097,11 @@ template<class T>void hb2st_replay_rows_cpu(const DdlaHandle_t& h,int n,typename
 {
     const auto p=hb2st_cpu_replay_check<T>(h,n,Y,ldy,history,phases.data(),phases.size(),Z,desc,panel);
     std::size_t backend_bytes=0;ddla::vector<char> backend_work(h);
-    replay_collective_local(h->comm,[&]{hb2st_cpu_replay_workspace_size<T>(h,p,&backend_bytes);backend_work.resize(backend_bytes);});
+    detail::agree_local(h->comm,"distributed CPU replay",[&]{hb2st_cpu_replay_workspace_size<T>(h,p,&backend_bytes);backend_work.resize(backend_bytes);});
     hb2st_cpu_replay_input_run<T>(h,p,Y,phases.data(),backend_work.data(),backend_bytes);
     // No later operation reads Y, and all input communication is complete.
     // The caller's pointer-reference guard sees null even if replay fails.
-    replay_collective_local(h->comm,[&]{DDLA_CHECK(ddlaFree(h,Y));Y=nullptr;});
+    detail::agree_local(h->comm,"distributed CPU replay",[&]{DDLA_CHECK(ddlaFree(h,Y));Y=nullptr;});
     hb2st_cpu_replay_apply_run<T>(h,p,history,Z,info,backend_work.data(),backend_bytes);
 }
 
@@ -1126,11 +1114,8 @@ template<class T>void hb2st_replay_rows_cpu(const DdlaHandle_t& h,int n,typename
     template void hb2st_cpu_replay_apply_run<T>(const DdlaHandle_t&,const Hb2stCpuReplayPlan&,const DistributedHistory<T>&,T*,int&,void*,std::size_t); \
     template void hb2st_cpu_replay_run<T>(const DdlaHandle_t&,const Hb2stCpuReplayPlan&,const DistributedHistory<T>&,const T*,const real_type<T>::type*,T*,int&,void*,std::size_t); \
     template void hb2st_replay_rows_cpu<T>(const DdlaHandle_t&,int,real_type<T>::type*&,int, \
-        const DistributedHistory<T>&,const std::vector<T>&,T*,const int*,int&,int);
-DDLA_INST_ROWS_CPU(float)
-DDLA_INST_ROWS_CPU(double)
-DDLA_INST_ROWS_CPU(std::complex<float>)
-DDLA_INST_ROWS_CPU(std::complex<double>)
+        const DistributedHistory<T>&,const std::vector<T>&,T*,const int*,int&,int)
+DDLA_FOR_EACH_TYPE(DDLA_INST_ROWS_CPU)
 #undef DDLA_INST_ROWS_CPU
 
 #define DDLA_INST_CPU_KERNELS(T)                                                                              \
@@ -1152,12 +1137,9 @@ DDLA_INST_ROWS_CPU(std::complex<double>)
     template void cpu_replay_pack_shared<T>(const real_type<T>::type*,std::size_t,int,const int*,int,int,              \
                                             const WaveShared<T>&,const T*,int,int,const int*,T*,int);    \
     template bool cpu_build_node_wave_schedule<T>(MPI_Comm, int, const hb2st_rot<T>*, std::size_t, int,       \
-                                                  WaveShared<T>&);
+                                                  WaveShared<T>&)
 
-DDLA_INST_CPU_KERNELS(float)
-DDLA_INST_CPU_KERNELS(double)
-DDLA_INST_CPU_KERNELS(std::complex<float>)
-DDLA_INST_CPU_KERNELS(std::complex<double>)
+DDLA_FOR_EACH_TYPE(DDLA_INST_CPU_KERNELS)
 
 } // namespace detail
 } // namespace ddla

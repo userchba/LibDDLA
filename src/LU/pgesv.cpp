@@ -16,6 +16,7 @@
 #include "lu_panel.h"
 #include "pgetrf_impl.h"
 #include "pgetrs_impl.h"
+#include "instantiate.h"
 
 namespace ddla{
 
@@ -132,24 +133,9 @@ void pgesv(
     const int*, const int*)
 
 
-INSTANTIATE_PGESV_CHECK(DdlaBackend::CPU);
-INSTANTIATE_PGESV(DdlaBackend::CPU, float);
-INSTANTIATE_PGESV(DdlaBackend::CPU, double);
-INSTANTIATE_PGESV(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PGESV(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PGESV_CHECK(DdlaBackend::GPU);
-INSTANTIATE_PGESV(DdlaBackend::GPU, float);
-INSTANTIATE_PGESV(DdlaBackend::GPU, double);
-INSTANTIATE_PGESV(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PGESV(DdlaBackend::GPU, std::complex<double>);
-#endif
-
-INSTANTIATE_PGESV_SIZE(float);
-INSTANTIATE_PGESV_SIZE(double);
-INSTANTIATE_PGESV_SIZE(std::complex<float>);
-INSTANTIATE_PGESV_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_PGESV_CHECK)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PGESV)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PGESV_SIZE)
 
 #undef INSTANTIATE_PGESV_SIZE
 #undef INSTANTIATE_PGESV_CHECK

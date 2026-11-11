@@ -17,6 +17,7 @@
 #include "lapack_impl.h"
 #include "plan_util.h"
 #include "require_backend.h"
+#include "instantiate.h"
 
 // Single-process bottom-right Cholesky, split into the three components of src/lapack_impl.h:
 //   potrf_bottom_right_check / _workspace_size / _run   the public potrf_bottom_right,
@@ -134,17 +135,7 @@ void potrf_bottom_right_block(
     template void potrf_bottom_right_block<BACKEND, TYPE>(char, int, TYPE*, int, int, TYPE*, int*, int&, \
     const DdlaHandle_t&, void*, std::size_t)
 
-INSTANTIATE_POTRF_BOTTOM_RIGHT_BLOCK(DdlaBackend::CPU, float);
-INSTANTIATE_POTRF_BOTTOM_RIGHT_BLOCK(DdlaBackend::CPU, double);
-INSTANTIATE_POTRF_BOTTOM_RIGHT_BLOCK(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_POTRF_BOTTOM_RIGHT_BLOCK(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_POTRF_BOTTOM_RIGHT_BLOCK(DdlaBackend::GPU, float);
-INSTANTIATE_POTRF_BOTTOM_RIGHT_BLOCK(DdlaBackend::GPU, double);
-INSTANTIATE_POTRF_BOTTOM_RIGHT_BLOCK(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_POTRF_BOTTOM_RIGHT_BLOCK(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_POTRF_BOTTOM_RIGHT_BLOCK)
 
 #undef INSTANTIATE_POTRF_BOTTOM_RIGHT_BLOCK
 
@@ -330,10 +321,7 @@ INSTANTIATE_POTRF_BOTTOM_RIGHT(DdlaBackend::GPU, std::complex<float>);
 INSTANTIATE_POTRF_BOTTOM_RIGHT(DdlaBackend::GPU, std::complex<double>);
 #endif
 
-INSTANTIATE_POTRF_BOTTOM_RIGHT_SIZE(float);
-INSTANTIATE_POTRF_BOTTOM_RIGHT_SIZE(double);
-INSTANTIATE_POTRF_BOTTOM_RIGHT_SIZE(std::complex<float>);
-INSTANTIATE_POTRF_BOTTOM_RIGHT_SIZE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INSTANTIATE_POTRF_BOTTOM_RIGHT_SIZE)
 
 #undef INSTANTIATE_POTRF_BOTTOM_RIGHT_SIZE
 #undef INSTANTIATE_POTRF_BOTTOM_RIGHT

@@ -11,6 +11,7 @@
 #include "lu_panel.h"
 #include "pgetrs_impl.h"
 #include "PBLAS/ptrtrs_impl.h"
+#include "instantiate.h"
 
 namespace ddla {
 
@@ -150,24 +151,9 @@ void pgetrs_nopiv(
     const int*)
 
 
-INSTANTIATE_PGETRS_NOPIV_CHECK(DdlaBackend::CPU);
-INSTANTIATE_PGETRS_NOPIV(DdlaBackend::CPU, float);
-INSTANTIATE_PGETRS_NOPIV(DdlaBackend::CPU, double);
-INSTANTIATE_PGETRS_NOPIV(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PGETRS_NOPIV(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PGETRS_NOPIV_CHECK(DdlaBackend::GPU);
-INSTANTIATE_PGETRS_NOPIV(DdlaBackend::GPU, float);
-INSTANTIATE_PGETRS_NOPIV(DdlaBackend::GPU, double);
-INSTANTIATE_PGETRS_NOPIV(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PGETRS_NOPIV(DdlaBackend::GPU, std::complex<double>);
-#endif
-
-INSTANTIATE_PGETRS_NOPIV_SIZE(float);
-INSTANTIATE_PGETRS_NOPIV_SIZE(double);
-INSTANTIATE_PGETRS_NOPIV_SIZE(std::complex<float>);
-INSTANTIATE_PGETRS_NOPIV_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_PGETRS_NOPIV_CHECK)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PGETRS_NOPIV)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PGETRS_NOPIV_SIZE)
 
 #undef INSTANTIATE_PGETRS_NOPIV_SIZE
 #undef INSTANTIATE_PGETRS_NOPIV_CHECK

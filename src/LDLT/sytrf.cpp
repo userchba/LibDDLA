@@ -1,5 +1,6 @@
 #include <ddla/ddla.h>
 #include "ldlt_impl.h"
+#include "instantiate.h"
 
 namespace ddla {
 
@@ -15,48 +16,10 @@ void sytrf_nopiv(const DdlaHandle_t &h, char uplo, int n, T *A, int lda, int &in
                                                       nullptr, nullptr, 1, info);
 }
 
-template void sytrf<DdlaBackend::CPU, float>(const DdlaHandle_t &, char, int, float *, int, int *,
-                                             int &);
-template void sytrf<DdlaBackend::CPU, double>(const DdlaHandle_t &, char, int, double *, int, int *,
-                                              int &);
-template void sytrf<DdlaBackend::CPU, std::complex<float>>(const DdlaHandle_t &, char, int,
-                                                           std::complex<float> *, int, int *,
-                                                           int &);
-template void sytrf<DdlaBackend::CPU, std::complex<double>>(const DdlaHandle_t &, char, int,
-                                                            std::complex<double> *, int, int *,
-                                                            int &);
-#if DDLA_HAS_GPU
-template void sytrf<DdlaBackend::GPU, float>(const DdlaHandle_t &, char, int, float *, int, int *,
-                                             int &);
-template void sytrf<DdlaBackend::GPU, double>(const DdlaHandle_t &, char, int, double *, int, int *,
-                                              int &);
-template void sytrf<DdlaBackend::GPU, std::complex<float>>(const DdlaHandle_t &, char, int,
-                                                           std::complex<float> *, int, int *,
-                                                           int &);
-template void sytrf<DdlaBackend::GPU, std::complex<double>>(const DdlaHandle_t &, char, int,
-                                                            std::complex<double> *, int, int *,
-                                                            int &);
-#endif
-
-template void sytrf_nopiv<DdlaBackend::CPU, float>(const DdlaHandle_t &, char, int, float *, int,
-                                                   int &);
-template void sytrf_nopiv<DdlaBackend::CPU, double>(const DdlaHandle_t &, char, int, double *, int,
-                                                    int &);
-template void sytrf_nopiv<DdlaBackend::CPU, std::complex<float>>(const DdlaHandle_t &, char, int,
-                                                                 std::complex<float> *, int, int &);
-template void sytrf_nopiv<DdlaBackend::CPU, std::complex<double>>(const DdlaHandle_t &, char, int,
-                                                                  std::complex<double> *, int,
-                                                                  int &);
-#if DDLA_HAS_GPU
-template void sytrf_nopiv<DdlaBackend::GPU, float>(const DdlaHandle_t &, char, int, float *, int,
-                                                   int &);
-template void sytrf_nopiv<DdlaBackend::GPU, double>(const DdlaHandle_t &, char, int, double *, int,
-                                                    int &);
-template void sytrf_nopiv<DdlaBackend::GPU, std::complex<float>>(const DdlaHandle_t &, char, int,
-                                                                 std::complex<float> *, int, int &);
-template void sytrf_nopiv<DdlaBackend::GPU, std::complex<double>>(const DdlaHandle_t &, char, int,
-                                                                  std::complex<double> *, int,
-                                                                  int &);
-#endif
+#define DDLA_INSTANTIATE(BACKEND_, TYPE_) \
+    template void sytrf<BACKEND_, TYPE_>(const DdlaHandle_t &, char, int, TYPE_ *, int, int *, int &); \
+    template void sytrf_nopiv<BACKEND_, TYPE_>(const DdlaHandle_t &, char, int, TYPE_ *, int, int &)
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_INSTANTIATE)
+#undef DDLA_INSTANTIATE
 
 } // namespace ddla

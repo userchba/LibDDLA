@@ -12,6 +12,7 @@
 #include "check_agree.h"
 #include "plan_util.h"
 #include "plapiv_impl.h"
+#include "instantiate.h"
 
 namespace ddla{
 
@@ -207,24 +208,9 @@ void plapiv(
 #define INSTANTIATE_PLAPIV_SIZE(TYPE) \
     template void plapiv_impl::plapiv_workspace_size<TYPE>(const DdlaHandle_t&, int, const int*, std::size_t*)
 
-INSTANTIATE_PLAPIV_CHECK(DdlaBackend::CPU);
-INSTANTIATE_PLAPIV(DdlaBackend::CPU, float);
-INSTANTIATE_PLAPIV(DdlaBackend::CPU, double);
-INSTANTIATE_PLAPIV(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PLAPIV(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PLAPIV_CHECK(DdlaBackend::GPU);
-INSTANTIATE_PLAPIV(DdlaBackend::GPU, float);
-INSTANTIATE_PLAPIV(DdlaBackend::GPU, double);
-INSTANTIATE_PLAPIV(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PLAPIV(DdlaBackend::GPU, std::complex<double>);
-#endif
-
-INSTANTIATE_PLAPIV_SIZE(float);
-INSTANTIATE_PLAPIV_SIZE(double);
-INSTANTIATE_PLAPIV_SIZE(std::complex<float>);
-INSTANTIATE_PLAPIV_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_PLAPIV_CHECK)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PLAPIV)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PLAPIV_SIZE)
 
 #undef INSTANTIATE_PLAPIV_SIZE
 #undef INSTANTIATE_PLAPIV_CHECK

@@ -17,6 +17,8 @@
 #include "blas_enums.h"
 #include "ddla_connector.h"
 #include "ddla_stream.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 extern "C" {
 // xGEMV takes the transpose character directly ('N', 'T' or 'C' -- the complex
@@ -140,20 +142,7 @@ void gemv_check(
     const T& beta,
     T* y, int incy)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU gemv is not available in this LibDDLA build");
-
-    if (handle == nullptr) {
-        throw std::runtime_error("gemv: null handle");
-    }
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("gemv: template backend ") +
-            (Backend == DdlaBackend::CPU ? "CPU" : "GPU") +
-            " does not match handle backend " +
-            (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
-    }
+    detail::require_backend<Backend>(handle, "gemv");
 
     if constexpr (Backend == DdlaBackend::GPU) {
         (void)detail::to_blas_op(trans);
@@ -225,33 +214,14 @@ void gemv(
         const TYPE&, const TYPE*, int,                                         \
         const TYPE*, int, const TYPE&, TYPE*, int)
 
-INSTANTIATE_GEMV(DdlaBackend::CPU, float);
-INSTANTIATE_GEMV(DdlaBackend::CPU, double);
-INSTANTIATE_GEMV(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_GEMV(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_GEMV(DdlaBackend::GPU, float);
-INSTANTIATE_GEMV(DdlaBackend::GPU, double);
-INSTANTIATE_GEMV(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_GEMV(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_GEMV)
 
 #undef INSTANTIATE_GEMV
 
 
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::gemv_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char trans, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE* x, int incx, const TYPE& beta, TYPE* y, int incy); \
-    template void blas_impl::gemv_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char trans, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE* x, int incx, const TYPE& beta, TYPE* y, int incy);
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#if DDLA_HAS_GPU
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
-#endif
+    template void blas_impl::gemv_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char trans, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE* x, int incx, const TYPE& beta, TYPE* y, int incy)
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_INSTANTIATE_PHASES)
 #undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

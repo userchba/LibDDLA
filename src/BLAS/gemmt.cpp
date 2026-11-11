@@ -7,6 +7,7 @@
 #include "helpers.h"
 #include "require_backend.h"
 #include "plan_util.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <cctype>
@@ -398,18 +399,10 @@ template void blas_impl::gemmt_check<B,T>(const DdlaHandle_t&,char,char,char,int
 template void blas_impl::gemmt_run<B,T>(const DdlaHandle_t&,char,char,char,int,int,const T&,const T*,int,const T*,int,const T&,T*,int,void*,std::size_t); \
 template void blas_impl::real_diagonal<B,T>(const DdlaHandle_t&,int,T*,int); \
 template void blas_impl::gemmt_copy_run<B,T>(const DdlaHandle_t&,char,int,int,int,const T&,const T*,T*,int,T* const*,const int*)
-#define INSTANTIATE_TYPES(B) \
-INSTANTIATE(B,float); INSTANTIATE(B,double); \
-INSTANTIATE(B,std::complex<float>); INSTANTIATE(B,std::complex<double>)
-INSTANTIATE_TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-INSTANTIATE_TYPES(DdlaBackend::GPU);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE)
 #define INSTANTIATE_SIZE(T) template void blas_impl::gemmt_workspace_size<T>(const DdlaHandle_t&,char,char,int,int,std::size_t*)
-INSTANTIATE_SIZE(float); INSTANTIATE_SIZE(double);
-INSTANTIATE_SIZE(std::complex<float>); INSTANTIATE_SIZE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INSTANTIATE_SIZE)
 #undef INSTANTIATE_SIZE
-#undef INSTANTIATE_TYPES
 #undef INSTANTIATE
 template <DdlaBackend Backend,typename R>
 void gemmt(const DdlaHandle_t& h,char uplo,char ta,char tb,int n,int k,

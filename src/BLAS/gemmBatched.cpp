@@ -37,6 +37,7 @@
 #include "gemm_mixed_cpu.h"
 #include "helpers.h"
 #include "require_backend.h"
+#include "instantiate.h"
 #include <cassert>
 
 extern "C" {
@@ -203,20 +204,7 @@ void gemmBatched_check(
     T* const Carray[], int ldc,
     int batchCount)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU gemmBatched is not available in this LibDDLA build");
-
-    if (handle == nullptr) {
-        throw std::runtime_error("gemmBatched: null handle");
-    }
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("gemmBatched: template backend ") +
-            (Backend == DdlaBackend::CPU ? "CPU" : "GPU") +
-            " does not match handle backend " +
-            (actual == DdlaBackend::CPU ? "CPU" : "GPU"));
-    }
+    detail::require_backend<Backend>(handle, "gemmBatched");
 
     if constexpr (!std::is_same_v<T,TA> || !std::is_same_v<T,TB>) {
         const char ta=upper(transa),tb=upper(transb);
@@ -424,34 +412,15 @@ void gemmBatched(
         const TYPE&, const TYPE* const[], int, const TYPE* const[], int,       \
         const TYPE&, TYPE* const[], int, int)
 
-INSTANTIATE_GEMM_BATCHED(DdlaBackend::CPU, float);
-INSTANTIATE_GEMM_BATCHED(DdlaBackend::CPU, double);
-INSTANTIATE_GEMM_BATCHED(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_GEMM_BATCHED(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_GEMM_BATCHED(DdlaBackend::GPU, float);
-INSTANTIATE_GEMM_BATCHED(DdlaBackend::GPU, double);
-INSTANTIATE_GEMM_BATCHED(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_GEMM_BATCHED(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_GEMM_BATCHED)
 
 #undef INSTANTIATE_GEMM_BATCHED
 
 
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::gemmBatched_check<BACKEND, TYPE>( const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k, const TYPE& alpha, const TYPE* const Aarray[], int lda, const TYPE* const Barray[], int ldb, const TYPE& beta, TYPE* const Carray[], int ldc, int batchCount); \
-    template void blas_impl::gemmBatched_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k, const TYPE& alpha, const TYPE* const Aarray[], int lda, const TYPE* const Barray[], int ldb, const TYPE& beta, TYPE* const Carray[], int ldc, int batchCount, void*, std::size_t);
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::CPU, std::complex<double>)
-#if DDLA_HAS_GPU
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, float)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, double)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<float>)
-DDLA_INSTANTIATE_PHASES(DdlaBackend::GPU, std::complex<double>)
-#endif
+    template void blas_impl::gemmBatched_run<BACKEND, TYPE>( const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k, const TYPE& alpha, const TYPE* const Aarray[], int lda, const TYPE* const Barray[], int ldb, const TYPE& beta, TYPE* const Carray[], int ldc, int batchCount, void*, std::size_t)
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_INSTANTIATE_PHASES)
 #undef DDLA_INSTANTIATE_PHASES
 template void blas_impl::gemmBatched_check<DdlaBackend::CPU,std::complex<float>,float,std::complex<float>>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<float>&,const float* const*,int,const std::complex<float>* const*,int,const std::complex<float>&,std::complex<float>* const*,int,int);
 template void blas_impl::gemmBatched_run<DdlaBackend::CPU,std::complex<float>,float,std::complex<float>>(const DdlaHandle_t&,char,char,int,int,int,const std::complex<float>&,const float* const*,int,const std::complex<float>* const*,int,const std::complex<float>&,std::complex<float>* const*,int,int,void*,std::size_t);

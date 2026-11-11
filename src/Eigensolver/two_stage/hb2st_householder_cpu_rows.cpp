@@ -8,6 +8,8 @@
 #include "mpi_datatype.h"
 #include "ddla_connector.h"
 #include "plan_util.h"
+#include "instantiate.h"
+#include "check_agree.h"
 
 #include <algorithm>
 #include <cassert>
@@ -131,20 +133,8 @@ public:
     void apply(Hb2stHouseholderCpu<T>& state,void*,std::size_t) {state.apply_tiles_run(data_,W,ncols_);}
 };
 
-// A local preparation or worker failure must be agreed before the next
-// exchange. The application thread alone calls MPI.
-template<class F>
-void rows_collective_local(MPI_Comm comm, F&& work)
-{
-    std::exception_ptr failure;
-    try { work(); } catch(...) { failure=std::current_exception(); }
-    int ok=failure?0:1,all_ok=0;
-    MPI_CHECK(MPI_Allreduce(&ok,&all_ok,1,MPI_INT,MPI_MIN,comm));
-    if(!all_ok) {
-        if(failure) std::rethrow_exception(failure);
-        throw std::runtime_error("CPU Householder rows failed on another rank");
-    }
-}
+// A local preparation or worker failure is agreed (detail::agree_local) before
+// the next exchange. The application thread alone calls MPI.
 
 // Elements of the column strips: n x ncs of T, or the split-real tiles (R) of
 // a paired state; false when the tile layout overflows.
@@ -183,10 +173,10 @@ template<class T> HhRowsCpuPlan hh_rows_cpu_check(const DdlaHandle_t& h,int n,co
     using R=typename real_type<T>::type;
     if(!h||h->backend!=DdlaBackend::CPU)throw std::invalid_argument("CPU Householder rows: CPU handle required");
     HhRowsCpuPlan plan;
-    rows_collective_local(h->comm,[&]{check_desc(desc,h);if(n<0||n>desc[DDLA_M_]||n>desc[DDLA_N_]||state.order()!=n)throw std::invalid_argument("CPU Householder rows: incompatible matrix order");});
+    detail::agree_local(h->comm,"CPU Householder rows",[&]{check_desc(desc,h);if(n<0||n>desc[DDLA_M_]||n>desc[DDLA_N_]||state.order()!=n)throw std::invalid_argument("CPU Householder rows: incompatible matrix order");});
     const int signature[5]={n,desc[DDLA_MB_],desc[DDLA_NB_],desc[DDLA_RSRC_],desc[DDLA_CSRC_]};int lo[5],hi[5];
     MPI_CHECK(MPI_Allreduce(signature,lo,5,MPI_INT,MPI_MIN,h->comm));MPI_CHECK(MPI_Allreduce(signature,hi,5,MPI_INT,MPI_MAX,h->comm));
-    rows_collective_local(h->comm,[&]{
+    detail::agree_local(h->comm,"CPU Householder rows",[&]{
         for(int i=0;i<5;++i)if(lo[i]!=hi[i])throw std::invalid_argument("CPU Householder rows: inconsistent metadata");
         plan=hh_rows_cpu_geometry<T>(h,n,ldy,desc,phase_count,state.paired_replay(),state.threads());const auto& p=plan.map;
         const auto nc=std::size_t(num_loc(n,p.nb,p.pc,p.csrc,p.npc));
@@ -216,7 +206,7 @@ void hh_rows_cpu_execute(const DdlaHandle_t& h,const HhRowsCpuPlan& plan,Input& 
 {
     using R=typename real_type<T>::type;constexpr bool is_real=std::is_same<T,R>::value;
     const int n=plan.map.n,ldy=plan.ldy,threads=plan.threads;info=0;
-    if(!n){if constexpr(Consume)rows_collective_local(h->comm,[&]{DDLA_CHECK(ddlaFree(h,Y));Y=nullptr;});return;}
+    if(!n){if constexpr(Consume)detail::agree_local(h->comm,"CPU Householder rows",[&]{DDLA_CHECK(ddlaFree(h,Y));Y=nullptr;});return;}
     if(!plan.phase_count)phases=nullptr;
     char* const base=static_cast<char*>(backend_work);char* front=base;
     CpuReplayLayout map=cpu_replay_layout(plan.map,front);front=align_rows(front);
@@ -227,7 +217,7 @@ void hh_rows_cpu_execute(const DdlaHandle_t& h,const HhRowsCpuPlan& plan,Input& 
     // The panels and the scratch of apply_columns_run share the stage behind the strips.
     char* stage=front;auto* const strips=take<typename std::decay_t<decltype(columns)>::value_type>(stage,strip_count);
     assert(std::size_t(stage-base)<=backend_bytes);
-    rows_collective_local(h->comm,[&] {
+    detail::agree_local(h->comm,"CPU Householder rows",[&] {
         columns.bind(strips,strip_count,n,map.ncs,threads);
     });
     [[maybe_unused]] auto put=[&](int col,int row,R value) {
@@ -250,7 +240,7 @@ void hh_rows_cpu_execute(const DdlaHandle_t& h,const HhRowsCpuPlan& plan,Input& 
                 });
             },stage,backend_bytes-std::size_t(stage-base));
     } else if(map.P==1) {
-        rows_collective_local(h->comm,[&] {
+        detail::agree_local(h->comm,"CPU Householder rows",[&] {
             if constexpr(std::decay_t<decltype(columns)>::tiled) {
                 constexpr int width=std::decay_t<decltype(columns)>::tile_width;
                 const int tiles=map.ncs/width+(map.ncs%width!=0);
@@ -271,9 +261,9 @@ void hh_rows_cpu_execute(const DdlaHandle_t& h,const HhRowsCpuPlan& plan,Input& 
         char* cursor=stage;std::size_t nsend=0,nrecv=0;rows_input_counts(plan.map,&nsend,&nrecv);
         R* const send=take<R>(cursor,nsend);R* const recv=take<R>(cursor,nrecv);
         assert(std::size_t(cursor-base)<=backend_bytes);
-        rows_collective_local(h->comm,[&] {start_rows(send,nsend,threads);start_rows(recv,nrecv,threads);});
+        detail::agree_local(h->comm,"CPU Householder rows",[&] {start_rows(send,nsend,threads);start_rows(recv,nrecv,threads);});
         for(int first=0;first<map.maxcols;first+=map.width) {
-            rows_collective_local(h->comm,[&] {
+            detail::agree_local(h->comm,"CPU Householder rows",[&] {
                 map.input(first);
                 for(int q=0;q<map.P;++q) {
                     const int count=map.count(q,first);const auto columns=map.column(q);
@@ -288,7 +278,7 @@ void hh_rows_cpu_execute(const DdlaHandle_t& h,const HhRowsCpuPlan& plan,Input& 
             });
             MPI_CHECK(MPI_Alltoallv(send,map.sc,map.sd,mpi_datatype<R>(),
                 recv,map.rc,map.rd,mpi_datatype<R>(),h->comm));
-            rows_collective_local(h->comm,[&] {
+            detail::agree_local(h->comm,"CPU Householder rows",[&] {
                 if constexpr(std::decay_t<decltype(columns)>::tiled) {
                     const int mine=map.count(map.me,first);
                     if(mine>0) host_parallel_for(n,32,threads,[&](long long lo,long long hi) {
@@ -314,14 +304,14 @@ void hh_rows_cpu_execute(const DdlaHandle_t& h,const HhRowsCpuPlan& plan,Input& 
     }
     // hh_rows_cpu consumes Y at its original boundary; hh_rows_cpu_run
     // retains the caller input and performs no free.
-    if constexpr(Consume)rows_collective_local(h->comm,[&]{DDLA_CHECK(ddlaFree(h,Y));Y=nullptr;});
+    if constexpr(Consume)detail::agree_local(h->comm,"CPU Householder rows",[&]{DDLA_CHECK(ddlaFree(h,Y));Y=nullptr;});
     const std::size_t stage_bytes=backend_bytes-std::size_t(stage-base);
     if constexpr(Consume){try{columns.check(state);columns.apply(state,stage,stage_bytes);}catch(...){state.release();throw;}}
     else columns.apply(state,stage,stage_bytes);
     auto get=[&](int col,int row)->T {return columns.get(col,row);};
     if(map.npr==1) {
         const auto columns=map.column(map.me);
-        rows_collective_local(h->comm,[&] {
+        detail::agree_local(h->comm,"CPU Householder rows",[&] {
             host_parallel_for(map.ncs,4,threads,[&](long long lo,long long hi) {
                 for(long long k=lo;k<hi;++k) {
                     const int j=columns[k],lj=(j/map.nb/map.npc)*map.nb+j%map.nb;
@@ -333,10 +323,10 @@ void hh_rows_cpu_execute(const DdlaHandle_t& h,const HhRowsCpuPlan& plan,Input& 
         char* cursor=stage;std::size_t nsend=0,nrecv=0;rows_output_counts(plan.map,&nsend,&nrecv);
         T* const send=take<T>(cursor,nsend);T* const recv=take<T>(cursor,nrecv);
         assert(std::size_t(cursor-base)<=backend_bytes);
-        rows_collective_local(h->comm,[&] {start_rows(send,nsend,threads);start_rows(recv,nrecv,threads);});
+        detail::agree_local(h->comm,"CPU Householder rows",[&] {start_rows(send,nsend,threads);start_rows(recv,nrecv,threads);});
         for(int first=0;first<map.maxoutcols;first+=map.width) {
             const int mine=map.output_count(map.me,first),start=map.output_first(map.me,first);
-            rows_collective_local(h->comm,[&] {
+            detail::agree_local(h->comm,"CPU Householder rows",[&] {
                 map.output(first);
                 host_parallel_for(n,32,threads,[&](long long lo,long long hi) {
                     for(long long i=lo;i<hi;++i) {
@@ -347,7 +337,7 @@ void hh_rows_cpu_execute(const DdlaHandle_t& h,const HhRowsCpuPlan& plan,Input& 
             });
             MPI_CHECK(MPI_Alltoallv(send,map.osc,map.osd,mpi_datatype<T>(),
                 recv,map.orc,map.ord,mpi_datatype<T>(),h->col_comm));
-            rows_collective_local(h->comm,[&] {
+            detail::agree_local(h->comm,"CPU Householder rows",[&] {
                 for(int p=0;p<map.npr;++p) {
                     const int q=map.col_ranks[p],count=map.output_count(q,first),start=map.output_first(q,first);const auto columns=map.column(q);
                     host_parallel_for(count,4,threads,[&](long long lo,long long hi) {
@@ -385,7 +375,7 @@ void hh_rows_cpu(const DdlaHandle_t& h,int n,typename real_type<T>::type*& Y,int
 {
     const auto p=hh_rows_cpu_check<T>(h,n,Y,ldy,state,phases.data(),phases.size(),Z,desc);
     std::size_t backend_bytes=0;ddla::vector<char> backend_work(h);
-    rows_collective_local(h->comm,[&]{hh_rows_cpu_workspace_size<T>(h,p,&backend_bytes);backend_work.resize(backend_bytes);});
+    detail::agree_local(h->comm,"CPU Householder rows",[&]{hh_rows_cpu_workspace_size<T>(h,p,&backend_bytes);backend_work.resize(backend_bytes);});
     hh_rows_cpu_execute<true,T>(h,p,Y,state,phases.data(),Z,info,backend_work.data(),backend_bytes);
 }
 
@@ -395,10 +385,7 @@ void hh_rows_cpu(const DdlaHandle_t& h,int n,typename real_type<T>::type*& Y,int
     template HhRowsCpuPlan hh_rows_cpu_geometry<T>(const DdlaHandle_t&,int,int,const int*,std::size_t,bool,int); \
     template HhRowsCpuPlan hh_rows_cpu_check<T>(const DdlaHandle_t&,int,const real_type<T>::type*,int,const Hb2stHouseholderCpu<T>&,const T*,std::size_t,T*,const int*); \
     template void hh_rows_cpu_workspace_size<T>(const DdlaHandle_t&,const HhRowsCpuPlan&,std::size_t*); \
-    template void hh_rows_cpu_run<T>(const DdlaHandle_t&,const HhRowsCpuPlan&,const real_type<T>::type*,Hb2stHouseholderCpu<T>&,const T*,T*,int&,void*,std::size_t);
-DDLA_INST_HH_ROWS(float)
-DDLA_INST_HH_ROWS(double)
-DDLA_INST_HH_ROWS(std::complex<float>)
-DDLA_INST_HH_ROWS(std::complex<double>)
+    template void hh_rows_cpu_run<T>(const DdlaHandle_t&,const HhRowsCpuPlan&,const real_type<T>::type*,Hb2stHouseholderCpu<T>&,const T*,T*,int&,void*,std::size_t)
+DDLA_FOR_EACH_TYPE(DDLA_INST_HH_ROWS)
 #undef DDLA_INST_HH_ROWS
 } }

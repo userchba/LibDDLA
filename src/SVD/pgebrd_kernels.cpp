@@ -15,6 +15,7 @@
 // ---------------------------------------------------------------------------
 #include "pgebrd_kernels.h"
 #include "ddla_stream.h"
+#include "instantiate.h"
 
 #include <algorithm>
 
@@ -746,11 +747,8 @@ template void brd_panel_payload<std::complex<double>>(const DdlaHandle_t&, bool,
     template void brd_amax_local<T>(const DdlaHandle_t&, const T*, int, int, int, real_type<T>::type*,                   \
                                     real_type<T>::type*, int, int);                \
     template void brd_sigma<T>(const DdlaHandle_t&, const real_type<T>::type*, int, real_type<T>::type*);   \
-    template void brd_unit_trapezoid<T>(const DdlaHandle_t&, T*, int, int, int, int, int, int, int, int);
-BRD_INST_FUSED(float)
-BRD_INST_FUSED(double)
-BRD_INST_FUSED(std::complex<float>)
-BRD_INST_FUSED(std::complex<double>)
+    template void brd_unit_trapezoid<T>(const DdlaHandle_t&, T*, int, int, int, int, int, int, int, int)
+DDLA_FOR_EACH_TYPE(BRD_INST_FUSED)
 #undef BRD_INST_FUSED
 
 } // namespace detail

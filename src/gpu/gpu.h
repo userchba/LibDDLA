@@ -10,6 +10,8 @@
 //
 // This is a hand-written alias layer (the MAGMA approach of writing CUDA once and running hipify at build
 // time is deliberately not used: it only works through a Makefile and leaves HIP code spelled in CUDA).
+// gpu_alias.h holds the aliases whose vendor names differ only by the family prefix (cuda/hip, cublas/hipblas,
+// cusolverDn/hipsolver, curand/hiprand); each vendor header defines the prefixes and lists the rest itself.
 
 #include <cstddef>
 #include <stdexcept>

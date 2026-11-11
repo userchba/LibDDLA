@@ -169,25 +169,6 @@ inline void pstedc_agree_deflation(MPI_Comm comm, int info, int K)
                                  std::to_string(K) + ", max " + std::to_string(tri[1]) + ")");
 }
 
-// Preparation may fail on just one rank. Preserve its original exception and
-// agree before any rank enters the solve; the caller owns the prepared storage.
-template <class Prepare>
-inline void pstedc_prepare(const DdlaHandle_t& handle, Prepare&& prepare)
-{
-    std::exception_ptr failure;
-    try {
-        prepare();
-    } catch (...) {
-        failure = std::current_exception();
-    }
-    int bad = failure ? 1 : 0;
-    MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &bad, 1, MPI_INT, MPI_MAX, handle->comm));
-    if (bad) {
-        if (failure)
-            std::rethrow_exception(failure);
-        throw std::runtime_error("pstedc: workspace preparation failed on another rank");
-    }
-}
 
 // Leaf size: subproblems are halved exactly as ?LAED0 does until the largest
 // is <= this (default 1024; override with DDLA_EIG_DC_LEAF >= 2); the leaves
@@ -1814,7 +1795,7 @@ void pstedc_allocate(const DdlaHandle_t& handle, const spectral_impl::PstedcPlan
     vector<char> backend_work(handle);
     std::vector<char> host_work;
     std::optional<spectral_impl::PstedcResources> rows;
-    pstedc_prepare(handle, [&] {
+    detail::agree_local(handle,"pstedc: workspace preparation", [&] {
         spectral_impl::pstedc_workspace_size<rt>(handle, p, &backend_bytes, &host_bytes);
         backend_work.resize(backend_bytes);
         host_work.resize(host_bytes);
@@ -1897,7 +1878,7 @@ void pstedc(const DdlaHandle_t& handle, int n, rt* d, rt* e, rt* w, rt* Y, int l
         vector<char> backend_work(handle);
         std::vector<char> host_work;
         std::optional<spectral_impl::PstedcResources> resources;
-        pstedc_prepare(handle, [&] {
+        detail::agree_local(handle,"pstedc: workspace preparation", [&] {
             spectral_impl::pstedc_workspace_size<rt>(handle, p, &backend_bytes, &host_bytes);
             backend_work.resize(backend_bytes);
             host_work.resize(host_bytes);

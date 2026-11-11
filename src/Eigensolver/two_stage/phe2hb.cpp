@@ -30,6 +30,7 @@
 #include "ddla_connector.h"
 #include "comm_traits.h"
 #include "ddla_desc.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <cassert>
@@ -43,16 +44,6 @@
 #include <vector>
 
 namespace ddla {
-namespace {
-void upper_agree(const DdlaHandle_t& h,const std::exception_ptr& failure) {
-    int failed=failure?1:0;
-    MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&failed,1,MPI_INT,MPI_MAX,ddlaGetCommunicator(h)));
-    if(failed) {
-        if(failure) {std::rethrow_exception(failure);}
-        throw std::runtime_error("CPU upper band reduction failed on another rank");
-    }
-}
-}
 
 namespace spectral_impl {
 template<class T>void phe2hb_upper_av_run(const DdlaHandle_t&,const Phe2hbPlan&,int,const T*,const T*,const T*,int,T*,T*,T*,T*,void*,std::size_t);
@@ -280,8 +271,7 @@ static void phe2hb_impl(const DdlaHandle_t& h,int n,T* A,const int* desc,int nbw
         spectral_impl::phe2hb_workspace_size<T>(h,p,A,tmat,&backend_bytes,&host_bytes);
         backend_work.resize(backend_bytes);host_work.resize(host_bytes);
     }catch(...){failure=std::current_exception();}
-    int bad=failure?1:0;MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&bad,1,MPI_INT,MPI_MAX,h->comm));
-    if(bad){if(failure)std::rethrow_exception(failure);throw std::runtime_error("phe2hb: workspace preparation failed on another rank");}
+    detail::agree_failure(h->comm,failure,"phe2hb: workspace preparation");
     spectral_impl::phe2hb_run<Backend,T>(h,p,A,tmat,info,backend_work.data(),backend_bytes,host_work.data(),host_bytes);
 }
 
@@ -313,7 +303,7 @@ void phe2hb_upper_av_run(const DdlaHandle_t& h,const Phe2hbPlan& p,int extent,co
             first=edge;
         }
     }catch(...){failure=std::current_exception();}
-    upper_agree(h,failure);
+    detail::agree_failure(h,failure,"CPU upper band reduction");
     commAllReduce<DdlaBackend::CPU>(h,CommScope::Row,Wr_partial,Wr,ldr*nvec,cclSum);
     commAllReduce<DdlaBackend::CPU>(h,CommScope::Col,Wc_partial,Wc,ldc*nvec,cclSum);
     const auto reverse=ptranspose_vectors_geometry(h,DdlaBackend::CPU,extent,nvec,nb,ldc,ldr,true,true);
@@ -336,7 +326,7 @@ void phe2hb_upper_update_run(const DdlaHandle_t& h,const Phe2hbPlan& p,int exten
         }
         DDLA_CHECK(ddlaSynchronize(h));
     }catch(...){failure=std::current_exception();}
-    upper_agree(h,failure);
+    detail::agree_failure(h,failure,"CPU upper band reduction");
 }
 } // namespace spectral_impl
 namespace detail {
@@ -361,7 +351,7 @@ void phe2hb_upper_av_cpu(const DdlaHandle_t& h,int extent,const T* A,const int* 
             throw std::invalid_argument("CPU upper AV metadata/workspace invalid");
         p=upper_cpu_geometry(h,desc,ldr,ldc,tile);
     }catch(...){failure=std::current_exception();}
-    upper_agree(h,failure);
+    detail::agree_failure(h,failure,"CPU upper band reduction");
     spectral_impl::phe2hb_upper_av_run(h,p,extent,A,Vr,Vc,nvec,Wr_partial,Wr,Wc_partial,Wc,aux,aux_elements*sizeof(T));
 }
 template<class T>
@@ -375,7 +365,7 @@ void phe2hb_upper_update_cpu(const DdlaHandle_t& h,int extent,T* A,const int* de
             throw std::invalid_argument("CPU upper update rectangle metadata invalid");
         p=upper_cpu_geometry(h,desc,ldr,ldc,tile);
     }catch(...){failure=std::current_exception();}
-    upper_agree(h,failure);spectral_impl::phe2hb_upper_update_run(h,p,extent,A,rows,cols,inner);
+    detail::agree_failure(h,failure,"CPU upper band reduction");spectral_impl::phe2hb_upper_update_run(h,p,extent,A,rows,cols,inner);
 }
 
 template<class T>
@@ -392,7 +382,7 @@ static bool phe2hb_upper_cpu_impl(const DdlaHandle_t& h,int n,T* A,const int* de
            (n>0&&nbw>0&&(n-1)/nbw>0&&!tmat))
             throw std::invalid_argument("CPU upper band reduction requires source0 and valid metadata");
     }catch(...){failure=std::current_exception();}
-    upper_agree(h,failure);
+    detail::agree_failure(h,failure,"CPU upper band reduction");
     const int sig[9]={n,nbw,desc[DDLA_M_],desc[DDLA_N_],desc[DDLA_MB_],desc[DDLA_NB_],
                       desc[DDLA_RSRC_],desc[DDLA_CSRC_],requested_tile};
     int lo[9]={},hi[9]={};
@@ -419,7 +409,7 @@ static bool phe2hb_upper_cpu_impl(const DdlaHandle_t& h,int n,T* A,const int* de
         if(num_loc(n,nb,mr,0,pr)>0&&num_loc(n,nb,mc,0,pc)>0&&!A)
             throw std::invalid_argument("CPU upper band matrix missing");
     }catch(...){failure=std::current_exception();}
-    upper_agree(h,failure);
+    detail::agree_failure(h,failure,"CPU upper band reduction");
     phe2hb_impl<DdlaBackend::CPU,T>(h,n,A,desc,nbw,tmat,info,tile,panel_policy);
     return true;
 }
@@ -441,11 +431,8 @@ bool phe2hb_cpu_auto_qr(const DdlaHandle_t& h,int n,T* A,const int* desc,int nbw
  template bool phe2hb_cpu_auto_qr<T>(const DdlaHandle_t&,int,T*,const int*,int,T*,int&,int); \
  template bool phe2hb_upper_cpu<T>(const DdlaHandle_t&,int,T*,const int*,int,T*,int&,int); \
  template void phe2hb_upper_av_cpu<T>(const DdlaHandle_t&,int,const T*,const int*,const T*,int,const T*,int,int,T*,T*,T*,T*,T*,std::size_t,int); \
- template void phe2hb_upper_update_cpu<T>(const DdlaHandle_t&,int,T*,const int*,const T*,int,const T*,int,int,int);
-DDLA_INST_UPPER(float)
-DDLA_INST_UPPER(double)
-DDLA_INST_UPPER(std::complex<float>)
-DDLA_INST_UPPER(std::complex<double>)
+ template void phe2hb_upper_update_cpu<T>(const DdlaHandle_t&,int,T*,const int*,const T*,int,const T*,int,int,int)
+DDLA_FOR_EACH_TYPE(DDLA_INST_UPPER)
 #undef DDLA_INST_UPPER
 } // namespace detail
 
@@ -458,22 +445,8 @@ DDLA_INST_UPPER(std::complex<double>)
     template void spectral_impl::phe2hb_run<BACKEND,TYPE>(const DdlaHandle_t&,const spectral_impl::Phe2hbPlan&, \
         TYPE*,TYPE*,int&,void*,std::size_t,void*,std::size_t)
 
-INSTANTIATE_PHE2HB_SIZE(float);
-INSTANTIATE_PHE2HB_SIZE(double);
-INSTANTIATE_PHE2HB_SIZE(std::complex<float>);
-INSTANTIATE_PHE2HB_SIZE(std::complex<double>);
-
-INSTANTIATE_PHE2HB(DdlaBackend::CPU, float);
-INSTANTIATE_PHE2HB(DdlaBackend::CPU, double);
-INSTANTIATE_PHE2HB(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PHE2HB(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PHE2HB(DdlaBackend::GPU, float);
-INSTANTIATE_PHE2HB(DdlaBackend::GPU, double);
-INSTANTIATE_PHE2HB(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PHE2HB(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PHE2HB_SIZE)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PHE2HB)
 
 #undef INSTANTIATE_PHE2HB
 #undef INSTANTIATE_PHE2HB_SIZE

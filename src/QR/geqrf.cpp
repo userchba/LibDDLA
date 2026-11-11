@@ -32,6 +32,8 @@
 #include "lapack_impl.h"
 #include "pgeqrf_kernels.h"
 #include "plan_util.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 // Host LAPACK ?geqrf / ?geqlf (Fortran ABI; the CPU BLAS library must provide LAPACK -- OpenBLAS and MKL do).
 extern "C" {
@@ -52,11 +54,6 @@ void zgeqlf_(const int*, const int*, std::complex<double>*, const int*, std::com
 namespace ddla {
 
 namespace {
-
-inline const char* geqrf_backend_name(DdlaBackend backend)
-{
-    return backend == DdlaBackend::CPU ? "CPU" : "GPU";
-}
 
 inline void lapack_geqrf(bool lower, int m, int n, float* A, int lda, float* tau, float* work, int lwork, int* info)
 {
@@ -211,18 +208,7 @@ namespace lapack_impl {
 template <DdlaBackend Backend>
 char geqrf_check(const DdlaHandle_t& handle, char uplo, int m, int n, const void* A, int lda, const void* tau)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU geqrf is not available in this LibDDLA build");
-
-    if (handle == nullptr) {
-        throw std::runtime_error("geqrf: null handle");
-    }
-    const DdlaBackend actual = ddlaGetBackend(handle);
-    if (actual != Backend) {
-        throw std::runtime_error(
-            std::string("geqrf: template backend ") + geqrf_backend_name(Backend) +
-            " does not match handle backend " + geqrf_backend_name(actual));
-    }
+    detail::require_backend<Backend>(handle, "geqrf");
     const char u = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo)));
     if (u != 'U' && u != 'L') throw std::runtime_error("geqrf: uplo must be 'U' or 'L'");
     if (m < 0 || n < 0) throw std::runtime_error("geqrf: negative matrix size");
@@ -323,10 +309,7 @@ INSTANTIATE_GEQRF(DdlaBackend::GPU, std::complex<float>);
 INSTANTIATE_GEQRF(DdlaBackend::GPU, std::complex<double>);
 #endif
 
-INSTANTIATE_GEQRF_SIZE(float);
-INSTANTIATE_GEQRF_SIZE(double);
-INSTANTIATE_GEQRF_SIZE(std::complex<float>);
-INSTANTIATE_GEQRF_SIZE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INSTANTIATE_GEQRF_SIZE)
 
 #undef INSTANTIATE_GEQRF_SIZE
 #undef INSTANTIATE_GEQRF

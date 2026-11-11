@@ -27,6 +27,7 @@
 #include <optional>
 #include "plan_util.h"
 #include "row_share.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <cassert>
@@ -266,8 +267,7 @@ void pgesvd(
         backend_work.resize(backend_bytes);host_work.resize(host_bytes);
         if(const int threads=spectral_impl::pgesvd_team_threads(p))team.emplace(threads);}
     catch(...){failure=std::current_exception();}
-    int bad=failure?1:0;MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&bad,1,MPI_INT,MPI_MAX,handle->comm));
-    if(bad){if(failure)std::rethrow_exception(failure);throw std::runtime_error("pgesvd: workspace preparation failed on another rank");}
+    detail::agree_failure(handle->comm,failure,"pgesvd: workspace preparation");
     spectral_impl::pgesvd_run<Backend,T>(handle,p,team?&*team:nullptr,A,s,U,VT,info,
         backend_work.data(),backend_bytes,host_work.data(),host_bytes);
 }
@@ -280,23 +280,12 @@ void pgesvd(
     template void spectral_impl::pgesvd_run<BACKEND,TYPE>(const DdlaHandle_t&,const spectral_impl::PgesvdPlan&, \
         detail::DcHostTeam*,TYPE*,real_type<TYPE>::type*,TYPE*,TYPE*,int&,void*,std::size_t,void*,std::size_t)
 
-INSTANTIATE_PGESVD(DdlaBackend::CPU, float);
-INSTANTIATE_PGESVD(DdlaBackend::CPU, double);
-INSTANTIATE_PGESVD(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PGESVD(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PGESVD(DdlaBackend::GPU, float);
-INSTANTIATE_PGESVD(DdlaBackend::GPU, double);
-INSTANTIATE_PGESVD(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PGESVD(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PGESVD)
 
 #undef INSTANTIATE_PGESVD
 #define INSTANTIATE_PGESVD_CHECK(T) template spectral_impl::PgesvdPlan spectral_impl::pgesvd_check<T>(const DdlaHandle_t&,DdlaBackend,char,char,int,int,const T*,const int*,const real_type<T>::type*,const T*,const int*,const T*,const int*); \
     template void spectral_impl::pgesvd_workspace_size<T>(const DdlaHandle_t&,const spectral_impl::PgesvdPlan&,std::size_t*,std::size_t*)
-INSTANTIATE_PGESVD_CHECK(float);INSTANTIATE_PGESVD_CHECK(double);
-INSTANTIATE_PGESVD_CHECK(std::complex<float>);INSTANTIATE_PGESVD_CHECK(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PGESVD_CHECK)
 #undef INSTANTIATE_PGESVD_CHECK
 
 } // namespace ddla

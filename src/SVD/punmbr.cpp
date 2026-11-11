@@ -35,6 +35,8 @@
 #include "reflector_build_T.h"
 #include "punmtr_impl.h"
 #include "svd_workspace.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 #include <algorithm>
 #include <cassert>
@@ -69,9 +71,7 @@ PunmbrPlan punmbr_check(const DdlaHandle_t& handle,DdlaBackend backend,bool is_r
 {
     const auto p=detail::agree_check(handle,"punmbr",[&](detail::Agree& agreement)->PunmbrPlan {
         agreement.mode("spectral operation",3102);
-    if(handle==nullptr)throw std::runtime_error("punmbr: null handle");
-    if(ddlaGetBackend(handle)!=backend)
-        throw std::runtime_error("punmbr: template backend does not match handle backend");
+    detail::require_backend(handle,backend,"punmbr");
     const char v=static_cast<char>(std::toupper(static_cast<unsigned char>(vect)));
     const char s=static_cast<char>(std::toupper(static_cast<unsigned char>(side)));
     const char t=static_cast<char>(std::toupper(static_cast<unsigned char>(trans)));
@@ -289,22 +289,8 @@ void punmbr(const DdlaHandle_t& handle,char vect,char side,char trans,int m,int 
     template void spectral_impl::punmbr_workspace_size<TYPE>(const DdlaHandle_t&, \
         const spectral_impl::PunmbrPlan&,std::size_t*,std::size_t*)
 
-INSTANTIATE_PUNMBR(DdlaBackend::CPU, float);
-INSTANTIATE_PUNMBR(DdlaBackend::CPU, double);
-INSTANTIATE_PUNMBR(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PUNMBR(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PUNMBR(DdlaBackend::GPU, float);
-INSTANTIATE_PUNMBR(DdlaBackend::GPU, double);
-INSTANTIATE_PUNMBR(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PUNMBR(DdlaBackend::GPU, std::complex<double>);
-#endif
-
-INSTANTIATE_PUNMBR_SIZE(float);
-INSTANTIATE_PUNMBR_SIZE(double);
-INSTANTIATE_PUNMBR_SIZE(std::complex<float>);
-INSTANTIATE_PUNMBR_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PUNMBR)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PUNMBR_SIZE)
 
 #undef INSTANTIATE_PUNMBR_SIZE
 #undef INSTANTIATE_PUNMBR

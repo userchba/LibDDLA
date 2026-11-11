@@ -7,6 +7,7 @@
 #include "ldlt_distributed.h"
 #include "matrix_transfer.h"
 #include "plan_util.h"
+#include "instantiate.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -600,15 +601,6 @@ void phetrf_nopiv(const DdlaHandle_t& h, char u, int n, T* a, const int* da, int
 #define INSTANCE(B, T)                                                                             \
     template void phetrf<B, T>(const DdlaHandle_t&, char, int, T*, const int*, int*, int&);        \
     template void phetrf_nopiv<B, T>(const DdlaHandle_t&, char, int, T*, const int*, int&)
-#define TYPES(B)                                                                                   \
-    INSTANCE(B, float);                                                                            \
-    INSTANCE(B, double);                                                                           \
-    INSTANCE(B, std::complex<float>);                                                              \
-    INSTANCE(B, std::complex<double>)
-TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-TYPES(DdlaBackend::GPU);
-#endif
-#undef TYPES
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANCE)
 #undef INSTANCE
 } // namespace ddla

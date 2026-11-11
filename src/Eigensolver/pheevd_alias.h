@@ -6,6 +6,7 @@
 #include "ddla_desc.h"
 #include "comm_traits.h"
 #include "plan_util.h"
+#include "check_agree.h"
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -79,20 +80,13 @@ template<class T>inline std::size_t reflector_active_span(int rows,int columns,i
     if(gaps&&std::size_t(ld)>(limit-std::size_t(rows))/gaps)throw std::length_error("pheevd: reflector span overflow");
     return (gaps*std::size_t(ld)+std::size_t(rows))*sizeof(T);
 }
-template<class F>inline void reflector_backup_collective(const DdlaHandle_t& h,F&& operation)
-{
-    std::exception_ptr failure;
-    try{operation();}catch(...){failure=std::current_exception();}
-    int ok=failure?0:1,all_ok=0;MPI_CHECK(MPI_Allreduce(&ok,&all_ok,1,MPI_INT,MPI_MIN,ddlaGetCommunicator(h)));
-    if(!all_ok){if(failure)std::rethrow_exception(failure);throw std::runtime_error("pheevd: reflector backup failed on another rank");}
-}
 template<class T>PheevdReflectorBackupPlan pheevd_reflector_backup_check(const DdlaHandle_t& h,int n,
     const T* A,const int* da,const T* Z,const int* dz,char triangle='A')
 {
     PheevdReflectorBackupPlan p;p.n=n;p.triangle=triangle;if(!dz||n<=0)return p;
     if(!h)throw std::invalid_argument("pheevd: reflector backup requires a handle");
     int overlap=0;
-    reflector_backup_collective(h,[&]{
+    detail::agree_local(h,"pheevd: reflector backup",[&]{
         check_desc(da,h);check_desc(dz,h);
         if(n>da[DDLA_M_]||n>da[DDLA_N_]||n>dz[DDLA_M_]||n>dz[DDLA_N_])throw std::invalid_argument("pheevd: reflector backup order exceeds descriptor");
         ddlaGetGridDims(h,p.npr,p.npc);ddlaGetGridCoords(h,p.pr,p.pc);
@@ -119,7 +113,7 @@ template<class T>void pheevd_reflector_backup_save_run(const DdlaHandle_t& h,con
         char* w=static_cast<char*>(backend_work);
         T* const saved=take<T>(w,std::max(std::size_t(1),std::size_t(p.saved[DDLA_LLD_])*std::size_t(p.columns)));
         assert(static_cast<std::size_t>(w-static_cast<char*>(backend_work))<=backend_bytes);(void)backend_bytes;
-        reflector_backup_collective(h,[&]{
+        detail::agree_local(h,"pheevd: reflector backup",[&]{
             const int ld=p.saved[DDLA_LLD_];
             if(p.triangle=='U'||p.triangle=='L')for(int c=0;c<p.columns;++c){
                 const int global=indxl2g(c,p.saved[DDLA_NB_],p.pc,p.saved[DDLA_CSRC_],p.npc);
@@ -150,7 +144,7 @@ public:
         if(!plan_.needed)return;
         std::size_t bytes=0;pheevd_reflector_backup_workspace_size<T>(plan_,&bytes);
         try{
-            reflector_backup_collective(h,[&]{DDLA_CHECK(ddlaMalloc(h,reinterpret_cast<void**>(&saved_),bytes));});
+            detail::agree_local(h,"pheevd: reflector backup",[&]{DDLA_CHECK(ddlaMalloc(h,reinterpret_cast<void**>(&saved_),bytes));});
             pheevd_reflector_backup_save_run<T>(h,plan_,A,saved_,bytes);
         }catch(...){if(saved_)(void)ddlaFree(h_,saved_);saved_=nullptr;throw;}
     }

@@ -1,6 +1,7 @@
 #include <ddla/ddla.h>
 #include <ddla/ddla_vector.h>
 #include "phemm_impl.h"
+#include "instantiate.h"
 #include <cctype>
 
 #include <vector>
@@ -26,13 +27,6 @@ void psymm(const DdlaHandle_t& h, char side, char uplo, int m, int n,
 
 #define INSTANTIATE_PSYMM(B,T) \
  template void psymm<B,T>(const DdlaHandle_t&,char,char,int,int,const T&,const T*,const int*,const T*,const int*,const T&,T*,const int*)
-#define INSTANTIATE_PSYMM_TYPES(B) \
- INSTANTIATE_PSYMM(B,float); INSTANTIATE_PSYMM(B,double); \
- INSTANTIATE_PSYMM(B,std::complex<float>); INSTANTIATE_PSYMM(B,std::complex<double>)
-INSTANTIATE_PSYMM_TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-INSTANTIATE_PSYMM_TYPES(DdlaBackend::GPU);
-#endif
-#undef INSTANTIATE_PSYMM_TYPES
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PSYMM)
 #undef INSTANTIATE_PSYMM
 } // namespace ddla

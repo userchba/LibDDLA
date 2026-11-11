@@ -8,6 +8,7 @@
 #include "ptrmm_impl.h"
 #include "pgeadd_impl.h"
 #include "BLAS/blas_impl.h"
+#include "instantiate.h"
 #include <ddla/ddla_vector.h>
 #include <algorithm>
 #include <cassert>
@@ -278,22 +279,9 @@ void ptrmm(const DdlaHandle_t& handle, char side, char uplo, char trans, char di
 #define INSTANTIATE_PTRMM_SIZE(TYPE) \
     template void ptrmm_impl::ptrmm_workspace_size<TYPE>(const DdlaHandle_t&, \
         char, char, int, int, bool, const int*, const int*, std::size_t*, std::size_t*)
-INSTANTIATE_PTRMM_CHECK(DdlaBackend::CPU);
-INSTANTIATE_PTRMM(DdlaBackend::CPU, float);
-INSTANTIATE_PTRMM(DdlaBackend::CPU, double);
-INSTANTIATE_PTRMM(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PTRMM(DdlaBackend::CPU, std::complex<double>);
-#if DDLA_HAS_GPU
-INSTANTIATE_PTRMM_CHECK(DdlaBackend::GPU);
-INSTANTIATE_PTRMM(DdlaBackend::GPU, float);
-INSTANTIATE_PTRMM(DdlaBackend::GPU, double);
-INSTANTIATE_PTRMM(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PTRMM(DdlaBackend::GPU, std::complex<double>);
-#endif
-INSTANTIATE_PTRMM_SIZE(float);
-INSTANTIATE_PTRMM_SIZE(double);
-INSTANTIATE_PTRMM_SIZE(std::complex<float>);
-INSTANTIATE_PTRMM_SIZE(std::complex<double>);
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_PTRMM_CHECK)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PTRMM)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PTRMM_SIZE)
 #undef INSTANTIATE_PTRMM_SIZE
 #undef INSTANTIATE_PTRMM_CHECK
 #undef INSTANTIATE_PTRMM

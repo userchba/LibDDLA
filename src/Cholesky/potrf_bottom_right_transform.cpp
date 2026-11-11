@@ -2,6 +2,7 @@
 #include "potrf_bottom_right_transform.h"
 #include "ddla_stream.h"
 #include "helpers.h"
+#include "instantiate.h"
 
 #include <cassert>
 #include <cstddef>
@@ -133,17 +134,7 @@ void reverse_lower_to_upper(
     template void reverse_upper_to_lower<BACKEND, TYPE>(const DdlaHandle_t&, int, const TYPE*, int, TYPE*, int); \
     template void reverse_lower_to_upper<BACKEND, TYPE>(const DdlaHandle_t&, int, const TYPE*, int, TYPE*, int)
 
-INSTANTIATE_REVERSE(DdlaBackend::CPU, float);
-INSTANTIATE_REVERSE(DdlaBackend::CPU, double);
-INSTANTIATE_REVERSE(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_REVERSE(DdlaBackend::CPU, std::complex<double>);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_REVERSE(DdlaBackend::GPU, float);
-INSTANTIATE_REVERSE(DdlaBackend::GPU, double);
-INSTANTIATE_REVERSE(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_REVERSE(DdlaBackend::GPU, std::complex<double>);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_REVERSE)
 
 #undef INSTANTIATE_REVERSE
 

@@ -14,6 +14,7 @@
 #include "check_agree.h"
 #include "require_backend.h"
 #include "plan_util.h"
+#include "instantiate.h"
 #include <algorithm>
 #include <cassert>
 #include <cctype>
@@ -494,18 +495,10 @@ void phemm(const DdlaHandle_t& h, char side, char uplo, int m, int n,
  template void phemm<B,T>(const DdlaHandle_t&,char,char,int,int,const T&,const T*,const int*,const T*,const int*,const T&,T*,const int*); \
  template bool phemm_impl::phemm_check<B,T>(const DdlaHandle_t&,char,char,int,int,const T&,const T*,const int*,const T*,const int*,const T&,const T*,const int*,bool,char); \
  template void phemm_impl::phemm_run<B,T>(const DdlaHandle_t&,char,char,int,int,const T&,const T*,const int*,const T*,const int*,const T&,T*,const int*,bool,void*,std::size_t,void*,std::size_t,char)
-#define INSTANTIATE_PHEMM_TYPES(B) \
- INSTANTIATE_PHEMM(B,float); INSTANTIATE_PHEMM(B,double); \
- INSTANTIATE_PHEMM(B,std::complex<float>); INSTANTIATE_PHEMM(B,std::complex<double>)
-INSTANTIATE_PHEMM_TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-INSTANTIATE_PHEMM_TYPES(DdlaBackend::GPU);
-#endif
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PHEMM)
 #define INSTANTIATE_SIZE(T) template void phemm_impl::phemm_workspace_size<T>(const DdlaHandle_t&,char,int,int,bool,const int*,const int*,const int*,bool,std::size_t*,std::size_t*,char)
-INSTANTIATE_SIZE(float); INSTANTIATE_SIZE(double);
-INSTANTIATE_SIZE(std::complex<float>); INSTANTIATE_SIZE(std::complex<double>);
+DDLA_FOR_EACH_TYPE(INSTANTIATE_SIZE)
 #undef INSTANTIATE_SIZE
-#undef INSTANTIATE_PHEMM_TYPES
 #undef INSTANTIATE_PHEMM
 template <DdlaBackend Backend,typename R>
 void phemm(const DdlaHandle_t& h,char side,char uplo,int m,int n,

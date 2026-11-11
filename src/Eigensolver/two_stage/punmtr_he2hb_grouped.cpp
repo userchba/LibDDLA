@@ -8,6 +8,7 @@
 #include "BLAS/blas_impl.h"
 #include "plan_util.h"
 #include "punmtr_impl.h"
+#include "instantiate.h"
 
 #include <algorithm>
 #include <cassert>
@@ -591,20 +592,8 @@ void punmtr_he2hb_grouped(
                                              const int*,                                           \
                                              const GroupedStage5Options&,                          \
                                              int&)
-#define INSTANTIATE_BACKEND(B)                                                                     \
-    INSTANTIATE_RUN(B, float);                                                                     \
-    INSTANTIATE_RUN(B, double);                                                                    \
-    INSTANTIATE_RUN(B, std::complex<float>);                                                       \
-    INSTANTIATE_RUN(B, std::complex<double>)
-INSTANTIATE_GEOMETRY(float);
-INSTANTIATE_GEOMETRY(double);
-INSTANTIATE_GEOMETRY(std::complex<float>);
-INSTANTIATE_GEOMETRY(std::complex<double>);
-INSTANTIATE_BACKEND(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-INSTANTIATE_BACKEND(DdlaBackend::GPU);
-#endif
-#undef INSTANTIATE_BACKEND
+DDLA_FOR_EACH_TYPE(INSTANTIATE_GEOMETRY)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_RUN)
 #undef INSTANTIATE_RUN
 #undef INSTANTIATE_GEOMETRY
 }

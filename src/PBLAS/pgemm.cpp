@@ -15,6 +15,8 @@
 #include "pgemm_impl.h"
 #include "check_agree.h"
 #include "plan_util.h"
+#include "instantiate.h"
+#include "require_backend.h"
 
 // Host includes used by the CPU paths in every build; no GPU vendor headers.
 #include <cstdlib>
@@ -22,11 +24,6 @@
 #include <new>
 
 namespace ddla {
-
-inline const char* pgemm_backend_name(DdlaBackend backend)
-{
-    return backend == DdlaBackend::CPU ? "CPU" : "GPU";
-}
 
 
 namespace pgemm_impl {
@@ -254,13 +251,8 @@ Algorithm pgemm_check(
     bool alpha_is_zero, const int* descA, const int* descB, const int* descC,
     Algorithm algorithm, int& panel_width)
 {
-    static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
-                  "GPU pgemm is not available in this LibDDLA build");
-
     return detail::agree_check(h, "pgemm", [&](detail::Agree& agree) {
-        if (h == nullptr) {
-            throw std::runtime_error("pgemm: null handle");
-        }
+        detail::require_backend<Backend>(h, "pgemm");
         // Each descriptor is validated against this handle's process grid
         // (dense block-cyclic type, slot ranges, LLD vs LOCr); a descriptor
         // built against a different process grid is rejected there.
@@ -270,13 +262,6 @@ Algorithm pgemm_check(
         int nprows = 0, npcols = 0;
         ddlaGetGridDims(h, nprows, npcols);
 
-        const DdlaBackend actual_backend = ddlaGetBackend(h);
-        if (actual_backend != Backend) {
-            throw std::runtime_error(
-                std::string("pgemm: template backend ") + pgemm_backend_name(Backend) +
-                " does not match descriptor handle backend " +
-                pgemm_backend_name(actual_backend));
-        }
 
         // Shared validation for every algorithm.
         if (transa != 'N' && transa != 'T' && transa != 'C')
@@ -535,22 +520,9 @@ void pgemm(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
     INSTANTIATE_PGEMM_MIXED(BACKEND, double, double, std::complex<double>); \
     INSTANTIATE_PGEMM_MIXED(BACKEND, double, std::complex<double>, double)
 
-INSTANTIATE_PGEMM_CHECK(DdlaBackend::CPU);
-INSTANTIATE_PGEMM(DdlaBackend::CPU, float);
-INSTANTIATE_PGEMM(DdlaBackend::CPU, double);
-INSTANTIATE_PGEMM(DdlaBackend::CPU, std::complex<float>);
-INSTANTIATE_PGEMM(DdlaBackend::CPU, std::complex<double>);
-INSTANTIATE_PGEMM_MIXED_BACKEND(DdlaBackend::CPU);
-
-#if DDLA_HAS_GPU
-INSTANTIATE_PGEMM_CHECK(DdlaBackend::GPU);
-INSTANTIATE_PGEMM(DdlaBackend::GPU, float);
-INSTANTIATE_PGEMM(DdlaBackend::GPU, double);
-INSTANTIATE_PGEMM(DdlaBackend::GPU, std::complex<float>);
-INSTANTIATE_PGEMM(DdlaBackend::GPU, std::complex<double>);
-INSTANTIATE_PGEMM_MIXED_BACKEND(DdlaBackend::GPU);
-#endif
-
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_PGEMM_CHECK)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PGEMM)
+DDLA_FOR_EACH_BACKEND(INSTANTIATE_PGEMM_MIXED_BACKEND)
 INSTANTIATE_PGEMM_SIZE(float, float, float);
 INSTANTIATE_PGEMM_SIZE(double, double, double);
 INSTANTIATE_PGEMM_SIZE(std::complex<float>, std::complex<float>, std::complex<float>);

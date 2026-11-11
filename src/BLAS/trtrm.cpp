@@ -5,6 +5,7 @@
 #include "ddla_stream.h"
 #include "helpers.h"
 #include "require_backend.h"
+#include "instantiate.h"
 #include <algorithm>
 #include <cassert>
 #include <cctype>
@@ -627,30 +628,12 @@ void trtrm(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, ch
 }
 #define INSTANTIATE_TRTRM(B, T) \
     template void trtrm<B, T>(const DdlaHandle_t&, char, char, char, char, int, const T&, const T*, int, const T*, int, const T&, T*, int)
-#define INSTANTIATE_TRTRM_TYPES(B) \
-    INSTANTIATE_TRTRM(B, float); \
-    INSTANTIATE_TRTRM(B, double); \
-    INSTANTIATE_TRTRM(B, std::complex<float>); \
-    INSTANTIATE_TRTRM(B, std::complex<double>)
-INSTANTIATE_TRTRM_TYPES(DdlaBackend::CPU);
-#if DDLA_HAS_GPU
-INSTANTIATE_TRTRM_TYPES(DdlaBackend::GPU);
-#endif
-#undef INSTANTIATE_TRTRM_TYPES
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_TRTRM)
 #undef INSTANTIATE_TRTRM
 #define DDLA_TRTRM_PHASES(B,T) \
  template void blas_impl::trtrm_check<B,T>(const DdlaHandle_t&,char,char,char,char,int,const T&,const T*,int,const T*,int,const T&,T*,int); \
- template void blas_impl::trtrm_run<B,T>(const DdlaHandle_t&,char,char,char,char,int,const T&,const T*,int,const T*,int,const T&,T*,int,void*,std::size_t);
-DDLA_TRTRM_PHASES(DdlaBackend::CPU,float)
-DDLA_TRTRM_PHASES(DdlaBackend::CPU,double)
-DDLA_TRTRM_PHASES(DdlaBackend::CPU,std::complex<float>)
-DDLA_TRTRM_PHASES(DdlaBackend::CPU,std::complex<double>)
-#if DDLA_HAS_GPU
-DDLA_TRTRM_PHASES(DdlaBackend::GPU,float)
-DDLA_TRTRM_PHASES(DdlaBackend::GPU,double)
-DDLA_TRTRM_PHASES(DdlaBackend::GPU,std::complex<float>)
-DDLA_TRTRM_PHASES(DdlaBackend::GPU,std::complex<double>)
-#endif
+ template void blas_impl::trtrm_run<B,T>(const DdlaHandle_t&,char,char,char,char,int,const T&,const T*,int,const T*,int,const T&,T*,int,void*,std::size_t)
+DDLA_FOR_EACH_BACKEND_TYPE(DDLA_TRTRM_PHASES)
 #undef DDLA_TRTRM_PHASES
 template void blas_impl::trtrm_workspace_size<float>(const DdlaHandle_t&,int,std::size_t*);
 template void blas_impl::trtrm_workspace_size<double>(const DdlaHandle_t&,int,std::size_t*);
