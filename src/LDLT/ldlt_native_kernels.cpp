@@ -26,10 +26,10 @@ template <class T> __device__ auto real_load(const T* a, std::size_t i)
         return reinterpret_cast<const typename T::value_type*>(a)[2 * i];
 }
 
-template <class T> __global__ void diagonal_factor(bool upper, int n, T* a, int lda, int* info)
+template <class T> __global__ void diagonal_factor(bool upper, int n, T* a, int lda, int* info, bool hermitian)
 {
     using R = decltype(real_part(T{}));
-    __shared__ R pivot;
+    __shared__ R pivot_real, pivot_imag;
     if (!threadIdx.x)
         *info = 0;
     __syncthreads();
@@ -38,13 +38,23 @@ template <class T> __global__ void diagonal_factor(bool upper, int n, T* a, int 
         const int j = upper ? n - 1 - s : s;
         if (!threadIdx.x)
         {
-            pivot = real_load(a, j + std::size_t(j) * lda);
-            a[j + std::size_t(j) * lda] = T(pivot);
-            if (pivot == R(0))
+            const T value = hermitian ? T(real_load(a, j + std::size_t(j) * lda))
+                                      : a[j + std::size_t(j) * lda];
+            pivot_real = real_part(value);
+            if constexpr (!std::is_arithmetic_v<T>)
+                pivot_imag = value.imag();
+            a[j + std::size_t(j) * lda] = value;
+            if (value == T(0))
                 *info = j + 1;
         }
         __syncthreads();
-        if (pivot == R(0))
+        const T pivot = [&]() {
+            if constexpr (std::is_arithmetic_v<T>)
+                return T(pivot_real);
+            else
+                return T(pivot_real, pivot_imag);
+        }();
+        if (pivot == T(0))
             return;
         const int first = upper ? 0 : j + 1, count = upper ? j : n - j - 1;
         for (int i = threadIdx.x; i < count; i += blockDim.x)
@@ -56,10 +66,11 @@ template <class T> __global__ void diagonal_factor(bool upper, int n, T* a, int 
             if (upper ? i > k : i < k)
                 continue;
             const T change =
-                (a[i + std::size_t(j) * lda] * detail::device_conj(a[k + std::size_t(j) * lda])) *
+                (a[i + std::size_t(j) * lda] * (hermitian ? detail::device_conj(a[k + std::size_t(j) * lda])
+                                                    : a[k + std::size_t(j) * lda])) *
                 pivot;
             const auto index = i + std::size_t(k) * lda;
-            if (i == k)
+            if (hermitian && i == k)
                 a[index] = T(real_load(a, index) - real_part(change));
             else
                 a[index] -= change;
@@ -70,48 +81,55 @@ template <class T> __global__ void diagonal_factor(bool upper, int n, T* a, int 
 
 template <class T>
 __global__ void panel_division(int rows, int cols, const T* d, int ldd, const T* w, int ldw, T* l,
-                               int ldl)
+                               int ldl, bool hermitian)
 {
     for (std::size_t p = blockIdx.x * blockDim.x + threadIdx.x; p < std::size_t(rows) * cols;
          p += blockDim.x * gridDim.x)
     {
         const int i = p % rows, j = p / rows;
         l[i + std::size_t(j) * ldl] =
-            w[i + std::size_t(j) * ldw] / real_load(d, j + std::size_t(j) * ldd);
+            w[i + std::size_t(j) * ldw] /
+            (hermitian ? T(real_load(d, j + std::size_t(j) * ldd)) : d[j + std::size_t(j) * ldd]);
     }
 }
 
 template <class T>
-__global__ void column_summary(T* column, int first, int count, int diagonal, PivotSummary* result)
+__global__ void column_summary(T* column, int first, int count, int diagonal, PivotSummary* result, bool hermitian)
 {
     __shared__ double values[256];
     __shared__ int indices[256];
     gpu_detail::max_abs_column(first, first + count, diagonal, column, 1, values, indices);
     if (!threadIdx.x)
     {
-        const auto value = real_load(column, diagonal);
-        column[diagonal] = T(value);
-        *result = {double(fabs(value)), fmax(0.0, values[0]), indices[0], 0};
+        const T value = hermitian ? T(real_load(column, diagonal)) : column[diagonal];
+        column[diagonal] = value;
+        double magnitude;
+        if constexpr (std::is_arithmetic_v<T>)
+            magnitude = fabs(value);
+        else
+            magnitude = fabs(value.real()) + (hermitian ? 0 : fabs(value.imag()));
+        *result = {magnitude, fmax(0.0, values[0]), indices[0], 0};
     }
 }
 
 template <class T>
 __global__ void normalize_pivots(int first, int count, int current, int neighbor, int step,
                                  int swap_a, int swap_b, const T* c0, const T* c1, T* l0, T* l1,
-                                 T* w0, T* w1)
+                                 T* w0, T* w1, bool hermitian)
 {
     const int current_source = current == swap_a ? swap_b : current == swap_b ? swap_a : current;
     const int neighbor_source = neighbor == swap_a   ? swap_b
                                 : neighbor == swap_b ? swap_a
                                                      : neighbor;
-    const auto d0 = real_load(c0, current_source);
+    const T d0 = hermitian ? T(real_load(c0, current_source)) : c0[current_source];
     T d11{}, d22{}, inverse{};
     if (step == 2)
     {
         const T off = c0[neighbor_source];
-        d11 = real_load(c1, neighbor_source) / off;
-        d22 = d0 / detail::device_conj(off);
-        inverse = (1 / (real_part(d11 * d22) - 1)) / off;
+        d11 = (hermitian ? T(real_load(c1, neighbor_source)) : c1[neighbor_source]) / off;
+        d22 = d0 / (hermitian ? detail::device_conj(off) : off);
+        inverse = hermitian ? T((1 / (real_part(d11 * d22) - 1))) / off
+                            : (T(1) / (d11 * d22 - T(1))) / off;
     }
     for (int i = first + blockIdx.x * blockDim.x + threadIdx.x; i < first + count;
          i += blockDim.x * gridDim.x)
@@ -120,7 +138,7 @@ __global__ void normalize_pivots(int first, int count, int current, int neighbor
         const T x = c0[source];
         w0[i] = x;
         if (step == 1)
-            l0[i] = i == current ? T(d0) : (d0 == 0 ? x : x / d0);
+            l0[i] = i == current ? T(d0) : (d0 == T(0) ? x : x / d0);
         else
         {
             const T y = c1[source];
@@ -128,11 +146,11 @@ __global__ void normalize_pivots(int first, int count, int current, int neighbor
             if (i == current || i == neighbor)
             {
                 l0[i] = i == current ? T(d0) : x;
-                l1[i] = i == neighbor ? T(real_load(c1, neighbor_source)) : y;
+                l1[i] = i == neighbor && hermitian ? T(real_load(c1, neighbor_source)) : y;
             }
             else
             {
-                l0[i] = detail::device_conj(inverse) * (d11 * x - y);
+                l0[i] = (hermitian ? detail::device_conj(inverse) : inverse) * (d11 * x - y);
                 l1[i] = inverse * (d22 * y - x);
             }
         }
@@ -142,7 +160,7 @@ __global__ void normalize_pivots(int first, int count, int current, int neighbor
 template <bool Subtract, class T>
 __global__ void stored_copy(bool upper, int n, int rows, int cols, int mb, int nb, int pr, int pc,
                             int mr, int mc, int rs, int cs, const T* src, int lds, T* dst, int ldd,
-                            int row0, int col0)
+                            int row0, int col0, bool hermitian)
 {
     for (std::size_t p = blockIdx.x * blockDim.x + threadIdx.x; p < std::size_t(rows) * cols;
          p += blockDim.x * gridDim.x)
@@ -155,13 +173,13 @@ __global__ void stored_copy(bool upper, int n, int rows, int cols, int mb, int n
         const auto source = i + std::size_t(j) * lds, target = r + std::size_t(c) * ldd;
         if constexpr (Subtract)
         {
-            if (gi == gj)
+            if (hermitian && gi == gj)
                 dst[target] = T(real_load(dst, target) - real_load(src, source));
             else
                 dst[target] -= src[source];
         }
         else
-            dst[target] = gi == gj ? T(real_load(src, source)) : src[source];
+            dst[target] = hermitian && gi == gj ? T(real_load(src, source)) : src[source];
     }
 }
 
@@ -170,7 +188,7 @@ __global__ void stored_copy(bool upper, int n, int rows, int cols, int mb, int n
 template <class T>
 __global__ void hermitian_swap(bool upper, int first, int count, int a, int b, int mb, int nb,
                                int pr, int pc, int mr, int mc, int rs, int cs, T* matrix, int ld,
-                               const T* ca, const T* cb)
+                               const T* ca, const T* cb, bool hermitian)
 {
     for (int k = blockIdx.x * blockDim.x + threadIdx.x; k < 2 * count; k += blockDim.x * gridDim.x)
     {
@@ -185,12 +203,13 @@ __global__ void hermitian_swap(bool upper, int first, int count, int a, int b, i
             const int tmp = r;
             r = c;
             c = tmp;
-            value = detail::device_conj(value);
+            if (hermitian)
+                value = detail::device_conj(value);
         }
         if ((r / mb + rs) % pr != mr || (c / nb + cs) % pc != mc)
             continue;
         const int lr = (r / (mb * pr)) * mb + r % mb, lc = (c / (nb * pc)) * nb + c % nb;
-        matrix[lr + std::size_t(lc) * ld] = r == c ? T(real_part(value)) : value;
+        matrix[lr + std::size_t(lc) * ld] = hermitian && r == c ? T(real_part(value)) : value;
     }
 }
 
@@ -202,26 +221,26 @@ int blocks(std::size_t elements)
 
 template <class T>
 void summarize_column(const DdlaHandle_t& h, T* column, int first, int count, int diagonal,
-                      PivotSummary* output)
+                      PivotSummary* output, bool hermitian)
 {
     using D = detail::DeviceScalarT<T>;
     static_assert(sizeof(D) == sizeof(T) && sizeof(T) % alignof(D) == 0);
     column_summary<<<1, 256, 0, static_cast<gpuStream_t>(h->stream)>>>(
-        reinterpret_cast<D*>(column), first, count, diagonal, output);
+        reinterpret_cast<D*>(column), first, count, diagonal, output, hermitian);
     DDLA_CHECK(ddlaGetLastError(h));
 }
 template <class T>
-void nopiv_diagonal(const DdlaHandle_t& h, char u, int n, T* a, int lda, int* info)
+void nopiv_diagonal(const DdlaHandle_t& h, char u, int n, T* a, int lda, int* info, bool hermitian)
 {
     using D = detail::DeviceScalarT<T>;
     static_assert(sizeof(D) == sizeof(T) && sizeof(T) % alignof(D) == 0);
     diagonal_factor<<<1, 256, 0, static_cast<gpuStream_t>(h->stream)>>>(
-        u == 'U', n, reinterpret_cast<D*>(a), lda, info);
+        u == 'U', n, reinterpret_cast<D*>(a), lda, info, hermitian);
     DDLA_CHECK(ddlaGetLastError(h));
 }
 template <class T>
 void divide_panel(const DdlaHandle_t& h, int rows, int cols, const T* d, int ldd, const T* w,
-                  int ldw, T* l, int ldl)
+                  int ldw, T* l, int ldl, bool hermitian)
 {
     if (!rows || !cols)
         return;
@@ -230,12 +249,12 @@ void divide_panel(const DdlaHandle_t& h, int rows, int cols, const T* d, int ldd
     panel_division<<<blocks(std::size_t(rows) * cols), 256, 0,
                      static_cast<gpuStream_t>(h->stream)>>>(
         rows, cols, reinterpret_cast<const D*>(d), ldd, reinterpret_cast<const D*>(w), ldw,
-        reinterpret_cast<D*>(l), ldl);
+        reinterpret_cast<D*>(l), ldl, hermitian);
     DDLA_CHECK(ddlaGetLastError(h));
 }
 template <class T>
 void pivot_columns(const DdlaHandle_t& h, int first, int count, int current, int neighbor, int step,
-                   int swap_a, int swap_b, const T* c0, const T* c1, T* l0, T* l1, T* w0, T* w1)
+                   int swap_a, int swap_b, const T* c0, const T* c1, T* l0, T* l1, T* w0, T* w1, bool hermitian)
 {
     if (!count)
         return;
@@ -244,12 +263,12 @@ void pivot_columns(const DdlaHandle_t& h, int first, int count, int current, int
     normalize_pivots<<<blocks(count), 256, 0, static_cast<gpuStream_t>(h->stream)>>>(
         first, count, current, neighbor, step, swap_a, swap_b, reinterpret_cast<const D*>(c0),
         reinterpret_cast<const D*>(c1), reinterpret_cast<D*>(l0), reinterpret_cast<D*>(l1),
-        reinterpret_cast<D*>(w0), reinterpret_cast<D*>(w1));
+        reinterpret_cast<D*>(w0), reinterpret_cast<D*>(w1), hermitian);
     DDLA_CHECK(ddlaGetLastError(h));
 }
 template <class T>
 void copy_stored(const DdlaHandle_t& h, char u, int n, const int* d, const T* src, int lds, T* dst,
-                 int ldd, int row0, int col0, int rows, int cols, bool subtract)
+                 int ldd, int row0, int col0, int rows, int cols, bool subtract, bool hermitian)
 {
     if (rows < 0)
         rows = num_loc(n, d[DDLA_MB_], h->myprow_, d[DDLA_RSRC_], h->nprows_);
@@ -265,18 +284,18 @@ void copy_stored(const DdlaHandle_t& h, char u, int n, const int* d, const T* sr
         stored_copy<true, D><<<grid, 256, 0, stream>>>(
             u == 'U', n, rows, cols, d[DDLA_MB_], d[DDLA_NB_], h->nprows_, h->npcols_, h->myprow_,
             h->mypcol_, d[DDLA_RSRC_], d[DDLA_CSRC_], reinterpret_cast<const D*>(src), lds,
-            reinterpret_cast<D*>(dst), ldd, row0, col0);
+            reinterpret_cast<D*>(dst), ldd, row0, col0, hermitian);
     else
         stored_copy<false, D><<<grid, 256, 0, stream>>>(
             u == 'U', n, rows, cols, d[DDLA_MB_], d[DDLA_NB_], h->nprows_, h->npcols_, h->myprow_,
             h->mypcol_, d[DDLA_RSRC_], d[DDLA_CSRC_], reinterpret_cast<const D*>(src), lds,
-            reinterpret_cast<D*>(dst), ldd, row0, col0);
+            reinterpret_cast<D*>(dst), ldd, row0, col0, hermitian);
     DDLA_CHECK(ddlaGetLastError(h));
 }
 
 template <class T>
 void swap_stored(const DdlaHandle_t& h, char u, int n, const int* d, T* a, int ld, int first,
-                 int count, int row_a, int row_b, const T* ca, const T* cb)
+                 int count, int row_a, int row_b, const T* ca, const T* cb, bool hermitian)
 {
     (void)n;
     if (!count || row_a == row_b)
@@ -286,21 +305,21 @@ void swap_stored(const DdlaHandle_t& h, char u, int n, const int* d, T* a, int l
     hermitian_swap<<<blocks(std::size_t(2) * count), 256, 0, static_cast<gpuStream_t>(h->stream)>>>(
         u == 'U', first, count, row_a, row_b, d[DDLA_MB_], d[DDLA_NB_], h->nprows_, h->npcols_,
         h->myprow_, h->mypcol_, d[DDLA_RSRC_], d[DDLA_CSRC_], reinterpret_cast<D*>(a), ld,
-        reinterpret_cast<const D*>(ca), reinterpret_cast<const D*>(cb));
+        reinterpret_cast<const D*>(ca), reinterpret_cast<const D*>(cb), hermitian);
     DDLA_CHECK(ddlaGetLastError(h));
 }
 
 #define INSTANCE(T)                                                                                \
     template void swap_stored<T>(const DdlaHandle_t&, char, int, const int*, T*, int, int, int,    \
-                                 int, int, const T*, const T*);                                    \
-    template void summarize_column<T>(const DdlaHandle_t&, T*, int, int, int, PivotSummary*);      \
-    template void nopiv_diagonal<T>(const DdlaHandle_t&, char, int, T*, int, int*);                \
+                                 int, int, const T*, const T*, bool);                                    \
+    template void summarize_column<T>(const DdlaHandle_t&, T*, int, int, int, PivotSummary*, bool);      \
+    template void nopiv_diagonal<T>(const DdlaHandle_t&, char, int, T*, int, int*, bool);                \
     template void divide_panel<T>(const DdlaHandle_t&, int, int, const T*, int, const T*, int, T*, \
-                                  int);                                                            \
+                                  int, bool);                                                            \
     template void pivot_columns<T>(const DdlaHandle_t&, int, int, int, int, int, int, int,         \
-                                   const T*, const T*, T*, T*, T*, T*);                            \
+                                   const T*, const T*, T*, T*, T*, T*, bool);                            \
     template void copy_stored<T>(const DdlaHandle_t&, char, int, const int*, const T*, int, T*,    \
-                                 int, int, int, int, int, bool)
+                                 int, int, int, int, int, bool, bool)
 DDLA_FOR_EACH_TYPE(INSTANCE)
 #undef INSTANCE
 } // namespace ddla::ldlt_impl

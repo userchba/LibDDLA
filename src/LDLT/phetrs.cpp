@@ -8,18 +8,17 @@
 #include <ddla/ddla.h>
 #include <numeric>
 
-namespace ddla
-{
-namespace
+namespace ddla::ldlt_impl
 {
 // LAPACK HETRF stores D's off-diagonal blocks and interleaved permutations
 // in the triangle. Separate them as HETRS2/SYCONV do before unit TRSM.
-template <DdlaBackend Backend, bool Pivot, class T>
-void hermitian_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* a, const int* da,
+template <DdlaBackend Backend, bool H, bool Pivot, class T>
+void distributed_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* a, const int* da,
                      const int* ipiv, T* b, const int* db, int& info)
 {
     using R = typename real_type<T>::type;
-    u = ldlt_impl::distributed_check<Backend, true, Pivot, true, T>(
+    using D = std::conditional_t<H, R, T>;
+    u = ldlt_impl::distributed_check<Backend, H, Pivot, true, T>(
         h, u, n, nrhs, const_cast<T*>(a), da, const_cast<int*>(ipiv), b, db, info);
     if (!n || !nrhs)
         return;
@@ -28,7 +27,7 @@ void hermitian_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* a,
         if (h->nprocs == 1)
         {
             ldlt_impl::check_pivots(u, n, ipiv);
-            ldlt_impl::solve(std::true_type{}, u, n, nrhs, a, da[DDLA_LLD_], ipiv, b, db[DDLA_LLD_],
+            ldlt_impl::solve(std::bool_constant<H>{}, u, n, nrhs, a, da[DDLA_LLD_], ipiv, b, db[DDLA_LLD_],
                              info);
             return;
         }
@@ -131,7 +130,7 @@ void hermitian_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* a,
                                                  h->npcols_)));
         });
     if (copy_a)
-        ldlt_impl::copy_factor<Backend, T>(h, u, n, a, da, triangle, dt, false);
+        ldlt_impl::copy_factor<Backend, H, T>(h, u, n, a, da, triangle, dt, false);
 
     std::vector<T> host_d;
     {
@@ -176,7 +175,7 @@ void hermitian_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* a,
         DDLA_CHECK(ddlaMemcpy(h, host_d.data(), global.data(), host_d.size() * sizeof(T)));
         DDLA_CHECK(ddlaSynchronize(h));
     }
-    std::vector<R> inverse;
+    std::vector<D> inverse;
     std::vector<T> off;
     std::vector<int> pair_swap;
     detail::agree_check(h, "phetrs diagonal coefficients",
@@ -189,7 +188,13 @@ void hermitian_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* a,
     std::iota(pair_swap.begin(), pair_swap.end(), 1);
     for (int i = 0; i < n; ++i)
     {
-        const R d0 = std::real(host_d[i]);
+        const auto diagonal = [&](int j) -> D {
+            if constexpr (H)
+                return std::real(host_d[j]);
+            else
+                return host_d[j];
+        };
+        const D d0 = diagonal(i);
         if constexpr (!Pivot)
             if (d0 == R(0))
             {
@@ -199,13 +204,22 @@ void hermitian_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* a,
         if constexpr (Pivot)
             if (piv[i] < 0)
             {
-                const T e = u == 'L' ? host_d[n + i] : detail::host_conj(host_d[n + i]);
-                const R scale = std::abs(e), a0 = d0 / scale, a1 = std::real(host_d[i + 1]) / scale;
-                const R multiplier = (R(1) / (a0 * a1 - R(1))) / scale;
+                const T stored = host_d[n + i];
+                const T e = H && u == 'U' ? detail::host_conj(stored) : stored;
+                const R scale = std::abs(e);
+                const D a0 = d0 / scale, a1 = diagonal(i + 1) / scale;
+                const T z = e / scale;
+                const D determinant = [&]() -> D {
+                    if constexpr (H)
+                        return a0 * a1 - R(1);
+                    else
+                        return a0 * a1 - z * z;
+                }();
+                const D multiplier = (D(1) / determinant) / scale;
                 inverse[i] = a1 * multiplier;
                 inverse[i + 1] = a0 * multiplier;
-                off[i + 1] = -(e / scale) * multiplier;
-                off[i] = detail::host_conj(off[i + 1]);
+                off[i + 1] = -z * multiplier;
+                off[i] = H ? detail::host_conj(off[i + 1]) : off[i + 1];
                 pair_swap[i] = i + 2;
                 ++i;
                 continue;
@@ -214,7 +228,7 @@ void hermitian_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* a,
     }
     std::size_t device_bytes = 0, host_bytes = 0;
     if (h->nprocs > 1)
-        ptrtrs_impl::ptrtrs_workspace_size<T>(h, 'L', 'C', n, nrhs, dt, dx, &device_bytes,
+        ptrtrs_impl::ptrtrs_workspace_size<T>(h, 'L', H ? 'C' : 'T', n, nrhs, dt, dx, &device_bytes,
                                               &host_bytes);
     std::size_t count = 0;
     if (convert)
@@ -240,7 +254,7 @@ void hermitian_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* a,
         }
     vector<char> work(h);
     std::vector<char> host;
-    vector<R> device_inverse(h);
+    vector<D> device_inverse(h);
     vector<T> device_off(h);
     std::vector<int> local_piv, local_pair;
     detail::agree_check(
@@ -252,7 +266,7 @@ void hermitian_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* a,
             device_inverse.resize(n);
             device_off.resize(off.size());
             DDLA_CHECK(
-                ddlaMemcpy(h, device_inverse.data(), inverse.data(), inverse.size() * sizeof(R)));
+                ddlaMemcpy(h, device_inverse.data(), inverse.data(), inverse.size() * sizeof(D)));
             if (pairs)
                 DDLA_CHECK(ddlaMemcpy(h, device_off.data(), off.data(), off.size() * sizeof(T)));
             const int rows = num_loc(n, dx[DDLA_MB_], h->myprow_, dx[DDLA_RSRC_], h->nprows_);
@@ -322,29 +336,35 @@ void hermitian_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* a,
         pdgmm_impl::pdgmm_run<Backend, T, T>(h, 'L', n, nrhs, spare.data(), ds, device_off.data(),
                                              1, spare.data(), ds);
     }
-    pdgmm_impl::pdgmm_run<Backend, T, R>(h, 'L', n, nrhs, x, dx, device_inverse.data(), 1, x, dx);
+    pdgmm_impl::pdgmm_run<Backend, T, D>(h, 'L', n, nrhs, x, dx, device_inverse.data(), 1, x, dx);
     if (pairs)
         add(x, dx, spare.data(), ds, x, dx, true);
-    triangular_solve('C');
+    triangular_solve(H ? 'C' : 'T');
     if (permute)
         apply_pivots('B', x, dx, local_piv);
     if (copy_rhs)
         add(x, dx, nullptr, dx, b, db, false);
     DDLA_CHECK(ddlaSynchronize(h));
 }
-} // namespace
+#define ENGINE(B, T) \
+    template void distributed_solve<B, false, true, T>(const DdlaHandle_t&, char, int, int, const T*, const int*, const int*, T*, const int*, int&); \
+    template void distributed_solve<B, false, false, T>(const DdlaHandle_t&, char, int, int, const T*, const int*, const int*, T*, const int*, int&)
+DDLA_FOR_EACH_BACKEND_TYPE(ENGINE)
+#undef ENGINE
+} // namespace ddla::ldlt_impl
 
+namespace ddla {
 template <DdlaBackend Backend, typename T>
 void phetrs(const DdlaHandle_t& h, char u, int n, int nrhs, const T* a, const int* da,
             const int* piv, T* b, const int* db, int& info)
 {
-    hermitian_solve<Backend, true, T>(h, u, n, nrhs, a, da, piv, b, db, info);
+    ldlt_impl::distributed_solve<Backend, true, true, T>(h, u, n, nrhs, a, da, piv, b, db, info);
 }
 template <DdlaBackend Backend, typename T>
 void phetrs_nopiv(const DdlaHandle_t& h, char u, int n, int nrhs, const T* a, const int* da, T* b,
                   const int* db, int& info)
 {
-    hermitian_solve<Backend, false, T>(h, u, n, nrhs, a, da, nullptr, b, db, info);
+    ldlt_impl::distributed_solve<Backend, true, false, T>(h, u, n, nrhs, a, da, nullptr, b, db, info);
 }
 
 #define INSTANCE(B, T)                                                                             \
