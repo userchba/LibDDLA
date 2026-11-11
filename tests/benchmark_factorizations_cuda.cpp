@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-#include <mpi.h>
+#include "mpi_test_init.h"
 
 #include <cal.h>
 #include <cuComplex.h>
@@ -818,9 +818,9 @@ void benchmark_dimension(int n, int repetitions, int warmup_size, bool warmup,
 
 int main(int argc, char** argv)
 {
-    const int mpi_status = MPI_Init(&argc, &argv);
+    const int mpi_status = ddla_test_mpi_init(&argc, &argv);
     if(mpi_status != MPI_SUCCESS){
-        std::cerr << "MPI_Init failed with status " << mpi_status << std::endl;
+        std::cerr << "MPI_Init_thread failed with status " << mpi_status << std::endl;
         return EXIT_FAILURE;
     }
 

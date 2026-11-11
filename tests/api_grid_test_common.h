@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-#include <mpi.h>
+#include "mpi_test_init.h"
 
 #include <ddla/ddla.h>
 #include "ddla_connector.h"
@@ -588,7 +588,7 @@ template <typename Body>
 int run_grid_test(int argc, char** argv, const std::string& test_name, Body body,
                   ddla::DdlaBackend backend = ddla::default_backend_v)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
 
     int nprocs = 0;
     int rank = 0;

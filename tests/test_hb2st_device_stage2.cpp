@@ -143,7 +143,7 @@ template<class T>void probe(DdlaHandle_t h,int n,int requested,bool zero) {
     gpu.release();cpu.release();
 }
 int main(int argc,char**argv) {
-    int provided=0;MPI_Init_thread(&argc,&argv,MPI_THREAD_FUNNELED,&provided);
+    ddla_test_mpi_init(&argc, &argv);
     try {
         int size=0;MPI_Comm_size(MPI_COMM_WORLD,&size);
         DdlaHandle_t h=nullptr;ddlaInit(h,DdlaBackend::GPU);ddlaSet(h,MPI_COMM_WORLD,size>=4?2:1,size/(size>=4?2:1));

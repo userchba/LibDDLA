@@ -16,7 +16,7 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-#include <mpi.h>
+#include "mpi_test_init.h"
 #include <ddla/ddla.h>
 #include "test_desc_helpers.h"
 #include "ddla_connector.h"
@@ -417,7 +417,7 @@ static int run_tests_for_type(const char* type_name,
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
 
     // Parse optional grid dimensions from command line
     int nprows = 0, npcols = 0;

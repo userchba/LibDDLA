@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include "matrix_test_common.h"
 
 // This oracle addresses global elements directly, independently of the block
@@ -140,7 +141,7 @@ template <DdlaBackend Backend> void run(int pr,int pc) {
     DDLA_CHECK(ddlaDestroy(h));
 }
 int main(int argc,char** argv) {
-    MPI_Init(&argc,&argv);try {
+    ddla_test_mpi_init(&argc,&argv);try {
         int np;MPI_Comm_size(MPI_COMM_WORLD,&np);int pr=argc>1?std::stoi(argv[1]):1,pc=argc>2?std::stoi(argv[2]):np;
         if(pr*pc!=np)throw std::runtime_error("wrong grid");
         run<DdlaBackend::CPU>(pr,pc);

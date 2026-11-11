@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include <ddla/ddla.h>
 #include <ddla/ddla_vector.h>
 #include "BLAS/gemmt_impl.h"
@@ -86,7 +87,7 @@ template<DdlaBackend B> int run() {
     DDLA_CHECK(ddlaDestroy(h));return cases;
 }
 int main(int argc,char**argv) {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         int cases=run<DdlaBackend::CPU>();
 #if DDLA_HAS_GPU

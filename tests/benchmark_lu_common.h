@@ -160,7 +160,7 @@ template<class T>void run_size(const DdlaHandle_t& h,int n,const Options& o,bool
     }
 }
 inline int main(int argc,char**argv,bool full) {
-    MPI_Init(&argc,&argv);int rank,size;MPI_Comm_rank(MPI_COMM_WORLD,&rank);MPI_Comm_size(MPI_COMM_WORLD,&size);
+    ddla_test_mpi_init(&argc,&argv);int rank,size;MPI_Comm_rank(MPI_COMM_WORLD,&rank);MPI_Comm_size(MPI_COMM_WORLD,&size);
     Options o;std::vector<char*> remaining{argv[0]};std::string error;
     for(int i=1;i<argc;++i) {
         std::string arg=argv[i];

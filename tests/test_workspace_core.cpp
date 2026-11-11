@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include <ddla/ddla.h>
 #include <ddla/ddla_vector.h>
 #include "lapack_impl.h"
@@ -279,7 +280,7 @@ template<DdlaBackend B> void backend()
 }
 int main(int argc,char** argv)
 {
-    MPI_Init(&argc,&argv);int status=0;
+    ddla_test_mpi_init(&argc,&argv);int status=0;
     try {
         backend<DdlaBackend::CPU>();
 #if DDLA_HAS_GPU

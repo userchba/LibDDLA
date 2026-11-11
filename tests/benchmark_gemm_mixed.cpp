@@ -1,5 +1,5 @@
 #include <ddla/ddla.h>
-#include <mpi.h>
+#include "mpi_test_init.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -97,7 +97,7 @@ template <DdlaBackend BE> void run(int argc,char**argv) {
 }
 }
 int main(int argc,char**argv) {
-    MPI_Init(&argc,&argv);int fail=0;
+    ddla_test_mpi_init(&argc,&argv);int fail=0;
     try {
         int size=0;MPI_Comm_size(MPI_COMM_WORLD,&size);
         if(size!=1)throw std::invalid_argument("benchmark requires one MPI process");

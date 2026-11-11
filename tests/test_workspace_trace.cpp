@@ -1,7 +1,7 @@
 #include <ddla/ddla.h>
 #include "lapack_impl.h"
 #include "workspace_test_common.h"
-#include <mpi.h>
+#include "mpi_test_init.h"
 #include <cstddef>
 #include <cstring>
 #include <iostream>
@@ -153,7 +153,7 @@ static void controls(ddla::DdlaBackend backend)
 
 int main(int argc,char** argv)
 {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         if(!workspace_test::available()) {
             std::cout<<"workspace tracing unavailable; diagnostic controls skipped"<<std::endl;

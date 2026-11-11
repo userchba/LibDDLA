@@ -169,7 +169,7 @@ void test(DdlaHandle_t h, int n, char uplo, int pattern, double scale, bool imag
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
     int ranks = 1;
     MPI_Comm_size(MPI_COMM_WORLD, &ranks);
     try

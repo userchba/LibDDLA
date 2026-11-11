@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include "matrix_test_common.h"
 #include <ddla/ddla_vector.h>
 #include "BLAS/blas_impl.h"
@@ -194,7 +195,7 @@ void run(int pr, int pc)
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         int size=1; MPI_Comm_size(MPI_COMM_WORLD,&size);
         const int pr=argc>2 ? std::stoi(argv[2]) : 1;

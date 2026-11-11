@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include "pgemm_test_common.h"
 #include "ddla_stream.h"
 
@@ -140,7 +141,7 @@ void backend_cases(int pr,int pc,bool quick) {
 }
 
 int main(int argc,char** argv) {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         check_selection();
         int np; MPI_Comm_size(MPI_COMM_WORLD,&np);

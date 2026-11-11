@@ -337,6 +337,7 @@ template <DdlaBackend B> void run(MPI_Comm comm,int pr,int pc,char major)
     convert_case<B,T>(h); \
     transfer_case<B,T>(h,19,17,2,3,15,13,h->nprocs-1); \
     transfer_case<B,T>(h,2,1,1,1,2,1,0); \
+    transfer_case<B,T>(h,65547,137,3,4,65539,129,h->nprocs-1); \
     rows_case<B,T>(h,7,false); rows_case<B,T>(h,7,true); \
     rows_case<B,T>(h,1,false); rows_case<B,T>(h,0,true); \
     panel_case<B,T>(h,'R','N'); panel_case<B,T>(h,'C','N'); \
@@ -350,7 +351,7 @@ template <DdlaBackend B> void run(MPI_Comm comm,int pr,int pc,char major)
 
 int main(int argc,char** argv)
 {
-    MPI_Init(&argc,&argv);int size;MPI_Comm_size(MPI_COMM_WORLD,&size);
+    ddla_test_mpi_init(&argc,&argv);int size;MPI_Comm_size(MPI_COMM_WORLD,&size);
     TestOptions options;std::string error;
     if(!parse_options(argc,argv,size,options,error)){std::cerr<<error<<std::endl;MPI_Abort(MPI_COMM_WORLD,2);}
     for(auto grid:options.grids)for(char major:{'R','C'}) {

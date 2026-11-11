@@ -169,7 +169,7 @@ template<class R> void run(const ddla::DdlaHandle_t& h) {
 }
 
 int main(int argc,char**argv) {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         int size=0;MPI_Comm_size(MPI_COMM_WORLD,&size);
         TestOptions options;std::string error;

@@ -1,5 +1,5 @@
 #include <ddla/ddla.h>
-#include <mpi.h>
+#include "mpi_test_init.h"
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -225,7 +225,7 @@ template <DdlaBackend BE> int run() {
 }
 }
 int main(int argc,char**argv) {
-    MPI_Init(&argc,&argv); int failures=0;
+    ddla_test_mpi_init(&argc,&argv); int failures=0;
     const std::string mode=argc>1?argv[1]:"all";
     try {
         if(mode!="gpu") failures+=run<DdlaBackend::CPU>();

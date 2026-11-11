@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include "trtrm_test_common.h"
 #include <array>
 #include <functional>
@@ -311,7 +312,7 @@ int run(bool quick, const std::string& uplos)
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
     int bad = 0;
     try {
         bool quick = false;

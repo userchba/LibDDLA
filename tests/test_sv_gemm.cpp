@@ -1,6 +1,6 @@
 #include <cassert>
 #include <cmath>
-#include <mpi.h>
+#include "mpi_test_init.h"
 #include <time.h>
 #include <iostream>
 #include <cstdlib>
@@ -149,7 +149,7 @@ void check_pzgetrf(int n, const DdlaHandle_t& ddla_handle)
     DDLA_CHECK(ddlaSynchronize(ddla_handle));
 }
 int main(int argc, char* argv[]) {  
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
     printf("before stream init\n");
     DdlaHandle_t ddla_handle = nullptr;
     ddlaInit(ddla_handle);

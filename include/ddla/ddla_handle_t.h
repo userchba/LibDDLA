@@ -56,6 +56,9 @@ ddlaStatus_t ddlaInit(DdlaHandle_t& handle);
 ddlaStatus_t ddlaInit(DdlaHandle_t& handle, DdlaBackend requested_backend);
 
 /// Initialize process grid and allocate backend resources.
+/// The caller owns MPI initialization. Request at least MPI_THREAD_FUNNELED
+/// and call MPI-using LibDDLA operations from the MPI-initializing thread.
+/// Internal numerical workers do not make MPI calls.
 /// Backend is resolved and validated collectively.
 ddlaStatus_t ddlaSet(DdlaHandle_t handle, const MPI_Comm& comm = MPI_COMM_WORLD,
                       char major = 'R');

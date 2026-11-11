@@ -1,3 +1,4 @@
+#include "mpi_test_init.h"
 #include "matrix_test_common.h"
 
 static int alltoalls=0,sendrecvs=0,max_send=0;
@@ -92,7 +93,7 @@ template<DdlaBackend Backend>void run(int pr,int pc,bool before) {
     DDLA_CHECK(ddlaDestroy(h));
 }
 int main(int argc,char** argv) {
-    MPI_Init(&argc,&argv);try {
+    ddla_test_mpi_init(&argc,&argv);try {
         int np;MPI_Comm_size(MPI_COMM_WORLD,&np);const int pr=argc>1?std::stoi(argv[1]):1,pc=argc>2?std::stoi(argv[2]):np;
         const bool before=argc>3 && std::string(argv[3])=="expect-block";
         if(pr*pc!=np)throw std::runtime_error("wrong grid");

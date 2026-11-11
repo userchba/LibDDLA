@@ -17,7 +17,7 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-#include <mpi.h>
+#include "mpi_test_init.h"
 #include <ddla/ddla.h>
 #include "test_desc_helpers.h"
 #include "ddla_connector.h"
@@ -369,7 +369,7 @@ static int run_type(const char* name, DdlaHandle_t h_cpu, DdlaHandle_t h_gpu,
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &myid);
     MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
 

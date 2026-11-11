@@ -3,7 +3,7 @@
 #include <ddla/ddla.h>
 #include <functional>
 
-#include <mpi.h>
+#include "mpi_test_init.h"
 
 #include <algorithm>
 #include <array>
@@ -641,7 +641,7 @@ double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
     int exit_code = 0;
     try
     {

@@ -7,9 +7,12 @@ program test_fortran_trtrm
   include 'mpif.h'
   type(c_ptr) :: h
   integer(c_int) :: backend, status
+  integer :: provided
   integer :: ierr, rank, failures, total
   failures = 0
-  call MPI_Init(ierr)
+  call MPI_Init_thread(MPI_THREAD_FUNNELED, provided, ierr)
+  if (ierr /= MPI_SUCCESS) stop 1
+  if (provided < MPI_THREAD_FUNNELED) call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
   call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
   do backend = DDLA_BACKEND_CPU, DDLA_BACKEND_GPU
     if (ddla_backend_available(backend) == 0) cycle

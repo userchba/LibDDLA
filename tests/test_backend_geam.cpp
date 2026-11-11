@@ -31,7 +31,7 @@
 #include <string>
 #include <vector>
 
-#include <mpi.h>
+#include "mpi_test_init.h"
 
 #include <ddla/ddla.h>
 
@@ -515,7 +515,7 @@ int check_rejections(const DdlaHandle_t& h, const DdlaHandle_t& other)
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &g_rank);
 
     const char* only = std::getenv("DDLA_TEST_ONLY");

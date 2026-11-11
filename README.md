@@ -127,6 +127,17 @@ Both read only the selected input triangle and destroy A. The one-stage solver
 completes the other triangle, then uses both halves as workspace for full-matrix
 GEMV/GEMM; `uplo` selects the input triangle, not a separate reduction method.
 
+#### MPI thread support
+
+Initialize MPI with `MPI_Init_thread(..., MPI_THREAD_FUNNELED, &provided)` and
+check that `provided >= MPI_THREAD_FUNNELED`. Call MPI-using LibDDLA routines
+from the thread that initialized MPI. Internal CPU workers perform local
+numerical work; communication and shared-window MPI calls stay on the caller.
+
+The C++ API leaves MPI initialization and finalization to the application.
+The bindings request FUNNELED when they initialize MPI automatically. If MPI
+is already initialized, its thread level remains the application's responsibility.
+
 #### CPU threads (OpenMP)
 
 The CPU eigensolver (`pheevd`) scales with threads as well as ranks.  The host kernels that BLAS does not
@@ -428,7 +439,13 @@ allocates and frees this memory, with helper calls taking the handle first.
 #include <mpi.h>
 
 int main(int argc, char** argv) {
-    MPI_Init(&argc, &argv);
+    int provided = MPI_THREAD_SINGLE;
+    if (MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided) != MPI_SUCCESS)
+        return 1;
+    if (provided < MPI_THREAD_FUNNELED) {
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        return 1;
+    }
 
     ddla::DdlaHandle_t handle = nullptr;
     ddla::DDLA_CHECK(ddla::ddlaInit(handle));

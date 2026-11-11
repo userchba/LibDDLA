@@ -8,7 +8,7 @@
 #include <type_traits>
 #include <vector>
 
-#include <mpi.h>
+#include "mpi_test_init.h"
 
 #include <ddla/ddla.h>
 
@@ -310,7 +310,7 @@ int run_backend()
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
     int rank = 0;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 

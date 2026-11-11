@@ -12,7 +12,7 @@
 #include <type_traits>
 #include <vector>
 
-#include <mpi.h>
+#include "mpi_test_init.h"
 
 #include <ddla/ddla.h>
 #include "ddla_connector.h"
@@ -194,7 +194,7 @@ bool test_backend(const DdlaHandle_t& handle, const DdlaHandle_t& other, int myi
 
 int main(int argc, char* argv[])
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
 
     int myid;
     MPI_Comm_rank(MPI_COMM_WORLD, &myid);

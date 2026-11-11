@@ -44,7 +44,7 @@
 #include <type_traits>
 #include <vector>
 
-#include <mpi.h>
+#include "mpi_test_init.h"
 
 #include "benchmark_grid_options.h"
 #include "test_desc_helpers.h"
@@ -390,7 +390,7 @@ void run_type(const DdlaHandle_t& handle, const benchmark_cli::Options& options,
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
     int nprocs = 0, rank = 0;
     MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);

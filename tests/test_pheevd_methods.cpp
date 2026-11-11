@@ -95,7 +95,7 @@ template<DdlaBackend B>void backend(const std::pair<int,int>& grid) {
 }
 }
 int main(int argc,char**argv) {
-    int provided=0;MPI_Init_thread(&argc,&argv,MPI_THREAD_FUNNELED,&provided);
+    ddla_test_mpi_init(&argc, &argv);
     try {
         int P=0;MPI_Comm_size(MPI_COMM_WORLD,&P);TestOptions options;std::string error;
         if(!parse_options(argc,argv,P,options,error))throw std::runtime_error(error);

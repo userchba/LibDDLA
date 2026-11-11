@@ -121,7 +121,7 @@ void run(const ddla::DdlaHandle_t& handle, int n, int nb, bool check, int reps, 
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
     int nprocs = 0, rank = 0;
     MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);

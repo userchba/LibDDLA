@@ -1,7 +1,7 @@
 #include <ddla/ddla.h>
 #include <ddla/ddla_vector.h>
 
-#include <mpi.h>
+#include "mpi_test_init.h"
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -79,7 +79,7 @@ int check_backend()
 
 int main(int argc, char** argv)
 {
-    MPI_Init(&argc, &argv);
+    ddla_test_mpi_init(&argc, &argv);
     int bad = 0;
     try {
         const char* only = std::getenv("DDLA_TEST_ONLY");

@@ -2,7 +2,7 @@
 #include <ddla/ddla_vector.h>
 #include "ddla_stream.h"
 #include "host_threads.h"
-#include <mpi.h>
+#include "mpi_test_init.h"
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -321,7 +321,7 @@ template <DdlaBackend Backend> void dispatch(const Options& o,int pr,int pc) {
 } // namespace
 
 int main(int argc,char** argv) {
-    MPI_Init(&argc,&argv);
+    ddla_test_mpi_init(&argc,&argv);
     try {
         if(argc<5 || argc>8) throw std::invalid_argument("usage: benchmark_products cpu|gpu local|distributed s|d|c|z n [nb=128] [warmups=3] [repeats=9]");
         Options o{argv[1],argv[2],argv[3][0],number(argv[4],"matrix order",1)};

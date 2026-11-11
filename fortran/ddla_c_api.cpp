@@ -30,6 +30,8 @@
 
 #include <mpi.h>
 
+#include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <string>
 #include <type_traits>
@@ -270,7 +272,17 @@ static void ensure_mpi_init()
     int is_init = 0;
     MPI_Initialized(&is_init);
     if (!is_init) {
-        MPI_Init(nullptr, nullptr);
+        int provided = MPI_THREAD_SINGLE;
+        const int status = MPI_Init_thread(nullptr, nullptr, MPI_THREAD_FUNNELED, &provided);
+        if (status != MPI_SUCCESS) {
+            std::fprintf(stderr, "LibDDLA: MPI_Init_thread failed with status %d\n", status);
+            std::abort();
+        }
+        if (provided < MPI_THREAD_FUNNELED) {
+            std::fprintf(stderr, "LibDDLA: MPI_THREAD_FUNNELED required; MPI provided %d\n", provided);
+            MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+            std::abort();
+        }
         g_mpi_init_by_ddla = true;
         std::atexit(ddla_c_finalize_on_exit);
     }
