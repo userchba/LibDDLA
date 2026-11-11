@@ -585,7 +585,8 @@ inline bool skip_non_square_grid(const ddla::DdlaHandle_t& handle, const std::st
 }
 
 template <typename Body>
-int run_grid_test(int argc, char** argv, const std::string& test_name, Body body)
+int run_grid_test(int argc, char** argv, const std::string& test_name, Body body,
+                  ddla::DdlaBackend backend = ddla::default_backend_v)
 {
     MPI_Init(&argc, &argv);
 
@@ -609,7 +610,7 @@ int run_grid_test(int argc, char** argv, const std::string& test_name, Body body
 
     for(auto [nprows, npcols] : options.grids){
         ddla::DdlaHandle_t handle = nullptr;
-        ddla::ddlaInit(handle);
+        ddla::ddlaInit(handle, backend);
         ddla::ddlaSet(handle, MPI_COMM_WORLD, nprows, npcols);
         int myid = ddlaGetRank(handle);
         if(myid == 0){

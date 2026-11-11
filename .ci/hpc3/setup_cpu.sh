@@ -11,3 +11,7 @@ module load gcc/11.4.0
 module load openmpi/4.1.1
 module load cmake/3.25.3
 export OPENBLAS=/data/home/renxg/app/toolchain/260328/toolchain/install/openblas-0.3.29/lib/libopenblas.so
+
+# CPU CI runs on one node. As in gpurank_wrapper.sh, avoid the openib
+# component, which can crash inside MPI_Init before any test code runs.
+export OMPI_MCA_btl=self,vader,tcp
