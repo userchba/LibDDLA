@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.18)
 project(LibDDLAInstalledConsumer LANGUAGES CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(LibDDLA REQUIRED CONFIG)
 
 # This is deliberately a separate project: no LibDDLA source/build include
@@ -20,6 +23,9 @@ endforeach()
 if(_ddla_definitions MATCHES "DDLA_USE_(CUDA|HIP|CPU|CCL|GPU_CPU_TUNNEL)")
     message(FATAL_ERROR "Public target exports private connector definitions: ${_ddla_definitions}")
 endif()
+if(NOT "cxx_std_11" IN_LIST _ddla_features OR "cxx_std_17" IN_LIST _ddla_features)
+    message(FATAL_ERROR "Public target must require C++11: ${_ddla_features}")
+endif()
 message(STATUS "ddla::ddla includes: ${_ddla_includes}")
 message(STATUS "ddla::ddla links: ${_ddla_links}")
 message(STATUS "ddla::ddla definitions: ${_ddla_definitions}")
@@ -28,6 +34,8 @@ file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/installed-target.txt" CONTENT
     "library=$<TARGET_FILE:ddla::ddla>\nincludes=${_ddla_includes}\nlinks=${_ddla_links}\ndefinitions=${_ddla_definitions}\nfeatures=${_ddla_features}\n")
 add_executable(installed_consumer main.cpp)
 target_link_libraries(installed_consumer PRIVATE ddla::ddla)
+target_compile_options(installed_consumer PRIVATE
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-pedantic-errors>)
 enable_testing()
 find_package(MPI REQUIRED COMPONENTS CXX)
 add_test(NAME installed_consumer_mpi
