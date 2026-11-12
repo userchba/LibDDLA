@@ -17,6 +17,9 @@ class DdlaStream {
 public:
     // -- per-handle device selection (replaces static local_device) ---------
     int local_device = -1;
+    // Ranks of this communicator in the same shared-memory domain, cached
+    // by ddlaSet alongside the host budget. Used by collective method policy.
+    int node_ranks = 0;
 
     // -- MPI communicators --------------------------------------------------
     MPI_Comm comm      = MPI_COMM_NULL;   // duplicated from user, owned

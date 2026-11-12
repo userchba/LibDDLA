@@ -3,6 +3,9 @@
 
 #include <mpi.h>
 #include <algorithm>
+#include <ddla/ddla_handle_t.h>
+#include <complex>
+#include <type_traits>
 
 namespace ddla {
 
@@ -129,6 +132,34 @@ inline int eig_distributed_bandwidth(int n,int block,int band,int ranks) noexcep
 /// Whether per-phase timing output is requested (DDLA_EIG_PROFILE=1).
 /// Read from the environment on every call -- callers need not cache it.
 bool eig_profile_enabled();
+
+namespace detail {
+// No CPU one-stage profile is enabled until full-node calibration is available.
+inline constexpr int pheevd_method_cpu_threads = 0;
+template <DdlaBackend Backend, class T>
+inline bool pheevd_one_stage_shape(char job, int n, int block, int pr, int pc,
+                                   char major) noexcept
+{
+    // Matched eight-V100 measurements, NB64, one host/BLAS worker per rank.
+    // Retain two-stage outside the measured range and for close real-values cases.
+    if (block != 64 || major != 'R' || n > 16384) return false;
+    if constexpr (Backend == DdlaBackend::CPU) {
+        return false;
+    } else {
+        if (pr != 2 || pc != 4) return false;
+        if constexpr (std::is_same_v<T,float>)
+            return job == 'V' && n >= 4096;
+        else if constexpr (std::is_same_v<T,double>)
+            return job == 'V' && n >= 3072;
+        else if constexpr (std::is_same_v<T,std::complex<float>>)
+            return (job == 'N' && n >= 1536) || (job == 'V' && n >= 1024);
+        else if constexpr (std::is_same_v<T,std::complex<double>>)
+            return (job == 'N' || job == 'V') && n >= 1024;
+        else
+            return false;
+    }
+}
+} // namespace detail
 
 } // namespace ddla
 

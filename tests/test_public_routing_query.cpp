@@ -204,7 +204,7 @@ int main(int argc,char** argv) {
         require_all(known,"unknown query mode");
         DDLA_CHECK(ddla::ddlaInit(h,ddla::DdlaBackend::CPU));DDLA_CHECK(ddla::ddlaSet(h,MPI_COMM_WORLD,pr,pc,'R'));
         const int cpus=allowed_cpus();
-        require_all(h->host_threads==expected_workers,"handle affinity/override budget");
+        require_all(h->host_threads==expected_workers&&h->node_ranks==local,"handle affinity/override budget and cached node ranks");
         check_workers(h,cpus);
         const int local_expected=nodes==1&&!legacy&&ddla::detail::pheevd_cpu_householder_shape(n,nb,nbw,pr,pc,expected_workers)?1:0;
         int expected=0;MPI_Allreduce(&local_expected,&expected,1,MPI_INT,MPI_MIN,MPI_COMM_WORLD);
@@ -220,7 +220,10 @@ int main(int argc,char** argv) {
         MPI_Comm subset=MPI_COMM_NULL;MPI_Comm_split(MPI_COMM_WORLD,rank%2,rank,&subset);
         ddla::DdlaHandle_t other=nullptr;ddla::ddlaInit(other,ddla::DdlaBackend::CPU);ddla::ddlaSet(other,subset,'R');
         const auto subset_plan=checked_plan(other,65,nb,nbw);
-        require_all(other->host_threads==3&&subset_plan.workers==3,"subset handle independent budget");
+        MPI_Comm subset_node=MPI_COMM_NULL;MPI_Comm_split_type(subset,MPI_COMM_TYPE_SHARED,0,MPI_INFO_NULL,&subset_node);
+        int subset_local=0;MPI_Comm_size(subset_node,&subset_local);MPI_Comm_free(&subset_node);
+        require_all(other->host_threads==3&&subset_plan.workers==3&&other->node_ranks==subset_local,
+            "subset handle independent budget and cached node ranks");
         ddla::ddlaDestroy(other);MPI_Comm_free(&subset);
         if(had_accum)setenv("DDLA_EIG_CPU_ACCUM",saved_accum.c_str(),1);
         if(had_team)setenv("DDLA_EIG_CHASE_TEAM_THREADS",saved_team.c_str(),1);
@@ -234,6 +237,10 @@ int main(int argc,char** argv) {
         const int choice=selected?1:0;int lo=0,hi=0;MPI_Allreduce(&choice,&lo,1,MPI_INT,MPI_MIN,MPI_COMM_WORLD);MPI_Allreduce(&choice,&hi,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD);
         require_all(lo==hi,"production selection was not uniform");
         std::printf("PUBLIC_ROUTING_QUERY_RANK rank=%d mode=%s nodes=%d local=%d allowed=%d warmed=%d workers=%d selected=%d expected=%d status=PASS\n",rank,mode.c_str(),nodes,local,cpus,warmed,first.workers,choice,expected);
+        DDLA_CHECK(ddla::ddlaSet(h,MPI_COMM_SELF,1,1));
+        require_all(h->node_ranks==1&&h->host_threads==3,"reconfigured self topology and budget");
+        DDLA_CHECK(ddla::ddlaSet(h,MPI_COMM_WORLD,pr,pc));
+        require_all(h->node_ranks==local&&h->host_threads==3,"reconfigured world topology and budget");
         DDLA_CHECK(ddla::ddlaDestroy(h));MPI_Comm_free(&node);
         MPI_Barrier(MPI_COMM_WORLD);
         if(rank==0)std::printf("PUBLIC_ROUTING_QUERY mode=%s n=%d nb=%d nbw=%d grid=%dx%d nodes=%d selected=%d ranks=%d shape_checks=23 status=PASS\n",mode.c_str(),n,nb,nbw,pr,pc,nodes,expected,ranks);

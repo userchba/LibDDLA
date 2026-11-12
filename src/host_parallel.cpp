@@ -9,12 +9,13 @@
 #include <omp.h>
 #endif
 namespace ddla { namespace detail {
-int host_thread_budget(MPI_Comm comm)
+int host_thread_budget(MPI_Comm comm, int& node_ranks)
 {
     MPI_Comm node = MPI_COMM_NULL;
     MPI_CHECK(MPI_Comm_split_type(comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &node));
     int ranks = 1;
     MPI_CHECK(MPI_Comm_size(node, &ranks));
+    node_ranks = ranks;
     int budget = std::max(1, host_allowed_cpus() / std::max(1, ranks));
 #if defined(__linux__) && defined(CPU_COUNT)
     cpu_set_t mask;

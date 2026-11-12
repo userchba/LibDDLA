@@ -44,7 +44,7 @@ inline int host_allowed_cpus()
 
 // Collective over comm, with no process-global cache. Called at handle setup,
 // never from a kernel that only a subset of ranks may reach.
-int host_thread_budget(MPI_Comm comm);
+int host_thread_budget(MPI_Comm comm, int& node_ranks);
 
 // ---------------------------------------------------------------------------
 // ScopedBlasThreads: hold the BLAS library's OWN thread count at `n` for the lifetime of the object, then put it back.
