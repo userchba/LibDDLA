@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include "api_grid_test_common.h"
 #include "LU/lu_internal.h"
 
@@ -17,7 +18,7 @@ void check_getrf_nopiv(const ddla::DdlaHandle_t& handle, const Shape& base)
     DeviceBuffer<int> d_info(handle, 1);
     upload(handle, d_A.ptr, h_A);
     check_ddla_sync(handle);
-    ddla::getrf_nopiv(n, n, d_A.ptr, n, d_info.ptr, handle);
+    ddla::getrf_nopiv<ddla_test::execution_backend>(n, n, d_A.ptr, n, d_info.ptr, handle);
     auto info = download(handle, d_info.ptr, 1);
     if(info[0] != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
     require_close(handle, "getrf_nopiv(local info)", 0.0, 0.0);

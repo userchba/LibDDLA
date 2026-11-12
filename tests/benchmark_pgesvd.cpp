@@ -1,3 +1,4 @@
+#include "test_backend.h"
 // ---------------------------------------------------------------------------
 // Benchmark for the distributed SVD pgesvd and its stages.
 //
@@ -417,7 +418,7 @@ int main(int argc, char** argv)
     }
 
     DdlaHandle_t handle = nullptr;
-    ddlaInit(handle);
+    ddlaInit(handle, ddla_test::execution_backend);
     ddlaSet(handle, MPI_COMM_WORLD, options.nprows, options.npcols);
     if (run_d) run_type<double>(handle, options, nb, "double");
     if (run_z) run_type<std::complex<double>>(handle, options, nb, "complex<double>");

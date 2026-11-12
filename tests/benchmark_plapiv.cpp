@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include <algorithm>
 #include <complex>
 #include <cstdlib>
@@ -111,7 +112,7 @@ int main(int argc, char** argv)
     }
 
     DdlaHandle_t handle = nullptr;
-    ddlaInit(handle);
+    ddlaInit(handle, ddla_test::execution_backend);
     ddlaSet(handle, MPI_COMM_WORLD, 2, 2);
 
     std::vector<int> sizes = {500, 5000, 10000, 15000};

@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include <cassert>
 #include <cmath>
 #include "mpi_test_init.h"
@@ -161,7 +162,7 @@ int main(int argc, char* argv[])
     ddla_test_mpi_init(&argc, &argv);
     printf("before stream init\n");
     DdlaHandle_t ddla_handle = nullptr;
-    ddlaInit(ddla_handle);
+    ddlaInit(ddla_handle, ddla_test::execution_backend);
     ddlaSet(ddla_handle);
     printf("after stream init\n");
 

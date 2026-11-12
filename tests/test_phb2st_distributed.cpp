@@ -1,3 +1,4 @@
+#include "test_backend.h"
 // The private bounded-history path must reproduce the public recorded chase
 // exactly, including chunks split through a recording step and empty owners.
 #include "api_grid_test_common.h"
@@ -145,7 +146,7 @@ int main(int argc,char** argv) {
         require(provided>=MPI_THREAD_FUNNELED,"MPI thread support");
         api_grid_test::TestOptions opts; std::string error;
         require(api_grid_test::parse_options(argc,argv,size,opts,error),error.c_str());
-        auto backend=ddla::default_backend_v;
+        auto backend=ddla_test::execution_backend;
         if(const char* arg=std::getenv("DDLA_TEST_BACKEND")) {
             const std::string name(arg);
             if(name=="CPU" || name=="cpu") backend=ddla::DdlaBackend::CPU;

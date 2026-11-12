@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include "api_grid_test_common.h"
 
 #include <algorithm>
@@ -448,7 +449,7 @@ int main(int argc, char** argv)
     }
 
     ddla::DdlaHandle_t handle = nullptr;
-    ddla::ddlaInit(handle);
+    ddla::ddlaInit(handle, ddla_test::execution_backend);
     ddla::ddlaSet(handle, MPI_COMM_WORLD, grid_dim, grid_dim);
 
     constexpr int nb = 16;

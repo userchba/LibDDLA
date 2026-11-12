@@ -33,7 +33,7 @@ namespace ddla {
  * and the run works in the caller's scratch without checks, policy reads or
  * allocation.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <DdlaBackend Backend, typename T>
 void pgetf2(const DdlaHandle_t& handle, int m, int n, int width,
             T* A, int ia, int ja, const int* descA, int* ipiv, int& info);
 
@@ -57,7 +57,7 @@ void pgetf2(const DdlaHandle_t& handle, int m, int n, int width,
  * @param info_buffer      Pointer in the selected backend to info (0 on success, k > 0 if U(k,k) is exactly zero).
  * @param ddla_handle DDLA handle (provides stream and BLAS handle).
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <DdlaBackend Backend, typename T>
 void getrf_nopiv(int m, int n, T* A, int lda, int* info_buffer, const DdlaHandle_t& ddla_handle);
 
 } // namespace ddla

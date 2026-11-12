@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include "backend_api.h" // Internal-only wrong-backend implementation checks.
 #include "ddla_connector.h"
 #include <ddla/ddla_handle_t.h>
@@ -647,7 +648,7 @@ int main(int argc, char** argv)
     try
     {
         ddla::DdlaHandle_t handle = nullptr;
-        ddla::ddlaInit(handle);
+        ddla::ddlaInit(handle, ddla_test::execution_backend);
         ddla::ddlaSet(handle, MPI_COMM_WORLD);
 
         int case_count = 0;

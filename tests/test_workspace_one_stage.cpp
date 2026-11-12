@@ -139,8 +139,8 @@ void exercise(DdlaHandle_t h,char uplo,char job,int n,bool alias=false,bool tigh
                     std::size_t(da[DDLA_LLD_])*sizeof(T),std::size_t(nr)*sizeof(T),nc));
             }
             upload(h,a.ptr,input(pass,true));check_ddla_sync(h);
-            if(n){require_close(h,"one-stage independent residual",workspace_test::finite_error(eig_test::residual_metric<T,B>(h,a.ptr,da,z.ptr,dz,eigenvalues.data(),n)),50);
-                require_close(h,"one-stage independent orthogonality",workspace_test::finite_error(eig_test::orthogonality_metric<T,B>(h,z.ptr,dz,n)),50);}
+            if(n){require_close(h,"one-stage independent residual",workspace_test::finite_error(eig_test::residual_metric<T>(h,a.ptr,da,z.ptr,dz,eigenvalues.data(),n)),50);
+                require_close(h,"one-stage independent orthogonality",workspace_test::finite_error(eig_test::orthogonality_metric<T>(h,z.ptr,dz,n)),50);}
         } else {
             double error=0;
             for(int i=0;i<n;++i)error=std::max(error,workspace_test::finite_error(double(std::abs(eigenvalues[i]-(R(i+1)+R(pass)/R(8))))/

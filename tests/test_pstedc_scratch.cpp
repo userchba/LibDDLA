@@ -1,3 +1,4 @@
+#include "test_backend.h"
 // Borrowed stage-3 CPU/GPU scratch must match the owned path without consuming
 // caller padding, touching rejected spans, or taking ownership of storage.
 #include "api_grid_test_common.h"
@@ -174,7 +175,7 @@ int main(int argc,char**argv) {
         int size=0;MPI_Comm_size(MPI_COMM_WORLD,&size);
         TestOptions options;std::string error;
         if(!parse_options(argc,argv,size,options,error))throw std::runtime_error(error);
-        auto backend=ddla::default_backend_v;
+        auto backend=ddla_test::execution_backend;
         if(const char* name=std::getenv("DDLA_TEST_BACKEND")) {
             const std::string s(name);
             if(s=="CPU"||s=="cpu")backend=ddla::DdlaBackend::CPU;

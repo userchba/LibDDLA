@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -354,7 +355,7 @@ static void check_body(const ddla::DdlaHandle_t& handle, const Shape& base)
         int nprows = 0, npcols = 0;
         ddlaGetGridDims(handle, nprows, npcols);
         ddla::DdlaHandle_t h_cm = nullptr;
-        ddla::ddlaInit(h_cm);
+        ddla::ddlaInit(h_cm, ddla_test::execution_backend);
         ddla::ddlaSet(h_cm, MPI_COMM_WORLD, nprows, npcols, 'C');
         run_case<Complex>(h_cm, CaseGeom{23, 19, 4, 4, 0, 0, 23, 19}, "colmajor-grid tall");
         run_case<Complex>(h_cm, CaseGeom{19, 23, 4, 4, 0, 0, 19, 23}, "colmajor-grid wide");

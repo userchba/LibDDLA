@@ -1,6 +1,8 @@
 #ifndef API_GRID_TEST_COMMON_H
 #define API_GRID_TEST_COMMON_H
 
+#include "test_backend.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -586,7 +588,7 @@ inline bool skip_non_square_grid(const ddla::DdlaHandle_t& handle, const std::st
 
 template <typename Body>
 int run_grid_test(int argc, char** argv, const std::string& test_name, Body body,
-                  ddla::DdlaBackend backend = ddla::default_backend_v)
+                  ddla::DdlaBackend backend = ddla_test::execution_backend)
 {
     ddla_test_mpi_init(&argc, &argv);
 

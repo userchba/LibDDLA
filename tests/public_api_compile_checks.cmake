@@ -14,6 +14,7 @@ function(ddla_check_public_scalar_api)
     set(_positive "${_prefix}
 void client(ddla::DdlaHandle_t h) {
     double* p=nullptr; std::complex<double>* z=nullptr; int info=0;
+    ddla::ddlaInit(h,ddla::DdlaBackend::CPU);
     ddla::gemm<double>(h,'N','N',0,0,0,1.,p,1,p,1,0.,p,1);
     ddla::scal(h,0,1.,p,1);
     ddla::gemm<double>(h,'N','N',0,0,0,std::complex<double>(1),p,1,z,1,std::complex<double>(0),z,1);
@@ -25,7 +26,7 @@ void client(ddla::DdlaHandle_t h) {
     if(NOT DDLA_PUBLIC_SCALAR_SYNTAX)
         message(FATAL_ERROR "Public scalar-only API positive compile control failed")
     endif()
-    foreach(_case GEMM SCAL MIXED WRITER POINTER)
+    foreach(_case GEMM SCAL MIXED WRITER POINTER INIT DEFAULT_BACKEND)
         if(_case STREQUAL GEMM)
             set(_call "ddla::gemm<ddla::DdlaBackend::CPU,double>(h,'N','N',0,0,0,1.,p,1,p,1,0.,p,1);")
         elseif(_case STREQUAL SCAL)
@@ -34,6 +35,10 @@ void client(ddla::DdlaHandle_t h) {
             set(_call "ddla::gemm<ddla::DdlaBackend::GPU,double>(h,'N','N',0,0,0,std::complex<double>(1),p,1,z,1,std::complex<double>(0),z,1);")
         elseif(_case STREQUAL WRITER)
             set(_call "ddla::write_matrix<ddla::DdlaBackend::CPU,double>(p,0,0,\"unused\");")
+        elseif(_case STREQUAL INIT)
+            set(_call "ddla::ddlaInit(h);")
+        elseif(_case STREQUAL DEFAULT_BACKEND)
+            set(_call "auto backend=ddla::default_backend_v; (void)backend;")
         else()
             set(_call "using F=void(*)(const ddla::DdlaHandle_t&,int,const double&,double*,int); F f=&ddla::scal<ddla::DdlaBackend::GPU,double>; (void)f;")
         endif()
@@ -44,5 +49,6 @@ void client(ddla::DdlaHandle_t h) {
             message(FATAL_ERROR "Old public Backend template syntax remains visible: ${_case}")
         endif()
     endforeach()
+    message(STATUS "Explicit backend initialization compile checks passed")
     message(STATUS "Public scalar-only positive/old-Backend negative compile checks passed")
 endfunction()

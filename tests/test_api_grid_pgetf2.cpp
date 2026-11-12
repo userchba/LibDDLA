@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include "api_grid_test_common.h"
 #include "LU/lu_internal.h"
 
@@ -51,7 +52,7 @@ void run_case(const ddla::DdlaHandle_t& handle, const int* desc,
 
     std::vector<int> ipiv(ddla_test::m_loc(handle, desc), -1);
     int info = -1;
-    ddla::pgetf2(handle, desc[DDLA_M_], desc[DDLA_N_], panel_width, d_A.ptr, 1, 1, desc, ipiv.data(), info);
+    ddla::pgetf2<ddla_test::execution_backend>(handle, desc[DDLA_M_], desc[DDLA_N_], panel_width, d_A.ptr, 1, 1, desc, ipiv.data(), info);
 
     const std::string label = std::string("pgetf2(handle, ") + scalar_name<T>()
                             + "/" + case_name + ")";
@@ -90,7 +91,7 @@ void run_same_row_swap(const ddla::DdlaHandle_t& handle, const int* desc, int p)
 
     std::vector<int> ipiv(ddla_test::m_loc(handle, desc), -1);
     int info = -1;
-    ddla::pgetf2(handle, desc[DDLA_M_], desc[DDLA_N_], 1, d_A.ptr, 1, 1, desc, ipiv.data(), info);
+    ddla::pgetf2<ddla_test::execution_backend>(handle, desc[DDLA_M_], desc[DDLA_N_], 1, d_A.ptr, 1, 1, desc, ipiv.data(), info);
     check_ddla_sync(handle);
     const auto out = download(handle, d_A.ptr, h_A.size());
 

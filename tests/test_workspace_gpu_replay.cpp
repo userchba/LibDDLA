@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include "api_grid_test_common.h"
 #include "ddla_stream.h"
 #include <helpers.h>
@@ -155,7 +156,7 @@ int main(int argc,char** argv)
     TestOptions options;std::string error;
     if(!parse_options(argc,argv,P,options,error)){if(!rank)std::cerr<<error<<"\n";MPI_Abort(MPI_COMM_WORLD,1);}
     for(auto grid:options.grids) {
-        DdlaHandle_t h=nullptr;ddlaInit(h);ddlaSet(h,MPI_COMM_WORLD,grid.first,grid.second);
+        DdlaHandle_t h=nullptr;ddlaInit(h, ddla_test::execution_backend);ddlaSet(h,MPI_COMM_WORLD,grid.first,grid.second);
         body(h,options.shapes.front());check_ddla_sync(h);ddlaDestroy(h);
     }
     if(!rank)std::cout<<"test_workspace_gpu_replay passed\n";MPI_Finalize();return 0;

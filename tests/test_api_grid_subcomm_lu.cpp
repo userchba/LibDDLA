@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include "api_grid_test_common.h"
 #include "LU/lu_internal.h"
 #include "ddla_stream.h"   // for set_local_device — internal test only
@@ -67,7 +68,7 @@ int main(int argc, char** argv)
 
     if(is_active){
         ddla::DdlaHandle_t handle = nullptr;
-        ddla::ddlaInit(handle);
+        ddla::ddlaInit(handle, ddla_test::execution_backend);
 
         int device_count = 0;
         DDLA_CHECK(ddlaGetDeviceCount(handle, &device_count));

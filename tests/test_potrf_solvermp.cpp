@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include "ddla_connector.h"
 #include <cassert>
 #include "test_desc_helpers.h"
@@ -272,7 +273,7 @@ int main(int argc, char* argv[]) {
     ddla_test_mpi_init(&argc, &argv);
     printf("before stream init\n");
     DdlaHandle_t ddla_handle = nullptr;
-    ddlaInit(ddla_handle);
+    ddlaInit(ddla_handle, ddla_test::execution_backend);
     ddlaSet(ddla_handle, MPI_COMM_WORLD, 'R');
     // DDLA_CHECK(ddlaSynchronize(ddla_handle));
     printf("after stream init\n");

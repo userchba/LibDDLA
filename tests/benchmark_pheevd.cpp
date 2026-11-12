@@ -1,3 +1,4 @@
+#include "test_backend.h"
 // ---------------------------------------------------------------------------
 // Scale benchmark of the full Hermitian eigensolver pheevd('V'): time, per-rank memory (DDLA_EIG_PROFILE=1 prints
 // the per-stage PHEEVDPROF / PHEEVDMEM lines) and, with --check, the residual ||A V - V Lambda||_F /
@@ -154,7 +155,7 @@ int main(int argc, char** argv)
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
     ddla::DdlaHandle_t handle = nullptr;
-    ddla::ddlaInit(handle);
+    ddla::ddlaInit(handle, ddla_test::execution_backend);
     ddla::ddlaSet(handle, MPI_COMM_WORLD, nprows, npcols);
     if (rank == 0)
         std::cout << "=== pheevd scale benchmark: ranks=" << nprocs << " grid=" << nprows << "x" << npcols << " nb=" << nb

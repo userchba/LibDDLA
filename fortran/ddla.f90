@@ -13,7 +13,7 @@
 ! type(c_ptr), which a Fortran generic cannot resolve by scalar type.
 !
 ! Argument conventions:
-!   * handle       type(c_ptr), value -- from ddla_init / ddla_init_backend.
+!   * handle       type(c_ptr), value -- from ddla_init_backend.
 !   * matrices     type(c_ptr), value -- host memory for a CPU handle, device
 !                  memory for a GPU handle, exactly where the C++ API puts
 !                  them.  Pass c_loc(fortran_array) on a CPU handle; on a GPU
@@ -36,13 +36,13 @@ module ddla
   implicit none
   private
 
-  public :: ddla_init, ddla_init_backend, ddla_set, ddla_destroy, ddla_backend_available, &
-     ddla_get_backend, ddla_grid_dims, ddla_grid_coords, ddla_rank, ddla_size, ddla_descinit, &
-     ddla_numloc, ddla_malloc, ddla_free, ddla_memcpy, ddla_memcpy2d, ddla_memset, &
-     ddla_synchronize, ddla_error_string, ddla_error_text, ddla_check, ddla_complex_float, &
-     ddla_complex_double, DDLA_BACKEND_CPU, DDLA_BACKEND_GPU, DDLA_STATUS_SUCCESS, &
-     DDLA_STATUS_INVALID_HANDLE, DDLA_STATUS_INVALID_VALUE, DDLA_STATUS_ALLOC_FAILED, &
-     DDLA_STATUS_BACKEND_UNAVAILABLE, DDLA_STATUS_INTERNAL_ERROR, DDLA_STATUS_EXCEPTION
+  public :: ddla_init_backend, ddla_set, ddla_destroy, ddla_backend_available, ddla_get_backend, &
+     ddla_grid_dims, ddla_grid_coords, ddla_rank, ddla_size, ddla_descinit, ddla_numloc, &
+     ddla_malloc, ddla_free, ddla_memcpy, ddla_memcpy2d, ddla_memset, ddla_synchronize, &
+     ddla_error_string, ddla_error_text, ddla_check, ddla_complex_float, ddla_complex_double, &
+     DDLA_BACKEND_CPU, DDLA_BACKEND_GPU, DDLA_STATUS_SUCCESS, DDLA_STATUS_INVALID_HANDLE, &
+     DDLA_STATUS_INVALID_VALUE, DDLA_STATUS_ALLOC_FAILED, DDLA_STATUS_BACKEND_UNAVAILABLE, &
+     DDLA_STATUS_INTERNAL_ERROR, DDLA_STATUS_EXCEPTION
   public :: ddla_s_ptrtrs, ddla_d_ptrtrs, ddla_c_ptrtrs, ddla_z_ptrtrs, ddla_s_ptrmm, ddla_d_ptrmm, &
      ddla_c_ptrmm, ddla_z_ptrmm, ddla_s_plapiv, ddla_d_plapiv, ddla_c_plapiv, ddla_z_plapiv, &
      ddla_s_pswap, ddla_d_pswap, ddla_c_pswap, ddla_z_pswap, ddla_s_gather, ddla_d_gather, &
@@ -3452,14 +3452,6 @@ module ddla
       type(c_ptr), value :: tmat
       integer(c_int), value :: ldt
     end function ddla_z_larft
-
-    function ddla_init(handle) &
-        result(status) bind(C, name="ddla_c_init")
-      import :: c_int, c_ptr
-      implicit none
-      integer(c_int) :: status
-      type(c_ptr), intent(out) :: handle
-    end function ddla_init
 
     function ddla_init_backend(handle, backend) &
         result(status) bind(C, name="ddla_c_init_backend")

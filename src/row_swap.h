@@ -1,7 +1,7 @@
 #ifndef DDLA_ROW_SWAP_H
 #define DDLA_ROW_SWAP_H
 
-// Public <ddla/ddla.h> first: owns DdlaBackend, default_backend_v, and every
+// Public <ddla/ddla.h> first: declares every
 // public default argument -- hipcc/clang rejects redeclarations that
 // introduce defaults later.
 #include <ddla/ddla.h>

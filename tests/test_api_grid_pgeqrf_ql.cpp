@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -773,7 +774,7 @@ static void check_body(const ddla::DdlaHandle_t& handle, const Shape& base)
     // One case on a column-major grid handle.
     {
         ddla::DdlaHandle_t h_cm = nullptr;
-        ddla::ddlaInit(h_cm);
+        ddla::ddlaInit(h_cm, ddla_test::execution_backend);
         ddla::ddlaSet(h_cm, MPI_COMM_WORLD, nprows_g, npcols_g, 'C');
         const CaseGeom cm{23, 23, 0, 4, 4, 0, 0, 23, 23, FILL_HASH};
         run_case<double>(h_cm, cm, "colmajor-grid");

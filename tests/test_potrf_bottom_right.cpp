@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -328,7 +329,7 @@ int main(int argc, char** argv)
     }
 
     ddla::DdlaHandle_t handle = nullptr;
-    ddla::ddlaInit(handle);
+    ddla::ddlaInit(handle, ddla_test::execution_backend);
     ddla::ddlaSet(handle, MPI_COMM_WORLD);
 
     bool passed = true;

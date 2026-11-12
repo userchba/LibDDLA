@@ -40,8 +40,8 @@ template<DdlaBackend B,class T>void methods(DdlaHandle_t h) {
         }
         require_close(h,"common method output padding",pad?0:1,0);
         upload(h,A.ptr,input);
-        double residual=eig_test::residual_metric<T,B>(h,A.ptr,d,Z.ptr,d,w.data(),n);
-        double orth=eig_test::orthogonality_metric<T,B>(h,Z.ptr,d,n);
+        double residual=eig_test::residual_metric<T>(h,A.ptr,d,Z.ptr,d,w.data(),n);
+        double orth=eig_test::orthogonality_metric<T>(h,Z.ptr,d,n);
         require_close(h,"common method residual",std::isfinite(residual)?residual:INFINITY,50);
         require_close(h,"common method orthogonality",std::isfinite(orth)?orth:INFINITY,50);
         upload(h,A.ptr,input);

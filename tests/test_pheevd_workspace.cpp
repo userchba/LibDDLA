@@ -1,10 +1,11 @@
+#include "test_backend.h"
 // Regression coverage for distributed eigensolver workspace reuse.
 // Compact and padded row slabs are compared with independent residual checks;
 // Padded block-cyclic outputs cover direct output, uneven receive capacity,
 // and empty local rows/columns when the matrix is smaller than the grid.
 // With no arguments, the test derives every valid grid from the MPI size
 // (the standard CTest invocation uses four ranks). --grid RxC selects one.
-// DDLA_TEST_BACKEND=CPU|GPU optionally overrides the compiled default backend.
+// DDLA_TEST_BACKEND=CPU|GPU optionally overrides the fixture backend selection.
 #include "api_grid_test_common.h"
 #include "eig_test_common.h"
 #include "row_share.h"
@@ -468,7 +469,7 @@ int main(int argc, char** argv)
         TestOptions opts;
         std::string error;
         if (!parse_options(argc, argv, P, opts, error)) throw std::runtime_error(error);
-        auto backend = ddla::default_backend_v;
+        auto backend = ddla_test::execution_backend;
         if (const char* value = std::getenv("DDLA_TEST_BACKEND")) {
             const std::string name(value);
             if (name == "CPU" || name == "cpu") backend = ddla::DdlaBackend::CPU;

@@ -9,7 +9,7 @@
 //     reported as DDLA_C_STATUS_EXCEPTION with its what() text retrievable
 //     from ddla_c_error_string(DDLA_C_STATUS_EXCEPTION).
 //   * The handle travels as void* (the C++ DdlaHandle_t is an opaque
-//     DdlaStream*).  ddla_c_init / ddla_c_destroy hand the pointer itself
+//     DdlaStream*).  ddla_c_init_backend / ddla_c_destroy hand the pointer itself
 //     back and forth through void**.
 //   * Integers are C int (32-bit, the ScaLAPACK convention), sizes long long.
 //     Character flags travel by value.
@@ -95,18 +95,6 @@ const char* ddla_c_error_string(int status)
     if (status >= 0 && status <= 5)
         return ddla::ddlaGetErrorString(static_cast<ddla::ddlaStatus_t>(status));
     return "unknown LibDDLA C API status";
-}
-
-int ddla_c_init(void** handle)
-{
-    try {
-        ddla::DdlaHandle_t h = nullptr;
-        const ddla::ddlaStatus_t st = ddla::ddlaInit(h);
-        if (st != ddla::ddlaStatus_t::DDLA_STATUS_SUCCESS) return static_cast<int>(st);
-        *handle = static_cast<void*>(h);
-        return DDLA_C_STATUS_SUCCESS;
-    } catch (const std::exception& e) { ddla_c_record_error(e.what()); return DDLA_C_STATUS_EXCEPTION; }
-    catch (...) { ddla_c_record_error("unknown C++ exception in ddla_c_init"); return DDLA_C_STATUS_EXCEPTION; }
 }
 
 int ddla_c_init_backend(void** handle, int backend)
