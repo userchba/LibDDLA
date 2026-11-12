@@ -19,6 +19,7 @@
 #include "plan_util.h"
 #include "PBLAS/pswap_impl.h"
 #include "PBLAS/ptrtrs_impl.h"
+#include "PBLAS/pblas_workspace.h"
 
 namespace ddla { namespace cholesky_impl {
 
@@ -76,12 +77,32 @@ std::size_t potrf_block_bytes(const DdlaHandle_t& h, char uplo, int n, T* A, con
 template <DdlaBackend Backend>
 void ppotrf_check(const DdlaHandle_t&, char, int, const void*, int, int, const int*, bool, int);
 
+// The diagonal relay is a no-redistribution fast path only when both grid
+// coordinates own the same global block sequence.
+inline bool diagonal_relay(const DdlaHandle_t& h, const int* d)
+{
+    return h->nprows_ == h->npcols_ && d[DDLA_RSRC_] == d[DDLA_CSRC_];
+}
+
+template <class T>
+void ppotrf_mirror_workspace_size(const DdlaHandle_t& h, char uplo, int n,
+                                  const int* d, std::size_t* backend, std::size_t* host)
+{
+    *backend = *host = 0;
+    if (diagonal_relay(h, d)) return;
+    const bool lower = uplo == 'L';
+    const int width = std::min(n, d[DDLA_MB_]);
+    pblas::panel_workspace_size<T>(h, !lower, 'C', lower ? n : width,
+        lower ? width : n, d, d, backend, host);
+}
+
 // Component 2.  Backend, in carving order: [ the left / right / target pointer lists of the batched update | the
 // ?potrf info word | the diagonal block and the first panel (panel_counts), which share one region because the
 // diagonal block is not read once that panel is written | the second panel ].  The ?potrf scratch (the rest of the
 // buffer) overlays both panels, which are written only after the diagonal block is factored; the two pswap buffers
 // of the head relocation (is_head, location != -1, n) overlay everything, since the swaps run first.  Host: the
-// left / right / target lists, filled on the host and uploaded.  n <= 0 needs nothing.
+// left / right / target lists, filled on the host and uploaded. General grids
+// append PGEADD panel-redistribution scratch in both domains. n <= 0 needs nothing.
 template <class T>
 void ppotrf_workspace_size(const DdlaHandle_t& handle, char uplo, int n, T* A, const int* descA,
                            bool is_head, int location, std::size_t* backend_bytes, std::size_t* host_bytes)
@@ -98,9 +119,11 @@ void ppotrf_workspace_size(const DdlaHandle_t& handle, char uplo, int n, T* A, c
     const std::size_t lists = 3 * detail::padded_bytes<T*>(batch_capacity(handle, n, descA));
     const std::size_t panels = std::max(detail::padded_bytes<T>(count[0]), detail::padded_bytes<T>(count[1]))
                              + detail::padded_bytes<T>(count[2]);
+    std::size_t mirror_backend = 0, mirror_host = 0;
+    ppotrf_mirror_workspace_size<T>(handle, uplo, n, descA, &mirror_backend, &mirror_host);
     *backend_bytes = lists + detail::padded_bytes<int>(1)
-                   + std::max(panels, potrf_block_bytes<T>(handle, uplo, n, A, descA, is_head, false));
-    *host_bytes = lists;
+                   + std::max(panels + mirror_backend, potrf_block_bytes<T>(handle, uplo, n, A, descA, is_head, false));
+    *host_bytes = lists + mirror_host;
     if (is_head && location != -1 && location != n) {
         std::size_t swap_bytes = 0;
         pswap_impl::pswap_workspace_size<T>(handle, descA, &swap_bytes);

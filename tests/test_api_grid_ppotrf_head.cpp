@@ -114,7 +114,6 @@ void check_head_case(const ddla::DdlaHandle_t& handle, int n, int nrhs, int nb,
 
 void check_ppotrf_head(const ddla::DdlaHandle_t& handle, const Shape& base)
 {
-    if(skip_non_square_grid(handle, "ppotrf_head")) return;
 
     const int nb = base.nb;
     const int n = square_size(handle, base);

@@ -996,8 +996,8 @@ void pdam(const DdlaHandle_t& handle, const T1& alpha, T2* A, const int* descA, 
 /**
  * @brief Distributed Cholesky factorization.
  *
- * Factors a Hermitian positive-definite distributed matrix using the GPU
- * solver libraries.  Algorithm: factor diagonal block
+ * Factors a Hermitian positive-definite distributed matrix using the selected
+ * CPU or GPU backend.  Algorithm: factor diagonal block
  * (potrf), broadcast factor, solve off-diagonal (trsm), update trailing
  * submatrix via gemm/herk.  With uplo='L', computes A = L * L^H.
  * With uplo='U', computes A = U^H * U.
@@ -1011,8 +1011,8 @@ void pdam(const DdlaHandle_t& handle, const T1& alpha, T2* A, const int* descA, 
  * @param ja       Reserved; must be 1 (1-based).
  * @param handle   Handle owning the process grid and stream.
  * @param descA    ScaLAPACK int[9] descriptor for A (mb == nb required).
- *                 The process grid must be square and RSRC == CSRC; other
- *                 layouts throw std::invalid_argument (pposv inherits this).
+ *                 Any rectangular process grid, grid order and valid RSRC/CSRC
+ *                 are supported (also by pposv).
  * @param info     0 on success, >0 if not positive-definite.
  * @param is_head  Internal flag for multi-head Cholesky (default false).
  * @param location Internal row/col rearrangement index (default -1).
