@@ -1,3 +1,7 @@
+#if __cplusplus != 201103L
+#error "The installed public-header consumer must compile as C++11"
+#endif
+
 #include <ddla/ddla.h>
 #include <ddla/ddla_handle_t.h>
 #include <ddla/ddla_desc.h>

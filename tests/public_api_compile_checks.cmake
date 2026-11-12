@@ -4,12 +4,16 @@
 function(ddla_check_public_scalar_api)
     include(CheckCXXSourceCompiles)
     set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
-    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD 11)
+    set(CMAKE_CXX_EXTENSIONS OFF)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
     set(CMAKE_REQUIRED_INCLUDES ${DDLA_PUBLIC_CHECK_INCLUDES} ${MPI_CXX_INCLUDE_DIRS})
     set(CMAKE_REQUIRED_LIBRARIES "")
     set(CMAKE_REQUIRED_DEFINITIONS "")
     set(CMAKE_REQUIRED_FLAGS "")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        set(CMAKE_REQUIRED_FLAGS "-pedantic-errors")
+    endif()
     set(_prefix "#include <ddla/ddla.h>\n#include <complex>\n#include <type_traits>\n")
     set(_positive "${_prefix}
 void client(ddla::DdlaHandle_t h) {

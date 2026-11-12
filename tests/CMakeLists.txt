@@ -188,6 +188,10 @@ add_bench_executable(benchmark_gemm_mixed)
 add_test_executable(test_backend_vector)
 if(TARGET test_backend_vector)
     target_link_libraries(test_backend_vector PRIVATE ${CMAKE_DL_LIBS})
+    set_target_properties(test_backend_vector PROPERTIES
+        CXX_STANDARD 11 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+    target_compile_options(test_backend_vector PRIVATE
+        $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-pedantic-errors>)
 endif()
 add_test_executable(test_pgemm_branches)
 add_test_executable(test_pgemm_mixed)

@@ -7,7 +7,8 @@ set_target_properties(ddla_lib PROPERTIES
   VERSION ${CMAKE_PROJECT_VERSION}
   SOVERSION ${CMAKE_PROJECT_SOVERSION_MAJOR}
 )
-target_compile_features(ddla_lib PUBLIC cxx_std_17)
+# Public headers support C++11; implementation sources still require C++17.
+target_compile_features(ddla_lib PRIVATE cxx_std_17 INTERFACE cxx_std_11)
 target_include_directories(ddla_lib PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>

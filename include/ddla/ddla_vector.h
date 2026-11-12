@@ -53,9 +53,12 @@ public:
     vector& operator=(const vector&) = delete;
 
     vector(vector&& other) noexcept
-        : handle_(other.handle_), data_(std::exchange(other.data_, nullptr)),
-          size_(std::exchange(other.size_, 0)), capacity_(std::exchange(other.capacity_, 0))
-    {}
+        : handle_(other.handle_), data_(other.data_),
+          size_(other.size_), capacity_(other.capacity_)
+    {
+        other.data_ = nullptr;
+        other.size_ = other.capacity_ = 0;
+    }
 
     vector& operator=(vector&& other) noexcept
     {
@@ -86,7 +89,8 @@ public:
         if (size_ != 0)
             DDLA_CHECK(ddlaMemcpy(handle_, next.data_, data_, size_ * sizeof(T)));
         DDLA_CHECK(ddlaFree(handle_, data_));
-        data_ = std::exchange(next.data_, nullptr);
+        data_ = next.data_;
+        next.data_ = nullptr;
         capacity_ = count;
     }
 

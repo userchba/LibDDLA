@@ -48,20 +48,20 @@ inline int num_loc(int n, int nb, int iproc, int srcproc, int nprocs)
 // DdlaHandle_t and its matrix layout through one of these length-9 int
 // arrays, so a caller can hand LibDDLA the very array ScaLAPACK's DESCINIT
 // produced with no translation step in between.
-inline constexpr int DDLA_DTYPE_ = 0;  ///< descriptor type; 1 == dense block-cyclic
-inline constexpr int DDLA_CTXT_  = 1;  ///< BLACS context -- ignored, see below
-inline constexpr int DDLA_M_     = 2;  ///< global rows
-inline constexpr int DDLA_N_     = 3;  ///< global columns
-inline constexpr int DDLA_MB_    = 4;  ///< row block size
-inline constexpr int DDLA_NB_    = 5;  ///< column block size
-inline constexpr int DDLA_RSRC_  = 6;  ///< process row owning the first block row
-inline constexpr int DDLA_CSRC_  = 7;  ///< process column owning the first block column
-inline constexpr int DDLA_LLD_   = 8;  ///< local leading dimension
-inline constexpr int DDLA_DLEN_  = 9;  ///< number of ints in a descriptor
+constexpr int DDLA_DTYPE_ = 0;  ///< descriptor type; 1 == dense block-cyclic
+constexpr int DDLA_CTXT_  = 1;  ///< BLACS context -- ignored, see below
+constexpr int DDLA_M_     = 2;  ///< global rows
+constexpr int DDLA_N_     = 3;  ///< global columns
+constexpr int DDLA_MB_    = 4;  ///< row block size
+constexpr int DDLA_NB_    = 5;  ///< column block size
+constexpr int DDLA_RSRC_  = 6;  ///< process row owning the first block row
+constexpr int DDLA_CSRC_  = 7;  ///< process column owning the first block column
+constexpr int DDLA_LLD_   = 8;  ///< local leading dimension
+constexpr int DDLA_DLEN_  = 9;  ///< number of ints in a descriptor
 
 /// Value of desc[DDLA_DTYPE_] for the dense block-cyclic descriptors LibDDLA
 /// understands (ScaLAPACK's BLOCK_CYCLIC_2D).
-inline constexpr int DDLA_BLOCK_CYCLIC_2D = 1;
+constexpr int DDLA_BLOCK_CYCLIC_2D = 1;
 
 /// Fill @p desc the way ScaLAPACK's DESCINIT does.
 ///

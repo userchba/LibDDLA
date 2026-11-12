@@ -1,6 +1,7 @@
 # LibDDLA — Distributed Dense Linear Algebra
 
-LibDDLA 0.0.6 is a C++17 template library for **distributed dense linear algebra**.
+LibDDLA 0.0.6 is a library for **distributed dense linear algebra**.
+Building LibDDLA requires C++17; applications using its public headers need C++11 or newer.
 It provides ScaLAPACK-style APIs with 2D block-cyclic data distribution over an
 MPI process grid. Every build includes the CPU backend (OpenBLAS/vendor
 BLAS). CUDA or HIP can add GPU support to the same library, with backend
@@ -57,13 +58,13 @@ selection per handle at runtime. All functions live in the `ddla` namespace.
   `cmake --install` (or `make install`), downstream builds can use
   `find_package(LibDDLA)` and link `ddla::ddla`. The package config locates
   MPI automatically and exports the real library target, including its SONAME,
-  C++17 requirement and link dependencies. Private backend macros are not
+  C++11 consumer requirement and link dependencies. Private backend macros are not
   required by public headers.
 
 ## Prerequisites
 
 - **CMake** ≥ 3.18 (the source lists use `TARGET_DIRECTORY` properties)
-- **C++17** compiler
+- **C++17** compiler to build LibDDLA; **C++11** or newer for public-header consumers
 - **MPI** (Open MPI or MPICH)
 - **Every build:** a BLAS library (e.g. OpenBLAS) providing the standard
   Fortran `?gemm`/`?scal`/`?axpy`/`i?amax`/`?ger`/`?geru`/`?swap` symbols,
