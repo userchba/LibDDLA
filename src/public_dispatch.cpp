@@ -1367,7 +1367,10 @@ template void scalBatched<std::complex<float>>(const DdlaHandle_t& handle, int m
 template void scalBatched<std::complex<double>>(const DdlaHandle_t& handle, int m, int n, const std::complex<double>& alpha, std::complex<double>* const Aarray[], int lda, int batchCount);
 
 template <typename T, typename Alpha>
-std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void> scal(
+typename std::enable_if<
+    std::is_same<T, std::complex<Alpha>>::value,
+    void
+>::type scal(
     const DdlaHandle_t& h, int m, int n, const Alpha& alpha, T* A, int lda)
 {
 #if DDLA_HAS_GPU
@@ -1378,11 +1381,14 @@ std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void> scal(
 }
 
 
-template std::enable_if_t<std::is_same_v<std::complex<float>,std::complex<float>>,void> scal<std::complex<float>, float>(const DdlaHandle_t& h, int m, int n, const float& alpha, std::complex<float>* A, int lda);
-template std::enable_if_t<std::is_same_v<std::complex<double>,std::complex<double>>,void> scal<std::complex<double>, double>(const DdlaHandle_t& h, int m, int n, const double& alpha, std::complex<double>* A, int lda);
+template void scal<std::complex<float>, float>(const DdlaHandle_t& h, int m, int n, const float& alpha, std::complex<float>* A, int lda);
+template void scal<std::complex<double>, double>(const DdlaHandle_t& h, int m, int n, const double& alpha, std::complex<double>* A, int lda);
 
 template <typename T, typename Alpha>
-std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void> pscal(
+typename std::enable_if<
+    std::is_same<T, std::complex<Alpha>>::value,
+    void
+>::type pscal(
     const DdlaHandle_t& h, int m, int n, const Alpha& alpha, T* A, const int* descA)
 {
 #if DDLA_HAS_GPU
@@ -1393,11 +1399,14 @@ std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void> pscal(
 }
 
 
-template std::enable_if_t<std::is_same_v<std::complex<float>,std::complex<float>>,void> pscal<std::complex<float>, float>(const DdlaHandle_t& h, int m, int n, const float& alpha, std::complex<float>* A, const int* descA);
-template std::enable_if_t<std::is_same_v<std::complex<double>,std::complex<double>>,void> pscal<std::complex<double>, double>(const DdlaHandle_t& h, int m, int n, const double& alpha, std::complex<double>* A, const int* descA);
+template void pscal<std::complex<float>, float>(const DdlaHandle_t& h, int m, int n, const float& alpha, std::complex<float>* A, const int* descA);
+template void pscal<std::complex<double>, double>(const DdlaHandle_t& h, int m, int n, const double& alpha, std::complex<double>* A, const int* descA);
 
 template <typename T, typename Alpha>
-std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void> scalBatched(
+typename std::enable_if<
+    std::is_same<T, std::complex<Alpha>>::value,
+    void
+>::type scalBatched(
     const DdlaHandle_t& h, int m, int n, const Alpha& alpha, T* const Aarray[], int lda, int count)
 {
 #if DDLA_HAS_GPU
@@ -1408,8 +1417,8 @@ std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void> scalBatched(
 }
 
 
-template std::enable_if_t<std::is_same_v<std::complex<float>,std::complex<float>>,void> scalBatched<std::complex<float>, float>(const DdlaHandle_t& h, int m, int n, const float& alpha, std::complex<float>* const Aarray[], int lda, int count);
-template std::enable_if_t<std::is_same_v<std::complex<double>,std::complex<double>>,void> scalBatched<std::complex<double>, double>(const DdlaHandle_t& h, int m, int n, const double& alpha, std::complex<double>* const Aarray[], int lda, int count);
+template void scalBatched<std::complex<float>, float>(const DdlaHandle_t& h, int m, int n, const float& alpha, std::complex<float>* const Aarray[], int lda, int count);
+template void scalBatched<std::complex<double>, double>(const DdlaHandle_t& h, int m, int n, const double& alpha, std::complex<double>* const Aarray[], int lda, int count);
 
 template <typename T>
 void axpy(

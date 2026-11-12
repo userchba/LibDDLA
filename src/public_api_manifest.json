@@ -1311,8 +1311,8 @@
         "T",
         "Alpha"
       ],
-      "public_signature": "std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void> scal( const DdlaHandle_t& h, int m, int n, const Alpha& alpha, T* A, int lda)",
-      "private_signature": "std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void> scal( const DdlaHandle_t& h, int m, int n, const Alpha& alpha, T* A, int lda)",
+      "public_signature": "typename std::enable_if<std::is_same<T,std::complex<Alpha>>::value,void>::type scal( const DdlaHandle_t& h, int m, int n, const Alpha& alpha, T* A, int lda)",
+      "private_signature": "typename std::enable_if<std::is_same<T,std::complex<Alpha>>::value,void>::type scal( const DdlaHandle_t& h, int m, int n, const Alpha& alpha, T* A, int lda)",
       "supported_scalar_arguments": [
         "std::complex<float>, float",
         "std::complex<double>, double"
@@ -1326,8 +1326,8 @@
         "T",
         "Alpha"
       ],
-      "public_signature": "std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void> pscal( const DdlaHandle_t& h, int m, int n, const Alpha& alpha, T* A, const int* descA)",
-      "private_signature": "std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void> pscal( const DdlaHandle_t& h, int m, int n, const Alpha& alpha, T* A, const int* descA)",
+      "public_signature": "typename std::enable_if<std::is_same<T,std::complex<Alpha>>::value,void>::type pscal( const DdlaHandle_t& h, int m, int n, const Alpha& alpha, T* A, const int* descA)",
+      "private_signature": "typename std::enable_if<std::is_same<T,std::complex<Alpha>>::value,void>::type pscal( const DdlaHandle_t& h, int m, int n, const Alpha& alpha, T* A, const int* descA)",
       "supported_scalar_arguments": [
         "std::complex<float>, float",
         "std::complex<double>, double"
@@ -1341,8 +1341,8 @@
         "T",
         "Alpha"
       ],
-      "public_signature": "std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void> scalBatched( const DdlaHandle_t& h, int m, int n, const Alpha& alpha, T* const Aarray[], int lda, int count)",
-      "private_signature": "std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void> scalBatched( const DdlaHandle_t& h, int m, int n, const Alpha& alpha, T* const Aarray[], int lda, int count)",
+      "public_signature": "typename std::enable_if<std::is_same<T,std::complex<Alpha>>::value,void>::type scalBatched( const DdlaHandle_t& h, int m, int n, const Alpha& alpha, T* const Aarray[], int lda, int count)",
+      "private_signature": "typename std::enable_if<std::is_same<T,std::complex<Alpha>>::value,void>::type scalBatched( const DdlaHandle_t& h, int m, int n, const Alpha& alpha, T* const Aarray[], int lda, int count)",
       "supported_scalar_arguments": [
         "std::complex<float>, float",
         "std::complex<double>, double"
