@@ -4,7 +4,6 @@ using namespace api_grid_test;
 
 void check_ppotrs(const ddla::DdlaHandle_t& handle, const Shape& base)
 {
-    if(skip_non_square_grid(handle, "ppotrs")) return;
 
     const int nb = base.nb;
     const int n = square_size(handle, base);
@@ -31,10 +30,17 @@ void check_ppotrs(const ddla::DdlaHandle_t& handle, const Shape& base)
         check_ddla_sync(handle);
 
         int info = -1;
-        const bool is_nega = ddla::ppotrf(handle, uplo, n, d_A.ptr, 1, 1, descA, info);
-        if(info != 0 || is_nega) MPI_Abort(ddlaGetCommunicator(handle), 1);
-        ddla::ppotrs(handle, side, uplo, trans, n, nrhs, d_A.ptr, descA, d_B.ptr, descB, is_nega);
-        check_solution(handle, descB, d_B.ptr, h_B.size(), name, 5e-9);
+        ddla::ppotrf(handle, uplo, n, d_A.ptr, 1, 1, descA, info);
+        if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
+        const auto factor = download(handle, d_A.ptr, h_A.size());
+        const Complex* const read_only_factor = d_A.ptr;
+        for (int repeat = 0; repeat < 2; ++repeat) {
+            upload(handle, d_B.ptr, h_B);
+            ddla::ppotrs(handle, side, uplo, trans, n, nrhs, read_only_factor, descA, d_B.ptr, descB);
+            check_solution(handle, descB, d_B.ptr, h_B.size(), name, 5e-9);
+            require_close(handle, "ppotrs preserves reusable factor",
+                download(handle, d_A.ptr, h_A.size()) == factor ? 0 : 1, 0);
+        }
     };
 
     // A is Hermitian, so trans='C' (op(A)=A^H) and trans='N' are equivalent.

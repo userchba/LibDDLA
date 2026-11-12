@@ -17,6 +17,7 @@ Designed with native **NumPy** array interoperability and **mpi4py** integration
   - `pgemm`: Distributed matrix-matrix multiplication ($C \leftarrow \alpha \mathrm{op}(A)\mathrm{op}(B) + \beta C$).
   - `pgetrf` / `pgetrs` / `pgesv`: Distributed LU factorization and general linear system solve.
   - `ppotrf` / `ppotrs` / `pposv`: Distributed Cholesky factorization and symmetric/Hermitian positive-definite solve.
+    `ppotrf` returns `(A, info)` and `pposv` returns `(B, info)`; `ppotrs` returns the solution matrix.
   - `pgeqrf`: Distributed Householder QR factorization.
   - `pgeqlf`: Distributed Householder QL factorization.
   - `ptrtrs` / `ptrmm`: Distributed triangular solve and triangular matrix multiplication.

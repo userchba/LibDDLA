@@ -100,15 +100,14 @@ void check_ppotrf(int n, const DdlaHandle_t& ddla_handle, bool is_write = false)
         MPI_Barrier(MPI_COMM_WORLD);
         printf("myid:%d, start ppotrf\n",ddla_handle->myid);
         double start_time_ppotrf = MPI_Wtime();
-        bool is_nega = ppotrf(ddla_handle, 
+        ppotrf(ddla_handle,
             'L', n,
             d_A, 1, 1, matrix_desc,
-            info,
-            true, -1
+            info
         );
         DDLA_CHECK(ddlaSynchronize(ddla_handle));
         double time_for_cholesky = MPI_Wtime() - start_time_ppotrf;
-        printf("myid:%d, ppotrf time:%lf, is_nega:%d, info:%d\n", ddla_handle->myid, time_for_cholesky, is_nega, info);
+        printf("myid:%d, ppotrf time:%lf, info:%d\n", ddla_handle->myid, time_for_cholesky, info);
         outfile << n << " " << time_for_cholesky << std::endl;
         outfile.close();
         MPI_Barrier(MPI_COMM_WORLD);
@@ -117,8 +116,7 @@ void check_ppotrf(int n, const DdlaHandle_t& ddla_handle, bool is_write = false)
             'L', 'L', 'N',
             n, n,
             d_A, matrix_desc,
-            d_A_copy, matrix_desc,
-            is_nega
+            d_A_copy, matrix_desc
         );
         DDLA_CHECK(ddlaSynchronize(ddla_handle));
         printf("myid:%d, ppotrs time:%lf\n", ddla_handle->myid, MPI_Wtime() - start_time_ppotrs);

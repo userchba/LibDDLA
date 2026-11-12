@@ -103,15 +103,16 @@ void ptrtrs_workspace_size(const DdlaHandle_t& handle, char side, char trans, in
 template <DdlaBackend Backend, typename T>
 void ptrtrs_run(const DdlaHandle_t& handle,
                 char side, char uplo, char trans, char diag, int m, int n,
-                T* A, const int* array_descA, T* B, const int* array_descB,
+                const T* A, const int* array_descA, T* B, const int* array_descB,
                 void* backend_work, [[maybe_unused]] std::size_t backend_bytes,
                 void* host_work, std::size_t host_bytes)
 {
     try {
         if(m==0 || n==0)return;
         if (handle->nprocs == 1) {
+            // The existing TRSM adapter takes a mutable pointer but only reads A.
             blas_impl::trsm_run<Backend,T>(handle,side,uplo,trans,diag,m,n,T(1),
-                A,array_descA[DDLA_LLD_],B,array_descB[DDLA_LLD_]);
+                const_cast<T*>(A),array_descA[DDLA_LLD_],B,array_descB[DDLA_LLD_]);
             return;
         }
         int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
@@ -398,7 +399,7 @@ void ptrtrs(
     TYPE* B, const int* array_descB); \
     template void ptrtrs_impl::ptrtrs_run<BACKEND, TYPE>(const DdlaHandle_t&, \
     char side, char uplo, char trans, char diag, int m, int n, \
-    TYPE* A, const int* array_descA, TYPE* B, const int* array_descB, \
+    const TYPE* A, const int* array_descA, TYPE* B, const int* array_descB, \
     void*, std::size_t, void*, std::size_t)
 
 #define INSTANTIATE_PTRTRS_CHECK(BACKEND) \

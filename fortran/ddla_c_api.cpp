@@ -1147,46 +1147,42 @@ extern "C" int ddla_z_pdam(void* handle, const ddla_c_double_complex* alpha, voi
     });
 }
 
-extern "C" int ddla_s_ppotrf(void* handle, char uplo, int n, void* A, int ia, int ja, const int* descA, int* info, int* is_nega)
+extern "C" int ddla_s_ppotrf(void* handle, char uplo, int n, void* A, int ia, int ja, const int* descA, int* info)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        const bool nega = ddla::ppotrf<BE::value, float>(hh, uplo, n, static_cast<float*>(A), ia, ja, descA, *info, *is_nega);
-        if (is_nega != nullptr) *is_nega = nega ? 1 : 0;
+        ddla::ppotrf<BE::value, float>(hh, uplo, n, static_cast<float*>(A), ia, ja, descA, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
-extern "C" int ddla_d_ppotrf(void* handle, char uplo, int n, void* A, int ia, int ja, const int* descA, int* info, int* is_nega)
+extern "C" int ddla_d_ppotrf(void* handle, char uplo, int n, void* A, int ia, int ja, const int* descA, int* info)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        const bool nega = ddla::ppotrf<BE::value, double>(hh, uplo, n, static_cast<double*>(A), ia, ja, descA, *info, *is_nega);
-        if (is_nega != nullptr) *is_nega = nega ? 1 : 0;
+        ddla::ppotrf<BE::value, double>(hh, uplo, n, static_cast<double*>(A), ia, ja, descA, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
-extern "C" int ddla_c_ppotrf(void* handle, char uplo, int n, void* A, int ia, int ja, const int* descA, int* info, int* is_nega)
+extern "C" int ddla_c_ppotrf(void* handle, char uplo, int n, void* A, int ia, int ja, const int* descA, int* info)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        const bool nega = ddla::ppotrf<BE::value, std::complex<float>>(hh, uplo, n, static_cast<std::complex<float>*>(A), ia, ja, descA, *info, *is_nega);
-        if (is_nega != nullptr) *is_nega = nega ? 1 : 0;
+        ddla::ppotrf<BE::value, std::complex<float>>(hh, uplo, n, static_cast<std::complex<float>*>(A), ia, ja, descA, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
-extern "C" int ddla_z_ppotrf(void* handle, char uplo, int n, void* A, int ia, int ja, const int* descA, int* info, int* is_nega)
+extern "C" int ddla_z_ppotrf(void* handle, char uplo, int n, void* A, int ia, int ja, const int* descA, int* info)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        const bool nega = ddla::ppotrf<BE::value, std::complex<double>>(hh, uplo, n, static_cast<std::complex<double>*>(A), ia, ja, descA, *info, *is_nega);
-        if (is_nega != nullptr) *is_nega = nega ? 1 : 0;
+        ddla::ppotrf<BE::value, std::complex<double>>(hh, uplo, n, static_cast<std::complex<double>*>(A), ia, ja, descA, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
@@ -1271,42 +1267,42 @@ extern "C" int ddla_z_ppotrf_bottom_right(void* handle, char uplo, int n, void* 
     });
 }
 
-extern "C" int ddla_s_ppotrs(void* handle, char side, char uplo, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB, int is_nega, int location)
+extern "C" int ddla_s_ppotrs(void* handle, char side, char uplo, char trans, int n, int nrhs, const void* A, const int* descA, void* B, const int* descB)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ppotrs<BE::value, float>(hh, side, uplo, trans, n, nrhs, static_cast<float*>(A), descA, static_cast<float*>(B), descB, is_nega, location);
+        ddla::ppotrs<BE::value, float>(hh, side, uplo, trans, n, nrhs, static_cast<const float*>(A), descA, static_cast<float*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
-extern "C" int ddla_d_ppotrs(void* handle, char side, char uplo, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB, int is_nega, int location)
+extern "C" int ddla_d_ppotrs(void* handle, char side, char uplo, char trans, int n, int nrhs, const void* A, const int* descA, void* B, const int* descB)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ppotrs<BE::value, double>(hh, side, uplo, trans, n, nrhs, static_cast<double*>(A), descA, static_cast<double*>(B), descB, is_nega, location);
+        ddla::ppotrs<BE::value, double>(hh, side, uplo, trans, n, nrhs, static_cast<const double*>(A), descA, static_cast<double*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
-extern "C" int ddla_c_ppotrs(void* handle, char side, char uplo, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB, int is_nega, int location)
+extern "C" int ddla_c_ppotrs(void* handle, char side, char uplo, char trans, int n, int nrhs, const void* A, const int* descA, void* B, const int* descB)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ppotrs<BE::value, std::complex<float>>(hh, side, uplo, trans, n, nrhs, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(B), descB, is_nega, location);
+        ddla::ppotrs<BE::value, std::complex<float>>(hh, side, uplo, trans, n, nrhs, static_cast<const std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
-extern "C" int ddla_z_ppotrs(void* handle, char side, char uplo, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB, int is_nega, int location)
+extern "C" int ddla_z_ppotrs(void* handle, char side, char uplo, char trans, int n, int nrhs, const void* A, const int* descA, void* B, const int* descB)
 {
     return ddla_c_run(handle, [&](auto be) -> int {
         using BE = decltype(be);
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ppotrs<BE::value, std::complex<double>>(hh, side, uplo, trans, n, nrhs, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(B), descB, is_nega, location);
+        ddla::ppotrs<BE::value, std::complex<double>>(hh, side, uplo, trans, n, nrhs, static_cast<const std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }

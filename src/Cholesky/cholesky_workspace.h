@@ -17,7 +17,6 @@
 #include "ddla_stream.h"
 #include "lapack_impl.h"
 #include "plan_util.h"
-#include "PBLAS/pswap_impl.h"
 #include "PBLAS/ptrtrs_impl.h"
 #include "PBLAS/pblas_workspace.h"
 
@@ -49,16 +48,16 @@ inline std::size_t batch_capacity(const DdlaHandle_t& h, int n, const int* d)
 }
 
 // The ?potrf scratch of the diagonal blocks this rank factors: the largest vendor workspace over their orders
-// (nothing on a CPU handle).  ppotrf factors a block in place (lda = LLD; with is_head the last block is one order
-// smaller), ppotrf_bottom_right a reverse-packed copy on the opposite triangle (lda = the order).
+// (nothing on a CPU handle). ppotrf factors a block in place (lda = LLD);
+// ppotrf_bottom_right uses a reverse-packed copy on the opposite triangle (lda = the order).
 template <class T>
-std::size_t potrf_block_bytes(const DdlaHandle_t& h, char uplo, int n, T* A, const int* d, bool head, bool bottom)
+std::size_t potrf_block_bytes(const DdlaHandle_t& h, char uplo, int n, T* A, const int* d, bool bottom)
 {
     const int nb = d[DDLA_MB_];
     std::size_t bytes = 0;
     int previous = 0;
     for (int k = 0; k < n; k += nb) {
-        const int width = std::min(nb, n - k), order = (!bottom && head && k + width == n) ? width - 1 : width;
+        const int width = std::min(nb, n - k), order = width;
         if (order <= 0 || order == previous || indxg2p(k, nb, d[DDLA_RSRC_], h->nprows_) != h->myprow_
             || indxg2p(k, nb, d[DDLA_CSRC_], h->npcols_) != h->mypcol_) continue;
         std::size_t block = 0;
@@ -75,7 +74,7 @@ std::size_t potrf_block_bytes(const DdlaHandle_t& h, char uplo, int n, T* A, con
 // ===========================================================================
 
 template <DdlaBackend Backend>
-void ppotrf_check(const DdlaHandle_t&, char, int, const void*, int, int, const int*, bool, int);
+void ppotrf_check(const DdlaHandle_t&, char, int, const void*, int, int, const int*);
 
 // The diagonal relay is a no-redistribution fast path only when both grid
 // coordinates own the same global block sequence.
@@ -99,17 +98,16 @@ void ppotrf_mirror_workspace_size(const DdlaHandle_t& h, char uplo, int n,
 // Component 2.  Backend, in carving order: [ the left / right / target pointer lists of the batched update | the
 // ?potrf info word | the diagonal block and the first panel (panel_counts), which share one region because the
 // diagonal block is not read once that panel is written | the second panel ].  The ?potrf scratch (the rest of the
-// buffer) overlays both panels, which are written only after the diagonal block is factored; the two pswap buffers
-// of the head relocation (is_head, location != -1, n) overlay everything, since the swaps run first.  Host: the
+// buffer) overlays the panels, which are written only after the diagonal block is factored. Host: the
 // left / right / target lists, filled on the host and uploaded. General grids
 // append PGEADD panel-redistribution scratch in both domains. n <= 0 needs nothing.
 template <class T>
 void ppotrf_workspace_size(const DdlaHandle_t& handle, char uplo, int n, T* A, const int* descA,
-                           bool is_head, int location, std::size_t* backend_bytes, std::size_t* host_bytes)
+                           std::size_t* backend_bytes, std::size_t* host_bytes)
 {
     *backend_bytes = *host_bytes = 0;
     if (n <= 0) return;
-    if (handle->nprocs==1 && !is_head) {
+    if (handle->nprocs==1) {
         lapack_impl::potrf_workspace_size<T>(handle,uplo,n,A,descA[DDLA_LLD_],backend_bytes);
         if (handle->backend==DdlaBackend::GPU) *backend_bytes+=detail::padded_bytes<int>(1);
         return;
@@ -122,19 +120,14 @@ void ppotrf_workspace_size(const DdlaHandle_t& handle, char uplo, int n, T* A, c
     std::size_t mirror_backend = 0, mirror_host = 0;
     ppotrf_mirror_workspace_size<T>(handle, uplo, n, descA, &mirror_backend, &mirror_host);
     *backend_bytes = lists + detail::padded_bytes<int>(1)
-                   + std::max(panels + mirror_backend, potrf_block_bytes<T>(handle, uplo, n, A, descA, is_head, false));
+                   + std::max(panels + mirror_backend, potrf_block_bytes<T>(handle, uplo, n, A, descA, false));
     *host_bytes = lists + mirror_host;
-    if (is_head && location != -1 && location != n) {
-        std::size_t swap_bytes = 0;
-        pswap_impl::pswap_workspace_size<T>(handle, descA, &swap_bytes);
-        *backend_bytes = std::max(*backend_bytes, swap_bytes);
-    }
 }
 
-// Component 3: returns whether the head correction negated the last pivot.  No validation, no allocation.
+// Component 3. No validation, no allocation.
 template <DdlaBackend Backend, class T>
-bool ppotrf_run(const DdlaHandle_t& handle, char uplo, int n, T* A, int ia, int ja, const int* descA,
-                int& info, bool is_head, int location,
+void ppotrf_run(const DdlaHandle_t& handle, char uplo, int n, T* A, int ia, int ja, const int* descA,
+                int& info,
                 void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes);
 
 // ===========================================================================
@@ -164,7 +157,7 @@ void ppotrf_bottom_right_workspace_size(const DdlaHandle_t& handle, char uplo, i
     *backend_bytes = lists + detail::padded_bytes<int>(1)
                    + std::max(detail::padded_bytes<T>(count[0]), detail::padded_bytes<T>(count[1]))
                    + std::max(detail::padded_bytes<T>(count[2]),
-                              potrf_block_bytes<T>(handle, uplo, n, A, descA, false, true));
+                              potrf_block_bytes<T>(handle, uplo, n, A, descA, true));
     *host_bytes = lists;
 }
 
@@ -178,16 +171,13 @@ void ppotrf_bottom_right_run(const DdlaHandle_t& handle, char uplo, int n, T* A,
 // ===========================================================================
 
 template <DdlaBackend Backend>
-void ppotrs_check(const DdlaHandle_t&, char, char, char, int, int, const void*, const int*, const void*, const int*,
-                  int);
+void ppotrs_check(const DdlaHandle_t&, char, char, char, int, int, const void*, const int*, const void*, const int*);
 
-// Component 2.  The two triangular solves (op(A) = A and A^H) and the swaps of B that undo the head relocation
-// (location != -1, n; before and after the solves) run one after the other on the whole scratch: the largest of
-// the ptrtrs scratches of both transposes (backend and host) and the pswap buffers of B's descriptor (backend).
+// Component 2. The two triangular solves reuse the larger scratch, by domain.
 // n == 0 or nrhs == 0 needs nothing.
 template <class T>
 void ppotrs_workspace_size(const DdlaHandle_t& handle, char side, int n, int nrhs,
-                           const int* descA, const int* descB, int location,
+                           const int* descA, const int* descB,
                            std::size_t* backend_bytes, std::size_t* host_bytes)
 {
     *backend_bytes = *host_bytes = 0;
@@ -200,17 +190,12 @@ void ppotrs_workspace_size(const DdlaHandle_t& handle, char side, int n, int nrh
         *backend_bytes = std::max(*backend_bytes, solve_backend);
         *host_bytes = std::max(*host_bytes, solve_host);
     }
-    if (location != -1 && location != n) {
-        std::size_t swap_bytes = 0;
-        pswap_impl::pswap_workspace_size<T>(handle, descB, &swap_bytes);
-        *backend_bytes = std::max(*backend_bytes, swap_bytes);
-    }
 }
 
 // Component 3.  No validation, no allocation.
 template <DdlaBackend Backend, class T>
 void ppotrs_run(const DdlaHandle_t& handle, char side, char uplo, char trans, int n, int nrhs,
-                T* A, const int* descA, T* B, const int* descB, bool is_nega, int location,
+                const T* A, const int* descA, T* B, const int* descB,
                 void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes);
 
 // ===========================================================================
@@ -219,17 +204,17 @@ void ppotrs_run(const DdlaHandle_t& handle, char side, char uplo, char trans, in
 
 template <DdlaBackend Backend>
 void pposv_check(const DdlaHandle_t&, char, char, char, int, int, const void*, int, int, const int*, const void*,
-                 int, int, const int*, bool, int);
+                 int, int, const int*);
 
 // Component 2: ppotrf and then ppotrs on the same scratch, so the larger of their scratches, kind by kind.
 template <class T>
 void pposv_workspace_size(const DdlaHandle_t& handle, char side, char uplo, int n, int nrhs, T* A,
-                          const int* descA, const int* descB, bool is_head, int location,
+                          const int* descA, const int* descB,
                           std::size_t* backend_bytes, std::size_t* host_bytes)
 {
     std::size_t solve_backend = 0, solve_host = 0;
-    ppotrf_workspace_size<T>(handle, uplo, n, A, descA, is_head, location, backend_bytes, host_bytes);
-    ppotrs_workspace_size<T>(handle, side, n, nrhs, descA, descB, location, &solve_backend, &solve_host);
+    ppotrf_workspace_size<T>(handle, uplo, n, A, descA, backend_bytes, host_bytes);
+    ppotrs_workspace_size<T>(handle, side, n, nrhs, descA, descB, &solve_backend, &solve_host);
     *backend_bytes = std::max(*backend_bytes, solve_backend);
     *host_bytes = std::max(*host_bytes, solve_host);
 }
@@ -238,7 +223,7 @@ void pposv_workspace_size(const DdlaHandle_t& handle, char side, char uplo, int 
 template <DdlaBackend Backend, class T>
 void pposv_run(const DdlaHandle_t& handle, char side, char uplo, char trans, int n, int nrhs,
                T* A, int ia, int ja, const int* descA, T* B, int ib, int jb, const int* descB,
-               int& info, bool is_head, int location,
+               int& info,
                void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes);
 
 }} // namespace ddla::cholesky_impl

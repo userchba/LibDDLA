@@ -11,8 +11,6 @@
 #include "plan_util.h"
 #include "require_backend.h"
 #include <vector>
-#include <type_traits>
-#include <cmath>
 #include <algorithm>
 #include "comm_traits.h"
 #include "instantiate.h"
@@ -21,26 +19,24 @@ namespace ddla{
 
 namespace cholesky_impl {
 template<DdlaBackend Backend>
-void ppotrf_check(const DdlaHandle_t& h,char uplo,int n,const void* A,int ia,int ja,const int* d,bool head,int location)
+void ppotrf_check(const DdlaHandle_t& h,char uplo,int n,const void* A,int ia,int ja,const int* d)
 {
     detail::agree_check(h,"ppotrf",[&](detail::Agree&){check_desc(d,h);detail::require_backend<Backend>(h,"ppotrf");
         if((uplo!='L' && uplo!='U') || n<0 || n>d[DDLA_M_] || n>d[DDLA_N_] || d[DDLA_MB_]!=d[DDLA_NB_] || ia!=1 || ja!=1)
             throw std::invalid_argument("ppotrf: invalid triangle, dimensions, blocks or offsets");
-        if(head && location!=-1 && (location<1 || location>n))throw std::invalid_argument("ppotrf: invalid head location");
         const int ml=num_loc(n,d[DDLA_MB_],h->myprow_,d[DDLA_RSRC_],h->nprows_),nl=num_loc(n,d[DDLA_NB_],h->mypcol_,d[DDLA_CSRC_],h->npcols_);
         if(n && ml && nl && !A)throw std::invalid_argument("ppotrf: null local matrix");});
 }
 template<DdlaBackend Backend,class T>
-bool ppotrf_run(
+void ppotrf_run(
     const DdlaHandle_t& handle, char uplo, int n,
     T* A, int ia, int ja, const int* array_descA,
     int& info, // host pointer
-    bool is_head, int location,
     void* backend_work, std::size_t backend_bytes, void* host_work, [[maybe_unused]] std::size_t host_bytes
 )
 {
-    if(n==0){info=0;return false;}
-    if (handle->nprocs==1 && !is_head) {
+    if(n==0){info=0;return;}
+    if (handle->nprocs==1) {
         char* work=static_cast<char*>(backend_work);
         int* status=&info;
         std::size_t used=0;
@@ -54,35 +50,10 @@ bool ppotrf_run(
             DDLA_CHECK(ddlaMemcpy(handle,&info,status,sizeof(int)));
             DDLA_CHECK(ddlaSynchronize(handle));
         }
-        return false;
+        return;
     }
-    bool is_nega=false;
     int nprows=handle->nprows_,npcols=handle->npcols_,myprow=handle->myprow_,mypcol=handle->mypcol_;
     DdlaHandle_t ddla_handle=handle;
-    if(is_head)
-    if(location != -1 && location != n){
-        // Symmetric permutation swapping global row/column `location` with
-        // the last index `n`: row swap (inca == m(), full row) then column
-        // swap (inca == 1, full column). A is a fully-populated (both
-        // triangles) Hermitian array, so both swaps touching every row/
-        // column entry keeps the matrix consistently Hermitian afterward --
-        // this is not a packed-triangle representation.
-        pswap_impl::pswap_run<Backend,T>(handle,
-            n,
-            A, location, 1, array_descA, array_descA[DDLA_M_],
-            A, n, 1, array_descA, array_descA[DDLA_M_],
-            backend_work, backend_bytes
-        );
-        pswap_impl::pswap_run<Backend,T>(handle,
-            // Was: A, 1, location, array_descA, 1 as the second operand --
-            // swapping column `location` with itself, a no-op that left the
-            // column swap half of the permutation never applied.
-            n,
-            A, 1, location, array_descA, 1,
-            A, 1, n, array_descA, 1,
-            backend_work, backend_bytes
-        );
-    }
 
     int nb = array_descA[DDLA_MB_];
     int lldA = array_descA[DDLA_LLD_];
@@ -145,65 +116,9 @@ bool ppotrf_run(
 
         if(myprow == owner_row && mypcol == owner_col)
         {
-            if(n_s + nb_real == n && is_head){
-                if(nb_real > 1){
-                    lapack_impl::potrf_run<Backend,T>(ddla_handle, uplo, nb_real - 1, A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA, info_buffer, solver, solver_bytes);
-                    if(uplo == 'L'){
-                        blas_impl::trsm_run<Backend, T>(
-                            ddla_handle, side_char, uplo, 'C', 'N',
-                            1, nb_real - 1, (T)1.0,
-                            A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA,
-                            A + mm_row_start + nb_real - 1 + std::size_t(mm_col_start) * lldA, lldA
-                        );
-                        blas_impl::herk_run<Backend, T>(
-                            ddla_handle, uplo, 'N',
-                            1, nb_real - 1,
-                            -1.0, A + mm_row_start + nb_real - 1 + std::size_t(mm_col_start) * lldA, lldA,
-                            1.0, A + mm_row_start + nb_real - 1 + std::size_t(mm_col_start + nb_real - 1) * lldA, lldA
-                        );
-                    }else{
-                        blas_impl::trsm_run<Backend, T>(
-                            ddla_handle, side_char, uplo, 'C', 'N',
-                            nb_real - 1, 1, (T)1.0,
-                            A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA,
-                            A + mm_row_start + std::size_t(mm_col_start + nb_real - 1) * lldA, lldA
-                        );
-                        blas_impl::herk_run<Backend, T>(
-                            ddla_handle, uplo, 'C',
-                            1, nb_real - 1,
-                            -1.0, A + mm_row_start + std::size_t(mm_col_start + nb_real - 1) * lldA, lldA,
-                            1.0, A + mm_row_start + nb_real - 1 + std::size_t(mm_col_start + nb_real - 1) * lldA, lldA
-                        );
-                    }
-                }
-                T last_value;
-                DDLA_CHECK(ddlaMemcpy(ddla_handle, &last_value,
-                                      A + mm_row_start + nb_real - 1 + std::size_t(mm_col_start + nb_real - 1) * lldA,
-                                      sizeof(T)));
-                // The D2H copy above is async; the host reads last_value below,
-                // so synchronize the stream before consuming it (no sync exists
-                // between the enqueued copy and this read otherwise).
-                DDLA_CHECK(ddlaSynchronize(ddla_handle));
-                is_nega = false;
-                if constexpr (std::is_same_v<T, double> || std::is_same_v<T, float>){
-                    if(last_value < 0){
-                        is_nega = true;
-                        last_value = -last_value;
-                    }
-                }else if constexpr (std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>>){
-                    if(last_value.real() < 0){
-                        is_nega = true;
-                        last_value = -last_value;
-                    }
-                }else{
-                    throw std::runtime_error("unsupported template type\n");
-                }
-                last_value = std::sqrt(last_value);
-                DDLA_CHECK(ddlaMemcpy(ddla_handle,
-                                      A + mm_row_start + nb_real - 1 + std::size_t(mm_col_start + nb_real - 1) * lldA,
-                                      &last_value, sizeof(T)));
-            }else
-                lapack_impl::potrf_run<Backend,T>(ddla_handle, uplo, nb_real, A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA, info_buffer, solver, solver_bytes);
+            lapack_impl::potrf_run<Backend,T>(ddla_handle, uplo, nb_real,
+                A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA,
+                info_buffer, solver, solver_bytes);
             DDLA_CHECK(ddlaSynchronize(ddla_handle));
             DDLA_CHECK(ddlaMemcpy(ddla_handle, &info, info_buffer, sizeof(int)));
             DDLA_CHECK(ddlaSynchronize(ddla_handle));
@@ -211,13 +126,11 @@ bool ppotrf_run(
                                     A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA * sizeof(T), nb_real * sizeof(T),
                                     nb_real));
         }
-        if(n_s + nb_real == n)
-            MPI_CHECK(MPI_Bcast(&is_nega, 1, MPI_CXX_BOOL, ddla_handle->rc_to_rank(owner_row, owner_col), ddla_handle->comm));
         MPI_CHECK(MPI_Bcast(&info, 1, MPI_INT, ddla_handle->rc_to_rank(owner_row, owner_col), ddla_handle->comm));
         if(info != 0){
             info = info + n_s;
             DDLA_CHECK(ddlaSynchronize(handle));
-            return false;
+            return;
         }
         // ---- the panel ----
         // The off-diagonal part of the block's column ('L', held by the block's process column) or of its row ('U',
@@ -408,32 +321,29 @@ bool ppotrf_run(
         DDLA_CHECK(ddlaSynchronize(ddla_handle));
     }
     DDLA_CHECK(ddlaSynchronize(handle));
-    return is_nega;
 }
 } // namespace cholesky_impl
 template <DdlaBackend Backend, typename T>
-bool ppotrf(
+void ppotrf(
     const DdlaHandle_t& handle, char uplo, int n,
     T* A, int ia, int ja, const int* array_descA,
-    int& info, // host pointer
-    bool is_head, int location
+    int& info // host pointer
 )
 {
-    cholesky_impl::ppotrf_check<Backend>(handle,uplo,n,A,ia,ja,array_descA,is_head,location);
-    info=0;if(n==0)return false;
+    cholesky_impl::ppotrf_check<Backend>(handle,uplo,n,A,ia,ja,array_descA);
+    info=0;if(n==0)return;
     std::size_t backend_bytes=0,host_bytes=0;
-    cholesky_impl::ppotrf_workspace_size<T>(handle,uplo,n,A,array_descA,is_head,location,&backend_bytes,&host_bytes);
+    cholesky_impl::ppotrf_workspace_size<T>(handle,uplo,n,A,array_descA,&backend_bytes,&host_bytes);
     vector<char> backend_work(handle,backend_bytes);
     std::vector<char> host_work(host_bytes);
-    return cholesky_impl::ppotrf_run<Backend,T>(handle,uplo,n,A,ia,ja,array_descA,info,is_head,location,
+    cholesky_impl::ppotrf_run<Backend,T>(handle,uplo,n,A,ia,ja,array_descA,info,
                                                 backend_work.data(),backend_bytes,host_work.data(),host_bytes);
 }
 
 #define INSTANTIATE_PPOTRF(BACKEND, TYPE)                                   \
-    template bool ppotrf<BACKEND, TYPE>(const DdlaHandle_t&, char uplo, int n, \
+    template void ppotrf<BACKEND, TYPE>(const DdlaHandle_t&, char uplo, int n, \
     TYPE* A, int ia, int ja, const int* array_descA, \
-    int& info, \
-    bool is_head, int location)
+    int& info)
 
 DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PPOTRF)
 
@@ -441,14 +351,14 @@ DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PPOTRF)
 
 
 
-#define DDLA_CHOLESKY_RUN(BACKEND,TYPE) template bool cholesky_impl::ppotrf_run<BACKEND,TYPE>( const DdlaHandle_t& handle, char uplo, int n, TYPE* A, int ia, int ja, const int* array_descA, int& info, bool is_head, int location, void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes );
-template void cholesky_impl::ppotrf_check<DdlaBackend::CPU>(const DdlaHandle_t&,char,int,const void*,int,int,const int*,bool,int);
+#define DDLA_CHOLESKY_RUN(BACKEND,TYPE) template void cholesky_impl::ppotrf_run<BACKEND,TYPE>( const DdlaHandle_t& handle, char uplo, int n, TYPE* A, int ia, int ja, const int* array_descA, int& info, void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes );
+template void cholesky_impl::ppotrf_check<DdlaBackend::CPU>(const DdlaHandle_t&,char,int,const void*,int,int,const int*);
 DDLA_CHOLESKY_RUN(DdlaBackend::CPU,float)
 DDLA_CHOLESKY_RUN(DdlaBackend::CPU,double)
 DDLA_CHOLESKY_RUN(DdlaBackend::CPU,std::complex<float>)
 DDLA_CHOLESKY_RUN(DdlaBackend::CPU,std::complex<double>)
 #if DDLA_HAS_GPU
-template void cholesky_impl::ppotrf_check<DdlaBackend::GPU>(const DdlaHandle_t&,char,int,const void*,int,int,const int*,bool,int);
+template void cholesky_impl::ppotrf_check<DdlaBackend::GPU>(const DdlaHandle_t&,char,int,const void*,int,int,const int*);
 DDLA_CHOLESKY_RUN(DdlaBackend::GPU,float)
 DDLA_CHOLESKY_RUN(DdlaBackend::GPU,double)
 DDLA_CHOLESKY_RUN(DdlaBackend::GPU,std::complex<float>)

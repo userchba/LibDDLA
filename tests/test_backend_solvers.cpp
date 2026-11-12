@@ -176,23 +176,13 @@ void check_lu_info(const DdlaHandle_t& h, int n, int nb)
     }
 }
 
-// hpd_value with the diagonal entry at head_idx negated (the head element of ppotrf's head correction).
-Complex head_value(int i, int j, int n, int head_idx)
-{
-    if (i == j) {
-        const double diag = 5.0 + 0.2 * n + 0.05 * i;
-        return Complex(i == head_idx ? -diag : diag, 0.0);
-    }
-    return hpd_value(i, j, n);
-}
-
 // ---- Cholesky --------------------------------------------------------------------------------------------------------
 template <DdlaBackend B, typename T>
 void check_cholesky(const DdlaHandle_t& h, int n, int nb, int nrhs)
 {
     int nprows = 0, npcols = 0;
     ddlaGetGridDims(h, nprows, npcols);
-    if (nprows != npcols) return;   // ppotrf / ppotrs need a square grid
+    if (nprows != npcols) return;   // bottom-right checks below require a square grid
     int descA[DDLA_DLEN_];
     DDLA_CHECK(ddlaDescInit(descA, h, n, n, nb, nb, 0, 0));
     const char* ty = type_name<T>();
@@ -211,9 +201,9 @@ void check_cholesky(const DdlaHandle_t& h, int n, int nb, int nrhs)
             upload(h, dB.ptr, h_B);
             check_ddla_sync(h);
             int info = -1;
-            const bool is_nega = ddla::ppotrf<B>(h, uplo, n, dA.ptr, 1, 1, descA, info);
-            if (info != 0 || is_nega) MPI_Abort(ddlaGetCommunicator(h), 1);
-            ddla::ppotrs<B>(h, side, uplo, 'N', n, nrhs, dA.ptr, descA, dB.ptr, descB, is_nega);
+            ddla::ppotrf<B>(h, uplo, n, dA.ptr, 1, 1, descA, info);
+            if (info != 0) MPI_Abort(ddlaGetCommunicator(h), 1);
+            ddla::ppotrs<B>(h, side, uplo, 'N', n, nrhs, dA.ptr, descA, dB.ptr, descB);
             check_x<T>(h, descB, dB.ptr, h_B.size(),
                        tag_of(B, "ppotrf+ppotrs", ty, std::string(1, side) + "," + uplo), tol);
 
@@ -229,7 +219,7 @@ void check_cholesky(const DdlaHandle_t& h, int n, int nb, int nrhs)
         }
     }
 
-    {   // a one-element head block skips the block factorization yet still reports its info
+    {   // a one-element factorization reports its status and square root
         int tiny[DDLA_DLEN_];
         DDLA_CHECK(ddlaDescInit(tiny, h, 1, 1, nb, nb, 0, 0));
         auto h_t = make_local<T>(h, tiny, [](int, int) { return T(4); });
@@ -237,10 +227,10 @@ void check_cholesky(const DdlaHandle_t& h, int n, int nb, int nrhs)
         upload(h, dT.ptr, h_t);
         check_ddla_sync(h);
         int info = -1;
-        const bool is_nega = ddla::ppotrf<B>(h, 'L', 1, dT.ptr, 1, 1, tiny, info, true, -1);
-        require_close(h, tag_of(B, "ppotrf", ty, "n=1 head status"), std::abs(info) + (is_nega ? 1.0 : 0.0), 0.0);
+        ddla::ppotrf<B>(h, 'L', 1, dT.ptr, 1, 1, tiny, info);
+        require_close(h, tag_of(B, "ppotrf", ty, "n=1 status"), std::abs(info), 0.0);
         auto out = download(h, dT.ptr, h_t.size());
-        require_close(h, tag_of(B, "ppotrf", ty, "n=1 head factor"),
+        require_close(h, tag_of(B, "ppotrf", ty, "n=1 factor"),
                       local_max_error<T>(h, tiny, out, [](int, int) { return T(2); }), tol);
     }
     {   // not positive definite: info = 1
@@ -249,8 +239,8 @@ void check_cholesky(const DdlaHandle_t& h, int n, int nb, int nrhs)
         upload(h, dN.ptr, h_n);
         check_ddla_sync(h);
         int info = -1;
-        const bool is_nega = ddla::ppotrf<B>(h, 'L', n, dN.ptr, 1, 1, descA, info);
-        require_close(h, tag_of(B, "ppotrf", ty, "non-PD info"), std::abs(info - 1) + (is_nega ? 1.0 : 0.0), 0.0);
+        ddla::ppotrf<B>(h, 'L', n, dN.ptr, 1, 1, descA, info);
+        require_close(h, tag_of(B, "ppotrf", ty, "non-PD info"), std::abs(info - 1), 0.0);
     }
 
     // bottom-right Cholesky: uplo 'U' gives A = U U^H, uplo 'L' gives A = L^H L.  Solve with the factor through ptrtrs.
@@ -276,28 +266,7 @@ void check_cholesky(const DdlaHandle_t& h, int n, int nb, int nrhs)
                    tag_of(B, "ppotrf_bottom_right", ty, std::string(1, uplo)), tol);
     }
 
-    {   // head element at an interior position: ppotrf relocates it to the last index with pswap, ppotrs undoes it with pswap
-        const int head_idx0 = std::max(0, n / 3 - 1);
-        const int location = head_idx0 + 1;   // 1-based
-        int descB[DDLA_DLEN_];
-        DDLA_CHECK(ddlaDescInit(descB, h, n, nrhs, nb, nb, 0, 0));
-        auto h_H = make_local<T>(h, descA, [&](int i, int j) { return to_T<T>(head_value(i, j, n, head_idx0)); });
-        auto h_B = make_local<T>(h, descB, [&](int i, int j) {
-            T sum = T(0);
-            for (int l = 0; l < n; ++l) sum += to_T<T>(head_value(i, l, n, head_idx0)) * to_T<T>(x_value(l, j));
-            return sum;
-        });
-        DeviceBuffer<T> dH(h, h_H.size()), dB(h, h_B.size());
-        upload(h, dH.ptr, h_H);
-        upload(h, dB.ptr, h_B);
-        check_ddla_sync(h);
-        int info = -1;
-        const bool is_nega = ddla::ppotrf<B>(h, 'L', n, dH.ptr, 1, 1, descA, info, true, location);
-        if (info != 0) MPI_Abort(ddlaGetCommunicator(h), 1);
-        require_close(h, tag_of(B, "ppotrf", ty, "head is_nega"), is_nega ? 0.0 : 1.0, 0.0);
-        ddla::ppotrs<B>(h, 'L', 'L', 'N', n, nrhs, dH.ptr, descA, dB.ptr, descB, is_nega, location);
-        check_x<T>(h, descB, dB.ptr, h_B.size(), tag_of(B, "ppotrf+ppotrs", ty, "head location"), tol);
-    }
+
 }
 
 // ---- triangular solves -----------------------------------------------------------------------------------------------

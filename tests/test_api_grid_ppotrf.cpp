@@ -20,9 +20,9 @@ void check_ppotrf(const ddla::DdlaHandle_t& handle, const Shape& base)
         check_ddla_sync(handle);
 
         int tiny_info = -1;
-        const bool tiny_is_nega = ddla::ppotrf(handle, 'L', 1, d_tiny.ptr, 1, 1,
+        ddla::ppotrf(handle, 'L', 1, d_tiny.ptr, 1, 1,
                                                tiny_desc, tiny_info);
-        const double tiny_status_err = std::abs(tiny_info) + (tiny_is_nega ? 1.0 : 0.0);
+        const double tiny_status_err = std::abs(tiny_info);
         require_close(handle, "ppotrf(handle, tiny status)", tiny_status_err, 0.0);
         auto tiny_out = download(handle, d_tiny.ptr, h_tiny.size());
         const double tiny_value_err = local_max_error<Complex>(handle, 
@@ -40,10 +40,9 @@ void check_ppotrf(const ddla::DdlaHandle_t& handle, const Shape& base)
         check_ddla_sync(handle);
 
         int not_pd_info = -1;
-        const bool not_pd_is_nega = ddla::ppotrf(handle, 'L', n, d_not_pd.ptr, 1, 1,
+        ddla::ppotrf(handle, 'L', n, d_not_pd.ptr, 1, 1,
                                                  descA, not_pd_info);
-        const double not_pd_err = std::abs(not_pd_info - 1)
-                                + (not_pd_is_nega ? 1.0 : 0.0);
+        const double not_pd_err = std::abs(not_pd_info - 1);
         require_close(handle, "ppotrf(handle, non-PD cleanup)", not_pd_err, 0.0);
     }
 
@@ -57,9 +56,9 @@ void check_ppotrf(const ddla::DdlaHandle_t& handle, const Shape& base)
     check_ddla_sync(handle);
 
     int info = -1;
-    const bool is_nega = ddla::ppotrf(handle, 'L', n, d_A.ptr, 1, 1, descA, info);
-    if(info != 0 || is_nega) MPI_Abort(ddlaGetCommunicator(handle), 1);
-    ddla::ppotrs(handle, 'L', 'L', 'N', n, nrhs, d_A.ptr, descA, d_B.ptr, descB, is_nega);
+    ddla::ppotrf(handle, 'L', n, d_A.ptr, 1, 1, descA, info);
+    if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
+    ddla::ppotrs(handle, 'L', 'L', 'N', n, nrhs, d_A.ptr, descA, d_B.ptr, descB);
     check_solution(handle, descB, d_B.ptr, h_B.size(), "ppotrf", 5e-9);
 }
 

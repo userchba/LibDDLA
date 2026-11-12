@@ -1014,22 +1014,17 @@ void pdam(const DdlaHandle_t& handle, const T1& alpha, T2* A, const int* descA, 
  *                 Any rectangular process grid, grid order and valid RSRC/CSRC
  *                 are supported (also by pposv).
  * @param info     0 on success, >0 if not positive-definite.
- * @param is_head  Internal flag for multi-head Cholesky (default false).
- * @param location Internal row/col rearrangement index (default -1).
- * @return true if the last diagonal element needed a sign correction,
- *         false otherwise.
  *
  * The descriptor may describe a matrix larger than the logical n-by-n
  * sub-matrix (leading block anchored at global (0,0)); only the leading
  * n x n block is factored.
  */
 template <DdlaBackend Backend = default_backend_v, typename T>
-bool ppotrf(
+void ppotrf(
     const DdlaHandle_t& handle,
     char uplo, int n,
     T* A, int ia, int ja, const int* descA,
-    int& info, // host pointer
-    bool is_head = false, int location = -1
+    int& info // host pointer
 );
 
 /**
@@ -1093,12 +1088,6 @@ void ppotrf_bottom_right(
  * trans='N' and trans='C' (identical code path); trans='T' is not
  * supported.
  *
- * When `location` is a head-correction index (the same value passed to
- * ppotrf with is_head=true), ppotrs applies the matching permutation to B
- * -- rows for side='L', columns for side='R' -- around the solve and undoes
- * it afterward, so direct ppotrf + ppotrs users (and pposv) do not need to
- * permute B themselves.
- *
  * @tparam T   Scalar type.
  * @param side     'L' -- solve op(A)*X = B (B is n x nrhs);
  *                 'R' -- solve X*op(A) = B (B is nrhs x n).
@@ -1113,19 +1102,14 @@ void ppotrf_bottom_right(
  * @param descB    ScaLAPACK int[9] descriptor for B: same MB as A, and B's
  *                 rows (side 'L') / columns (side 'R') distributed like A's
  *                 (equal RSRC, resp. equal NB and CSRC).
- * @param is_nega  Diagonal sign-correction flag (from ppotrf return).  The
- *                 factor in A is left unchanged, so it can be reused.
- * @param location Head-correction index forwarded from ppotrf; -1 (or == n)
- *                 means no B permutation.
  */
 template <DdlaBackend Backend = default_backend_v, typename T>
 void ppotrs(
     const DdlaHandle_t& handle,
     char side, char uplo, char trans,
     int n, int nrhs,
-    T* A, const int* descA,
-    T* B, const int* descB,
-    bool is_nega = false, int location = -1
+    const T* A, const int* descA,
+    T* B, const int* descB
 );
 
 /**
@@ -1153,8 +1137,6 @@ void ppotrs(
  * @param jb       Reserved; must be 1 (1-based).
  * @param descB    ScaLAPACK int[9] descriptor for B.
  * @param info     Output: 0 on success, >0 if not positive-definite.
- * @param is_head  Forwarded to ppotrf.
- * @param location Forwarded to ppotrf.
  */
 template <DdlaBackend Backend = default_backend_v, typename T>
 void pposv(
@@ -1163,8 +1145,7 @@ void pposv(
     int n, int nrhs,
     T* A, int ia, int ja, const int* descA,
     T* B, int ib, int jb, const int* descB,
-    int& info, // host pointer
-    bool is_head = false, int location = -1
+    int& info // host pointer
 );
 
 

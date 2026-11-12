@@ -1449,7 +1449,7 @@ module ddla
       integer(c_int), value :: n
     end function ddla_z_pdam
 
-    function ddla_s_ppotrf(handle, uplo, n, a, ia, ja, desca, info, is_nega) &
+    function ddla_s_ppotrf(handle, uplo, n, a, ia, ja, desca, info) &
         result(status) bind(C, name="ddla_s_ppotrf")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
@@ -1462,10 +1462,9 @@ module ddla
       integer(c_int), value :: ja
       integer(c_int), intent(in) :: desca(9)
       integer(c_int), intent(out) :: info
-      integer(c_int), intent(out) :: is_nega
     end function ddla_s_ppotrf
 
-    function ddla_d_ppotrf(handle, uplo, n, a, ia, ja, desca, info, is_nega) &
+    function ddla_d_ppotrf(handle, uplo, n, a, ia, ja, desca, info) &
         result(status) bind(C, name="ddla_d_ppotrf")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
@@ -1478,10 +1477,9 @@ module ddla
       integer(c_int), value :: ja
       integer(c_int), intent(in) :: desca(9)
       integer(c_int), intent(out) :: info
-      integer(c_int), intent(out) :: is_nega
     end function ddla_d_ppotrf
 
-    function ddla_c_ppotrf(handle, uplo, n, a, ia, ja, desca, info, is_nega) &
+    function ddla_c_ppotrf(handle, uplo, n, a, ia, ja, desca, info) &
         result(status) bind(C, name="ddla_c_ppotrf")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
@@ -1494,10 +1492,9 @@ module ddla
       integer(c_int), value :: ja
       integer(c_int), intent(in) :: desca(9)
       integer(c_int), intent(out) :: info
-      integer(c_int), intent(out) :: is_nega
     end function ddla_c_ppotrf
 
-    function ddla_z_ppotrf(handle, uplo, n, a, ia, ja, desca, info, is_nega) &
+    function ddla_z_ppotrf(handle, uplo, n, a, ia, ja, desca, info) &
         result(status) bind(C, name="ddla_z_ppotrf")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
@@ -1510,7 +1507,6 @@ module ddla
       integer(c_int), value :: ja
       integer(c_int), intent(in) :: desca(9)
       integer(c_int), intent(out) :: info
-      integer(c_int), intent(out) :: is_nega
     end function ddla_z_ppotrf
 
     function ddla_s_potrf_bottom_right(handle, uplo, n, a, lda, info) &
@@ -1617,7 +1613,7 @@ module ddla
       integer(c_int), intent(out) :: info
     end function ddla_z_ppotrf_bottom_right
 
-    function ddla_s_ppotrs(handle, side, uplo, trans, n, nrhs, a, desca, b, descb, is_nega, location) &
+    function ddla_s_ppotrs(handle, side, uplo, trans, n, nrhs, a, desca, b, descb) &
         result(status) bind(C, name="ddla_s_ppotrs")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
@@ -1632,11 +1628,9 @@ module ddla
       integer(c_int), intent(in) :: desca(9)
       type(c_ptr), value :: b
       integer(c_int), intent(in) :: descb(9)
-      integer(c_int), value :: is_nega
-      integer(c_int), value :: location
     end function ddla_s_ppotrs
 
-    function ddla_d_ppotrs(handle, side, uplo, trans, n, nrhs, a, desca, b, descb, is_nega, location) &
+    function ddla_d_ppotrs(handle, side, uplo, trans, n, nrhs, a, desca, b, descb) &
         result(status) bind(C, name="ddla_d_ppotrs")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
@@ -1651,11 +1645,9 @@ module ddla
       integer(c_int), intent(in) :: desca(9)
       type(c_ptr), value :: b
       integer(c_int), intent(in) :: descb(9)
-      integer(c_int), value :: is_nega
-      integer(c_int), value :: location
     end function ddla_d_ppotrs
 
-    function ddla_c_ppotrs(handle, side, uplo, trans, n, nrhs, a, desca, b, descb, is_nega, location) &
+    function ddla_c_ppotrs(handle, side, uplo, trans, n, nrhs, a, desca, b, descb) &
         result(status) bind(C, name="ddla_c_ppotrs")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
@@ -1670,11 +1662,9 @@ module ddla
       integer(c_int), intent(in) :: desca(9)
       type(c_ptr), value :: b
       integer(c_int), intent(in) :: descb(9)
-      integer(c_int), value :: is_nega
-      integer(c_int), value :: location
     end function ddla_c_ppotrs
 
-    function ddla_z_ppotrs(handle, side, uplo, trans, n, nrhs, a, desca, b, descb, is_nega, location) &
+    function ddla_z_ppotrs(handle, side, uplo, trans, n, nrhs, a, desca, b, descb) &
         result(status) bind(C, name="ddla_z_ppotrs")
       import :: c_int, c_char, c_ptr, c_float, c_double, c_int64_t, ddla_complex_float, ddla_complex_double
       implicit none
@@ -1689,8 +1679,6 @@ module ddla
       integer(c_int), intent(in) :: desca(9)
       type(c_ptr), value :: b
       integer(c_int), intent(in) :: descb(9)
-      integer(c_int), value :: is_nega
-      integer(c_int), value :: location
     end function ddla_z_ppotrs
 
     function ddla_s_pposv(handle, side, uplo, trans, n, nrhs, a, ia, ja, desca, b, ib, jb, descb, info) &
