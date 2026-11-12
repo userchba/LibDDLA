@@ -18,8 +18,8 @@ enum class DdlaBackend {
     GPU   ///< GPU (CUDA or HIP, depending on build configuration)
 };
 
-/// Compile-time default used by backend-templated compute interfaces.
-/// Dual CPU+GPU builds prefer GPU, matching ddlaInit(handle).
+/// Default used when creating a handle without an explicit backend.
+/// Dual CPU+GPU builds prefer GPU; computations use the created handle.
 inline constexpr DdlaBackend default_backend_v =
 #if DDLA_HAS_GPU
     DdlaBackend::GPU;

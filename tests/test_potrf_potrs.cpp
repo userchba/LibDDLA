@@ -32,6 +32,8 @@ void check_ppotrf(int n, const DdlaHandle_t& ddla_handle, bool is_write = false)
 
     printf("myid:%d, m_loc:%d, n_loc:%d, mb:%d, nb:%d, m:%d, n:%d\n", ddla_handle->myid, ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), matrix_desc[DDLA_MB_], matrix_desc[DDLA_NB_], matrix_desc[DDLA_M_], matrix_desc[DDLA_N_]);
     bool verbose = false;
+    DdlaHandle_t host_io = nullptr;
+    if (verbose) DDLA_CHECK(ddlaInit(host_io, DdlaBackend::CPU));
 
     std::complex<double>* d_A;
     std::complex<double>* d_A_copy;
@@ -93,7 +95,7 @@ void check_ppotrf(int n, const DdlaHandle_t& ddla_handle, bool is_write = false)
             std::string filename = "ppotrf_myid_";
             filename += std::to_string(ddla_handle->myid);
             filename += ".txt";
-            write_matrix<DdlaBackend::CPU>(a.data(), ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), filename.c_str());
+            write_matrix(host_io,a.data(), ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), filename.c_str());
         }
 
         DDLA_CHECK(ddlaSynchronize(ddla_handle));
@@ -130,7 +132,7 @@ void check_ppotrf(int n, const DdlaHandle_t& ddla_handle, bool is_write = false)
         std::string filename = "after_ppotrs_myid_";
         filename += std::to_string(ddla_handle->myid);
         filename += ".txt";
-        write_matrix<DdlaBackend::CPU>(a.data(), ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), filename.c_str());
+        write_matrix(host_io,a.data(), ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), filename.c_str());
     }
     {
         // check the data from scalapack and bcast
@@ -167,6 +169,7 @@ void check_ppotrf(int n, const DdlaHandle_t& ddla_handle, bool is_write = false)
     DDLA_CHECK(ddlaFree(ddla_handle, d_A_copy));
     DDLA_CHECK(ddlaFree(ddla_handle, d_A));
     DDLA_CHECK(ddlaSynchronize(ddla_handle));
+    if (host_io) DDLA_CHECK(ddlaDestroy(host_io));
 }
 int main(int argc, char* argv[]){  
     ddla_test_mpi_init(&argc, &argv);

@@ -43,9 +43,7 @@ void one(DdlaHandle_t h,int m,int n,int k,char ta,char tb,bool shifted,int mode,
         Z* cp=owns(h,m,n,c.d)?c.data:nullptr;
         const int threads=h->host_threads;
         if(alg==Algorithm::Auto) {
-            if constexpr (Backend==default_backend_v)
-                pgemm<>(h,ta,tb,m,n,k,alpha,ap,a.d,bp,b.d,beta,cp,c.d);
-            else pgemm<Backend,R>(h,ta,tb,m,n,k,alpha,ap,a.d,bp,b.d,beta,cp,c.d);
+            pgemm<>(h,ta,tb,m,n,k,alpha,ap,a.d,bp,b.d,beta,cp,c.d);
         } else pgemm_impl::run<Backend>(h,ta,tb,m,n,k,alpha,ap,a.d,bp,b.d,beta,cp,c.d,alg);
         if(h->host_threads!=threads)throw std::runtime_error("mixed pgemm changed host thread budget");
         auto out=c.download();long double worst=0;int bad=0;
@@ -104,19 +102,19 @@ template <DdlaBackend Backend> void invalid_cases(DdlaHandle_t h) {
         int all=0;MPI_Allreduce(&caught,&all,1,MPI_INT,MPI_MIN,ddlaGetCommunicator(h));
         if(!all)throw std::runtime_error("mixed pgemm validation was not collective");
     };
-    reject([&]{pgemm<Backend,double>(h,rank==0?'X':'N','N',17,13,23,Z(1),a.data,a.d,b.data,b.d,Z(0),c.data,c.d);});
-    reject([&]{pgemm<Backend,double>(h,'N','N',17,13,23,Z(1),rank==0?nullptr:a.data,a.d,b.data,b.d,Z(0),c.data,c.d);});
-    reject([&]{pgemm<Backend,double>(h,'N','N',17,13,23,Z(1),a.data,a.d,b.data,b.d,Z(0),rank==0?nullptr:c.data,c.d);});
+    reject([&]{pgemm<double>(h,rank==0?'X':'N','N',17,13,23,Z(1),a.data,a.d,b.data,b.d,Z(0),c.data,c.d);});
+    reject([&]{pgemm<double>(h,'N','N',17,13,23,Z(1),rank==0?nullptr:a.data,a.d,b.data,b.d,Z(0),c.data,c.d);});
+    reject([&]{pgemm<double>(h,'N','N',17,13,23,Z(1),a.data,a.d,b.data,b.d,Z(0),rank==0?nullptr:c.data,c.d);});
     int bad_desc[DDLA_DLEN_];std::copy(b.d,b.d+DDLA_DLEN_,bad_desc);if(rank==0)bad_desc[DDLA_LLD_]=0;
-    reject([&]{pgemm<Backend,double>(h,'N','N',17,13,23,Z(1),a.data,a.d,b.data,bad_desc,Z(0),c.data,c.d);});
+    reject([&]{pgemm<double>(h,'N','N',17,13,23,Z(1),a.data,a.d,b.data,bad_desc,Z(0),c.data,c.d);});
     int np=1;MPI_Comm_size(ddlaGetCommunicator(h),&np);
     if(np>1){
         setenv("DDLA_PGEMM_KPANEL",rank==0?"6":"9",1);
-        reject([&]{pgemm<Backend,double>(h,'N','N',17,13,23,Z(1),a.data,a.d,b.data,b.d,Z(0),c.data,c.d);});
+        reject([&]{pgemm<double>(h,'N','N',17,13,23,Z(1),a.data,a.d,b.data,b.d,Z(0),c.data,c.d);});
         setenv("DDLA_PGEMM_KPANEL","6",1);
     }
     // A zero product and beta=1 must not even form an address from null C.
-    pgemm<Backend,double>(h,'N','N',17,13,23,Z(0),static_cast<const double*>(nullptr),a.d,
+    pgemm<double>(h,'N','N',17,13,23,Z(0),static_cast<const double*>(nullptr),a.d,
                          static_cast<const Z*>(nullptr),b.d,Z(1),static_cast<Z*>(nullptr),c.d);
 }
 

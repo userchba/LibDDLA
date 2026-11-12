@@ -1,3 +1,4 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 #include "mpi_test_init.h"
 #include "matrix_test_common.h"
 #include <ddla/ddla_vector.h>
@@ -122,7 +123,7 @@ void local_case(DdlaHandle_t h,char symmetry,char uplo,char ta,char tb,int n,int
     DDLA_CHECK(ddlaMemcpy(h,c.data(),ch.data(),ch.size()*sizeof(T)));
     const bool product=n>0 && k>0 && alpha!=T(0);
     const auto flag=[&](char x) { return mode==6 ? char(std::tolower(static_cast<unsigned char>(x))) : x; };
-    gemmt<Backend,T>(h,flag(uplo),flag(ta),flag(tb),n,k,
+    gemmt<T>(h,flag(uplo),flag(ta),flag(tb),n,k,
         alpha,product ? a.data() : nullptr,lda,product ? b.data() : nullptr,ldb,
         beta,n ? c.data() : nullptr,ldc);
     std::vector<T> out(ch.size()),aa(ah.size()),bb(bh.size());
@@ -194,7 +195,7 @@ void distributed_case(DdlaHandle_t h,char symmetry,char uplo,char ta,char tb,int
     };
     const bool product=n>0 && k>0 && alpha!=T(0);
     const auto flag=[&](char x) { return mode==6 ? char(std::tolower(static_cast<unsigned char>(x))) : x; };
-    pgemmt<Backend,T>(h,flag(uplo),flag(ta),flag(tb),n,k,
+    pgemmt<T>(h,flag(uplo),flag(ta),flag(tb),n,k,
         alpha,product && owns(a,ar,ac) ? a.data : nullptr,a.d,
         product && owns(b,br,bc) ? b.data : nullptr,b.d,beta,owns(c,n,n) ? c.data : nullptr,c.d);
     const auto out=c.download(),aa=a.download(),bb=b.download();
@@ -250,7 +251,7 @@ void analytic_large(DdlaHandle_t h,char symmetry,char uplo,int& cases,long doubl
         sigma[i][j]+=term;bound[i][j]+=std::abs(term);
     }
     if (!borrowed) {
-        pgemmt<Backend,T>(h,uplo,ta,tb,n,k,alpha,a.data,a.d,b.data,b.d,beta,c.data,c.d);
+        pgemmt<T>(h,uplo,ta,tb,n,k,alpha,a.data,a.d,b.data,b.d,beta,c.data,c.d);
     } else {
         std::size_t backend_bytes=0,host_bytes=0;
         pgemmt_impl::workspace_size<T>(h,uplo,ta,tb,true,n,k,a.d,b.d,c.d,&backend_bytes,&host_bytes);
@@ -329,7 +330,7 @@ template <DdlaBackend Backend> void invalid_cases(DdlaHandle_t h,bool local) {
         if(!all) throw std::runtime_error("triangular product invalid argument not rejected on every rank");
     };
     const auto call=[&](char u,char ta,char tb,int n,int k,const int* dc,const double* ap,double* cp) {
-        pgemmt<Backend,double>(h,u,ta,tb,n,k,1.,ap,a.d,b.data,b.d,0.,cp,dc);
+        pgemmt<double>(h,u,ta,tb,n,k,1.,ap,a.d,b.data,b.d,0.,cp,dc);
     };
     reject([&]{call(root ? '?' : 'U','N','N',8,8,c.d,a.data,c.data);});
     reject([&]{call('U',root ? '?' : 'N','N',8,8,c.d,a.data,c.data);});
@@ -351,7 +352,7 @@ template <DdlaBackend Backend> void invalid_cases(DdlaHandle_t h,bool local) {
     if(local) {
         ddla::vector<double> x(h,64),y(h,64),z(h,64);
         const auto lc=[&](char u,char ta,char tb,int n,int k,int lda,double* cp) {
-            gemmt<Backend,double>(h,u,ta,tb,n,k,1.,x.data(),lda,y.data(),8,0.,cp,8);
+            gemmt<double>(h,u,ta,tb,n,k,1.,x.data(),lda,y.data(),8,0.,cp,8);
         };
         reject([&]{lc('?','N','N',8,8,8,z.data());});
         reject([&]{lc('U','?','N',8,8,8,z.data());});

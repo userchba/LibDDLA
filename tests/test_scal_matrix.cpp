@@ -38,8 +38,8 @@ void local(DdlaHandle_t h,int m,int n,int count,Alpha alpha,bool batched,int& ca
     DDLA_CHECK(ddlaMemcpy(h,arrays.data(),pointers.data(),count*sizeof(T*)));
     auto reset=[&]{DDLA_CHECK(ddlaMemcpy(h,data.data(),seed.data(),seed.size()*sizeof(T)));};
     auto call=[&]{
-        if(batched)scalBatched<B>(h,m,n,alpha,arrays.data(),lda,count);
-        else scal<B>(h,m,n,alpha,data.data(),lda);
+        if(batched)scalBatched(h,m,n,alpha,arrays.data(),lda,count);
+        else scal(h,m,n,alpha,data.data(),lda);
     };
     reset();call();DDLA_CHECK(ddlaSynchronize(h));reset();
     {workspace_test::Scope scope;call();no_workspace(h,scope.finish());}
@@ -62,7 +62,7 @@ void distributed(DdlaHandle_t h,int m,int n,Alpha alpha,int& cases) {
     a.fill(m,n,[&](int i,int j){return alpha==T(0)?scalar<T>(nan,nan):structured_test::value<T>(i,j,3);});
     const int rows=num_loc(m,4,a.r,pr-1,pr),cols=num_loc(n,4,a.c,pc-1,pc);
     T* input=rows&&cols?a.data.data():nullptr;
-    auto call=[&]{pscal<B>(h,m,n,alpha,input,a.d);};
+    auto call=[&]{pscal(h,m,n,alpha,input,a.d);};
     a.upload();call();DDLA_CHECK(ddlaSynchronize(h));a.upload();
     {workspace_test::Scope scope;call();no_workspace(h,scope.finish());}
     const auto out=a.download();bool ok=true;
@@ -84,8 +84,8 @@ void zero_uninitialized(DdlaHandle_t h,bool batched,int& cases) {
     for(int q=0;q<count;++q)pointers[q]=data.data()+q*stride;
     vector<T*> arrays(h,count);
     DDLA_CHECK(ddlaMemcpy(h,arrays.data(),pointers.data(),count*sizeof(T*)));
-    if(batched)scalBatched<B>(h,m,n,Alpha(0),arrays.data(),m,count);
-    else scal<B>(h,m,n,Alpha(0),data.data(),m);
+    if(batched)scalBatched(h,m,n,Alpha(0),arrays.data(),m,count);
+    else scal(h,m,n,Alpha(0),data.data(),m);
     std::vector<T> out(stride*count);
     DDLA_CHECK(ddlaMemcpy(h,out.data(),data.data(),out.size()*sizeof(T)));
     DDLA_CHECK(ddlaSynchronize(h));
@@ -104,12 +104,12 @@ template <DdlaBackend B,typename T> void types(DdlaHandle_t h,int& cases) {
     zero_uninitialized<B,T>(h,true,cases);
     distributed<B,T>(h,0,2,T(0),cases);
     local<B,T>(h,1,1,65537,scalar<T>(.5,.25),true,cases);
-    scal<B>(h,0,3,T(0),static_cast<T*>(nullptr),1);
-    scalBatched<B>(h,2,3,T(0),static_cast<T* const*>(nullptr),2,0);
+    scal(h,0,3,T(0),static_cast<T*>(nullptr),1);
+    scalBatched(h,2,3,T(0),static_cast<T* const*>(nullptr),2,0);
     // The existing vector overload and stride contract remain unchanged.
     std::vector<T> seed(15,scalar<T>(9,8));for(int i=0;i<7;++i)seed[2*i]=scalar<T>(i+1,-i);
     vector<T> x(h,seed.size());DDLA_CHECK(ddlaMemcpy(h,x.data(),seed.data(),seed.size()*sizeof(T)));
-    const T alpha=scalar<T>(.75,.125);scal<B>(h,7,alpha,x.data(),2);
+    const T alpha=scalar<T>(.75,.125);scal(h,7,alpha,x.data(),2);
     std::vector<T> out(seed.size());DDLA_CHECK(ddlaMemcpy(h,out.data(),x.data(),out.size()*sizeof(T)));DDLA_CHECK(ddlaSynchronize(h));
     bool ok=true;for(int i=0;i<15;++i)ok=ok&&close(out[i],i<14&&i%2==0?alpha*seed[i]:seed[i]);
     require(h,ok,"vector scal overload or stride regressed");++cases;
@@ -129,20 +129,20 @@ template <DdlaBackend B,typename R> void mixed_types(DdlaHandle_t h,int& cases) 
     const R nan=std::numeric_limits<R>::quiet_NaN();
     T seed[2]={{nan,R(4)},{R(3),nan}};vector<T> data(h,2);
     DDLA_CHECK(ddlaMemcpy(h,data.data(),seed,sizeof(seed)));
-    scal<B,T>(h,2,1,R(.5),data.data(),2);
+    scal<T>(h,2,1,R(.5),data.data(),2);
     T out[2];DDLA_CHECK(ddlaMemcpy(h,out,data.data(),sizeof(out)));DDLA_CHECK(ddlaSynchronize(h));
     require(h,std::isnan(out[0].real())&&out[0].imag()==R(2)&&out[1].real()==R(1.5)&&std::isnan(out[1].imag()),
         "mixed scaling contaminated the other component with NaN");++cases;
     DDLA_CHECK(ddlaMemcpy(h,data.data(),seed,sizeof(seed)));
     T* pointer=data.data();vector<T*> one_array(h,1);
     DDLA_CHECK(ddlaMemcpy(h,one_array.data(),&pointer,sizeof(pointer)));
-    scalBatched<B,T>(h,2,1,R(.5),one_array.data(),2,1);
+    scalBatched<T>(h,2,1,R(.5),one_array.data(),2,1);
     DDLA_CHECK(ddlaMemcpy(h,out,data.data(),sizeof(out)));DDLA_CHECK(ddlaSynchronize(h));
     require(h,std::isnan(out[0].real())&&out[0].imag()==R(2)&&out[1].real()==R(1.5)&&std::isnan(out[1].imag()),
         "mixed batch scaling contaminated the other component with NaN");++cases;
     structured_test::Matrix<T> distributed_nan(h,2,1,4);
     distributed_nan.fill(2,1,[&](int i,int){return seed[i];});distributed_nan.upload();
-    pscal<B,T>(h,2,1,R(.5),distributed_nan.data.data(),distributed_nan.d);
+    pscal<T>(h,2,1,R(.5),distributed_nan.data.data(),distributed_nan.d);
     const auto nan_result=distributed_nan.download();bool nan_ok=true;
     for(int j=0;j<distributed_nan.nc;++j)for(int i=0;i<distributed_nan.nr;++i) {
         if(distributed_nan.gi(i)>=2||distributed_nan.gj(j)>=1)continue;
@@ -159,8 +159,8 @@ template <DdlaBackend B,typename R> void mixed_types(DdlaHandle_t h,int& cases) 
     DDLA_CHECK(ddlaMemcpy(h,arrays.data(),host,sizeof(host)));
     for(bool batch:{false,true}) {
         DDLA_CHECK(ddlaMemcpy(h,x.data(),original.data(),original.size()*sizeof(T)));
-        if(batch)scalBatched<B>(h,m,1,R(.5),arrays.data(),std::numeric_limits<int>::max(),count);
-        else scal<B>(h,m,1,R(.5),x.data(),std::numeric_limits<int>::max());
+        if(batch)scalBatched(h,m,1,R(.5),arrays.data(),std::numeric_limits<int>::max(),count);
+        else scal(h,m,1,R(.5),x.data(),std::numeric_limits<int>::max());
         std::vector<T> result(original.size());DDLA_CHECK(ddlaMemcpy(h,result.data(),x.data(),result.size()*sizeof(T)));DDLA_CHECK(ddlaSynchronize(h));
         bool ok=true;for(int q=0;q<count;++q)for(int i=0;i<stride;++i) {
             const T expected=i<m&&(batch||q==0)?original[q*stride+i]*R(.5):original[q*stride+i];
@@ -174,15 +174,15 @@ template <DdlaBackend B> void run(int pr,int pc) {
     int cases=0;mixed_types<B,float>(h,cases);mixed_types<B,double>(h,cases);
     types<B,float>(h,cases);types<B,double>(h,cases);
     types<B,std::complex<float>>(h,cases);types<B,std::complex<double>>(h,cases);
-    bool rejected=false;try{scalBatched<B,double>(h,2,3,1.,nullptr,1,1);}catch(const std::exception&){rejected=true;}
+    bool rejected=false;try{scalBatched<double>(h,2,3,1.,nullptr,1,1);}catch(const std::exception&){rejected=true;}
     require(h,rejected,"invalid batched leading dimension accepted");
     structured_test::Matrix<double> a(h,3,3,2);
     int rank;MPI_Comm_rank(MPI_COMM_WORLD,&rank);
-    rejected=false;try{pscal<B,double>(h,rank==0?4:3,3,1.,a.data.data(),a.d);}catch(const std::exception&){rejected=true;}
+    rejected=false;try{pscal<double>(h,rank==0?4:3,3,1.,a.data.data(),a.d);}catch(const std::exception&){rejected=true;}
     require(h,rejected,"invalid pscal region did not reject collectively");
     if(pr*pc>1) {
         rejected=false;
-        try{pscal<B,double>(h,rank==0?2:3,3,1.,a.data.data(),a.d);}
+        try{pscal<double>(h,rank==0?2:3,3,1.,a.data.data(),a.d);}
         catch(const std::exception&){rejected=true;}
         require(h,rejected,"inconsistent pscal regions did not reject collectively");
     }

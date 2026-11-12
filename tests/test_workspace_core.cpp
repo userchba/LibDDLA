@@ -104,7 +104,7 @@ template<DdlaBackend B,class T> void lapack(DdlaHandle_t h)
     for(const auto& sh:shapes) {
         write(h,a,initial);write(h,b,initial);
         const std::vector<int> pivot_poison(m,-19);write(h,piv,pivot_poison);write(h,pivref,pivot_poison);
-        getrf<B,T>(h,sh[0],sh[1],b.data(),lda,pivref.data(),inforef.data());
+        getrf<T>(h,sh[0],sh[1],b.data(),lda,pivref.data(),inforef.data());
         workspace_test::Scope run;
         lapack_impl::getrf_run<B,T>(h,sh[0],sh[1],a.data(),lda,piv.data(),info.data(),luwork.backend,lu_bytes);
         run_clean(run.finish());
@@ -120,7 +120,7 @@ template<DdlaBackend B,class T> void lapack(DdlaHandle_t h)
     query_clean(chol_scope.finish());Guarded cholwork(h,chol_bytes,0);
     for(int order:orders) {
         write(h,a,initial);write(h,b,initial);
-        potrf<B,T>(h,'L',order,b.data(),lda,inforef.data());
+        potrf<T>(h,'L',order,b.data(),lda,inforef.data());
         workspace_test::Scope run;
         lapack_impl::potrf_run<B,T>(h,'L',order,a.data(),lda,info.data(),cholwork.backend,chol_bytes);
         run_clean(run.finish());same(read(h,b),read(h,a));require(read(h,info)==read(h,inforef),"Cholesky info");cholwork.check();
@@ -136,7 +136,7 @@ template<DdlaBackend B,class T> void lapack(DdlaHandle_t h)
         query_clean(query_scope.finish());same(initial,read(h,a));same(tau_poison,read(h,tau));Guarded work(h,qr_bytes,0);
         for(const auto& sh:shapes) {
             write(h,a,initial);write(h,b,initial);write(h,tau,tau_poison);write(h,tauref,tau_poison);
-            geqrf<B,T>(h,uplo,sh[0],sh[1],b.data(),lda,tauref.data());
+            geqrf<T>(h,uplo,sh[0],sh[1],b.data(),lda,tauref.data());
             workspace_test::Scope run;
             lapack_impl::geqrf_run<B,T>(h,uplo,sh[0],sh[1],a.data(),lda,tau.data(),work.backend,qr_bytes);
             run_clean(run.finish());same(read(h,b),read(h,a));same(read(h,tauref),read(h,tau));work.check();
@@ -148,7 +148,7 @@ template<DdlaBackend B,class T> void lapack(DdlaHandle_t h)
         Guarded work(h,bytes,0);ddla::vector<T> t(h,15),tref(h,15);
         std::vector<T> tv(15,value<T>(-9)),ts(m,value<T>(.25));ts[1]=T(0);
         write(h,a,initial);write(h,b,initial);write(h,t,tv);write(h,tref,tv);write(h,tau,ts);
-        larft<B,T>(h,direct,'C',m,3,b.data(),lda,tau.data(),tref.data(),5);
+        larft<T>(h,direct,'C',m,3,b.data(),lda,tau.data(),tref.data(),5);
         workspace_test::Scope run;
         lapack_impl::larft_run<B,T>(h,direct,m,3,a.data(),lda,tau.data(),t.data(),5,work.backend,bytes);
         run_clean(run.finish());same(read(h,tref),read(h,t));work.check();
@@ -156,14 +156,14 @@ template<DdlaBackend B,class T> void lapack(DdlaHandle_t h)
     std::size_t swap_bytes=0;
     workspace_test::Scope swaps_scope(true);lapack_impl::laswp_workspace_size(h,2,4,-2,&swap_bytes);query_clean(swaps_scope.finish());
     Guarded swapwork(h,0,swap_bytes);ddla::vector<int> ipiv(h,8);std::vector<int> ps(8,1);ps[1]=4;ps[3]=2;ps[5]=3;write(h,ipiv,ps);
-    write(h,a,initial);write(h,b,initial);laswp<B,T>(h,n,b.data(),lda,2,4,ipiv.data(),-2);
+    write(h,a,initial);write(h,b,initial);laswp<T>(h,n,b.data(),lda,2,4,ipiv.data(),-2);
     workspace_test::Scope swap_run;
     lapack_impl::laswp_run<B,T>(h,n,a.data(),lda,2,4,ipiv.data(),-2,swapwork.host,swap_bytes);
     run_clean(swap_run.finish());same(read(h,b),read(h,a));swapwork.check();
     write(h,a,initial);write(h,b,initial);
     std::size_t bottom_bytes=0;
     workspace_test::Scope bottom_scope(true);lapack_impl::potrf_bottom_right_workspace_size<T>(h,'U',m,a.data(),&bottom_bytes);query_clean(bottom_scope.finish());
-    Guarded bottom(h,bottom_bytes,0);int got=0,want=0;potrf_bottom_right<B,T>('U',m,b.data(),lda,want,h);
+    Guarded bottom(h,bottom_bytes,0);int got=0,want=0;potrf_bottom_right<T>('U',m,b.data(),lda,want,h);
     workspace_test::Scope bottom_run;
     lapack_impl::potrf_bottom_right_run<B,T>(h,'U',m,a.data(),lda,got,bottom.backend,bottom_bytes);
     run_clean(bottom_run.finish());same(read(h,b),read(h,a));require(got==want,"bottom-right info");bottom.check();
@@ -182,13 +182,13 @@ template<DdlaBackend B,class T> void blas(DdlaHandle_t h)
         initial[i+j*n]=value<T>(.01*(1+i+j),.003*(i-j));other[i+j*n]=value<T>(.02*(1+2*i+j),.002*(i+j));
     }
     ddla::vector<T> a(h,n*n),b(h,n*n),c(h,n*n),ref(h,n*n);write(h,a,initial);write(h,b,other);write(h,c,out);write(h,ref,out);
-    gemm<B,T>(h,'N','C',n,n,n,T(1),a.data(),n,b.data(),n,T(0),ref.data(),n);
+    gemm<T>(h,'N','C',n,n,n,T(1),a.data(),n,b.data(),n,T(0),ref.data(),n);
     workspace_test::Scope run;blas_impl::gemm_run<B,T>(h,'N','C',n,n,n,T(1),a.data(),n,b.data(),n,T(0),c.data(),n);run_clean(run.finish());same(read(h,ref),read(h,c));
     std::size_t bytes=0;
     workspace_test::Scope tq(true);blas_impl::trtrm_workspace_size<T>(h,n,&bytes);query_clean(tq.finish());Guarded work(h,bytes,0);
     for(int repeat=0;repeat<2;++repeat) {
         write(h,c,out);write(h,ref,out);
-        trtrm<B,T>(h,'U','N','L','C',n,T(1),a.data(),n,b.data(),n,T(.5),ref.data(),n);
+        trtrm<T>(h,'U','N','L','C',n,T(1),a.data(),n,b.data(),n,T(.5),ref.data(),n);
         workspace_test::Scope trun;blas_impl::trtrm_run<B,T>(h,'U','N','L','C',n,T(1),a.data(),n,b.data(),n,T(.5),c.data(),n,work.backend,bytes);run_clean(trun.finish());
         same(read(h,ref),read(h,c));work.check();
     }
@@ -206,14 +206,14 @@ template<DdlaBackend B,class R> void mixed(DdlaHandle_t h)
         workspace_test::Scope qs(true);blas_impl::mixed_gemm_workspace_size<R>(h,m,n,k,cr,&bytes);query_clean(qs.finish());Guarded work(h,bytes,0);
         for(int repeat=0;repeat<2;++repeat) {
             write(h,c,out);write(h,ref,out);
-            if(cr) gemm<B,R>(h,'N','N',m,n,k,C(.7,.1),dca.data(),m,drb.data(),k,C(.2,-.1),ref.data(),m);
-            else gemm<B,R>(h,'N','N',m,n,k,C(.7,.1),dra.data(),m,dcb.data(),k,C(.2,-.1),ref.data(),m);
+            if(cr) gemm<R>(h,'N','N',m,n,k,C(.7,.1),dca.data(),m,drb.data(),k,C(.2,-.1),ref.data(),m);
+            else gemm<R>(h,'N','N',m,n,k,C(.7,.1),dra.data(),m,dcb.data(),k,C(.2,-.1),ref.data(),m);
             if constexpr(B==DdlaBackend::CPU) {
                 // The checked convenience path retains its historical warm
                 // caller-thread scratch cache, outside the numerical components.
                 workspace_test::Scope cached;
-                if(cr)gemm<B,R>(h,'N','N',m,n,k,C(.7,.1),dca.data(),m,drb.data(),k,C(.2,-.1),c.data(),m);
-                else gemm<B,R>(h,'N','N',m,n,k,C(.7,.1),dra.data(),m,dcb.data(),k,C(.2,-.1),c.data(),m);
+                if(cr)gemm<R>(h,'N','N',m,n,k,C(.7,.1),dca.data(),m,drb.data(),k,C(.2,-.1),c.data(),m);
+                else gemm<R>(h,'N','N',m,n,k,C(.7,.1),dra.data(),m,dcb.data(),k,C(.2,-.1),c.data(),m);
                 run_clean(cached.finish());same(read(h,ref),read(h,c));write(h,c,out);
             }
             workspace_test::Scope run;
@@ -241,7 +241,7 @@ template<DdlaBackend B,class T> void vbatched(DdlaHandle_t h)
         workspace_test::Scope validation;
         int maximum_m, maximum_n, maximum_k;blas_impl::vbatched_dimensions_check(h,'N','N',dims.data(),dims.data(),dims.data(),dims.data(),dims.data(),dims.data(),batches,scratch.backend,bytes,maximum_m,maximum_n,maximum_k);
         run_clean(validation.finish());
-        gemmVbatched<B,T>(h,'N','N',dims.data(),dims.data(),dims.data(),T(1),da.data(),dims.data(),db.data(),dims.data(),T(0),dr.data(),dims.data(),batches);
+        gemmVbatched<T>(h,'N','N',dims.data(),dims.data(),dims.data(),T(1),da.data(),dims.data(),db.data(),dims.data(),T(0),dr.data(),dims.data(),batches);
         workspace_test::Scope run;
         blas_impl::gemmVbatched_run<B,T>(h, maximum_m, maximum_n, maximum_k,'N','N',dims.data(),dims.data(),dims.data(),T(1),da.data(),dims.data(),db.data(),dims.data(),T(0),dc.data(),dims.data(),batches);
         run_clean(run.finish());same(read(h,ref),read(h,c));scratch.check();

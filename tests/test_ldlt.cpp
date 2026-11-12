@@ -60,28 +60,28 @@ void test(DdlaHandle_t h, bool distributed, int n, bool pair) {
         if (!distributed) {
             if constexpr (H == false) {
                 if constexpr (Pivot == false)
-                    sytrf_nopiv<B, T>(h, u, n, A.ptr, lda, info);
+                    sytrf_nopiv<T>(h, u, n, A.ptr, lda, info);
                 if constexpr (Pivot == true)
-                    sytrf<B, T>(h, u, n, A.ptr, lda, piv.data(), info);
+                    sytrf<T>(h, u, n, A.ptr, lda, piv.data(), info);
             }
             if constexpr (H == true) {
                 if constexpr (Pivot == false)
-                    hetrf_nopiv<B, T>(h, u, n, A.ptr, lda, info);
+                    hetrf_nopiv<T>(h, u, n, A.ptr, lda, info);
                 if constexpr (Pivot == true)
-                    hetrf<B, T>(h, u, n, A.ptr, lda, piv.data(), info);
+                    hetrf<T>(h, u, n, A.ptr, lda, piv.data(), info);
             }
         } else {
             if constexpr (H == false) {
                 if constexpr (Pivot == false)
-                    psytrf_nopiv<B, T>(h, u, n, A.ptr, da, info);
+                    psytrf_nopiv<T>(h, u, n, A.ptr, da, info);
                 if constexpr (Pivot == true)
-                    psytrf<B, T>(h, u, n, A.ptr, da, piv.data(), info);
+                    psytrf<T>(h, u, n, A.ptr, da, piv.data(), info);
             }
             if constexpr (H == true) {
                 if constexpr (Pivot == false)
-                    phetrf_nopiv<B, T>(h, u, n, A.ptr, da, info);
+                    phetrf_nopiv<T>(h, u, n, A.ptr, da, info);
                 if constexpr (Pivot == true)
-                    phetrf<B, T>(h, u, n, A.ptr, da, piv.data(), info);
+                    phetrf<T>(h, u, n, A.ptr, da, piv.data(), info);
             }
         }
         require_close(h, "factor info", info, 0);
@@ -105,28 +105,28 @@ void test(DdlaHandle_t h, bool distributed, int n, bool pair) {
         if (!distributed) {
             if constexpr (H == false) {
                 if constexpr (Pivot == false)
-                    sytrs_nopiv<B, T>(h, u, n, 2, A.ptr, lda, RHS.ptr, ldb, info);
+                    sytrs_nopiv<T>(h, u, n, 2, A.ptr, lda, RHS.ptr, ldb, info);
                 if constexpr (Pivot == true)
-                    sytrs<B, T>(h, u, n, 2, A.ptr, lda, piv.data(), RHS.ptr, ldb, info);
+                    sytrs<T>(h, u, n, 2, A.ptr, lda, piv.data(), RHS.ptr, ldb, info);
             }
             if constexpr (H == true) {
                 if constexpr (Pivot == false)
-                    hetrs_nopiv<B, T>(h, u, n, 2, A.ptr, lda, RHS.ptr, ldb, info);
+                    hetrs_nopiv<T>(h, u, n, 2, A.ptr, lda, RHS.ptr, ldb, info);
                 if constexpr (Pivot == true)
-                    hetrs<B, T>(h, u, n, 2, A.ptr, lda, piv.data(), RHS.ptr, ldb, info);
+                    hetrs<T>(h, u, n, 2, A.ptr, lda, piv.data(), RHS.ptr, ldb, info);
             }
         } else {
             if constexpr (H == false) {
                 if constexpr (Pivot == false)
-                    psytrs_nopiv<B, T>(h, u, n, 2, A.ptr, da, RHS.ptr, db, info);
+                    psytrs_nopiv<T>(h, u, n, 2, A.ptr, da, RHS.ptr, db, info);
                 if constexpr (Pivot == true)
-                    psytrs<B, T>(h, u, n, 2, A.ptr, da, piv.data(), RHS.ptr, db, info);
+                    psytrs<T>(h, u, n, 2, A.ptr, da, piv.data(), RHS.ptr, db, info);
             }
             if constexpr (H == true) {
                 if constexpr (Pivot == false)
-                    phetrs_nopiv<B, T>(h, u, n, 2, A.ptr, da, RHS.ptr, db, info);
+                    phetrs_nopiv<T>(h, u, n, 2, A.ptr, da, RHS.ptr, db, info);
                 if constexpr (Pivot == true)
-                    phetrs<B, T>(h, u, n, 2, A.ptr, da, piv.data(), RHS.ptr, db, info);
+                    phetrs<T>(h, u, n, 2, A.ptr, da, piv.data(), RHS.ptr, db, info);
             }
         }
         require_close(h, "solve info", info, 0);
@@ -167,13 +167,13 @@ template <DdlaBackend B, class T> void cases(DdlaHandle_t h) {
     DeviceBuffer<T> a(h, 4);
     upload(h, a.ptr, std::vector<T>{T(0), T(1), T(1), T(0)});
     int info = 0;
-    sytrf_nopiv<B, T>(h, 'L', 2, a.ptr, 2, info);
+    sytrf_nopiv<T>(h, 'L', 2, a.ptr, 2, info);
     require_close(h, "no pivot zero breakdown", info, 1);
-    sytrf_nopiv<B, T>(h, 'L', 0, nullptr, 1, info);
+    sytrf_nopiv<T>(h, 'L', 0, nullptr, 1, info);
     require_close(h, "empty factor", info, 0);
     int piv[2];
     upload(h, a.ptr, std::vector<T>(4, T(0)));
-    hetrf<B, T>(h, 'U', 2, a.ptr, 2, piv, info);
+    hetrf<T>(h, 'U', 2, a.ptr, 2, piv, info);
     require_close(h, "singular pivoted factor", info > 0 ? 0 : 1, 0);
 }
 template <DdlaBackend B> void run(int pr, int pc) {

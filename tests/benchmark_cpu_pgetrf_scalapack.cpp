@@ -185,7 +185,7 @@ static int run_type(const DdlaHandle_t& handle, int ictxt, int myid,
             std::fill(ipiv_ddla.begin(), ipiv_ddla.end(), 0);
             setenv("DDLA_LU_PANEL", method.c_str(), 1);
             int info = -1;
-            ddla::pgetrf<DdlaBackend::CPU>(handle, n, n, a_ddla.data(), ia, ja, descA,
+            ddla::pgetrf(handle, n, n, a_ddla.data(), ia, ja, descA,
                                            ipiv_ddla.data(), info);
             if (info != 0) {
                 if (myid == 0) std::cerr << "DDLA pgetrf warmup info=" << info << " n=" << n << "\n";
@@ -217,7 +217,7 @@ static int run_type(const DdlaHandle_t& handle, int ictxt, int myid,
                 MPI_Barrier(MPI_COMM_WORLD);
                 double t0 = MPI_Wtime();
                 int info = -1;
-                ddla::pgetrf<DdlaBackend::CPU>(handle, n, n, a_ddla.data(), ia, ja, descA,
+                ddla::pgetrf(handle, n, n, a_ddla.data(), ia, ja, descA,
                                                ipiv_ddla.data(), info);
                 double t1 = MPI_Wtime();
                 int failed = info != 0;
@@ -279,7 +279,7 @@ static int run_type(const DdlaHandle_t& handle, int ictxt, int myid,
                 std::fill(ipiv_ddla.begin(), ipiv_ddla.end(), 0);
                 setenv("DDLA_LU_PANEL", method.c_str(), 1);
                 int info = -1;
-                ddla::pgetrf<DdlaBackend::CPU>(handle, n, n, a_ddla.data(), ia, ja, descA,
+                ddla::pgetrf(handle, n, n, a_ddla.data(), ia, ja, descA,
                                                ipiv_ddla.data(), info);
                 int failed = info != 0;
                 MPI_Allreduce(MPI_IN_PLACE, &failed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);

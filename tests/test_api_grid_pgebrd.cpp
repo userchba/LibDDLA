@@ -42,13 +42,13 @@ void call_pgebrd(const ddla::DdlaHandle_t& handle, int m, int n, T* d_A, const i
 {
 #if DDLA_HAS_GPU
     if (ddlaGetBackend(handle) == DdlaBackend::CPU)
-        ddla::pgebrd<DdlaBackend::CPU, T>(handle, m, n, d_A, desc, d, e, tq, tp, info);
+        ddla::pgebrd<T>(handle, m, n, d_A, desc, d, e, tq, tp, info);
     else
-        ddla::pgebrd<DdlaBackend::GPU, T>(handle, m, n, d_A, desc, d, e, tq, tp, info);
+        ddla::pgebrd<T>(handle, m, n, d_A, desc, d, e, tq, tp, info);
 #elif DDLA_HAS_GPU
-    ddla::pgebrd<DdlaBackend::GPU, T>(handle, m, n, d_A, desc, d, e, tq, tp, info);
+    ddla::pgebrd<T>(handle, m, n, d_A, desc, d, e, tq, tp, info);
 #else
-    ddla::pgebrd<DdlaBackend::CPU, T>(handle, m, n, d_A, desc, d, e, tq, tp, info);
+    ddla::pgebrd<T>(handle, m, n, d_A, desc, d, e, tq, tp, info);
 #endif
 }
 

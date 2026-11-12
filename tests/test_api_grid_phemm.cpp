@@ -1,3 +1,4 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 #include "api_grid_test_common.h"
 #include "PBLAS/phemm_impl.h"
 #include "comm_traits.h"
@@ -112,7 +113,7 @@ void check_case(DdlaHandle_t h,char side,char u,int m,int n,int nb,int mode,bool
             phemm_impl::phemm_run<Backend,T>(h,side,u,m,n,alpha,ap,a.d,bp,b.d,beta,c.data.data(),c.d,true,
                 backend_work.data(),backend_bytes,host_work.data(),host_bytes);
     } else {
-        phemm<Backend,T>(h,mode==5 ? char(std::tolower(side)) : side,mode==5 ? char(std::tolower(u)) : u,
+        phemm<T>(h,mode==5 ? char(std::tolower(side)) : side,mode==5 ? char(std::tolower(u)) : u,
             m,n,alpha,ap,a.d,bp,b.d,beta,noop ? nullptr : c.data.data(),c.d);
     }
     const auto out=c.download();int bad=0;double error=0;
@@ -171,7 +172,7 @@ void invalid_cases(DdlaHandle_t h) {
         int all;MPI_Allreduce(&caught,&all,1,MPI_INT,MPI_MIN,ddlaGetCommunicator(h));
         if(!all) throw std::runtime_error("phemm invalid argument not rejected on every rank");};
     auto call=[&](char side,char u,int m,int n,const double* ap,const double* bp,double* cp,double alpha=0.,double beta=1.) {
-        phemm<Backend,double>(h,side,u,m,n,alpha,ap,a.d,bp,b.d,beta,cp,c.d);};
+        phemm<double>(h,side,u,m,n,alpha,ap,a.d,bp,b.d,beta,cp,c.d);};
     reject([&]{call('?','U',2,2,nullptr,nullptr,nullptr);});
     reject([&]{call('L','?',2,2,nullptr,nullptr,nullptr);});
     reject([&]{call('L','U',-1,2,nullptr,nullptr,nullptr);});
@@ -192,7 +193,7 @@ void invalid_cases(DdlaHandle_t h) {
         reject([&]{call(root ? 'R' : 'L','U',8,8,a.data.data(),b.data.data(),c.data.data(),1.,0.);});
         reject([&]{call('L','U',8,8,a.data.data(),b.data.data(),c.data.data(),root ? 0. : 1.,0.);});
     }
-    reject([&]{phemm<Backend,double>(nullptr,'L','U',0,0,0.,nullptr,a.d,nullptr,b.d,1.,nullptr,c.d);});
+    reject([&]{phemm<double>(nullptr,'L','U',0,0,0.,nullptr,a.d,nullptr,b.d,1.,nullptr,c.d);});
 #if DDLA_HAS_GPU
     constexpr auto Other=Backend==DdlaBackend::CPU ? DdlaBackend::GPU : DdlaBackend::CPU;
     reject([&]{phemm<Other,double>(h,'L','U',0,0,0.,nullptr,a.d,nullptr,b.d,1.,nullptr,c.d);});
@@ -218,7 +219,7 @@ void protected_triangle(DdlaHandle_t h,char side,char u) {
     DDLA_CHECK(ddlaDescInit(da,h,q,q,4,4,0,0,lda));DDLA_CHECK(ddlaDescInit(db,h,m,n,4,4,0,0));
     std::vector<T> b(std::size_t(m)*n),c(b.size(),scalar<T>(std::numeric_limits<double>::quiet_NaN()));
     for(int j=0;j<n;++j) for(int i=0;i<m;++i) b[i+std::size_t(j)*m]=value<T>(i,j,2);
-    phemm<DdlaBackend::CPU,T>(h,side,u,m,n,T(1),a,da,b.data(),db,T(0),c.data(),db);
+    phemm<T>(h,side,u,m,n,T(1),a,da,b.data(),db,T(0),c.data(),db);
     double worst=0;
     for(int j=0;j<n;++j) for(int i=0;i<m;++i) {
         std::complex<double> ref=0;double bound=0;

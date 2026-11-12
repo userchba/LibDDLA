@@ -25,9 +25,9 @@ void check_pdam(const ddla::DdlaHandle_t& handle, const Shape& base)
     ddla::pdam(handle, alpha, static_cast<Complex*>(nullptr), desc, 0);
 #if DDLA_HAS_GPU
     if (ddla::ddlaGetBackend(handle) == ddla::DdlaBackend::GPU)
-        ddla::pdam<ddla::DdlaBackend::CPU>(handle, alpha, static_cast<Complex*>(nullptr), desc, 0);
+        ddla::pdam(handle, alpha, static_cast<Complex*>(nullptr), desc, 0);
     else
-        ddla::pdam<ddla::DdlaBackend::GPU>(handle, alpha, static_cast<Complex*>(nullptr), desc, 0);
+        ddla::pdam(handle, alpha, static_cast<Complex*>(nullptr), desc, 0);
 #endif
     bool threw = false;
     try { ddla::pdam(handle, alpha, d_A.ptr, desc, n + 1); }

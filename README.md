@@ -17,10 +17,11 @@ selection per handle at runtime. All functions live in the `ddla` namespace.
   wrappers, including `gemm`, `trmm`, `trtrm`, `gemmBatched`, `getrf`, `potrf`,
   `geqrf` and `larft`; distributed GEMM, LU, Cholesky, QR/QL, triangular
   multiplication/solve, and data movement; and `random_generate`.
-  These routines are templated on the
-  backend, like `pgemm`: `pgetrf<DdlaBackend::CPU>(handle, ...)` runs on a CPU
-  handle (host BLAS/LAPACK, MPI), `<DdlaBackend::GPU>` on a GPU handle, and the
-  default is the build's default backend. Only the variable-size batched GEMMs
+  Public compute calls select the backend from their handle: the same
+  `pgetrf(handle, ...)` call uses host BLAS/LAPACK and MPI on a CPU handle
+  or the GPU implementation on a GPU handle. Scalar types are inferred from
+  arguments or supplied explicitly, such as `pgetrf<double>(handle, ...)`.
+  Only the variable-size batched GEMMs
   (`gemmVbatched`, `gemmVbatched2s`) need `DDLA_USE_CUDA` or `DDLA_USE_HIP`
   in a CPU+GPU build.
   `DDLA_USE_CCL` and `DDLA_USE_GPU_CPU_TUNNEL` are not supported with a
@@ -130,7 +131,7 @@ in `src/Eigensolver/`.
 - `two_stage`: force full → band → tridiagonal.
 - `one_stage`: force direct Householder reduction to tridiagonal.
 
-Local `syevd` (real) and `heevd` (complex) use the same backend-templated
+Local `syevd` (real) and `heevd` (complex) use the same handle-driven
 interface as the other single-process solvers:
 `(handle, jobz, uplo, n, A, lda, w, info)`. A, w and the `int* info` are in the
 handle's backend memory; GPU callers synchronize before copying device results to the host.
@@ -307,9 +308,15 @@ The installed `ddla::ddla` target supplies the include path, MPI dependency
 and configured compile definitions. CPU support is unconditional; public headers
 obtain GPU availability from `<ddla/ddla_config.h>` (`DDLA_HAS_GPU`), so
 applications using only the public API do not need private vendor headers.
-In a dual build, `ddlaInit(handle)` and an omitted compute-template backend
-default to GPU. For CPU calls, create a CPU handle and select
-`DdlaBackend::CPU` explicitly on backend-templated compute routines.
+In a dual build, `ddlaInit(handle)` defaults to GPU. Use
+`ddlaInit(handle, ddla::DdlaBackend::CPU)` for CPU data. Public computational
+templates take scalar types only and always use the handle's backend; there
+is no separate backend template argument to keep in sync. Rebuild C++ clients
+after removing the backend template argument, for example using
+`gemm<double>(handle, ...)` with a CPU handle for host data. This backend
+selection change retains the Fortran/Python opaque-handle interface. The
+separate Cholesky cleanup removes the sign/location arguments: regenerate
+and rebuild native bindings together with their Fortran/Python consumers.
 
 ## CMake options
 
@@ -366,7 +373,7 @@ ddla::DDLA_CHECK(ddla::ddlaSet(handle, MPI_COMM_WORLD, 'R')); // create resource
   The automatic form (`'R'`) derives a 2D grid from the number of MPI ranks.
 - Initialize MPI before setting up the handle. In a dual build,
   `ddlaInit(handle, ddla::DdlaBackend::CPU)` selects the CPU backend;
-  compute calls must use the matching template backend.
+  subsequent compute calls use that handle's backend automatically.
 - **Destroy** with `ddla::DDLA_CHECK(ddla::ddlaDestroy(handle))` when done.
 
 ### Distributed matrix multiplication
@@ -393,9 +400,9 @@ Hermitian. C uses ordinary column-major storage, not packed triangular storage.
 
 ```cpp
 // Lower triangle only; op(A) is n-by-k and op(B) is k-by-n.
-ddla::gemmt<ddla::DdlaBackend::CPU>(h, 'L', 'N', 'N', n, k,
+ddla::gemmt(h, 'L', 'N', 'N', n, k,
     alpha, A, lda, B, ldb, beta, C, ldc);
-ddla::pgemmt<ddla::DdlaBackend::CPU>(h, 'L', 'N', 'N', n, k,
+ddla::pgemmt(h, 'L', 'N', 'N', n, k,
     alpha, A_local, descA, B_local, descB, beta, C_local, descC);
 ```
 
@@ -418,9 +425,9 @@ are explicit; unused input triangles need not be initialized.
 
 ```cpp
 // Full C = alpha * U * L + beta * C.
-ddla::trtrm<ddla::DdlaBackend::CPU>(h, 'U', 'N', 'L', 'N', n,
+ddla::trtrm(h, 'U', 'N', 'L', 'N', n,
     alpha, U, ldu, L, ldl, beta, C, ldc);
-ddla::ptrtrm<ddla::DdlaBackend::CPU>(h, 'U', 'N', 'L', 'N', n,
+ddla::ptrtrm(h, 'U', 'N', 'L', 'N', n,
     alpha, U_local, descU, L_local, descL, beta, C_local, descC);
 ```
 
@@ -706,7 +713,7 @@ Only QR and QL are implemented; right-side LQ and RQ forms are not provided.
 
 | Function | Description |
 |----------|-------------|
-| `pgesvd` | Driver: `A = U·diag(s)·V^H` (ScaLAPACK `PxGESVD` semantics: economy `U` m×k and `VT` k×n, `jobu`/`jobvt` = 'V'/'N', host `s` descending and replicated; U's rows aligned with A's, VT's columns aligned with A's; backend-templated, all four scalar types; the bidiagonal vector stage uses row-distributed divide and conquer on CPU and GPU, with O(k²/P) factor storage per rank and bounded leaf solves; `DDLA_SVD_DC_LEAF` selects the leaf size, default 128, capped at 256; values-only jobs use O(k) dqds storage. The obsolete `DDLA_SVD_BDSOLVER` selector is ignored; replicated `lapack`/`qr` modes have been removed) |
+| `pgesvd` | Driver: `A = U·diag(s)·V^H` (ScaLAPACK `PxGESVD` semantics: economy `U` m×k and `VT` k×n, `jobu`/`jobvt` = 'V'/'N', host `s` descending and replicated; U's rows aligned with A's, VT's columns aligned with A's; handle-selected backend, all four scalar types; the bidiagonal vector stage uses row-distributed divide and conquer on CPU and GPU, with O(k²/P) factor storage per rank and bounded leaf solves; `DDLA_SVD_DC_LEAF` selects the leaf size, default 128, capped at 256; values-only jobs use O(k) dqds storage. The obsolete `DDLA_SVD_BDSOLVER` selector is ignored; replicated `lapack`/`qr` modes have been removed) |
 | `pbdsdc` | Bidiagonal divide-and-conquer SVD `B = U·diag(s)·V^T`, upper/lower real bidiagonal, float/double, CPU/GPU. Host `d`, `e`, `s` are replicated; `s` is descending. Both `U` and `V` return contiguous row slabs over all communicator ranks with local leading dimension `ld`; no descriptor-output or replicated-factor variant. Matrix-sized storage is distributed; bounded panels and scalar vectors may be replicated. |
 | `pgebrd` | Householder bidiagonalization `A = Q·B·P^H` (ScaLAPACK `PxGEBRD`; upper bidiagonal for m >= n, lower for m < n; LAPACK `?GEBRD` storage; host `d`, `e`, `tauq`, `taup` of global length, replicated) |
 | `punmbr` | Apply `Q`/`Q^H` from the left or `P`/`P^H` from the right (ScaLAPACK `PxUNMBR`; vect='Q' with side='L', vect='P' with side='R') |
@@ -736,16 +743,23 @@ factorization succeeds. The factor passed to `ppotrs` is read-only.
 | `gemmVbatched2s(handle, ...)` | Two-stage variable-batch GEMM with reusable temporary (GPU only) |
 | `random_generate(handle, data, n)` | Fill a buffer with uniform random values |
 
-`swap`, `getrf`, `potrf`, `laswp`, `geqrf`, `larft` and `random_generate` are `<Backend, T>` templates declared in
-`<ddla/ddla.h>` (as are `gemm`, `geam`, `write_matrix` and all other backend-templated
-functions); each takes the handle first, is implemented in the `.cpp` of the same name
-(CPU arm: host BLAS / LAPACK, GPU arm: cuBLAS / cuSOLVER / cuRAND or the hip equivalents) and is
-explicitly instantiated for `float`, `double`, `std::complex<float>`, and `std::complex<double>`.
-Every pointer lives where the handle's backend does -- host memory for a CPU handle, device memory
-for a GPU handle -- `ipiv` and `info` included; a GPU call is asynchronous on the handle's stream,
-so read `info` after `ddlaSynchronize`.  `gemmVbatched` / `gemmVbatched2s` are `<Backend, T>` as
-well but the kernels are device code: a CPU handle (or `Backend = CPU`) is rejected with
-`std::invalid_argument`.
+`swap`, `getrf`, `potrf`, `laswp`, `geqrf`, `larft`, `random_generate`,
+`gemm`, `geam` and `write_matrix` are scalar templates declared in
+`<ddla/ddla.h>`. These compute and matrix-output calls take the handle first;
+backend selection comes from that handle. For example,
+`write_matrix(handle, A, m, n, "matrix.txt")` consumes host A on a CPU handle
+or device A on a GPU handle. Use a CPU handle when writing a host reference
+array, even in a GPU-enabled program. Supported instantiations cover `float`,
+`double`, `std::complex<float>` and `std::complex<double>`, subject to each
+routine's real/complex constraints.
+
+Pointers use the memory domain documented by each routine. Local BLAS/LAPACK
+buffers live with the handle's backend -- host memory on CPU, device memory on
+GPU -- including local `ipiv` and `info`. GPU calls are asynchronous on the
+handle's stream, so read `info` after `ddlaSynchronize`. Distributed routines
+may document host metadata separately. `gemmVbatched` / `gemmVbatched2s` also
+use the handle-driven scalar interface but require a GPU handle; a CPU handle
+is rejected with `std::invalid_argument`.
 
 ### Fortran bindings
 
@@ -816,9 +830,9 @@ real and complex data on the build's default backend (device buffers +
 Both local `trmm` and distributed `ptrmm` overwrite `B`, following BLAS/PBLAS:
 
 ```cpp
-trmm<Backend, T>(handle, side, uplo, trans, diag, m, n,
+trmm<T>(handle, side, uplo, trans, diag, m, n,
                  alpha, A, lda, B, ldb);
-ptrmm<Backend, T>(handle, side, uplo, trans, diag, m, n,
+ptrmm<T>(handle, side, uplo, trans, diag, m, n,
                   alpha, A, descA, B, descB);
 ```
 

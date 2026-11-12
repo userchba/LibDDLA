@@ -1,3 +1,4 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 #include <cctype>
 #include <stdexcept>
 #include <algorithm>
@@ -67,7 +68,7 @@ T matrix_op(const std::vector<T>& matrix, int ld, char trans, int i, int j)
 }
 
 template <DdlaBackend Backend, typename T>
-int check_case(const DdlaHandle_t& handle, char transa, char transb, bool use_default, bool lowercase = false)
+int check_case(const DdlaHandle_t& handle, char transa, char transb, bool use_empty_template_arguments, bool lowercase = false)
 {
     const int m = 7;
     const int n = 5;
@@ -128,11 +129,11 @@ int check_case(const DdlaHandle_t& handle, char transa, char transb, bool use_de
     // Fortran LSAME is case-insensitive; both backends must agree on that.
     const char fa = lowercase ? static_cast<char>(std::tolower(static_cast<unsigned char>(transa))) : transa;
     const char fb = lowercase ? static_cast<char>(std::tolower(static_cast<unsigned char>(transb))) : transb;
-    if (use_default) {
+    if (use_empty_template_arguments) {
         gemm<>(handle, fa, fb, m, n, k,
                alpha, a, lda, b, ldb, beta, c, ldc);
     } else {
-        gemm<Backend>(handle, fa, fb, m, n, k,
+        gemm(handle, fa, fb, m, n, k,
                       alpha, a, lda, b, ldb, beta, c, ldc);
     }
     status |= static_cast<int>(ddlaSynchronize(handle));
@@ -172,12 +173,12 @@ int run_type(const DdlaHandle_t& handle)
         // An invalid flag must be rejected, not run as a conjugate transpose.
         T dummy = T(0);
         bool caught = false;
-        try { gemm<Backend>(handle, 'X', 'N', 1, 1, 1, T(1), &dummy, 1, &dummy, 1, T(0), &dummy, 1); }
+        try { gemm(handle, 'X', 'N', 1, 1, 1, T(1), &dummy, 1, &dummy, 1, T(0), &dummy, 1); }
         catch (const std::invalid_argument&) { caught = true; }
         if (!caught) ++failures;
     }
-    if constexpr (Backend == default_backend_v)
-        failures += check_case<Backend, T>(handle, 'N', 'N', true);
+    // Empty template arguments deduce the scalar type on either handle.
+    failures += check_case<Backend, T>(handle, 'N', 'N', true);
     return failures;
 }
 

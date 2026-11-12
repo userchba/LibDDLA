@@ -1,3 +1,4 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 #include "mpi_test_init.h"
 #include "trtrm_test_common.h"
 #include <array>
@@ -21,7 +22,7 @@ int sampled_large_case(DdlaHandle_t h, int n, char uplo)
     Buffer<T> da(h,a.size(),true), db(h,b.size(),true), dc(h,c.size(),true);
     da.put(a); db.put(b); dc.put(c);
     const T alpha=value<T>(0.75,-0.25), beta=value<T>(-0.5,0.3);
-    trtrm<Backend,T>(h,uplo,'N',uplo,'N',n,alpha,da.p,lda,db.p,ldb,beta,dc.p,ldc);
+    trtrm<T>(h,uplo,'N',uplo,'N',n,alpha,da.p,lda,db.p,ldb,beta,dc.p,ldc);
     const auto got=dc.get();
     bool ok=true; long double worst=0;
     auto check=[&](int i,int j) {
@@ -79,7 +80,7 @@ int run_type(DdlaHandle_t h, bool quick, char uplo)
                 c[off + i + std::size_t(j) * ldc] = beta == T(0) ? poison<T>() : data<T>(i, j, 3);
             dc.put(c);
             const char triangle = mode%2 ? (upper?'u':'l') : uplo;
-            trtrm<Backend,T>(h, triangle,'N',triangle,'N', n, alpha, alpha == T(0) ? nullptr : da.p + off, lda,
+            trtrm<T>(h, triangle,'N',triangle,'N', n, alpha, alpha == T(0) ? nullptr : da.p + off, lda,
                             alpha == T(0) ? nullptr : (mode == 5 ? da.p : db.p) + off, mode == 5 ? lda : ldb, beta, dc.p + off, ldc);
             auto got = dc.get();
             bool ok = true;
@@ -118,7 +119,7 @@ int run_type(DdlaHandle_t h, bool quick, char uplo)
                 before[i + 3*j] = value<T>(i == j ? 0.0 : -0.0, i == j ? -0.0 : 0.0);
         Buffer<T> zeros(h, before.size(), true);
         zeros.put(before);
-        trtrm<Backend,T>(h, uplo,'N',uplo,'N', 2, T(0), nullptr, 2, nullptr, 2, scale, zeros.p, 3);
+        trtrm<T>(h, uplo,'N',uplo,'N', 2, T(0), nullptr, 2, nullptr, 2, scale, zeros.p, 3);
         const auto after = zeros.get();
         for (int j = 0; j < 2; ++j) for (int i = 0; i < 3; ++i) {
             const int q = i + 3*j;
@@ -172,7 +173,7 @@ int general_one(DdlaHandle_t h, int n, char ua, char xa, char ub, char xb,
     Buffer<T> da(h, a.size(), component_alignment), db(h, b.size(), component_alignment),
               dc(h, c.size(), component_alignment);
     da.put(a); db.put(b); dc.put(c);
-    trtrm<Backend,T>(h, call_ua, call_xa, call_ub, call_xb, n, alpha, alpha == T(0) ? nullptr : da.p + off, lda,
+    trtrm<T>(h, call_ua, call_xa, call_ub, call_xb, n, alpha, alpha == T(0) ? nullptr : da.p + off, lda,
                      alpha == T(0) ? nullptr : db.p + off, ldb, beta, dc.p + off, ldc);
     const auto got = dc.get();
     // Reference op(): zero outside the stored triangle, swapped/conjugated in.
@@ -269,39 +270,39 @@ int run(bool quick, const std::string& uplos)
     auto rejects = [&](std::function<void()> f) { try { f(); ++bad; } catch (const std::exception&) {} };
     double a[12] = {}, b[12] = {}, c[12] = {};
     for (char uplo : uplos) {
-        rejects([&] { trtrm<Backend,double>(nullptr, uplo,'N',uplo,'N', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1); });
-        rejects([&] { trtrm<Backend,double>(h, uplo,'N',uplo,'N', -1, 1., a, 1, b, 1, 0., c, 1); });
-        rejects([&] { trtrm<Backend,double>(h, uplo,'N',uplo,'N', 2, 1., a, 1, b, 2, 0., c, 2); });
-        rejects([&] { trtrm<Backend,double>(h, uplo,'N',uplo,'N', 2, 1., a, 2, b, 1, 0., c, 2); });
-        rejects([&] { trtrm<Backend,double>(h, uplo,'N',uplo,'N', 2, 1., a, 2, b, 2, 0., c, 1); });
-        rejects([&] { trtrm<Backend,double>(h, uplo,'N',uplo,'N', 2, 1., nullptr, 2, b, 2, 0., c, 2); });
-        rejects([&] { trtrm<Backend,double>(h, uplo,'N',uplo,'N', 2, 1., a, 2, nullptr, 2, 0., c, 2); });
-        rejects([&] { trtrm<Backend,double>(h, uplo,'N',uplo,'N', 2, 1., a, 2, b, 2, 0., nullptr, 2); });
-        rejects([&] { trtrm<Backend,double>(h, uplo,'N',uplo,'N', 2, 1., a, 2, b, 2, 0., a, 2); });
-        rejects([&] { trtrm<Backend,double>(h, uplo,'N',uplo,'N', 2, 1., a, 2, b, 2, 0., b + 1, 2); });
-        trtrm<Backend,double>(h, uplo,'N',uplo,'N', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1);
-        trtrm<Backend,double>(h, uplo,'N',uplo,'N', 2, 0., nullptr, 2, nullptr, 2, 1., nullptr, 2);
+        rejects([&] { trtrm<double>(nullptr, uplo,'N',uplo,'N', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1); });
+        rejects([&] { trtrm<double>(h, uplo,'N',uplo,'N', -1, 1., a, 1, b, 1, 0., c, 1); });
+        rejects([&] { trtrm<double>(h, uplo,'N',uplo,'N', 2, 1., a, 1, b, 2, 0., c, 2); });
+        rejects([&] { trtrm<double>(h, uplo,'N',uplo,'N', 2, 1., a, 2, b, 1, 0., c, 2); });
+        rejects([&] { trtrm<double>(h, uplo,'N',uplo,'N', 2, 1., a, 2, b, 2, 0., c, 1); });
+        rejects([&] { trtrm<double>(h, uplo,'N',uplo,'N', 2, 1., nullptr, 2, b, 2, 0., c, 2); });
+        rejects([&] { trtrm<double>(h, uplo,'N',uplo,'N', 2, 1., a, 2, nullptr, 2, 0., c, 2); });
+        rejects([&] { trtrm<double>(h, uplo,'N',uplo,'N', 2, 1., a, 2, b, 2, 0., nullptr, 2); });
+        rejects([&] { trtrm<double>(h, uplo,'N',uplo,'N', 2, 1., a, 2, b, 2, 0., a, 2); });
+        rejects([&] { trtrm<double>(h, uplo,'N',uplo,'N', 2, 1., a, 2, b, 2, 0., b + 1, 2); });
+        trtrm<double>(h, uplo,'N',uplo,'N', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1);
+        trtrm<double>(h, uplo,'N',uplo,'N', 2, 0., nullptr, 2, nullptr, 2, 1., nullptr, 2);
     }
     for (char invalid : {'X','N','\0'}) {
         try {
-            trtrm<Backend,double>(h,invalid,'N','U','N',0,1.,nullptr,1,nullptr,1,0.,nullptr,1);
+            trtrm<double>(h,invalid,'N','U','N',0,1.,nullptr,1,nullptr,1,0.,nullptr,1);
             ++bad;
         } catch (const std::invalid_argument&) {}
     }
     // Per-operand flag rejects: bad flags, dimensions, nulls, overlap.
-    rejects([&] { trtrm<Backend,double>(h, 'X','N','U','N', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1); });
-    rejects([&] { trtrm<Backend,double>(h, 'U','X','U','N', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1); });
-    rejects([&] { trtrm<Backend,double>(h, 'U','N','X','N', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1); });
-    rejects([&] { trtrm<Backend,double>(h, 'U','N','U','X', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1); });
-    rejects([&] { trtrm<Backend,double>(h, 'U','T','L','N', -1, 1., a, 1, b, 1, 0., c, 1); });
-    rejects([&] { trtrm<Backend,double>(h, 'U','T','L','N', 2, 1., a, 1, b, 2, 0., c, 2); });
-    rejects([&] { trtrm<Backend,double>(h, 'U','T','L','N', 2, 1., a, 2, b, 2, 0., nullptr, 2); });
-    rejects([&] { trtrm<Backend,double>(h, 'U','T','L','N', 2, 1., nullptr, 2, b, 2, 0., c, 2); });
-    rejects([&] { trtrm<Backend,double>(h, 'U','T','L','N', 2, 1., a, 2, b, 2, 0., a, 2); });
-    rejects([&] { trtrm<Backend,double>(h, 'U','N','L','N', 2, 1., a, 2, b, 2, 0., a, 2); });
-    rejects([&] { trtrm<Backend,double>(h, 'L','N','U','N', 2, 1., a, 2, b, 2, 0., b+1, 2); });
-    trtrm<Backend,double>(h, 'U','T','L','C', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1);
-    trtrm<Backend,double>(h, 'L','C','U','T', 2, 0., nullptr, 2, nullptr, 2, 1., nullptr, 2);
+    rejects([&] { trtrm<double>(h, 'X','N','U','N', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1); });
+    rejects([&] { trtrm<double>(h, 'U','X','U','N', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1); });
+    rejects([&] { trtrm<double>(h, 'U','N','X','N', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1); });
+    rejects([&] { trtrm<double>(h, 'U','N','U','X', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1); });
+    rejects([&] { trtrm<double>(h, 'U','T','L','N', -1, 1., a, 1, b, 1, 0., c, 1); });
+    rejects([&] { trtrm<double>(h, 'U','T','L','N', 2, 1., a, 1, b, 2, 0., c, 2); });
+    rejects([&] { trtrm<double>(h, 'U','T','L','N', 2, 1., a, 2, b, 2, 0., nullptr, 2); });
+    rejects([&] { trtrm<double>(h, 'U','T','L','N', 2, 1., nullptr, 2, b, 2, 0., c, 2); });
+    rejects([&] { trtrm<double>(h, 'U','T','L','N', 2, 1., a, 2, b, 2, 0., a, 2); });
+    rejects([&] { trtrm<double>(h, 'U','N','L','N', 2, 1., a, 2, b, 2, 0., a, 2); });
+    rejects([&] { trtrm<double>(h, 'L','N','U','N', 2, 1., a, 2, b, 2, 0., b+1, 2); });
+    trtrm<double>(h, 'U','T','L','C', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1);
+    trtrm<double>(h, 'L','C','U','T', 2, 0., nullptr, 2, nullptr, 2, 1., nullptr, 2);
 #if DDLA_HAS_GPU
     constexpr DdlaBackend Other = Backend == DdlaBackend::CPU ? DdlaBackend::GPU : DdlaBackend::CPU;
     rejects([&] { trtrm<Other,double>(h, 'L','N','L','N', 0, 1., nullptr, 1, nullptr, 1, 0., nullptr, 1); });

@@ -57,6 +57,7 @@ endif()
 
 # Sources that sit directly in src/.
 target_sources(ddla_lib PRIVATE
+    public_dispatch.cpp
     write_matrix.cpp
     random_generate.cpp
     matrix_transfer.cpp

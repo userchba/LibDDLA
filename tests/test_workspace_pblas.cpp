@@ -124,29 +124,29 @@ template <DdlaBackend B,typename T> void cases(DdlaHandle_t h)
         exercise(x,"PBLAS GEADD transpose/alias reuse",[&]{pgeadd_impl::pgeadd_check<B>(h,trans,trans,n,n,x.d,1,1,x.d,1,1,x.d,1,1);},
             [&](std::size_t* bb,std::size_t* hb){pgeadd_impl::pgeadd_workspace_size<T>(h,trans,trans,true,true,n,n,x.d,bb,hb);},
             [&](void* w,std::size_t wb,void* hw,std::size_t hwb){pgeadd_impl::pgeadd_run<B,T>(h,trans,trans,n,n,alpha,x.a.ptr,1,1,x.d,beta,x.b.ptr,1,1,x.d,alias?x.a.ptr:x.c.ptr,1,1,x.d,w,wb,hw,hwb);},
-            [&]{pgeadd<B,T>(h,trans,trans,n,n,alpha,x.a.ptr,1,1,x.d,beta,x.b.ptr,1,1,x.d,alias?x.a.ptr:x.c.ptr,1,1,x.d);});
+            [&]{pgeadd<T>(h,trans,trans,n,n,alpha,x.a.ptr,1,1,x.d,beta,x.b.ptr,1,1,x.d,alias?x.a.ptr:x.c.ptr,1,1,x.d);});
     }
     for(char side:{'L','R'})for(char trans:{'N','C'}) {
         const int m=side=='L'?n:nrhs,cols=side=='L'?nrhs:n;
         exercise(x,"PBLAS triangular solve reuse",[&]{ptrtrs_impl::ptrtrs_check<B>(h,side,'L',trans,'N',m,cols,x.d,x.d);},
             [&](std::size_t* bb,std::size_t* hb){ptrtrs_impl::ptrtrs_workspace_size<T>(h,side,trans,m,cols,x.d,x.d,bb,hb);},
             [&](void* w,std::size_t wb,void* hw,std::size_t hwb){ptrtrs_impl::ptrtrs_run<B,T>(h,side,'L',trans,'N',m,cols,x.a.ptr,x.d,x.b.ptr,x.d,w,wb,hw,hwb);},
-            [&]{ptrtrs<B,T>(h,side,'L',trans,'N',m,cols,x.a.ptr,x.d,x.b.ptr,x.d);});
+            [&]{ptrtrs<T>(h,side,'L',trans,'N',m,cols,x.a.ptr,x.d,x.b.ptr,x.d);});
         exercise(x,"PBLAS triangular multiply reuse",[&]{ptrmm_impl::ptrmm_check<B>(h,side,'U',trans,'N',m,cols,x.d,x.d);},
             [&](std::size_t* bb,std::size_t* hb){ptrmm_impl::ptrmm_workspace_size<T>(h,side,trans,m,cols,false,x.d,x.d,bb,hb);},
             [&](void* w,std::size_t wb,void* hw,std::size_t hwb){ptrmm_impl::ptrmm_run<B,T>(h,side,'U',trans,'N',m,cols,alpha,x.a.ptr,x.d,x.b.ptr,x.d,w,wb,hw,hwb);},
-            [&]{ptrmm<B,T>(h,side,'U',trans,'N',m,cols,alpha,x.a.ptr,x.d,x.b.ptr,x.d);});
+            [&]{ptrmm<T>(h,side,'U',trans,'N',m,cols,alpha,x.a.ptr,x.d,x.b.ptr,x.d);});
     }
     for(char ua:{'U','L'})for(char ub:{'U','L'})
         exercise(x,"PBLAS triangular product reuse",[&]{ptrtrm_impl::ptrtrm_check<B,T>(h,ua,'N',ub,'N',n,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d);},
             [&](std::size_t* bb,std::size_t* hb){ptrtrm_impl::ptrtrm_workspace_size<T>(h,'N','N',n,x.d,x.d,x.d,bb,hb);},
             [&](void* w,std::size_t wb,void* hw,std::size_t hwb){ptrtrm_impl::ptrtrm_run<B,T>(h,ua,'N',ub,'N',n,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d,w,wb,hw,hwb);},
-            [&]{ptrtrm<B,T>(h,ua,'N',ub,'N',n,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d);});
+            [&]{ptrtrm<T>(h,ua,'N',ub,'N',n,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d);});
     for(bool hermitian:{false,true})for(char side:{'L','R'})
         exercise(x,"PBLAS symmetric/Hermitian multiply reuse",[&]{phemm_impl::phemm_check<B,T>(h,side,'L',n,nrhs,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d,hermitian);},
             [&](std::size_t* bb,std::size_t* hb){phemm_impl::phemm_workspace_size<T>(h,side,n,nrhs,false,x.d,x.d,x.d,hermitian,bb,hb);},
             [&](void* w,std::size_t wb,void* hw,std::size_t hwb){phemm_impl::phemm_run<B,T>(h,side,'L',n,nrhs,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d,hermitian,w,wb,hw,hwb);},
-            [&]{if(hermitian)phemm<B,T>(h,side,'L',n,nrhs,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d);else psymm<B,T>(h,side,'L',n,nrhs,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d);});
+            [&]{if(hermitian)phemm<T>(h,side,'L',n,nrhs,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d);else psymm<T>(h,side,'L',n,nrhs,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d);});
     for(bool hermitian:{false,true})for(bool rank2:{false,true})for(bool general:{false,true}) {
         if(general && rank2)continue;
         const char adj=hermitian?'C':'T';
@@ -160,14 +160,14 @@ template <DdlaBackend B,typename T> void cases(DdlaHandle_t h)
                 else prankk_impl::workspace_size<T>(h,kind,'U','N',adj,product,rank2,n,k,x.d,x.d,x.d,bb,hb);},
             [&](void* w,std::size_t wb,void* hw,std::size_t hwb){if(general)pgemmt_impl::run<B,T>(h,'U','N',adj,product,n,k,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d,w,wb,hw,hwb);
                 else prankk_impl::run<B,T>(h,kind,'U','N',adj,product,rank2,n,k,alpha,x.a.ptr,x.d,rank2?x.b.ptr:x.a.ptr,x.d,beta,x.c.ptr,x.d,w,wb,hw,hwb);},
-            [&]{if(general){pgemmt<B,T>(h,'U','N',adj,n,k,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d);return;}
+            [&]{if(general){pgemmt<T>(h,'U','N',adj,n,k,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d);return;}
                 // pherk/pher2k exist for complex types only; a real Hermitian update is the symmetric one.
                 if constexpr(!std::is_arithmetic_v<T>)if(hermitian){
-                    if(rank2)pher2k<B,T>(h,'U','N',n,k,alpha,x.a.ptr,x.d,x.b.ptr,x.d,std::real(beta),x.c.ptr,x.d);
-                    else pherk<B,T>(h,'U','N',n,k,std::real(alpha),x.a.ptr,x.d,std::real(beta),x.c.ptr,x.d);
+                    if(rank2)pher2k<T>(h,'U','N',n,k,alpha,x.a.ptr,x.d,x.b.ptr,x.d,std::real(beta),x.c.ptr,x.d);
+                    else pherk<T>(h,'U','N',n,k,std::real(alpha),x.a.ptr,x.d,std::real(beta),x.c.ptr,x.d);
                     return;}
-                if(rank2)psyr2k<B,T>(h,'U','N',n,k,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d);
-                else psyrk<B,T>(h,'U','N',n,k,alpha,x.a.ptr,x.d,beta,x.c.ptr,x.d);});
+                if(rank2)psyr2k<T>(h,'U','N',n,k,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d);
+                else psyrk<T>(h,'U','N',n,k,alpha,x.a.ptr,x.d,beta,x.c.ptr,x.d);});
     }
     const bool empty_product=pgemmt_impl::check<B,T,T,T>(h,'U','N','N',1,0,T(0),
         nullptr,x.d,nullptr,x.d,T(1),nullptr,x.d);
@@ -183,7 +183,7 @@ template <DdlaBackend B,typename T> void cases(DdlaHandle_t h)
         exercise(x,"PBLAS row/column swap reuse",[&]{pswap_impl::pswap_check<B>(h,len,ia,ja,x.d,inca,ib,jb,x.d,inca);},
             [&](std::size_t* bb,std::size_t* hb){*hb=0;pswap_impl::pswap_workspace_size<T>(h,x.d,bb);},
             [&](void* w,std::size_t wb,void*,std::size_t){pswap_impl::pswap_run<B,T>(h,len,x.a.ptr,ia,ja,x.d,inca,x.b.ptr,ib,jb,x.d,inca,w,wb);},
-            [&]{pswap<B,T>(h,len,x.a.ptr,ia,ja,x.d,inca,x.b.ptr,ib,jb,x.d,inca);});
+            [&]{pswap<T>(h,len,x.a.ptr,ia,ja,x.d,inca,x.b.ptr,ib,jb,x.d,inca);});
     }
     std::vector<int> piv(ddla_test::m_loc(h,x.d));
     for(std::size_t i=0;i<piv.size();++i){const int global=indx_l2g_r(x.d,h,int(i));piv[i]=global==0?n:global+1;}
@@ -191,7 +191,7 @@ template <DdlaBackend B,typename T> void cases(DdlaHandle_t h)
         exercise(x,"PBLAS host permutation reuse",[&]{plapiv_impl::plapiv_check<B>(h,'F',rc,'C',n,nrhs,x.d,x.d);},
             [&](std::size_t* bb,std::size_t* hb){*hb=0;plapiv_impl::plapiv_workspace_size<T>(h,nrhs,x.d,bb);},
             [&](void* w,std::size_t wb,void*,std::size_t){plapiv_impl::plapiv_run<B,T>(h,'F',rc,n,nrhs,x.a.ptr,x.d,piv.data(),x.d,w,wb);},
-            [&]{plapiv<B,T>(h,'F',rc,'C',n,nrhs,x.a.ptr,x.d,piv.data(),x.d,nullptr);});
+            [&]{plapiv<T>(h,'F',rc,'C',n,nrhs,x.a.ptr,x.d,piv.data(),x.d,nullptr);});
     // Scratch-free APIs deliberately have no size-query stage.
     x.reset(0);const int order=pdam_impl::pdam_check<B>(h,n,x.d);
     workspace_test::Scope pdam_scope;pdam_impl::pdam_run<B,T,T>(h,order,T(2),x.a.ptr,x.d);
@@ -204,17 +204,17 @@ template <DdlaBackend B,typename T> void cases(DdlaHandle_t h)
     exercise(x,"PBLAS zero-product no-read path",[]{},
         [&](std::size_t* bb,std::size_t* hb){pgemm_impl::pgemm_workspace_size<T>(h,zero_opts,zero_opts_panel_width,true,'N','N',n,n,0,false,x.d,x.d,x.d,bb,hb);},
         [&](void* w,std::size_t wb,void* hw,std::size_t hwb){pgemm_impl::pgemm_run<B,T,T,T>(h,zero_opts,zero_opts_panel_width,'N','N',n,n,0,T(0),nullptr,x.d,nullptr,x.d,T(0),x.c.ptr,x.d,w,wb,hw,hwb);},
-        [&]{pgemm<B,T>(h,'N','N',n,n,0,T(0),nullptr,x.d,nullptr,x.d,T(0),x.c.ptr,x.d);});
+        [&]{pgemm<T>(h,'N','N',n,n,0,T(0),nullptr,x.d,nullptr,x.d,T(0),x.c.ptr,x.d);});
     int empty_panel_width=1;const auto empty=pgemm_impl::pgemm_check<B>(h,'N','N',0,n,k,false,x.d,x.d,x.d,pgemm_impl::Algorithm::AB,empty_panel_width);
     exercise(x,"PBLAS empty global output",[]{},
         [&](std::size_t* bb,std::size_t* hb){pgemm_impl::pgemm_workspace_size<T>(h,empty,empty_panel_width,false,'N','N',0,n,k,true,x.d,x.d,x.d,bb,hb);},
         [&](void* w,std::size_t wb,void* hw,std::size_t hwb){pgemm_impl::pgemm_run<B,T,T,T>(h,empty,empty_panel_width,'N','N',0,n,k,alpha,nullptr,x.d,nullptr,x.d,beta,nullptr,x.d,w,wb,hw,hwb);},
-        [&]{pgemm<B,T>(h,'N','N',0,n,k,alpha,nullptr,x.d,nullptr,x.d,beta,nullptr,x.d);});
+        [&]{pgemm<T>(h,'N','N',0,n,k,alpha,nullptr,x.d,nullptr,x.d,beta,nullptr,x.d);});
     int tiny_panel_width=1;const auto tiny=pgemm_impl::pgemm_check<B>(h,'N','N',1,1,1,false,x.d,x.d,x.d,pgemm_impl::Algorithm::AB,tiny_panel_width);
     exercise(x,"PBLAS empty local owners",[]{},
         [&](std::size_t* bb,std::size_t* hb){pgemm_impl::pgemm_workspace_size<T>(h,tiny,tiny_panel_width,false,'N','N',1,1,1,true,x.d,x.d,x.d,bb,hb);},
         [&](void* w,std::size_t wb,void* hw,std::size_t hwb){pgemm_impl::pgemm_run<B,T>(h,tiny,tiny_panel_width,'N','N',1,1,1,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d,w,wb,hw,hwb);},
-        [&]{pgemm<B,T>(h,'N','N',1,1,1,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d);});
+        [&]{pgemm<T>(h,'N','N',1,1,1,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d);});
 }
 
 template <DdlaBackend B,typename R> void mixed_cases(DdlaHandle_t h)
@@ -248,13 +248,13 @@ template <DdlaBackend B> void shared_scratch(DdlaHandle_t h)
     GuardedScratch scratch(h,backend_bytes,host_bytes);
     for(int pass=0;pass<3;++pass) {
         if(pass%2==0) {
-            z.reset(pass);pgeadd<B,T>(h,'C','C',11,11,T(0.7),z.a.ptr,1,1,z.d,T(0.3),z.b.ptr,1,1,z.d,z.c.ptr,1,1,z.d);check_ddla_sync(h);
+            z.reset(pass);pgeadd<T>(h,'C','C',11,11,T(0.7),z.a.ptr,1,1,z.d,T(0.3),z.b.ptr,1,1,z.d,z.c.ptr,1,1,z.d);check_ddla_sync(h);
             const auto ea=download(h,z.a.ptr,z.count),eb=download(h,z.b.ptr,z.count),ec=download(h,z.c.ptr,z.count);z.reset(pass);
             workspace_test::Scope scope;pgeadd_impl::pgeadd_run<B,T>(h,'C','C',11,11,T(0.7),z.a.ptr,1,1,z.d,T(0.3),z.b.ptr,1,1,z.d,z.c.ptr,1,1,z.d,
                 scratch.backend(),backend_bytes,scratch.host(),host_bytes);
             const auto snap=scope.finish();require_close(h,"shared scratch complex upload has no scratch",no_scratch(snap)?0:1,0);check_ddla_sync(h);z.compare("shared scratch complex metadata reuse",ea,eb,ec);
         } else {
-            f.reset(pass);ptrtrm<B,float>(h,'U','N','L','N',11,0.7f,f.a.ptr,f.d,f.b.ptr,f.d,0.3f,f.c.ptr,f.d);check_ddla_sync(h);
+            f.reset(pass);ptrtrm<float>(h,'U','N','L','N',11,0.7f,f.a.ptr,f.d,f.b.ptr,f.d,0.3f,f.c.ptr,f.d);check_ddla_sync(h);
             const auto ea=download(h,f.a.ptr,f.count),eb=download(h,f.b.ptr,f.count),ec=download(h,f.c.ptr,f.count);f.reset(pass);
             workspace_test::Scope scope;ptrtrm_impl::ptrtrm_run<B,float>(h,'U','N','L','N',11,0.7f,f.a.ptr,f.d,f.b.ptr,f.d,0.3f,f.c.ptr,f.d,
                 scratch.backend(),backend_bytes,scratch.host(),host_bytes);
@@ -352,7 +352,7 @@ template<DdlaBackend B,class T>void shifted_triangular_cases(DdlaHandle_t h)
             upload(h,A.ptr,a);upload(h,rhs.ptr,b);check_ddla_sync(h);
             workspace_test::Scope run_scope;ptrtrs_impl::ptrtrs_run<B,T>(h,side,uplo,trans,'N',m,n,A.ptr,da,rhs.ptr,db,workspace.backend(),backend_bytes,workspace.host(),host_bytes);const auto run=run_scope.finish();
             require_close(h,"shifted PTRTRS run has no allocation/query/setup",no_scratch(run)?0:1,0);verify();workspace.verify();
-            upload(h,A.ptr,a);upload(h,rhs.ptr,b);ptrtrs<B,T>(h,side,uplo,trans,'N',m,n,A.ptr,da,rhs.ptr,db);verify();
+            upload(h,A.ptr,a);upload(h,rhs.ptr,b);ptrtrs<T>(h,side,uplo,trans,'N',m,n,A.ptr,da,rhs.ptr,db);verify();
         }
     }
 }
@@ -369,14 +369,14 @@ template <DdlaBackend B,typename T> void panel_boundaries(DdlaHandle_t h)
                 else prankk_impl::workspace_size<T>(h,'S','U','N','T',true,false,n,k,x.d,x.d,x.d,bb,hb);},
             [&](void* w,std::size_t wb,void* hw,std::size_t hwb){if(general)pgemmt_impl::run<B,T>(h,'U','N','T',true,n,k,alpha,x.a.ptr,x.d,x.a.ptr,x.d,beta,x.c.ptr,x.d,w,wb,hw,hwb);
                 else prankk_impl::run<B,T>(h,'S','U','N','T',true,false,n,k,alpha,x.a.ptr,x.d,x.a.ptr,x.d,beta,x.c.ptr,x.d,w,wb,hw,hwb);},
-            [&]{if(general)pgemmt<B,T>(h,'U','N','T',n,k,alpha,x.a.ptr,x.d,x.a.ptr,x.d,beta,x.c.ptr,x.d);
-                else psyrk<B,T>(h,'U','N',n,k,alpha,x.a.ptr,x.d,beta,x.c.ptr,x.d);});
+            [&]{if(general)pgemmt<T>(h,'U','N','T',n,k,alpha,x.a.ptr,x.d,x.a.ptr,x.d,beta,x.c.ptr,x.d);
+                else psyrk<T>(h,'U','N',n,k,alpha,x.a.ptr,x.d,beta,x.c.ptr,x.d);});
     }
     for(int n:{1024,1031})for(char side:{'L','R'})
         exercise(x,"PBLAS grouped multiply workspace boundary",[]{},
             [&](std::size_t* bb,std::size_t* hb){phemm_impl::phemm_workspace_size<T>(h,side,n,n,false,x.d,x.d,x.d,true,bb,hb);},
             [&](void* w,std::size_t wb,void* hw,std::size_t hwb){phemm_impl::phemm_run<B,T>(h,side,'U',n,n,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d,true,w,wb,hw,hwb);},
-            [&]{phemm<B,T>(h,side,'U',n,n,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d);});
+            [&]{phemm<T>(h,side,'U',n,n,alpha,x.a.ptr,x.d,x.b.ptr,x.d,beta,x.c.ptr,x.d);});
 }
 
 template <DdlaBackend B> void run(MPI_Comm comm,int pr,int pc,char major)

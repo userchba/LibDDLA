@@ -115,8 +115,8 @@ void benchmark(DdlaHandle_t h,int m,int n,int nb,int reps,char side,char uplo,in
     b.fill([](int i,int j){return sample<T>(i,j,2);});
     initial.fill([](int i,int j){return sample<T>(i,j,3);});
     const T alpha=scalar<T>(.7,-.2),beta=scalar<T>(-.3,.15);
-    auto hemm=[&]{phemm<Backend,T>(h,side,uplo,m,n,alpha,tri.data.data(),tri.d,b.data.data(),b.d,beta,ph.data.data(),ph.d);};
-    auto gemm=[&]{pgemm<Backend,T>(h,'N','N',m,n,q,alpha,
+    auto hemm=[&]{phemm<T>(h,side,uplo,m,n,alpha,tri.data.data(),tri.d,b.data.data(),b.d,beta,ph.data.data(),ph.d);};
+    auto gemm=[&]{pgemm<T>(h,'N','N',m,n,q,alpha,
         side=='L' ? full.data.data() : b.data.data(),side=='L' ? full.d : b.d,
         side=='L' ? b.data.data() : full.data.data(),side=='L' ? b.d : full.d,beta,pg.data.data(),pg.d);};
     // Two untimed calls per routine; validate before any timing.

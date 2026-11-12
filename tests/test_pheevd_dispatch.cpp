@@ -1,6 +1,7 @@
 // Routing-only endpoint interposition. No matrix storage is read or allocated:
 // large synthetic descriptors exercise public dispatch without a large solve.
 #include "api_grid_test_common.h"
+#include "backend_api.h" // Private backend endpoints are deliberately intercepted below.
 #include "Eigensolver/eig_params.h"
 #include "Eigensolver/pheevd_impl.h"
 #include "host_threads.h"
@@ -41,7 +42,7 @@ template<DdlaBackend B,class T>void test(DdlaHandle_t h,bool device) {
         DDLA_CHECK(ddlaDescInit(d,h,std::max(1,n),std::max(1,n),block,block,0,0));
         T* out=job=='V'?&z:nullptr;const int* dz=job=='V'?d:nullptr;
         calls=called=0;info=-1;bool caught=false;
-        try {pheevd<B,T>(h,job,uplo,n,&a,d,&w,out,dz,info);}catch(const std::exception&){caught=true;}
+        try {pheevd<T>(h,job,uplo,n,&a,d,&w,out,dz,info);}catch(const std::exception&){caught=true;}
         require_close(h,"public dispatcher collective rejection",caught==reject?0:1,0);
         if(reject){require_close(h,"rejection before algorithm",calls,0);return;}
         const char* mode=std::getenv("DDLA_EIGEN_METHOD");

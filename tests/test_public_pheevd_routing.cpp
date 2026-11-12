@@ -48,10 +48,10 @@ template<class T>double residual(const ddla::DdlaHandle_t& h,const T* A,const in
                                  const T* Z,const int* dz,const typename ddla::real_type<T>::type* w,int n) {
     using namespace ddla;using R=typename real_type<T>::type;
     DeviceBuffer<T> AZ(h,std::max<std::size_t>(1,local_size(h,dz)));
-    pgemm<DdlaBackend::CPU,T>(h,'N','N',n,n,n,T(1),A,da,Z,dz,T(0),AZ.ptr,dz);
+    pgemm<T>(h,'N','N',n,n,n,T(1),A,da,Z,dz,T(0),AZ.ptr,dz);
     int pr=0,pc=0,mr=0,mc=0;ddlaGetGridDims(h,pr,pc);ddlaGetGridCoords(h,mr,mc);
     const int rows=num_loc(n,dz[DDLA_MB_],mr,dz[DDLA_RSRC_],pr),cols=num_loc(n,dz[DDLA_NB_],mc,dz[DDLA_CSRC_],pc),ld=dz[DDLA_LLD_];
-    for(int j=0;j<cols;++j)axpy<DdlaBackend::CPU,T>(h,rows,T(-w[indx_l2g_c(dz,h,j)]),Z+static_cast<std::size_t>(j)*ld,1,AZ.ptr+static_cast<std::size_t>(j)*ld,1);
+    for(int j=0;j<cols;++j)axpy<T>(h,rows,T(-w[indx_l2g_c(dz,h,j)]),Z+static_cast<std::size_t>(j)*ld,1,AZ.ptr+static_cast<std::size_t>(j)*ld,1);
     check_ddla_sync(h);
     const double a=eig_test::frobenius_norm(h,A,da,n),r=eig_test::frobenius_norm(h,AZ.ptr,dz,n);
     return a>0?r/(n*a*eig_test::eps_trait<R>::value):std::numeric_limits<double>::infinity();
@@ -60,7 +60,7 @@ template<class T>double orthogonal(const ddla::DdlaHandle_t& h,const T* Z,const 
     using namespace ddla;using R=typename real_type<T>::type;
     int dg[DDLA_DLEN_];ddlaDescInit(dg,h,n,n,dz[DDLA_MB_],dz[DDLA_NB_],dz[DDLA_RSRC_],dz[DDLA_CSRC_]);
     DeviceBuffer<T> G(h,std::max<std::size_t>(1,local_size(h,dg)));
-    pgemm<DdlaBackend::CPU,T>(h,'C','N',n,n,n,T(1),Z,dz,Z,dz,T(0),G.ptr,dg);
+    pgemm<T>(h,'C','N',n,n,n,T(1),Z,dz,Z,dz,T(0),G.ptr,dg);
     check_ddla_sync(h);
     int pr=0,pc=0,mr=0,mc=0;ddlaGetGridDims(h,pr,pc);ddlaGetGridCoords(h,mr,mc);
     const int rows=num_loc(n,dg[DDLA_MB_],mr,dg[DDLA_RSRC_],pr),cols=num_loc(n,dg[DDLA_NB_],mc,dg[DDLA_CSRC_],pc),ld=dg[DDLA_LLD_];
@@ -118,7 +118,7 @@ template<class T>void solve(const ddla::DdlaHandle_t& h,int n,int nb,char uplo,b
         if(rank==0)std::printf("PUBLIC_ROUTING_CALL phase=%s type=%s n=%d grid=%dx%d uplo=%c alias=%d shared_parent=%d maxrank_seconds=%.9f clock=whole_call status=PASS\n",phase,scalar_name<T>(),n,pr,pc,uplo,int(alias),int(shared_parent),maximum);
     };
     int info=-1;
-    invoke("public_V",[&]{pheevd<DdlaBackend::CPU,T>(h,'V',uplo,n,A.ptr,da,w.data()+3,output,dz,info);});
+    invoke("public_V",[&]{pheevd<T>(h,'V',uplo,n,A.ptr,da,w.data()+3,output,dz,info);});
     require_close(h,"public V info",info,0);require_close(h,"public V w guards/finite/order",guarded(w)?0:INFINITY,0);
     const auto after_a=download(h,A.ptr,input.size());
     if(shared_parent) {
@@ -137,7 +137,7 @@ template<class T>void solve(const ddla::DdlaHandle_t& h,int n,int nb,char uplo,b
     const double r=residual(h,reference.ptr,da,output,dz,w.data()+3,n),o=orthogonal(h,output,dz,n),norm=eig_test::frobenius_norm(h,reference.ptr,da,n);
     require_close(h,"public independent residual",std::isfinite(r)?r:INFINITY,50);require_close(h,"public independent orthogonality",std::isfinite(o)?o:INFINITY,50);
     upload(h,reference.ptr,input);
-    invoke("public_N",[&]{pheevd<DdlaBackend::CPU,T>(h,'N',uplo,n,reference.ptr,da,wn.data()+3,nullptr,nullptr,info);});
+    invoke("public_N",[&]{pheevd<T>(h,'N',uplo,n,reference.ptr,da,wn.data()+3,nullptr,nullptr,info);});
     require_close(h,"public N info",info,0);require_close(h,"public N w guards/finite/order",guarded(wn)?0:INFINITY,0);
     require_close(h,"public N A inactive parent/LLD padding",padding_and_finite(h,da,download(h,reference.ptr,input.size()),n,sentinel,false),0);
     upload(h,reference.ptr,input);

@@ -91,7 +91,7 @@ void one(const DdlaHandle_t& h,int m,int n,int nb,int start,int width,int kind,i
     std::vector<int> piv(std::max(1,ddla_test::m_loc(h,desc)),-1);
     int info=-1;
     if(routine==0) ddla::pgetf2<B>(h,m-start,n-start,width,d.ptr,row_shift+start+1,col_shift+start+1,desc,piv.data(),info);
-    else ddla::pgetrf<B>(h,m,n,d.ptr,row_shift+1,col_shift+1,desc,piv.data(),info);
+    else ddla::pgetrf(h,m,n,d.ptr,row_shift+1,col_shift+1,desc,piv.data(),info);
     check_ddla_sync(h);
     auto out=download(h,d.ptr,host.size());
     hash_bytes(out.data(),out.size()*sizeof(T)); hash_bytes(piv.data(),piv.size()*sizeof(int));hash_bytes(&info,sizeof(info));
@@ -220,7 +220,7 @@ template<DdlaBackend B> void selector_checks(const DdlaHandle_t& h) {
     DeviceBuffer<double> a(h,initial.size());std::vector<int> piv(std::max(1,ddla_test::m_loc(h,desc)),-1);
     auto call=[&](int routine,int m,int n,int width,int& info,int ia=1,int ja=1) {
         if(routine==0)ddla::pgetf2<B>(h,m,n,width,a.ptr,ia,ja,desc,piv.data(),info);
-        else ddla::pgetrf<B>(h,m,n,a.ptr,ia,ja,desc,piv.data(),info);
+        else ddla::pgetrf(h,m,n,a.ptr,ia,ja,desc,piv.data(),info);
     };
     upload(h,a.ptr,initial);
     for(int routine=0;routine<2;++routine) {
@@ -245,7 +245,7 @@ template<DdlaBackend B> void selector_checks(const DdlaHandle_t& h) {
             bool caught=false;int info=-1;
             try {
                 if(routine==0)ddla::pgetf2<B,double>(h,4,4,1,ap,1,1,desc,pp,info);
-                else ddla::pgetrf<B,double>(h,4,4,ap,1,1,desc,pp,info);
+                else ddla::pgetrf<double>(h,4,4,ap,1,1,desc,pp,info);
             } catch(const std::invalid_argument&){caught=true;}
             require_close(h,"LU missing rank-local storage rejected collectively",caught?0:1,0);
         }
@@ -259,7 +259,7 @@ template<DdlaBackend B> void selector_checks(const DdlaHandle_t& h) {
         setenv("DDLA_LU_PANEL","gather",1);info=-1;call(routine,0,0,0,info);
         require_close(h,"LU empty operation",std::abs(info),0);
         if(routine==0)ddla::pgetf2<B,double>(h,0,0,0,nullptr,5,5,desc,nullptr,info);
-        else ddla::pgetrf<B,double>(h,0,0,nullptr,5,5,desc,nullptr,info);
+        else ddla::pgetrf<double>(h,0,0,nullptr,5,5,desc,nullptr,info);
         require_close(h,"LU empty edge offsets and null storage",std::abs(info),0);
     }
     if(had)setenv("DDLA_LU_PANEL",saved.c_str(),1);else unsetenv("DDLA_LU_PANEL");
@@ -286,14 +286,14 @@ template<DdlaBackend B> void solve_checks(const DdlaHandle_t& h) {
     auto call=[&](int routine,char side,char trans,int n,int nrhs) {
         int info=0;
         switch(routine) {
-        case GETRS: ddla::pgetrs<B,double>(h,side,trans,n,nrhs,a.ptr,dA,ipiv.data(),b.ptr,dB);break;
-        case GETRS_NOPIV: ddla::pgetrs_nopiv<B,double>(h,side,trans,n,nrhs,a.ptr,dA,b.ptr,dB);break;
-        case GETRS_BPIV: ddla::pgetrs_bpiv<B,double>(h,side,trans,n,nrhs,a.ptr,dA,blockpiv.ptr,b.ptr,dB);break;
-        case GESV: ddla::pgesv<B,double>(h,side,trans,n,nrhs,a.ptr,dA,b.ptr,dB);break;
-        case GESV_NOPIV: ddla::pgesv_nopiv<B,double>(h,side,trans,n,nrhs,a.ptr,dA,b.ptr,dB);break;
-        case GESV_BPIV: ddla::pgesv_bpiv<B,double>(h,side,trans,n,nrhs,a.ptr,dA,b.ptr,dB);break;
-        case GETRF_NOPIV: ddla::pgetrf_nopiv<B,double>(h,n,n,a.ptr,dA,info);break;
-        default: ddla::pgetrf_bpiv<B,double>(h,n,n,a.ptr,dA,blockpiv.ptr,info);break;
+        case GETRS: ddla::pgetrs<double>(h,side,trans,n,nrhs,a.ptr,dA,ipiv.data(),b.ptr,dB);break;
+        case GETRS_NOPIV: ddla::pgetrs_nopiv<double>(h,side,trans,n,nrhs,a.ptr,dA,b.ptr,dB);break;
+        case GETRS_BPIV: ddla::pgetrs_bpiv<double>(h,side,trans,n,nrhs,a.ptr,dA,blockpiv.ptr,b.ptr,dB);break;
+        case GESV: ddla::pgesv<double>(h,side,trans,n,nrhs,a.ptr,dA,b.ptr,dB);break;
+        case GESV_NOPIV: ddla::pgesv_nopiv<double>(h,side,trans,n,nrhs,a.ptr,dA,b.ptr,dB);break;
+        case GESV_BPIV: ddla::pgesv_bpiv<double>(h,side,trans,n,nrhs,a.ptr,dA,b.ptr,dB);break;
+        case GETRF_NOPIV: ddla::pgetrf_nopiv<double>(h,n,n,a.ptr,dA,info);break;
+        default: ddla::pgetrf_bpiv<double>(h,n,n,a.ptr,dA,blockpiv.ptr,info);break;
         }
     };
     auto untouched=[&]() {

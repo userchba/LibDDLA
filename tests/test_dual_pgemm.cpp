@@ -1,3 +1,4 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 /**
  * @file test_dual_pgemm.cpp
  * @brief Dual-backend (CPU + GPU) pgemm comparison test.
@@ -139,7 +140,7 @@ static int check_one(
 
     // --- Compute in requested order ---
     auto run_cpu = [&]() {
-        pgemm<DdlaBackend::CPU>(
+        pgemm(
             h_cpu, transa, transb, M, N, K, alpha,
             h_A.data(), descA_cpu, h_B.data(), descB_cpu,
             beta, h_C_cpu.data(), descC_cpu);
@@ -149,7 +150,7 @@ static int check_one(
             pgemm<>(h_gpu, transa, transb, M, N, K, alpha,
                     d_A, descA_gpu, d_B, descB_gpu, beta, d_C, descC_gpu);
         } else {
-            pgemm<DdlaBackend::GPU>(
+            pgemm(
                 h_gpu, transa, transb, M, N, K, alpha,
                 d_A, descA_gpu, d_B, descB_gpu, beta, d_C, descC_gpu);
         }
@@ -275,7 +276,7 @@ static int check_k_zero(DdlaHandle_t h_cpu, DdlaHandle_t h_gpu)
         beta = T(-0.75, 0.5);
     }
 
-    pgemm<DdlaBackend::CPU>(h_cpu, 'N', 'N', M, N, 0, alpha,
+    pgemm(h_cpu, 'N', 'N', M, N, 0, alpha,
                             h_A.data(), descA_cpu, h_B.data(), descB_cpu,
                             beta, h_C_cpu.data(), descC_cpu);
 
@@ -288,7 +289,7 @@ static int check_k_zero(DdlaHandle_t h_cpu, DdlaHandle_t h_gpu)
     TEST("k=0 GPU upload C", up == 0);
     TEST("k=0 GPU sync after upload", ddlaSynchronize(h_gpu) == ddlaStatus_t::DDLA_STATUS_SUCCESS);
 
-    pgemm<DdlaBackend::GPU>(h_gpu, 'N', 'N', M, N, 0, alpha,
+    pgemm(h_gpu, 'N', 'N', M, N, 0, alpha,
                             d_A, descA_gpu, d_B, descB_gpu,
                             beta, d_C, descC_gpu);
     int dl = static_cast<int>(ddlaMemcpy(h_gpu, h_C_gpu.data(), d_C, szC * sizeof(T)));
@@ -448,7 +449,7 @@ int main(int argc, char** argv)
                 msg.find("handle backend GPU") != std::string::npos;
         } catch (...) {
         }
-        TEST("Explicit pgemm backend mismatch rejects with std::runtime_error",
+        TEST("Explicit pgemm internal backend mismatch rejects with std::runtime_error",
              backend_mismatch_caught && backend_mismatch_msg_ok);
 
         int mf = 0;

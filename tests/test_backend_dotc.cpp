@@ -51,7 +51,7 @@ int check_type(DdlaHandle_t h)
         vector<T> dx(h, x.size()), dy(h, y.size()), result(h, 1);
         DDLA_CHECK(ddlaMemcpy(h, dx.data(), x.data(), x.size()*sizeof(T)));
         DDLA_CHECK(ddlaMemcpy(h, dy.data(), y.data(), y.size()*sizeof(T)));
-        dotc<Backend, T>(h, n, dx.data() + px, ix, dy.data() + py, iy, result.data());
+        dotc<T>(h, n, dx.data() + px, ix, dy.data() + py, iy, result.data());
         T got;
         DDLA_CHECK(ddlaMemcpy(h, &got, result.data(), sizeof(T)));
         DDLA_CHECK(ddlaSynchronize(h));

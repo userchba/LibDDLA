@@ -191,16 +191,16 @@ void call_punmbr(const ddla::DdlaHandle_t& handle, char vect, char side, char tr
 {
 #if DDLA_HAS_GPU
     if (ddlaGetBackend(handle) == DdlaBackend::CPU)
-        ddla::punmbr<DdlaBackend::CPU, T>(handle, vect, side, trans, m, n, k, d_A, descA, tau,
+        ddla::punmbr<T>(handle, vect, side, trans, m, n, k, d_A, descA, tau,
                                           d_C, descC, info);
     else
-        ddla::punmbr<DdlaBackend::GPU, T>(handle, vect, side, trans, m, n, k, d_A, descA, tau,
+        ddla::punmbr<T>(handle, vect, side, trans, m, n, k, d_A, descA, tau,
                                           d_C, descC, info);
 #elif DDLA_HAS_GPU
-    ddla::punmbr<DdlaBackend::GPU, T>(handle, vect, side, trans, m, n, k, d_A, descA, tau, d_C,
+    ddla::punmbr<T>(handle, vect, side, trans, m, n, k, d_A, descA, tau, d_C,
                                       descC, info);
 #else
-    ddla::punmbr<DdlaBackend::CPU, T>(handle, vect, side, trans, m, n, k, d_A, descA, tau, d_C,
+    ddla::punmbr<T>(handle, vect, side, trans, m, n, k, d_A, descA, tau, d_C,
                                       descC, info);
 #endif
 }

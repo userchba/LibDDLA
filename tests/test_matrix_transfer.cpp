@@ -1,3 +1,4 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 #include "api_grid_test_common.h"
 #include <cstdint>
 #include <cstring>
@@ -45,7 +46,7 @@ void one(const DdlaHandle_t& h,int M,int N,int mb,int nb,int rs,int cs,int ia,in
     const int ldw=m+5;
     std::vector<T> window(rank==root ? std::size_t(ldw)*n : 0,sentinel);
     DeviceBuffer<T> w(h,window.size());upload(h,w.ptr,window);
-    ddla::gather<B,T>(h,m,n,distributed,ia,ja,d,root,rank==root?w.ptr:nullptr,rank==root?ldw:-7);
+    ddla::gather<T>(h,m,n,distributed,ia,ja,d,root,rank==root?w.ptr:nullptr,rank==root?ldw:-7);
     check_ddla_sync(h);
     auto got=download(h,w.ptr,window.size());auto expected=window;
     if(rank==root)for(int c=0;c<n;++c)for(int r=0;r<m;++r)expected[r+std::size_t(c)*ldw]=value<T>(ia-1+r,ja-1+c);
@@ -53,7 +54,7 @@ void one(const DdlaHandle_t& h,int M,int N,int mb,int nb,int rs,int cs,int ia,in
     require_close(h,"gather preserves source",same(download(h,a.ptr,original.size()),original)?0:1,0);
     if(rank==root)for(int c=0;c<n;++c)for(int r=0;r<m;++r)window[r+std::size_t(c)*ldw]=value<T>(r,c,7001);
     upload(h,w.ptr,window);
-    ddla::scatter<B,T>(h,m,n,distributed,ia,ja,d,root,rank==root?w.ptr:nullptr,rank==root?ldw:-7);
+    ddla::scatter<T>(h,m,n,distributed,ia,ja,d,root,rank==root?w.ptr:nullptr,rank==root?ldw:-7);
     check_ddla_sync(h);
     auto want=original;
     for(int c=0;c<ddla_test::n_loc(h,d);++c)for(int r=0;r<ddla_test::m_loc(h,d);++r) {
@@ -64,8 +65,8 @@ void one(const DdlaHandle_t& h,int M,int N,int mb,int nb,int rs,int cs,int ia,in
     require_close(h,"scatter exact selected entries and untouched exterior/padding",same(download(h,a.ptr,want.size()),want)?0:1,0);
     require_close(h,"scatter preserves root source",same(download(h,w.ptr,window.size()),window)?0:1,0);
     // Empty operations do not inspect storage, even on root.
-    ddla::gather<B,T>(h,0,n,nullptr,M+1,ja,d,root,nullptr,-1);
-    ddla::scatter<B,T>(h,m,0,nullptr,ia,N+1,d,root,nullptr,-1);
+    ddla::gather<T>(h,0,n,nullptr,M+1,ja,d,root,nullptr,-1);
+    ddla::scatter<T>(h,m,0,nullptr,ia,N+1,d,root,nullptr,-1);
 }
 template<DdlaBackend B,class T> void cases(const DdlaHandle_t& h,int size,int pr,int pc) {
     for(int source=0;source<2;++source)for(int root=0;root<size;++root) {
@@ -81,8 +82,8 @@ template<DdlaBackend B,class T> void cases(const DdlaHandle_t& h,int size,int pr
     one<B,T>(h,long_size+8,5,127,3,pr-1,pc-1,3,2,long_size,1,size-1);
     one<B,T>(h,3,long_size+6,2,257,pr-1,pc-1,2,2,1,long_size,size-1);
     int empty[DDLA_DLEN_];DDLA_CHECK(ddlaDescInit(empty,h,0,0,3,5,0,0));
-    ddla::gather<B,T>(h,0,0,nullptr,1,1,empty,size-1,nullptr,-1);
-    ddla::scatter<B,T>(h,0,0,nullptr,1,1,empty,size-1,nullptr,-1);
+    ddla::gather<T>(h,0,0,nullptr,1,1,empty,size-1,nullptr,-1);
+    ddla::scatter<T>(h,0,0,nullptr,1,1,empty,size-1,nullptr,-1);
     // Exact alias of a strided local view; selected rectangle all on root.
     int d[DDLA_DLEN_];DDLA_CHECK(ddlaDescInit(d,h,9,11,9,11,pr-1,pc-1));d[DDLA_LLD_]+=4;
     auto host=make_local<T>(h,d,[](int i,int j){return value<T>(i,j);});
@@ -93,8 +94,8 @@ template<DdlaBackend B,class T> void cases(const DdlaHandle_t& h,int size,int pr
     if(myr==pr-1 && myc==pc-1)rr=rank;
     MPI_Allreduce(MPI_IN_PLACE,&rr,1,MPI_INT,MPI_MAX,ddlaGetCommunicator(h));
     T* local=rank==rr?a.ptr+1+d[DDLA_LLD_]*2:nullptr;
-    ddla::gather<B,T>(h,6,7,host.empty()?nullptr:a.ptr,2,3,d,rr,local,d[DDLA_LLD_]);
-    ddla::scatter<B,T>(h,6,7,host.empty()?nullptr:a.ptr,2,3,d,rr,local,d[DDLA_LLD_]);
+    ddla::gather<T>(h,6,7,host.empty()?nullptr:a.ptr,2,3,d,rr,local,d[DDLA_LLD_]);
+    ddla::scatter<T>(h,6,7,host.empty()?nullptr:a.ptr,2,3,d,rr,local,d[DDLA_LLD_]);
     require_close(h,"matrix transfer exact local alias",same(download(h,a.ptr,host.size()),host)?0:1,0);
 }
 template<DdlaBackend B> void invalid(const DdlaHandle_t& h,int rank,int size) {
@@ -119,10 +120,10 @@ template<DdlaBackend B> void invalid(const DdlaHandle_t& h,int rank,int size) {
         if(kind==11 && rank==0)wp=host.data();
         if(kind==12 && rank==0)ap=host.data();
         bool caught=false;
-        try{ddla::gather<B,double>(h,m,n,ap,ia,ja,desc,root,wp,ld);}catch(const std::invalid_argument&){caught=true;}
+        try{ddla::gather<double>(h,m,n,ap,ia,ja,desc,root,wp,ld);}catch(const std::invalid_argument&){caught=true;}
         require_close(h,"collective gather validation "+std::to_string(kind),caught?0:1,0);
         caught=false;
-        try{ddla::scatter<B,double>(h,m,n,ap,ia,ja,desc,root,wp,ld);}catch(const std::invalid_argument&){caught=true;}
+        try{ddla::scatter<double>(h,m,n,ap,ia,ja,desc,root,wp,ld);}catch(const std::invalid_argument&){caught=true;}
         require_close(h,"collective scatter validation "+std::to_string(kind),caught?0:1,0);
     }
 #if DDLA_HAS_GPU
@@ -131,7 +132,7 @@ template<DdlaBackend B> void invalid(const DdlaHandle_t& h,int rank,int size) {
         if constexpr(B==DdlaBackend::GPU)ddla::gather<DdlaBackend::CPU,double>(h,0,0,nullptr,1,1,d,0,nullptr,0);
         else ddla::gather<DdlaBackend::GPU,double>(h,0,0,nullptr,1,1,d,0,nullptr,0);
     }catch(const std::invalid_argument&){caught=true;}
-    require_close(h,"backend mismatch rejected",caught?0:1,0);
+    require_close(h,"internal backend mismatch rejected",caught?0:1,0);
 #endif
 }
 template<DdlaBackend B> void run(MPI_Comm comm,int pr,int pc,char major) {

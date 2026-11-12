@@ -87,24 +87,12 @@ char bench_uplo()
     return u;
 }
 
-template <DdlaBackend Backend, typename T>
-void factor_matrix(const DdlaHandle_t& handle, int m, int n,
-                   T* A, const int* desc, T* tau, int& info)
-{
-    if (bench_uplo() == 'L') pgeqlf<Backend, T>(handle, m, n, A, desc, tau, info);
-    else pgeqrf<Backend, T>(handle, m, n, A, desc, tau, info);
-}
-
 template <typename T>
 void call_pgeqrf(const DdlaHandle_t& handle, int m, int n,
                  T* A, const int* desc, T* tau, int& info)
 {
-#if DDLA_HAS_GPU
-    if (ddlaGetBackend(handle) == DdlaBackend::GPU)
-        factor_matrix<DdlaBackend::GPU, T>(handle, m, n, A, desc, tau, info);
-    else
-#endif
-        factor_matrix<DdlaBackend::CPU, T>(handle, m, n, A, desc, tau, info);
+    if (bench_uplo() == 'L') pgeqlf<T>(handle, m, n, A, desc, tau, info);
+    else pgeqrf<T>(handle, m, n, A, desc, tau, info);
 }
 
 const char* backend_name(const DdlaHandle_t& handle)

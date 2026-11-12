@@ -28,7 +28,7 @@ int main(int argc, char** argv)
             int piv[65], info = 0, caught = 0;
             try
             {
-                phetrf<DdlaBackend::GPU, T>(h, 'L', 65, a.data(), d, piv, info);
+                phetrf<T>(h, 'L', 65, a.data(), d, piv, info);
             }
             catch (const std::runtime_error& error)
             {
@@ -44,7 +44,7 @@ int main(int argc, char** argv)
             vector<T> one(h, 1);
             const T value(2, 3);
             DDLA_CHECK(ddlaMemcpy(h, one.data(), &value, sizeof(value)));
-            hetrf_nopiv<DdlaBackend::GPU, T>(h, 'U', 1, one.data(), 1, info);
+            hetrf_nopiv<T>(h, 'U', 1, one.data(), 1, info);
             if (info)
                 throw std::runtime_error("GPU stream unusable after collective failure");
         }

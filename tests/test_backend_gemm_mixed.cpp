@@ -1,3 +1,4 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 #include <ddla/ddla.h>
 #include "mpi_test_init.h"
 #include <algorithm>
@@ -59,7 +60,7 @@ int one(DdlaHandle_t h,char ta,char tb,int m,int n,int k,
     const R* ap=product?da.p+guard:nullptr;
     const Z* bp=product?db.p+guard:nullptr;
     if (implicit) gemm<>(h,ta,tb,m,n,k,alpha,ap,lda,bp,ldb,beta,dc.p+guard,ldc);
-    else gemm<BE,R>(h,ta,tb,m,n,k,alpha,ap,lda,bp,ldb,beta,dc.p+guard,ldc);
+    else gemm<R>(h,ta,tb,m,n,k,alpha,ap,lda,bp,ldb,beta,dc.p+guard,ldc);
     const auto out=dc.read(c.size());
     int failures=0;
     for (std::size_t p=0;p<c.size();++p) {
@@ -109,7 +110,7 @@ int one_cr(DdlaHandle_t h,char ta,char tb,int m,int n,int k,
     const bool product=k>0 && alpha!=R(0);
     const Z* ap=product?da.p+guard:nullptr;
     const R* bp=product?db.p+guard:nullptr;
-    gemm<BE,R>(h,ta,tb,m,n,k,alpha,ap,lda,bp,ldb,beta,dc.p+guard,ldc);
+    gemm<R>(h,ta,tb,m,n,k,alpha,ap,lda,bp,ldb,beta,dc.p+guard,ldc);
     const auto out=dc.read(c.size());
     int failures=0;
     for (std::size_t p=0;p<c.size();++p) {
@@ -175,14 +176,15 @@ template <DdlaBackend BE,typename R> int run_type(DdlaHandle_t h) {
         fails+=one<BE,R>(h,'N','N',37,521,519,Z(1),Z(0),true); ++cases;
         fails+=one_cr<BE,R>(h,'N','N',521,37,519,Z(1),Z(0),true); ++cases;
     }
-    if constexpr (BE==default_backend_v) { fails+=one<BE,R>(h,'n','c',9,11,5,Z(1),Z(0),true,true);++cases; }
+    // Mixed scalar deduction also follows nondefault handles in a dual build.
+    fails+=one<BE,R>(h,'n','c',9,11,5,Z(1),Z(0),true,true);++cases;
     // Quick return permits null matrices; invalid metadata is still rejected.
-    gemm<BE,R>(h,'N','N',2,3,0,Z(1),static_cast<const R*>(nullptr),2,
+    gemm<R>(h,'N','N',2,3,0,Z(1),static_cast<const R*>(nullptr),2,
                static_cast<const Z*>(nullptr),1,Z(1),static_cast<Z*>(nullptr),2);
-    gemm<BE,R>(h,'N','N',2,3,0,Z(1),static_cast<const Z*>(nullptr),2,
+    gemm<R>(h,'N','N',2,3,0,Z(1),static_cast<const Z*>(nullptr),2,
                static_cast<const R*>(nullptr),1,Z(1),static_cast<Z*>(nullptr),2);
     auto reject=[&](DdlaHandle_t handle,char a,char b,int m,int n,int k,int la,int lb,int lc) {
-        try { gemm<BE,R>(handle,a,b,m,n,k,Z(1),static_cast<const R*>(nullptr),la,
+        try { gemm<R>(handle,a,b,m,n,k,Z(1),static_cast<const R*>(nullptr),la,
                        static_cast<const Z*>(nullptr),lb,Z(0),static_cast<Z*>(nullptr),lc); }
         catch(const std::exception&) { return 0; } return 1;
     };
@@ -197,7 +199,7 @@ template <DdlaBackend BE,typename R> int run_type(DdlaHandle_t h) {
     fails+=reject(h,'N','N',2,1,1,2,1,1);
     fails+=reject(h,'N','N',1,1,1,1,1,1);
     auto reject_cr=[&](DdlaHandle_t handle,char a,char b,int m,int n,int k,int la,int lb,int lc) {
-        try { gemm<BE,R>(handle,a,b,m,n,k,Z(1),static_cast<const Z*>(nullptr),la,
+        try { gemm<R>(handle,a,b,m,n,k,Z(1),static_cast<const Z*>(nullptr),la,
                        static_cast<const R*>(nullptr),lb,Z(0),static_cast<Z*>(nullptr),lc); }
         catch(const std::exception&) { return 0; } return 1;
     };

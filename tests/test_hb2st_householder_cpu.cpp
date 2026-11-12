@@ -189,7 +189,7 @@ void check_full(const DdlaHandle_t& h,int n,bool upper,bool alias) {
     require_close(h,"HH full independent residual",std::isfinite(residual)?residual:INFINITY,50);
     require_close(h,"HH full independent orthogonality",std::isfinite(orthogonal)?orthogonal:INFINITY,50);
     upload(h,reference.ptr,input);
-    pheevd<DdlaBackend::CPU,T>(h,'N',upper?'U':'L',n,reference.ptr,descA,old.data(),nullptr,nullptr,info);
+    pheevd<T>(h,'N',upper?'U':'L',n,reference.ptr,descA,old.data(),nullptr,nullptr,info);
     require_close(h,"HH reference eigenvalues info",info,0);
     upload(h,reference.ptr,input);
     detail::pheevd_householder<DdlaBackend::CPU, T>(h,'N',upper?'U':'L',n,reference.ptr,descA,only.data(),nullptr,nullptr,info);

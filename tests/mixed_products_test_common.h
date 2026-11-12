@@ -100,7 +100,7 @@ void batch_case(DdlaHandle_t h,int m,int n,int k,int count,char ta,char tb,int m
         require(h,ok&&worst<(std::is_same_v<R,float>?3e-5:3e-12),"mixed batch result/guard failure m="+std::to_string(m)+" n="+std::to_string(n)+" k="+std::to_string(k)+" error="+std::to_string(worst));
     };
     auto reset=[&]{DDLA_CHECK(ddlaMemcpy(h,c.data(),seed.data(),seed.size()*sizeof(T)));};
-    reset();gemmBatched<Backend,R>(h,ta,tb,m,n,k,alpha,alpha==T(0)?nullptr:da.data(),lda,alpha==T(0)?nullptr:db.data(),ldb,beta,dc.data(),ldc,count);check();
+    reset();gemmBatched<R>(h,ta,tb,m,n,k,alpha,alpha==T(0)?nullptr:da.data(),lda,alpha==T(0)?nullptr:db.data(),ldb,beta,dc.data(),ldc,count);check();
     std::size_t bytes=0;{workspace_test::Scope scope(true);if(alpha!=T(0))blas_impl::mixed_gemmBatched_workspace_size<R>(h,m,n,k,std::is_same_v<TA,T>,count,&bytes);query_pure(h,scope.finish());}
     vector<char> work(h,bytes+512);DDLA_CHECK(ddlaMemset(h,work.data(),0x5a,bytes+512));
     for(int rep=0;rep<2;++rep){reset();workspace_test::Scope scope;blas_impl::gemmBatched_run<Backend,T>(h,ta,tb,m,n,k,alpha,da.data(),lda,db.data(),ldb,beta,dc.data(),ldc,count,work.data()+256,bytes);run_reused(h,scope.finish());check();}

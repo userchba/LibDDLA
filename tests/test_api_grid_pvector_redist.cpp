@@ -140,20 +140,20 @@ void check_node_local_arms(const ddla::DdlaHandle_t& handle)
     // gemv: y = A x
     upload(handle, d_A.ptr, A_full);
     upload(handle, d_x.ptr, x);
-    ddla::gemv<Backend, T>(handle, 'N', n, n, T(1.0),
+    ddla::gemv<T>(handle, 'N', n, n, T(1.0),
                            d_A.ptr, n, d_x.ptr, 1, T(0.0), d_r.ptr, 1);
     check_max(tagged("gemv").c_str(), download<T>(handle, d_r.ptr, n), ref_ax, tol);
 
     // hemv (lower) on the same A: y = A x, same reference.
     upload(handle, d_A.ptr, A_full);
-    ddla::hemv<Backend, T>(handle, 'L', n, T(1.0),
+    ddla::hemv<T>(handle, 'L', n, T(1.0),
                            d_A.ptr, n, d_x.ptr, 1, T(0.0), d_r.ptr, 1);
     check_max(tagged("hemv").c_str(), download<T>(handle, d_r.ptr, n), ref_ax, tol);
 
     // trmv (lower, non-unit): x := L x
     upload(handle, d_L.ptr, L_full);
     upload(handle, d_x.ptr, x);
-    ddla::trmv<Backend, T>(handle, 'L', 'N', 'N',
+    ddla::trmv<T>(handle, 'L', 'N', 'N',
                            n, d_L.ptr, n, d_x.ptr, 1);
     check_max(tagged("trmv").c_str(), download<T>(handle, d_x.ptr, n), ref_trx, tol);
 
@@ -170,20 +170,20 @@ void check_node_local_arms(const ddla::DdlaHandle_t& handle)
         upload(handle, d_y.ptr, y);
         if constexpr (Backend == ddla::DdlaBackend::CPU) {
             rt nrm_v{};
-            ddla::nrm2<Backend, T>(handle, n, d_x.ptr, 1, &nrm_v);
+            ddla::nrm2<T>(handle, n, d_x.ptr, 1, &nrm_v);
             require_close(handle, tagged("nrm2").c_str(), std::abs(nrm_v - ref_nrm),
                           static_cast<double>(tol));
             T dot_v{};
-            ddla::dotc<Backend, T>(handle, n, d_x.ptr, 1, d_y.ptr, 1, &dot_v);
+            ddla::dotc<T>(handle, n, d_x.ptr, 1, d_y.ptr, 1, &dot_v);
             check_max(tagged("dotc").c_str(), std::vector<T>{dot_v}, {ref_dot}, tol);
         } else {
             DeviceBuffer<rt> d_nrm(handle, 1);
-            ddla::nrm2<Backend, T>(handle, n, d_x.ptr, 1, d_nrm.ptr);
+            ddla::nrm2<T>(handle, n, d_x.ptr, 1, d_nrm.ptr);
             const auto nrm_v = download<rt>(handle, d_nrm.ptr, 1);
             require_close(handle, tagged("nrm2").c_str(), std::abs(nrm_v[0] - ref_nrm),
                           static_cast<double>(tol));
             DeviceBuffer<T> d_dot(handle, 1);
-            ddla::dotc<Backend, T>(handle, n, d_x.ptr, 1, d_y.ptr, 1, d_dot.ptr);
+            ddla::dotc<T>(handle, n, d_x.ptr, 1, d_y.ptr, 1, d_dot.ptr);
             check_max(tagged("dotc").c_str(), download<T>(handle, d_dot.ptr, 1), {ref_dot}, tol);
         }
     }
@@ -197,7 +197,7 @@ void check_node_local_arms(const ddla::DdlaHandle_t& handle)
         upload(handle, d_x.ptr, x);   // trmv above overwrote x in place
         upload(handle, d_y.ptr, y);
         upload(handle, d_A.ptr, A_full);
-        ddla::her2<Backend, T>(handle, 'L', n, T(1.0),
+        ddla::her2<T>(handle, 'L', n, T(1.0),
                                d_x.ptr, 1, d_y.ptr, 1, d_A.ptr, n);
         std::vector<T> got = download<T>(handle, d_A.ptr, n * n);
         std::vector<T> ref_lower(n * n, T{});
@@ -221,7 +221,7 @@ void check_node_local_arms(const ddla::DdlaHandle_t& handle)
                 C_ref[i + j * n] = acc;
             }
         upload(handle, d_A.ptr, A_full);
-        ddla::herk<Backend, T>(handle, 'L', 'N', n, n,
+        ddla::herk<T>(handle, 'L', 'N', n, n,
                                rt(1.0), d_A.ptr, n, rt(0.0), d_C.ptr, n);
         std::vector<T> got = download<T>(handle, d_C.ptr, n * n);
         rt err{};
@@ -237,7 +237,7 @@ void check_node_local_arms(const ddla::DdlaHandle_t& handle)
         for (int j = 0; j < k2; ++j)
             for (int i = 0; i < n; ++i) B_host[i + j * n] = redist_value<T>(i, j + 9);
         upload(handle, d_AB.ptr, B_host);
-        ddla::hemm<Backend, T>(handle, 'L', 'L', n, k2,
+        ddla::hemm<T>(handle, 'L', 'L', n, k2,
                                T(1.0), d_A.ptr, n, d_AB.ptr, n, T(0.0), d_C2.ptr, n);
         check_max(tagged("hemm").c_str(), download<T>(handle, d_C2.ptr, n * k2), ref_hemm, tol);
     }
@@ -260,7 +260,7 @@ void check_node_local_arms(const ddla::DdlaHandle_t& handle)
             }
         upload(handle, d_AB.ptr, A2);
         upload(handle, d_BB.ptr, B2);
-        ddla::her2k<Backend, T>(handle, 'L', 'N', n, k2,
+        ddla::her2k<T>(handle, 'L', 'N', n, k2,
                                 T(1.0), d_AB.ptr, n, d_BB.ptr, n, rt(0.0), d_C2.ptr, n);
         std::vector<T> got = download<T>(handle, d_C2.ptr, n * n);
         rt err{};
@@ -295,7 +295,7 @@ void check_node_local_arms(const ddla::DdlaHandle_t& handle)
         upload(handle, d_AB.ptr, A2);
         upload(handle, d_BB.ptr, B2);
         upload(handle, d_C2.ptr, std::vector<T>(n * n, T{}));
-        ddla::her2k<Backend, T>(handle, 'L', 'C', n, k2,
+        ddla::her2k<T>(handle, 'L', 'C', n, k2,
                                 T(1.0), d_AB.ptr, k2, d_BB.ptr, k2, rt(0.0), d_C2.ptr, n);
         std::vector<T> got = download<T>(handle, d_C2.ptr, n * n);
         rt err{};
@@ -323,7 +323,7 @@ void check_node_local_arms(const ddla::DdlaHandle_t& handle)
             }
         upload(handle, d_A.ptr, A_full);
         upload(handle, d_C.ptr, std::vector<T>(n * n, T{}));
-        ddla::herk<Backend, T>(handle, 'U', 'C', n, n,
+        ddla::herk<T>(handle, 'U', 'C', n, n,
                                rt(1.0), d_A.ptr, n, rt(0.0), d_C.ptr, n);
         std::vector<T> got = download<T>(handle, d_C.ptr, n * n);
         rt err{};
@@ -341,21 +341,21 @@ void check_node_local_arms(const ddla::DdlaHandle_t& handle)
         upload(handle, d_y.ptr, y);
         if constexpr (Backend == ddla::DdlaBackend::CPU) {
             rt got_nrm{};
-            ddla::nrm2<Backend, T>(handle, n, d_x.ptr, 1, &got_nrm);
+            ddla::nrm2<T>(handle, n, d_x.ptr, 1, &got_nrm);
             require_close(handle, tagged("nrm2<CPU>").c_str(),
                           static_cast<double>(std::abs(got_nrm - ref_nrm)), static_cast<double>(tol));
             T got_dot{};
-            ddla::dotc<Backend, T>(handle, n, d_x.ptr, 1, d_y.ptr, 1, &got_dot);
+            ddla::dotc<T>(handle, n, d_x.ptr, 1, d_y.ptr, 1, &got_dot);
             require_close(handle, tagged("dotc<CPU>").c_str(),
                           static_cast<double>(std::abs(got_dot - ref_dot)), static_cast<double>(tol));
         } else {
             DeviceBuffer<rt> d_nrm2(handle, 1);
-            ddla::nrm2<Backend, T>(handle, n, d_x.ptr, 1, d_nrm2.ptr);
+            ddla::nrm2<T>(handle, n, d_x.ptr, 1, d_nrm2.ptr);
             const auto got_nrm = download<rt>(handle, d_nrm2.ptr, 1);
             require_close(handle, tagged("nrm2<GPU>").c_str(),
                           static_cast<double>(std::abs(got_nrm[0] - ref_nrm)), static_cast<double>(tol));
             DeviceBuffer<T> d_dot2(handle, 1);
-            ddla::dotc<Backend, T>(handle, n, d_x.ptr, 1, d_y.ptr, 1, d_dot2.ptr);
+            ddla::dotc<T>(handle, n, d_x.ptr, 1, d_y.ptr, 1, d_dot2.ptr);
             require_close(handle, tagged("dotc<GPU>").c_str(),
                           static_cast<double>(std::abs(download<T>(handle, d_dot2.ptr, 1)[0] - ref_dot)),
                           static_cast<double>(tol));

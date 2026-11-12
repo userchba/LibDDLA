@@ -98,7 +98,7 @@ void check_pgeadd_transpose_sources(DdlaHandle_t h) {
         int da[DDLA_DLEN_],dc[DDLA_DLEN_];
         std::copy(a.d,a.d+DDLA_DLEN_,da); std::copy(c.d,c.d+DDLA_DLEN_,dc);
         da[DDLA_M_]=9; da[DDLA_N_]=7; dc[DDLA_M_]=7; dc[DDLA_N_]=9;
-        pgeadd<Backend>(h,conjugate?'C':'T','N',7,9,T(1),a.data, 1, 1,da,
+        pgeadd(h,conjugate?'C':'T','N',7,9,T(1),a.data, 1, 1,da,
                         T(0),c.data, 1, 1,dc,c.data, 1, 1,dc);
         auto out=c.download(),input=a.download(); int bad=0,any=0;
         for (std::size_t idx=0;idx<out.size();++idx) {

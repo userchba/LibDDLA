@@ -33,3 +33,8 @@ find_package(MPI REQUIRED COMPONENTS CXX)
 add_test(NAME installed_consumer_mpi
     COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1
             ${MPIEXEC_PREFLAGS} $<TARGET_FILE:installed_consumer> ${MPIEXEC_POSTFLAGS})
+
+# The relocated installed headers must hide the former Backend template API.
+set(DDLA_PUBLIC_CHECK_INCLUDES ${_ddla_includes})
+include(${CMAKE_CURRENT_SOURCE_DIR}/../public_api_compile_checks.cmake)
+ddla_check_public_scalar_api()

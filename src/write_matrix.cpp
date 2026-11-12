@@ -1,4 +1,5 @@
 #include "write_matrix.h"
+#include "ddla_stream.h"
 #include "instantiate.h"
 
 #include <cassert>
@@ -74,6 +75,44 @@ void write_matrix(const T* A, int m, int n, const char* filename)
     if(!output)return;
     matrix_io_impl::write_matrix_run<Backend,T>(A,m,n,output,host_work.data(),host_bytes);
 }
+
+// The public form selects the memory domain from the handle. Keep the old
+// no-handle backend overloads above for private callers and existing binaries.
+template <typename T>
+void write_matrix(const DdlaHandle_t& handle, const T* A, int m, int n, const char* filename)
+{
+    if (!handle)
+        throw std::runtime_error("write_matrix: null handle");
+#if DDLA_HAS_GPU
+    if (handle->backend == DdlaBackend::GPU) {
+        if (!matrix_io_impl::write_matrix_check(A, m, n, filename))
+            return;
+        std::size_t host_bytes = 0;
+        matrix_io_impl::write_matrix_workspace_size<DdlaBackend::GPU, T>(m, n, &host_bytes);
+        std::vector<char> host_work(host_bytes);
+        std::ofstream output(filename, std::ios::out | std::ios::trunc);
+        if (!output)
+            return;
+        const auto count = std::size_t(m) * std::size_t(n);
+        char* cursor = host_work.data();
+        T* host = detail::take<T>(cursor, count);
+        assert(std::size_t(cursor - host_work.data()) <= host_bytes);
+        // Explicit D2H retains the device-pointer contract. This read follows
+        // queued producers on this handle, including a nondefault stream.
+        GPU_CHECK(gpuMemcpyAsync(host, A, count * sizeof(T), gpuMemcpyDeviceToHost,
+                                 static_cast<gpuStream_t>(handle->stream)));
+        DDLA_CHECK(ddlaSynchronize(handle));
+        write_host_matrix(host, m, n, output);
+        return;
+    }
+#endif
+    return write_matrix<DdlaBackend::CPU, T>(A, m, n, filename);
+}
+
+#define INSTANTIATE_PUBLIC_WRITE(TYPE) \
+    template void write_matrix<TYPE>(const DdlaHandle_t&, const TYPE*, int, int, const char*)
+DDLA_FOR_EACH_TYPE(INSTANTIATE_PUBLIC_WRITE)
+#undef INSTANTIATE_PUBLIC_WRITE
 
 #define INSTANTIATE_WRITE_MATRIX(BACKEND, TYPE)                              \
     template void write_matrix<BACKEND, TYPE>(                               \

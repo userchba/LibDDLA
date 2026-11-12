@@ -267,13 +267,13 @@ void call_pgeqrf(const ddla::DdlaHandle_t& handle, int m, int n,
 {
 #if DDLA_HAS_GPU
     if (ddlaGetBackend(handle) == DdlaBackend::CPU)
-        ddla::pgeqrf<DdlaBackend::CPU, T>(handle, m, n, d_A, desc, tau, info);
+        ddla::pgeqrf<T>(handle, m, n, d_A, desc, tau, info);
     else
-        ddla::pgeqrf<DdlaBackend::GPU, T>(handle, m, n, d_A, desc, tau, info);
+        ddla::pgeqrf<T>(handle, m, n, d_A, desc, tau, info);
 #elif DDLA_HAS_GPU
-    ddla::pgeqrf<DdlaBackend::GPU, T>(handle, m, n, d_A, desc, tau, info);
+    ddla::pgeqrf<T>(handle, m, n, d_A, desc, tau, info);
 #else
-    ddla::pgeqrf<DdlaBackend::CPU, T>(handle, m, n, d_A, desc, tau, info);
+    ddla::pgeqrf<T>(handle, m, n, d_A, desc, tau, info);
 #endif
 }
 

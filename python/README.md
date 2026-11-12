@@ -35,7 +35,6 @@ the Python package. A Python-only binding build needs no Fortran compiler:
 
 ```bash
 cmake -S . -B build-python \
-  -DDDLA_USE_CPU=ON \
   -DDDLA_CPU_BLAS_LIBRARY=/path/to/libopenblas.so \
   -DDDLA_ENABLE_PYTHON=ON
 cmake --build build-python --target ddla_python --parallel 4
@@ -49,7 +48,11 @@ The package requires NumPy; install `./python[mpi]` to add optional `mpi4py`.
 `DDLA_LIB_PATH` names the native shared library itself. For an installed
 native prefix, `DDLA_DIR=/path/to/install` searches its `lib` and `lib64`
 directories. Load the matching MPI and backend runtime libraries as well.
-The native library must include the backend requested by `Handle`.
+The native library must include the backend requested by `Handle`. The
+C++ public API now also selects computation from the handle; this does not
+change Python `Handle`, type prefixes or C error statuses. The Cholesky
+interface cleanup is described below. The generated C bridge calls the scalar-only C++ entry points
+without a second CPU/GPU execution dispatcher.
 
 Distributed operations are collective over the handle's communicator. Launch the example
 below with an MPI rank count covered by the scheduler allocation, for example
@@ -97,3 +100,13 @@ take arguments through `B, ldb`; the former separate `C, ldc` output
 arguments were removed. Update direct `_c_api` calls and use the generated
 bindings from the same source revision as the native library. The high-level
 distributed `ddla.ptrmm` interface already overwrites B and is unchanged.
+
+## Cholesky compatibility
+
+`ppotrf` returns `(A, info)` and `pposv` returns `(B, info)`; they no longer
+return a sign flag. `ppotrs(A, B, uplo='L')` no longer accepts `is_nega` or
+`location`, and its factor A is read-only. A nonpositive pivot is reported
+through positive `info`; the driver leaves the right-hand side unchanged
+when factorization fails. Use the regenerated ctypes/Fortran bindings and
+native C library from the same source revision, since the native Cholesky
+argument lists changed as well.

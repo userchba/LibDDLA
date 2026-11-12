@@ -21,13 +21,13 @@ template<class T,ddla::DdlaBackend Backend=ddla::DdlaBackend::CPU> IntegrationRe
     const auto before=a;std::vector<T>t(std::max<std::size_t>(1,std::size_t(steps)*b*b),T(7));int info=0;bool used=false;
     if constexpr(Backend==ddla::DdlaBackend::CPU) {
         if(upper)used=ddla::detail::phe2hb_upper_cpu<T>(h,n,a.data(),da,b,t.data(),info,tile);
-        else ddla::phe2hb<Backend,T>(h,n,a.data(),da,b,t.data(),info);
+        else ddla::phe2hb<T>(h,n,a.data(),da,b,t.data(),info);
     } else {
 #if DDLA_HAS_GPU
         ddla::vector<T> device_a(h,a.size()),device_t(h,t.size());
         DDLA_CHECK(ddlaMemcpy(h,device_a.data(),a.data(),a.size()*sizeof(T)));
         DDLA_CHECK(ddlaMemcpy(h,device_t.data(),t.data(),t.size()*sizeof(T)));
-        ddla::phe2hb<Backend,T>(h,n,device_a.data(),da,b,device_t.data(),info);
+        ddla::phe2hb<T>(h,n,device_a.data(),da,b,device_t.data(),info);
         DDLA_CHECK(ddlaMemcpy(h,a.data(),device_a.data(),a.size()*sizeof(T)));
         DDLA_CHECK(ddlaMemcpy(h,t.data(),device_t.data(),t.size()*sizeof(T)));
         DDLA_CHECK(ddlaSynchronize(h));

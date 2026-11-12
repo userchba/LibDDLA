@@ -27,6 +27,8 @@ void check_ppotrf(int n, const DdlaHandle_t& ddla_handle)
 
     printf("myid:%d, m_loc:%d, n_loc:%d, mb:%d, nb:%d, m:%d, n:%d\n", ddla_handle->myid, ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), matrix_desc[DDLA_MB_], matrix_desc[DDLA_NB_], matrix_desc[DDLA_M_], matrix_desc[DDLA_N_]);
     bool verbose = false;
+    DdlaHandle_t host_io = nullptr;
+    if (verbose) DDLA_CHECK(ddlaInit(host_io, DdlaBackend::CPU));
 
     std::complex<double>* d_A;
     std::complex<double>* d_A_copy;
@@ -84,7 +86,7 @@ void check_ppotrf(int n, const DdlaHandle_t& ddla_handle)
         std::string filename = "before_potrf_myid_";
         filename += std::to_string(ddla_handle->myid);
         filename += ".txt";
-        write_matrix<DdlaBackend::CPU>(a.data(), ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), filename.c_str());
+        write_matrix(host_io,a.data(), ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), filename.c_str());
     }
     
     // DDLA_CHECK(ddlaMemcpy(ddla_handle, d_A_copy, d_A, size));
@@ -102,7 +104,7 @@ void check_ppotrf(int n, const DdlaHandle_t& ddla_handle)
         std::string filename = "ppotrf_myid_";
         filename += std::to_string(ddla_handle->myid);
         filename += ".txt";
-        write_matrix<DdlaBackend::CPU>(a.data(), ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), filename.c_str());
+        write_matrix(host_io,a.data(), ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), filename.c_str());
     }
     DDLA_CHECK(ddlaSynchronize(ddla_handle));
     {
@@ -229,7 +231,7 @@ void check_ppotrf(int n, const DdlaHandle_t& ddla_handle)
         std::string filename = "potrf_myid_";
         filename += std::to_string(ddla_handle->myid);
         filename += ".txt";
-        write_matrix<DdlaBackend::CPU>(a.data(), ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), filename.c_str());
+        write_matrix(host_io,a.data(), ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), filename.c_str());
     }
     {
         printf("myid:%d, start check potrf\n", ddla_handle->myid);
@@ -264,6 +266,7 @@ void check_ppotrf(int n, const DdlaHandle_t& ddla_handle)
     DDLA_CHECK(ddlaFree(ddla_handle, d_info));
 
     
+    if (host_io) DDLA_CHECK(ddlaDestroy(host_io));
 }
 int main(int argc, char* argv[]) {  
     ddla_test_mpi_init(&argc, &argv);

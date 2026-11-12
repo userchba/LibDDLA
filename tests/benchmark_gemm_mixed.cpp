@@ -39,9 +39,9 @@ void bench(DdlaHandle_t h,int m,int n,int k,char ta,char tb,int reps,char varian
     if (variant=='c') for (std::size_t p=0;p<nb;++p) { bcr[p]=b[p].real(); b[p]=Z(bcr[p],0); }
     Buffer<R> da(h,a),dbc(h,bcr); Buffer<Z> dac(h,ac),db(h,b),dc(h,c),dr(h,ref);
     const Z alpha(1),beta(0);
-    auto mixed=[&]{if(variant=='c')gemm<BE,R>(h,ta,tb,m,n,k,alpha,dac.p,lda,dbc.p,ldb,beta,dc.p,m);
-                   else gemm<BE,R>(h,ta,tb,m,n,k,alpha,da.p,lda,db.p,ldb,beta,dc.p,m);};
-    auto full=[&]{gemm<BE,Z>(h,ta,tb,m,n,k,alpha,dac.p,lda,db.p,ldb,beta,dr.p,m);};
+    auto mixed=[&]{if(variant=='c')gemm<R>(h,ta,tb,m,n,k,alpha,dac.p,lda,dbc.p,ldb,beta,dc.p,m);
+                   else gemm<R>(h,ta,tb,m,n,k,alpha,da.p,lda,db.p,ldb,beta,dc.p,m);};
+    auto full=[&]{gemm<Z>(h,ta,tb,m,n,k,alpha,dac.p,lda,db.p,ldb,beta,dr.p,m);};
     // beta=0 overwrites C, so each repetition has identical inputs. Host/device
     // input copies and preconversion of A for the complex baseline are untimed.
     // API wall time includes packing, combine, allocation, free and completion.

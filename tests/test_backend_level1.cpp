@@ -89,7 +89,7 @@ int check_axpy()
     ddlaMalloc(handle, reinterpret_cast<void**>(&d_y), y.size() * sizeof(T));
     ddlaMemcpy(handle, d_x, x.data(), x.size() * sizeof(T));
     ddlaMemcpy(handle, d_y, y.data(), y.size() * sizeof(T));
-    ddla::axpy<Backend>(handle, n, alpha, d_x, incx, d_y, incy);
+    ddla::axpy(handle, n, alpha, d_x, incx, d_y, incy);
     ddlaSynchronize(handle);
     ddlaMemcpy(handle, y.data(), d_y, y.size() * sizeof(T));
     ddlaSynchronize(handle);
@@ -123,7 +123,7 @@ int check_iamax()
     ddlaMalloc(handle, reinterpret_cast<void**>(&d_x), x.size() * sizeof(T));
     ddlaMemcpy(handle, d_x, x.data(), x.size() * sizeof(T));
     int result = -1;
-    ddla::iamax<Backend>(handle, n, d_x, incx, result);
+    ddla::iamax(handle, n, d_x, incx, result);
     ddlaSynchronize(handle);
     ddlaFree(handle, d_x);
     ddlaDestroy(handle);
@@ -166,7 +166,7 @@ int check_geru()
     ddlaMemcpy(handle, d_x, x.data(), x.size() * sizeof(T));
     ddlaMemcpy(handle, d_y, y.data(), y.size() * sizeof(T));
     ddlaMemcpy(handle, d_A, A.data(), A.size() * sizeof(T));
-    ddla::geru<Backend>(handle, m, n, alpha, d_x, incx, d_y, incy, d_A, m);
+    ddla::geru(handle, m, n, alpha, d_x, incx, d_y, incy, d_A, m);
     ddlaSynchronize(handle);
     ddlaMemcpy(handle, A.data(), d_A, A.size() * sizeof(T));
     ddlaSynchronize(handle);
@@ -200,7 +200,7 @@ int check_scal()
     T* d_x = nullptr;
     ddlaMalloc(handle, reinterpret_cast<void**>(&d_x), x.size() * sizeof(T));
     ddlaMemcpy(handle, d_x, x.data(), x.size() * sizeof(T));
-    ddla::scal<Backend>(handle, n, alpha, d_x, incx);
+    ddla::scal(handle, n, alpha, d_x, incx);
     ddlaSynchronize(handle);
     ddlaMemcpy(handle, x.data(), d_x, x.size() * sizeof(T));
     ddlaSynchronize(handle);
@@ -250,7 +250,7 @@ int check_swap(int incx, int incy)
     ddlaMalloc(handle, reinterpret_cast<void**>(&d_y), y.size() * sizeof(T));
     ddlaMemcpy(handle, d_x, x.data(), x.size() * sizeof(T));
     ddlaMemcpy(handle, d_y, y.data(), y.size() * sizeof(T));
-    ddla::swap<Backend>(handle, n, d_x, incx, d_y, incy);
+    ddla::swap(handle, n, d_x, incx, d_y, incy);
     ddlaSynchronize(handle);
     ddlaMemcpy(handle, x.data(), d_x, x.size() * sizeof(T));
     ddlaMemcpy(handle, y.data(), d_y, y.size() * sizeof(T));

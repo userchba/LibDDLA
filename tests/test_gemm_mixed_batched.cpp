@@ -34,9 +34,9 @@ template <DdlaBackend Backend> void run(bool large) {
     using T=std::complex<double>;
     const double* const* a=nullptr;
     const T* const* b=nullptr;
-    gemmBatched<Backend,double>(h,'N','N',7,7,7,T(0),a,7,b,7,T(1),nullptr,7,3);
+    gemmBatched<double>(h,'N','N',7,7,7,T(0),a,7,b,7,T(1),nullptr,7,3);
     int rejected=0;
-    try {gemmBatched<Backend,double>(h,'N','N',7,7,7,T(0),a,7,b,7,T(1),nullptr,7,-1);}
+    try {gemmBatched<double>(h,'N','N',7,7,7,T(0),a,7,b,7,T(1),nullptr,7,-1);}
     catch (const std::invalid_argument&) {rejected=1;}
     require(h,rejected,"negative batch count accepted");
     int cases=0;

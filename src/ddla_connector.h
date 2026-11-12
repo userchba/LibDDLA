@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <ddla/ddla_handle_t.h>
+#include "backend_api.h"
 
 namespace ddla{
 
