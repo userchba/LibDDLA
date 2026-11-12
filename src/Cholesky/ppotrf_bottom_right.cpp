@@ -78,6 +78,12 @@ void ppotrf_bottom_right_run(
     void* backend_work, std::size_t backend_bytes, void* host_work, [[maybe_unused]] std::size_t host_bytes
 )
 {
+    if (handle->nprocs==1) {
+        lapack_impl::potrf_bottom_right_run<Backend,T>(handle,uplo,n,A,descA[DDLA_LLD_],info,
+            backend_work,backend_bytes);
+        return;
+    }
+
     if(n==0){info=0;return;}
     int nprows=handle->nprows_,npcols=handle->npcols_,myprow=handle->myprow_,mypcol=handle->mypcol_;
     info=0;

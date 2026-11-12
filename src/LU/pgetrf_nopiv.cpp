@@ -35,6 +35,10 @@ template <typename T>
 void pgetrf_nopiv_workspace_size(const DdlaHandle_t& handle, int m, int n, const int* array_descA,
                                  std::size_t* backend_bytes)
 {
+    if (handle->nprocs == 1) {
+        *backend_bytes=detail::padded_bytes<int>(1);
+        return;
+    }
     std::size_t host_bytes = 0;
     pgetrf_block_workspace_size<T>(handle, false, m, n, nullptr, array_descA, backend_bytes, &host_bytes);
 }
@@ -43,6 +47,15 @@ template <DdlaBackend Backend, typename T>
 void pgetrf_nopiv_run(const DdlaHandle_t& handle, int m, int n, T* A, const int* array_descA, int& info,
                       void* backend_work, std::size_t backend_bytes)
 {
+    if (handle->nprocs == 1) {
+        info=0;
+        if (m<=0 || n<=0) return;
+        int* status=static_cast<int*>(backend_work);
+        lapack_impl::getrf_nopiv_run<Backend,T>(handle,m,n,A,array_descA[DDLA_LLD_],status);
+        DDLA_CHECK(ddlaMemcpy(handle,&info,status,sizeof(int)));
+        DDLA_CHECK(ddlaSynchronize(handle));
+        return;
+    }
     pgetrf_block_run<Backend, T>(handle, false, m, n, A, array_descA, nullptr, info,
                                  backend_work, backend_bytes, nullptr, 0);
 }

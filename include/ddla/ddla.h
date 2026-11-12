@@ -2233,6 +2233,31 @@ void pstedc(
     int& info
 );
 
+/**
+ * @brief Single-process symmetric eigensolver (float or double).
+ *
+ * jobz='N' returns eigenvalues; 'V' also overwrites A with eigenvectors.
+ * Reads only uplo='U'/'L', destroys the active n-by-n block, and preserves
+ * leading-dimension padding. A, w (ascending), and info are all in the handle's
+ * backend memory, including device memory for GPU calls. No MPI communication.
+ * info is zero on success, negative for a vendor argument error and positive
+ * for nonconvergence. GPU work is ordered on the handle stream; synchronize
+ * before consuming results on the host. n=0 only sets info to zero.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void syevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
+           T* A, int lda, T* w, int* info);
+
+/**
+ * @brief Single-process Hermitian eigensolver (complex float or double).
+ *
+ * Same storage, job, triangle and info conventions as syevd; w has the real
+ * component type. The imaginary diagonal is ignored. Eigenvectors replace A.
+ */
+template <DdlaBackend Backend = default_backend_v, typename T>
+void heevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
+           T* A, int lda, typename real_type<T>::type* w, int* info);
+
 // Hermitian eigensolver interfaces; shared by CPU and GPU backends.
 template <typename T>
 struct hb2st_rot {
@@ -2244,11 +2269,13 @@ struct hb2st_rot {
 /**
  * @brief Distributed Hermitian eigensolver with runtime method selection.
  *
- * When DDLA_EIGEN_METHOD is unset, empty or auto, a conservative measured
- * policy chooses one-stage or two-stage from the scalar type, order, job,
+ * When DDLA_EIGEN_METHOD is unset, empty or auto, a single-rank call uses
+ * host LAPACK or the local GPU vendor eigensolver.
+ * Multiple ranks use a policy choosing one-stage or two-stage from scalar type, order, job,
  * block/grid layout, cached host budget, shared-node topology and GPU support.
- * Calls outside the measured profiles retain two-stage. Nonempty two-stage
- * tuning options (for example DDLA_EIG_NBW) retain their two-stage meaning.
+ * Multi-rank calls outside measured profiles retain two-stage. On multiple
+ * ranks, nonempty two-stage tuning options (for example DDLA_EIG_NBW) retain
+ * their two-stage meaning.
  * DDLA_EIGEN_METHOD=one_stage or two_stage forces that explicit method.
  * The selector is read on every call and must agree across the process grid.
  * Invalid values or inconsistent selections throw collectively before either

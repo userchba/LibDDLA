@@ -412,6 +412,11 @@ template <typename T>
 void ptrtrm_workspace_size(const DdlaHandle_t& h, char ta, char tb, int n,
     const int* da, const int* db, const int* dc, std::size_t* bytes, std::size_t* host)
 {
+    if (h->nprocs == 1) {
+        *host=0;
+        blas_impl::trtrm_workspace_size<T>(h,n,bytes);
+        return;
+    }
     ptrtrm_base_workspace_size<T>(h,n,da,db,dc,bytes,host);
     if(n==0 || (ta=='N' && tb=='N')) return;
     std::size_t extra=0,extra_host=0;
@@ -436,6 +441,11 @@ void ptrtrm_run(const DdlaHandle_t& h, char ua, char ta, char ub, char tb, int n
     void* host, std::size_t host_bytes)
 {
     if(n==0 || (alpha==T(0) && beta==T(1))) return;
+    if (h->nprocs == 1) {
+        blas_impl::trtrm_run<Backend,T>(h,ua,ta,ub,tb,n,alpha,A,da[DDLA_LLD_],
+            B,db[DDLA_LLD_],beta,C,dc[DDLA_LLD_],work,bytes);
+        return;
+    }
     const char ea=ta=='N'?ua:(ua=='U'?'L':'U'),eb=tb=='N'?ub:(ub=='U'?'L':'U');
     if(alpha==T(0)) scale_output<Backend,T>(h,ea,eb,n,beta,C,dc);
     else if(ta=='N' && tb=='N')

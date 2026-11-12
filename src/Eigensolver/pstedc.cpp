@@ -80,6 +80,34 @@ void stedc(char compz, int n, double* d, double* e, double* z, int ldz, double* 
     dstedc_(&compz, &n, d, e, z, &ldz, work, &lwork, iwork, &liwork, &info);
 }
 
+namespace {
+// The local LAPACK interface uses 32-bit workspace counts. Larger vector
+// problems keep the existing bounded-leaf engine.
+bool local_stedc_cpu(const PstedcVectorPlan& p) {
+    return p.backend==DdlaBackend::CPU && p.ranks==1 &&
+        std::size_t(p.n)*(std::size_t(p.n)+4)+1<=std::size_t(INT_MAX);
+}
+template<class R>std::size_t local_stedc_bytes(int n,bool vectors) {
+    const std::size_t count=vectors?std::size_t(n)*(std::size_t(n)+4)+1:1;
+    const std::size_t integers=vectors?3+5*std::size_t(n):1;
+    return detail::padded_bytes<R>(std::max(1,n-1))+detail::padded_bytes<R>(count)+
+        detail::padded_bytes<int>(integers);
+}
+template<class R>void local_stedc_run(const DdlaHandle_t& h,char job,int n,R* d,R* e,R* w,R* z,int ldz,void* scratch) {
+    char* cursor=static_cast<char*>(scratch);
+    R* off=detail::take<R>(cursor,std::max(1,n-1));
+    if(n>1)std::copy_n(e,n-1,off);
+    std::memmove(w,d,std::size_t(n)*sizeof(R));
+    const int count=job=='I'?int(std::size_t(n)*(std::size_t(n)+4)+1):1;
+    const int integers=job=='I'?3+5*n:1;
+    R* work=detail::take<R>(cursor,count);int* iwork=detail::take<int>(cursor,integers);
+    R dummy=0;if(!z)z=&dummy;
+    int info=0;detail::ScopedBlasThreads threads(h->host_threads);
+    stedc(job,n,w,off,z,ldz,work,count,iwork,integers,info);
+    if(info)throw std::runtime_error("pstedc: local STEDC failed, info="+std::to_string(info));
+}
+}
+
 // ?LAED8 with ICOMPQ = 0: Q and Q2 are not referenced (a dummy is passed),
 // but LDQ/LDQ2 must still be >= max(1, n).
 template <typename rt, typename F>
@@ -526,7 +554,7 @@ PstedcVectorPlan pstedc_policy(const DdlaHandle_t& h, int n)
                 policy[2] = int(std::min<long>(v, INT_MAX));
         }
     }
-    MPI_CHECK(MPI_Bcast(policy, 3, MPI_INT, 0, h->comm));
+    if(p.ranks>1)MPI_CHECK(MPI_Bcast(policy, 3, MPI_INT, 0, h->comm));
     p.leaf = policy[0];
     p.split = policy[1];
     // On a multi-rank grid, a single leaf would solve and broadcast the
@@ -540,9 +568,11 @@ PstedcVectorPlan pstedc_policy(const DdlaHandle_t& h, int n)
     }
     int onnode = 1;
     MPI_Comm node = MPI_COMM_NULL;
-    MPI_CHECK(MPI_Comm_split_type(h->comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &node));
-    MPI_CHECK(MPI_Comm_size(node, &onnode));
-    MPI_CHECK(MPI_Comm_free(&node));
+    if(p.ranks>1) {
+        MPI_CHECK(MPI_Comm_split_type(h->comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &node));
+        MPI_CHECK(MPI_Comm_size(node, &onnode));
+        MPI_CHECK(MPI_Comm_free(&node));
+    }
     p.threads = h->host_threads;
     p.profile = eig_profile_enabled();
     const auto rows = (static_cast<unsigned long long>(n) + p.ranks - 1) / p.ranks;
@@ -625,6 +655,10 @@ void pstedc_workspace_size(const DdlaHandle_t&, const PstedcVectorPlan& p, std::
     *host_bytes = 0;
     if (!p.n)
         return;
+    if(local_stedc_cpu(p)) {
+        *backend_bytes=local_stedc_bytes<R>(p.n,true);
+        return;
+    }
     const bool gpu = p.backend == DdlaBackend::GPU;
     const std::size_t n = p.n;
     const int leaves = pstedc_leaves(p.n, p.leaf), mine = pstedc_my_leaves(leaves, p.rank, p.ranks);
@@ -689,6 +723,10 @@ void pstedc_workspace_size(const DdlaHandle_t& h, const PstedcPlan& p, std::size
     const auto& a = p.rows;
     if (!a.n)
         return;
+    if(local_stedc_cpu(a)) {
+        *backend_bytes=local_stedc_bytes<R>(a.n,false);
+        return;
+    }
     const std::size_t n = a.n;
     const int leaves = pstedc_leaves(a.n, a.leaf), mine = pstedc_my_leaves(leaves, a.rank, a.ranks);
     const std::size_t m = pstedc_leaf_geometry(a.n, leaves, leaves - 1);
@@ -776,6 +814,12 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
     const int n = policy.n, ldy = policy.ldy;
     if (!n)
         return;
+    if constexpr(B==DdlaBackend::CPU) {
+        if(local_stedc_cpu(policy)) {
+            local_stedc_run(handle,'I',n,d,e,w,dY,ldy,backend_work);
+            return;
+        }
+    }
     MPI_Comm comm = handle->comm;
     const int P = policy.ranks, me = policy.rank;
     const MPI_Datatype mt = detail::mpi_datatype<rt>();
@@ -1413,6 +1457,13 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcPlan& policy, rt* d, rt*
             pstedc_run<B, rt>(handle, policy.rows, *rows, d, e, w, vectors, nullptr, backend_work,
                              backend_bytes, host_work, host_bytes);
             return;
+        }
+
+        if constexpr(B==DdlaBackend::CPU) {
+            if(local_stedc_cpu(policy.rows)) {
+                local_stedc_run(handle,'N',policy.rows.n,d,e,w,static_cast<rt*>(nullptr),1,backend_work);
+                return;
+            }
         }
 
         using detail::take;

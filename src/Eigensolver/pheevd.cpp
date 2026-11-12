@@ -2,6 +2,7 @@
 #include "check_agree.h"
 #include "instantiate.h"
 #include "eig_params.h"
+#include "pheevd_impl.h"
 #include "host_threads.h"
 
 #include <cstdlib>
@@ -88,6 +89,10 @@ void pheevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
         }
         return selected;
     });
+    if (!mode && handle->nprocs == 1) {
+        detail::pheevd_local<Backend,T>(handle,jobz,uplo,n,A,descA,w,Z,descZ,info);
+        return;
+    }
     if (!mode && automatic_shape && handle->nprocs > 1)
         MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &prefer_one, 1, MPI_INT, MPI_MIN, handle->comm));
     const bool one_stage = mode == 1 || (!mode && prefer_one);

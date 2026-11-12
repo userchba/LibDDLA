@@ -82,6 +82,7 @@ template<class T> void solve(const ddla::DdlaHandle_t& h, const Environment& met
             bad += std::memcmp(&after_z[at], &expected, sizeof(T)) ? 1 : 0;
         }
     }
+    if(bad)std::cout<<"PHEEVD_GUARD_FAILURE n="<<n<<" scalar_bytes="<<sizeof(T)<<" uplo="<<uplo<<" alias="<<alias<<" automatic="<<automatic<<std::endl;
     require_close(h, "selected method finite vectors and parent/LLD guards", bad, 0);
     upload(h, a.ptr, input);
     ddla::pheevd(h, 'N', uplo, n, a.ptr, da, values.data(), static_cast<T*>(nullptr), nullptr, info);
@@ -124,7 +125,9 @@ void selection(const ddla::DdlaHandle_t& h, const Environment& method, const Env
     // including the unset/empty defaults and per-call changes in one process.
     band.set("3");
     for (const char* value : {static_cast<const char*>(nullptr), "", "auto", "two_stage", "one_stage", "two_stage", "one_stage"}) {
-        method.set(value); invoke(17, !value || std::strcmp(value, "one_stage") != 0);
+        method.set(value);
+        const bool automatic = !value || !*value || std::strcmp(value,"auto")==0;
+        invoke(17, (!automatic || ranks>1) && (!value || std::strcmp(value,"one_stage")!=0));
     }
     band.set("16");
 }
@@ -132,6 +135,39 @@ template<class T> void cases(const ddla::DdlaHandle_t& h, const Environment& met
     for (bool one : {false, true}) for (char uplo : {'U', 'L'}) {
         for (int n : {0, 1, 17, 33}) solve<T>(h, method, n, uplo, one, false);
         solve<T>(h, method, 33, uplo, one, true);
+    }
+}
+template<class T> void overlap_local(const ddla::DdlaHandle_t& h, const Environment& method) {
+    using R=typename ddla::real_type<T>::type;
+    int ranks=0;MPI_Comm_size(ddlaGetCommunicator(h),&ranks);if(ranks!=1)return;
+    const int n=17;
+    for(char uplo:{'U','L'})for(int shift:{0,1}) {
+        int da[ddla::DDLA_DLEN_],dz[ddla::DDLA_DLEN_];
+        ddlaDescInit(da,h,n+2,n+3,16,16,0,0);da[ddla::DDLA_LLD_]+=4;
+        std::copy_n(da,ddla::DDLA_DLEN_,dz);dz[ddla::DDLA_LLD_]+=2;
+        const auto size=std::max(local_size(h,da),std::size_t(shift)+local_size(h,dz));
+        std::vector<T> initial(size,T(12345));
+        for(int j=0;j<n;++j)for(int i=0;i<n;++i)
+            initial[i+std::size_t(j)*da[ddla::DDLA_LLD_]]= (uplo=='U'?i<=j:i>=j)?entry<T>(i,j):T(std::numeric_limits<R>::quiet_NaN());
+        DeviceBuffer<T> a(h,size),reference(h,local_size(h,da));
+        upload(h,a.ptr,initial);
+        const auto full=make_local<T>(h,da,[&](int i,int j){return i<n&&j<n?entry<T>(i,j):T(12345);});
+        upload(h,reference.ptr,full);
+        std::vector<R> w(n+2,R(9876));int info=-1;
+        method.set("auto");T* z=a.ptr+shift;
+        ddla::pheevd(h,'V',uplo,n,a.ptr,da,w.data()+1,z,dz,info);
+        require_close(h,"local overlapping output info",info,0);
+        require_close(h,"local overlapping output residual",eig_test::residual_metric<T>(h,reference.ptr,da,z,dz,w.data()+1,n),50);
+        require_close(h,"local overlapping output orthogonality",eig_test::orthogonality_metric<T>(h,z,dz,n),50);
+        auto after=download(h,a.ptr,size);std::vector<bool> active(size,false);
+        for(int j=0;j<n;++j)for(int i=0;i<n;++i) {
+            active[i+std::size_t(j)*da[ddla::DDLA_LLD_]]=true;
+            active[shift+i+std::size_t(j)*dz[ddla::DDLA_LLD_]]=true;
+        }
+        bool guards=w.front()==R(9876)&&w.back()==R(9876);
+        for(std::size_t i=0;i<size;++i)if(!active[i])guards=guards&&!std::memcmp(&after[i],&initial[i],sizeof(T));
+        for(int i=1;i<=n;++i)guards=guards&&std::isfinite(w[i])&&(i==1||w[i]>=w[i-1]);
+        require_close(h,"local overlapping matrix/scalar guards",guards?0:1,0);
     }
 }
 void body(const ddla::DdlaHandle_t& h, const Shape&) {
@@ -147,6 +183,8 @@ void body(const ddla::DdlaHandle_t& h, const Shape&) {
     };
     automatic(float{}); automatic(double{});
     automatic(std::complex<float>{}); automatic(std::complex<double>{});
+    overlap_local<float>(h,method);overlap_local<double>(h,method);
+    overlap_local<std::complex<float>>(h,method);overlap_local<std::complex<double>>(h,method);
 }
 }
 int main(int argc, char** argv) { return run_grid_test(argc, argv, "test_pheevd_method", body); }

@@ -1,3 +1,4 @@
+#include "gebrd_local.h"
 // ---------------------------------------------------------------------------
 // Distributed Householder bidiagonalization (ScaLAPACK PxGEBRD semantics):
 // A = Q B P^H with B upper bidiagonal (m >= n) or lower bidiagonal (m < n),
@@ -204,11 +205,15 @@ PgebrdPlan pgebrd_check(const DdlaHandle_t& handle,DdlaBackend backend,int m,int
 
 // Component 2 (svd_workspace.h).
 template <typename T>
-void pgebrd_workspace_size(const DdlaHandle_t&, const PgebrdPlan& p, std::size_t* backend_bytes)
+void pgebrd_workspace_size(const DdlaHandle_t& h, const PgebrdPlan& p, std::size_t* backend_bytes)
 {
     using rt = typename real_type<T>::type;
     *backend_bytes = 0;
     if (!p.k) return;
+    if(h->nprocs==1 && (p.backend==DdlaBackend::CPU || p.m>=p.n)) {
+        local_gebrd_workspace_size<T>(h,p.m,p.n,backend_bytes);
+        return;
+    }
     const std::size_t nred = brd_reduce_count(p);
     std::size_t bytes = detail::padded_bytes<T>(static_cast<std::size_t>(p.ldv) * 2 * p.nbp)
                       + detail::padded_bytes<T>(static_cast<std::size_t>(p.ldy) * 2 * p.nbp)
@@ -234,6 +239,10 @@ void pgebrd_run(const DdlaHandle_t& handle,const PgebrdPlan& p,T* A,const int*,
 
     static_assert(Backend!=DdlaBackend::GPU||DDLA_HAS_GPU,"GPU pgebrd is not available");
     info=0;if(!p.k)return;
+    if(handle->nprocs==1 && (Backend==DdlaBackend::CPU || p.m>=p.n)) {
+        local_gebrd_run<Backend,T>(handle,p.m,p.n,A,p.lld,d,e,tauq,taup,info,backend_work,backend_bytes);
+        return;
+    }
     const int m=p.m,n=p.n,k=p.k,mb=p.mb,nb=p.nb,rsrc=p.rsrc,csrc=p.csrc,lld=p.lld;
     const int nprows=p.nprows,npcols=p.npcols,myprow=p.myprow,mypcol=p.mypcol;
     const int mloc=p.mloc,nloc=p.nloc,nbp=p.nbp,ldv=p.ldv,ldy=p.ldy;

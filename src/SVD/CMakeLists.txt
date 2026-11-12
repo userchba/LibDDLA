@@ -4,8 +4,10 @@
 target_sources(ddla_lib PRIVATE
     pbdsdc.cpp
     pgebrd.cpp
+    gebrd_local.cpp
     punmbr.cpp
     pgesvd.cpp
+    gesvd_local.cpp
 )
 if(DDLA_HAS_GPU)
     target_sources(ddla_lib PRIVATE pgebrd_kernels.cpp)

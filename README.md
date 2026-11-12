@@ -130,7 +130,21 @@ in `src/Eigensolver/`.
 - `two_stage`: force full → band → tridiagonal.
 - `one_stage`: force direct Householder reduction to tridiagonal.
 
-Automatic selection is conservative: it considers the scalar type, matrix order,
+Local `syevd` (real) and `heevd` (complex) use the same backend-templated
+interface as the other single-process solvers:
+`(handle, jobz, uplo, n, A, lda, w, info)`. A, w and the `int* info` are in the
+handle's backend memory; GPU callers synchronize before copying device results to the host.
+The private check, workspace query and unchecked execution can reuse scratch.
+
+On a single-rank grid, automatic calls use LAPACK SYEVD/HEEVD on CPU or
+cuSOLVER/hipSOLVER on GPU directly. The leading active block and UPLO are passed
+to the local solver; eigenvalues still return in host memory, and eigenvectors
+are copied to `Z` when necessary. Padding is preserved unless it overlaps active
+`Z`. Exact in-place output needs no matrix copy; other overlapping A/Z layouts
+use one compact temporary matrix. Explicit one-stage/two-stage choices retain
+their algorithms, including on one rank.
+
+Automatic selection on multiple ranks is conservative: it considers the scalar type, matrix order,
 eigenvalues/eigenvectors request, block/grid layout, cached host thread budget,
 shared-memory topology and GPU support. Unmeasured profiles retain two-stage.
 Nonempty two-stage tuning options, such as `DDLA_EIG_NBW`, keep the two-stage

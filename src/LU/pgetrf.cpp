@@ -14,6 +14,7 @@
 #include "check_agree.h"
 #include "plan_util.h"
 #include "lu_panel.h"
+#include "lapack_impl.h"
 #include "pgetrf_impl.h"
 #include "instantiate.h"
 
@@ -47,6 +48,14 @@ void pgetrf_workspace_size(const DdlaHandle_t& handle, bool gather, int m, int n
 {
     *backend_bytes = *host_bytes = 0;
     if (m == 0 || n == 0) return;
+    if (handle->nprocs == 1) {
+        lapack_impl::getrf_workspace_size<T>(handle,m,n,A+(ia-1)+std::size_t(ja-1)*desc[DDLA_LLD_],
+            desc[DDLA_LLD_],backend_bytes);
+        *backend_bytes += detail::padded_bytes<int>(std::min(m,n));
+        if (handle->backend == DdlaBackend::GPU)
+            *backend_bytes += detail::padded_bytes<int>(1);
+        return;
+    }
     int nprows, npcols, myprow, mypcol;
     ddlaGetGridDims(handle, nprows, npcols);
     ddlaGetGridCoords(handle, myprow, mypcol);
@@ -79,6 +88,30 @@ void pgetrf_run(const DdlaHandle_t& handle, bool gather, int m, int n, T* A, int
         info = 0;
         if (m == 0 || n == 0) return;
 
+        if (handle->nprocs == 1) {
+            const int k=std::min(m,n);
+            char* work=static_cast<char*>(backend_work);
+            int* piv=detail::take<int>(work,k);
+            int* status=&info;
+            std::size_t used=detail::padded_bytes<int>(k);
+            if constexpr (Backend == DdlaBackend::GPU) {
+                status=detail::take<int>(work,1);
+                used+=detail::padded_bytes<int>(1);
+            }
+            lapack_impl::getrf_run<Backend,T>(handle,m,n,A+(ia-1)+std::size_t(ja-1)*desc[DDLA_LLD_],
+                desc[DDLA_LLD_],piv,status,work,backend_bytes-used);
+            if constexpr (Backend == DdlaBackend::GPU) {
+                DDLA_CHECK(ddlaMemcpy(handle,&info,status,sizeof(int)));
+                DDLA_CHECK(ddlaSynchronize(handle));
+            }
+            // Preserve the distributed interface's untouched pivot suffix on
+            // singular input, although the local vendor continues factoring.
+            const int count=info>0?std::min(k,info):(info==0?k:0);
+            DDLA_CHECK(ddlaMemcpy(handle,ipiv+ia-1,piv,std::size_t(count)*sizeof(int)));
+            if constexpr (Backend == DdlaBackend::GPU) DDLA_CHECK(ddlaSynchronize(handle));
+            for (int i=0;i<count;++i) ipiv[ia-1+i]+=ia-1;
+            return;
+        }
         int nprows, npcols, myprow, mypcol;
         ddlaGetGridDims(handle, nprows, npcols);
         ddlaGetGridCoords(handle, myprow, mypcol);

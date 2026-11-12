@@ -88,6 +88,11 @@ void ppotrf_workspace_size(const DdlaHandle_t& handle, char uplo, int n, T* A, c
 {
     *backend_bytes = *host_bytes = 0;
     if (n <= 0) return;
+    if (handle->nprocs==1 && !is_head) {
+        lapack_impl::potrf_workspace_size<T>(handle,uplo,n,A,descA[DDLA_LLD_],backend_bytes);
+        if (handle->backend==DdlaBackend::GPU) *backend_bytes+=detail::padded_bytes<int>(1);
+        return;
+    }
     std::size_t count[3];
     panel_counts(handle, uplo, n, descA, false, count);
     const std::size_t lists = 3 * detail::padded_bytes<T*>(batch_capacity(handle, n, descA));
@@ -126,6 +131,10 @@ void ppotrf_bottom_right_workspace_size(const DdlaHandle_t& handle, char uplo, i
 {
     *backend_bytes = *host_bytes = 0;
     if (n <= 0) return;
+    if (handle->nprocs==1) {
+        lapack_impl::potrf_bottom_right_workspace_size<T>(handle,uplo,n,A,backend_bytes);
+        return;
+    }
     std::size_t count[3];
     panel_counts(handle, uplo, n, descA, true, count);
     const std::size_t lists = 3 * detail::padded_bytes<T*>(batch_capacity(handle, n, descA));
