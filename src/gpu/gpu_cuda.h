@@ -87,6 +87,12 @@ inline gpusolverFillMode_t gpusolverFillMode(gpublasFillMode_t uplo) { return up
 #define gpusolverZgetrf(h, m, n, A, lda, work, lwork, ipiv, info) \
     cusolverDnZgetrf(h, m, n, A, lda, work, ipiv, info)
 
+// Normalize the native GESVD workspace query (HIP includes job flags).
+#define gpusolverSgesvd_bufferSize(h, ju, jv, m, n, work) cusolverDnSgesvd_bufferSize(h, m, n, work)
+#define gpusolverDgesvd_bufferSize(h, ju, jv, m, n, work) cusolverDnDgesvd_bufferSize(h, m, n, work)
+#define gpusolverCgesvd_bufferSize(h, ju, jv, m, n, work) cusolverDnCgesvd_bufferSize(h, m, n, work)
+#define gpusolverZgesvd_bufferSize(h, ju, jv, m, n, work) cusolverDnZgesvd_bufferSize(h, m, n, work)
+
 // ---- vendor features and launch helpers --------------------------------------------------
 // cuSOLVER has laswp, hipSOLVER does not (HIP falls back to a row-swap loop, see laswp.cpp).
 #define GPU_HAS_SOLVER_LASWP 1

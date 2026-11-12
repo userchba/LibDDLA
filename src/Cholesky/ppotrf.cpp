@@ -45,6 +45,22 @@ bool ppotrf_run(
 )
 {
     if(n==0){info=0;return false;}
+    if (handle->nprocs==1 && !is_head) {
+        char* work=static_cast<char*>(backend_work);
+        int* status=&info;
+        std::size_t used=0;
+        if constexpr (Backend==DdlaBackend::GPU) {
+            status=detail::take<int>(work,1);
+            used=detail::padded_bytes<int>(1);
+        }
+        lapack_impl::potrf_run<Backend,T>(handle,uplo,n,A,array_descA[DDLA_LLD_],status,
+            work,backend_bytes-used);
+        if constexpr (Backend==DdlaBackend::GPU) {
+            DDLA_CHECK(ddlaMemcpy(handle,&info,status,sizeof(int)));
+            DDLA_CHECK(ddlaSynchronize(handle));
+        }
+        return false;
+    }
     bool is_nega=false;
     int nprows=handle->nprows_,npcols=handle->npcols_,myprow=handle->myprow_,mypcol=handle->mypcol_;
     DdlaHandle_t ddla_handle=handle;

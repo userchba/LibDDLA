@@ -23,6 +23,7 @@
 #include "ddla_desc.h"
 #include "mpi_datatype.h"
 #include "pgesvd_workspace.h"
+#include "gesvd_local.h"
 #include "check_agree.h"
 #include <optional>
 #include "plan_util.h"
@@ -144,6 +145,11 @@ void pgesvd_workspace_size(const DdlaHandle_t& h,const PgesvdPlan& p,std::size_t
     using R=typename real_type<T>::type;using detail::padded_bytes;
     *backend_bytes=0;*host_bytes=0;
     if(!p.k)return;
+    // The GPU row-D&C driver is faster than vendor GESVD for full vectors.
+    if (h->nprocs==1 && p.backend==DdlaBackend::CPU) {
+        local_gesvd_workspace_size<T>(h,p.jobu,p.jobvt,p.m,p.n,backend_bytes,host_bytes);
+        return;
+    }
     const bool wantu=p.jobu=='V',wantvt=p.jobvt=='V',vectors=wantu||wantvt;
     const std::size_t k=p.k;
     std::size_t brd=0,unm_u=0,unm_u_host=0,unm_v=0,unm_v_host=0;
@@ -176,6 +182,12 @@ void pgesvd_run(const DdlaHandle_t& handle,const PgesvdPlan& p,detail::DcHostTea
         static_assert(Backend != DdlaBackend::GPU || DDLA_HAS_GPU,
                       "GPU pgesvd is not available in this LibDDLA build");
         info=0;const int m=p.m,n=p.n,k=p.k;if(!k)return;
+        if (handle->nprocs==1 && Backend==DdlaBackend::CPU) {
+            local_gesvd_run<Backend,T>(handle,p.jobu,p.jobvt,m,n,A,p.descA[DDLA_LLD_],s,
+                U,p.jobu=='V'?p.descU[DDLA_LLD_]:1,VT,p.jobvt=='V'?p.descVT[DDLA_LLD_]:1,
+                info,backend_work,backend_bytes,host_work,host_bytes);
+            return;
+        }
         const bool wantu=p.jobu=='V',wantvt=p.jobvt=='V';
         const int* descA=p.descA.data();const int* descU=p.descU.data();const int* descVT=p.descVT.data();
         MPI_Comm comm=handle->comm;
@@ -265,7 +277,8 @@ void pgesvd(
     std::exception_ptr failure;
     try{spectral_impl::pgesvd_workspace_size<T>(handle,p,&backend_bytes,&host_bytes);
         backend_work.resize(backend_bytes);host_work.resize(host_bytes);
-        if(const int threads=spectral_impl::pgesvd_team_threads(p))team.emplace(threads);}
+        if(handle->nprocs!=1 || Backend==DdlaBackend::GPU)
+            if(const int threads=spectral_impl::pgesvd_team_threads(p))team.emplace(threads);}
     catch(...){failure=std::current_exception();}
     detail::agree_failure(handle->comm,failure,"pgesvd: workspace preparation");
     spectral_impl::pgesvd_run<Backend,T>(handle,p,team?&*team:nullptr,A,s,U,VT,info,

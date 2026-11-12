@@ -140,7 +140,7 @@ void ptrmm_workspace_size(const DdlaHandle_t& handle, char side, char trans, int
                           std::size_t* backend_bytes, std::size_t* host_bytes)
 {
     *backend_bytes = *host_bytes = 0;
-    if (alpha_is_zero || m == 0 || n == 0) return;
+    if (alpha_is_zero || m == 0 || n == 0 || handle->nprocs == 1) return;
     const bool left = side == 'L';
     std::size_t count[4], add_bytes = 0;
     scratch_counts(handle, left, m, n, descA, descB, count);
@@ -158,6 +158,11 @@ void ptrmm_run(const DdlaHandle_t& handle, char side, char uplo, char trans, cha
 {
     try {
         if (m == 0 || n == 0) return;
+        if (handle->nprocs == 1) {
+            blas_impl::trmm_run<Backend,T>(handle,side,uplo,trans,diag,m,n,alpha,
+                A,descA[DDLA_LLD_],B,descB[DDLA_LLD_]);
+            return;
+        }
         const bool left = side == 'L';
         const int order = left ? m : n;
         const int nb = descA[DDLA_MB_];

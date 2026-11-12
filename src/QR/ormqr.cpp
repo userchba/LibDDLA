@@ -151,7 +151,7 @@ void prepare(const DdlaHandle_t &h, const Geometry &p, const T *tau, Workspace<T
         for (int j = 0; j < p.k; ++j)
             if (indxg2p(j, p.nb, p.csrc, h->npcols_) == h->mypcol_)
                 w.host_tau[j] = tau[indxg2l(j, p.nb, h->npcols_)];
-        MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, w.host_tau.data(), p.k, detail::mpi_datatype<T>(),
+        if(h->npcols_>1)MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, w.host_tau.data(), p.k, detail::mpi_datatype<T>(),
                                 MPI_SUM, h->row_comm));
         DDLA_CHECK(
             ddlaMemcpy(h, w.device_tau.data(), w.host_tau.data(), std::size_t(p.k) * sizeof(T)));

@@ -86,7 +86,7 @@ void ptrtrs_workspace_size(const DdlaHandle_t& handle, char side, char trans, in
                            std::size_t* backend_bytes, std::size_t* host_bytes)
 {
     *backend_bytes = *host_bytes = 0;
-    if (m == 0 || n == 0) return;
+    if (m == 0 || n == 0 || handle->nprocs == 1) return;
     const int nb = array_descA[DDLA_MB_], order = side == 'L' ? m : n;
     std::size_t count[3], transport_bytes = 0;
     scratch_counts(handle, side, m, n, array_descA, array_descB, count);
@@ -109,6 +109,11 @@ void ptrtrs_run(const DdlaHandle_t& handle,
 {
     try {
         if(m==0 || n==0)return;
+        if (handle->nprocs == 1) {
+            blas_impl::trsm_run<Backend,T>(handle,side,uplo,trans,diag,m,n,T(1),
+                A,array_descA[DDLA_LLD_],B,array_descB[DDLA_LLD_]);
+            return;
+        }
         int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
         ddlaGetGridDims(handle, nprows, npcols);
         ddlaGetGridCoords(handle, myprow, mypcol);

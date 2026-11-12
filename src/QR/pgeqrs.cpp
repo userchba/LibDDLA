@@ -7,6 +7,7 @@
 #include "mpi_datatype.h"
 #include "require_backend.h"
 #include "PBLAS/ptrtrs_impl.h"
+#include "BLAS/blas_impl.h"
 #include "SVD/svd_workspace.h"
 #include "instantiate.h"
 
@@ -53,6 +54,20 @@ void pgeqrs(const DdlaHandle_t& handle, int m, int n, int nrhs,
     detail::descriptor_signature(signature + 10, descB);
     detail::agree_signature(handle, "pgeqrs", signature);
     if (n == 0 || nrhs == 0) return;
+
+    if(handle->nprocs==1) {
+        vector<T> device_tau(handle,Backend==DdlaBackend::GPU?n:0);
+        const T* factors=tau;
+        if constexpr(Backend==DdlaBackend::GPU) {
+            DDLA_CHECK(ddlaMemcpy(handle,device_tau.data(),tau,std::size_t(n)*sizeof(T)));
+            factors=device_tau.data();
+        }
+        ormqr<Backend,T>(handle,'L','C',m,nrhs,n,A,descA[DDLA_LLD_],factors,B,descB[DDLA_LLD_],info);
+        if(!info)blas_impl::trsm_run<Backend,T>(handle,'L','U','N','N',n,nrhs,T(1),
+            const_cast<T*>(A),descA[DDLA_LLD_],B,descB[DDLA_LLD_]);
+        DDLA_CHECK(ddlaSynchronize(handle));
+        return;
+    }
 
     // For m >= n the Q-left punmbr path uses QR's columns, unit diagonal,
     // and forward reflector product. Its tau input is replicated on the host.

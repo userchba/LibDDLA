@@ -160,6 +160,34 @@ template <DdlaBackend Backend>
 void potrf_bottom_right_block_check(char uplo, int n, const void* A, int lda, int global_offset,
                                     const void* work, const void* info_buffer, const DdlaHandle_t& handle);
 
+// ===========================================================================
+// syevd / heevd (shared local symmetric/Hermitian eigensolver)
+// ===========================================================================
+
+template <DdlaBackend B>
+void heevd_check(const DdlaHandle_t&, char&, char&, int, const void*, int,
+                       const void*, const int*);
+
+// Vendor workspace query: no allocation or matrix writes. Counts are elements,
+// not bytes. CPU needs work/rwork/iwork; GPU also saves leading-dimension
+// padding because vendor SYEVD/HEEVD may use it as temporary storage.
+template <class T>
+void heevd_workspace_size(const DdlaHandle_t&, char, char, int, T*, int,
+    typename real_type<T>::type*, int& lwork, int& lrwork, int& liwork, std::size_t& padding_elements);
+
+// Unchecked, allocation-free vendor execution. GPU w and info are device
+// pointers; CPU w and info are host pointers. Work follows the handle stream.
+template <DdlaBackend B, class T>
+void heevd_run(const DdlaHandle_t&, char, char, int, T*, int,
+    typename real_type<T>::type*, T*, int, typename real_type<T>::type*, int,
+    int*, int, int*, T* padding);
+
+// Shared convenience owner used by public real SYEVD and complex HEEVD.
+// Inner callers instead use the check/query/run components and reuse scratch.
+template <DdlaBackend B, class T>
+void heevd_allocate(const DdlaHandle_t&, char, char, int, T*, int,
+                     typename real_type<T>::type*, int*);
+
 }} // namespace ddla::lapack_impl
 
 #endif // DDLA_LAPACK_IMPL_H

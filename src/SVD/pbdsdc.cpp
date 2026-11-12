@@ -39,6 +39,9 @@
 // as in src/pstedc.cpp).  OpenBLAS's LAPACK: the same library code the
 // reference ?BDSDC runs.
 extern "C" {
+void sbdsdc_(const char*,const char*,const int*,float*,float*,float*,const int*,float*,const int*,float*,int*,float*,int*,int*);
+void dbdsdc_(const char*,const char*,const int*,double*,double*,double*,const int*,double*,const int*,double*,int*,double*,int*,int*);
+
 double dlamch_(const char*);
 float slamch_(const char*);
 double dlanst_(const char*, const int*, const double*, const double*);
@@ -773,10 +776,12 @@ void pbdsdc_freeze_policy(const DdlaHandle_t& h,PbdsdcPlan& p)
 {
     if(!p.n)return;
     if(!p.rank)p.leaf=std::min(256,dc_leaf_size("DDLA_SVD_DC_LEAF",128));
-    MPI_CHECK(MPI_Bcast(&p.leaf,1,MPI_INT,0,h->comm));
+    if(h->nprocs>1)MPI_CHECK(MPI_Bcast(&p.leaf,1,MPI_INT,0,h->comm));
     int onnode=1;MPI_Comm node=MPI_COMM_NULL;
-    MPI_CHECK(MPI_Comm_split_type(h->comm,MPI_COMM_TYPE_SHARED,0,MPI_INFO_NULL,&node));
-    MPI_CHECK(MPI_Comm_size(node,&onnode));MPI_CHECK(MPI_Comm_free(&node));
+    if(h->nprocs>1) {
+        MPI_CHECK(MPI_Comm_split_type(h->comm,MPI_COMM_TYPE_SHARED,0,MPI_INFO_NULL,&node));
+        MPI_CHECK(MPI_Comm_size(node,&onnode));MPI_CHECK(MPI_Comm_free(&node));
+    }
     p.threads=p.n>p.leaf?detail::dc_host_threads(onnode,p.backend==DdlaBackend::CPU?h->host_threads:0):1;
 }
 
@@ -811,6 +816,12 @@ void pbdsdc_workspace_size(const DdlaHandle_t&,const PbdsdcPlan& p,
     using detail::padded_bytes;
     *backend_bytes=0;*host_bytes=0;
     if(!p.n)return;
+    if(p.backend==DdlaBackend::CPU && p.ranks==1 &&
+        std::size_t(p.n)*(3*std::size_t(p.n)+4)<=std::size_t(INT_MAX)) {
+        *host_bytes=padded_bytes<rt>(3*std::size_t(p.n)*p.n+4*std::size_t(p.n))+
+            padded_bytes<int>(8*std::size_t(p.n));
+        return;
+    }
     const std::size_t n=p.n;const int L=std::min(p.n,p.leaf);
     const int rows=detail::RowShare(p.n,p.ranks).count(p.rank);
     const std::size_t leaf_phase=padded_bytes<PbdsdcLeaf>(n)+padded_bytes<rt>(pbdsdc_retained_bound(p))
@@ -831,6 +842,44 @@ void pbdsdc_run(const DdlaHandle_t& h,const PbdsdcPlan& p,detail::DcHostTeam& te
     using detail::take;
     info=0;const int k=p.n;if(!k)return;
     try {
+    if constexpr(B==DdlaBackend::CPU) {
+        if(p.ranks==1 && std::size_t(p.n)*(3*std::size_t(p.n)+4)<=std::size_t(INT_MAX)) {
+            char* cursor=static_cast<char*>(host_work);
+            rt* work=detail::take<rt>(cursor,3*std::size_t(k)*k+4*std::size_t(k));
+            int* iwork=detail::take<int>(cursor,8*std::size_t(k));
+            const bool diagonal=k==1 || std::all_of(e,e+k-1,[](rt x){return x==rt(0);});
+            if(diagonal) {
+                std::copy_n(d,k,work);
+                for(int i=0;i<k;++i)iwork[i]=i;
+                std::sort(iwork,iwork+k,[&](int a,int b){
+                    const rt av=std::abs(work[a]),bv=std::abs(work[b]);
+                    return av==bv?a<b:av>bv;
+                });
+                for(int j=0;j<k;++j) {
+                    std::fill_n(U+std::size_t(j)*p.ld,k,rt(0));
+                    std::fill_n(V+std::size_t(j)*p.ld,k,rt(0));
+                    const int row=iwork[j];
+                    s[j]=std::abs(work[row]);
+                    U[row+std::size_t(j)*p.ld]=work[row]<rt(0)?rt(-1):rt(1);
+                    V[row+std::size_t(j)*p.ld]=rt(1);
+                }
+                return;
+            }
+            const char vectors='I';rt dummy=0;int dummy_index=0;
+            detail::ScopedBlasThreads threads(h->host_threads);
+            if constexpr(std::is_same_v<rt,float>)
+                sbdsdc_(&p.uplo,&vectors,&k,d,e,U,&p.ld,V,&p.ld,&dummy,&dummy_index,work,iwork,&info);
+            else
+                dbdsdc_(&p.uplo,&vectors,&k,d,e,U,&p.ld,V,&p.ld,&dummy,&dummy_index,work,iwork,&info);
+            if(info)throw std::runtime_error("pbdsdc: local BDSDC failed, info="+std::to_string(info));
+            std::memmove(s,d,std::size_t(k)*sizeof(rt));
+            // BDSDC returns V^T; the public row-slab interface returns V.
+            for(int i=0;i<k-1;++i)
+                blas_impl::swap_run<DdlaBackend::CPU,rt>(h,k-i-1,V+i+1+std::size_t(i)*p.ld,1,
+                    V+i+std::size_t(i+1)*p.ld,p.ld);
+            return;
+        }
+    }
     if(p.uplo=='L')std::swap(U,V);
     const int P=p.ranks,me=p.rank,ld=p.ld,leaf=p.leaf;
     const detail::RowShare share(k,P);const int lo=share.lo(me),rows=share.count(me);

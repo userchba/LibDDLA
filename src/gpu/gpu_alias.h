@@ -60,6 +60,9 @@ constexpr auto GPUBLAS_STATUS_SUCCESS = DDLA_GPU_BLAS_CONST(STATUS_SUCCESS);
 // ---- solver ------------------------------------------------------------------------------------
 using gpusolverHandle_t = DDLA_GPU_SOLVER(Handle_t);
 using gpusolverStatus_t = DDLA_GPU_SOLVER_BASE(Status_t);
+using gpusolverEigMode_t = DDLA_GPU_SOLVER_BASE(EigMode_t);
+constexpr auto GPUSOLVER_EIG_MODE_VECTOR = DDLA_GPU_SOLVER_CONST(EIG_MODE_VECTOR);
+constexpr auto GPUSOLVER_EIG_MODE_NOVECTOR = DDLA_GPU_SOLVER_CONST(EIG_MODE_NOVECTOR);
 constexpr auto GPUSOLVER_STATUS_SUCCESS = DDLA_GPU_SOLVER_CONST(STATUS_SUCCESS);
 
 // ---- rand --------------------------------------------------------------------------------------
@@ -246,6 +249,29 @@ constexpr auto gpucclSum = ncclSum;
 #define gpusolverZgetrf_bufferSize DDLA_GPU_SOLVER(Zgetrf_bufferSize)
 #define gpusolverZpotrf DDLA_GPU_SOLVER(Zpotrf)
 #define gpusolverZpotrf_bufferSize DDLA_GPU_SOLVER(Zpotrf_bufferSize)
+
+#define gpusolverSsyevd DDLA_GPU_SOLVER(Ssyevd)
+#define gpusolverDsyevd DDLA_GPU_SOLVER(Dsyevd)
+#define gpusolverCheevd DDLA_GPU_SOLVER(Cheevd)
+#define gpusolverZheevd DDLA_GPU_SOLVER(Zheevd)
+#define gpusolverSsyevd_bufferSize DDLA_GPU_SOLVER(Ssyevd_bufferSize)
+#define gpusolverDsyevd_bufferSize DDLA_GPU_SOLVER(Dsyevd_bufferSize)
+#define gpusolverCheevd_bufferSize DDLA_GPU_SOLVER(Cheevd_bufferSize)
+#define gpusolverZheevd_bufferSize DDLA_GPU_SOLVER(Zheevd_bufferSize)
+
+#define gpusolverSgesvd DDLA_GPU_SOLVER(Sgesvd)
+#define gpusolverDgesvd DDLA_GPU_SOLVER(Dgesvd)
+#define gpusolverCgesvd DDLA_GPU_SOLVER(Cgesvd)
+#define gpusolverZgesvd DDLA_GPU_SOLVER(Zgesvd)
+
+#define gpusolverSgebrd DDLA_GPU_SOLVER(Sgebrd)
+#define gpusolverSgebrd_bufferSize DDLA_GPU_SOLVER(Sgebrd_bufferSize)
+#define gpusolverDgebrd DDLA_GPU_SOLVER(Dgebrd)
+#define gpusolverDgebrd_bufferSize DDLA_GPU_SOLVER(Dgebrd_bufferSize)
+#define gpusolverCgebrd DDLA_GPU_SOLVER(Cgebrd)
+#define gpusolverCgebrd_bufferSize DDLA_GPU_SOLVER(Cgebrd_bufferSize)
+#define gpusolverZgebrd DDLA_GPU_SOLVER(Zgebrd)
+#define gpusolverZgebrd_bufferSize DDLA_GPU_SOLVER(Zgebrd_bufferSize)
 
 // rand
 #define gpurandCreateGenerator DDLA_GPU_RAND(CreateGenerator)

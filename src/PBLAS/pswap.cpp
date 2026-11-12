@@ -132,7 +132,7 @@ std::size_t exchange_length(const DdlaHandle_t& handle, const int* array_descA)
 template <typename T>
 void pswap_workspace_size(const DdlaHandle_t& handle, const int* array_descA, std::size_t* backend_bytes)
 {
-    *backend_bytes = 2 * detail::padded_bytes<T>(exchange_length(handle, array_descA));
+    *backend_bytes = handle->nprocs==1 ? 0 : 2 * detail::padded_bytes<T>(exchange_length(handle, array_descA));
 }
 
 // Component 3.
@@ -143,6 +143,12 @@ void pswap_run(const DdlaHandle_t& handle, int N,
                void* backend_work, [[maybe_unused]] std::size_t backend_bytes)
 {
     try {
+        if (handle->nprocs==1) {
+            if(N>0)blas_impl::swap_run<Backend,T>(handle,N,
+                A+(ia-1)+std::size_t(ja-1)*array_descA[DDLA_LLD_],inca==1?1:array_descA[DDLA_LLD_],
+                B+(ib-1)+std::size_t(jb-1)*array_descB[DDLA_LLD_],incb==1?1:array_descB[DDLA_LLD_]);
+            return;
+        }
         (void)incb;
         int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
         ddlaGetGridDims(handle, nprows, npcols);

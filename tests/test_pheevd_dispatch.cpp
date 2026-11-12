@@ -2,6 +2,7 @@
 // large synthetic descriptors exercise public dispatch without a large solve.
 #include "api_grid_test_common.h"
 #include "Eigensolver/eig_params.h"
+#include "Eigensolver/pheevd_impl.h"
 #include "host_threads.h"
 #include "ddla_stream.h"
 #include "instantiate.h"
@@ -22,6 +23,11 @@ namespace ddla {
     template<> void pheevd_two_stage<B,T>(const DdlaHandle_t& h,char job,char uplo,int n,T* a,const int* da,typename real_type<T>::type* w,T* z,const int* dz,int& info) {record(2,h,job,uplo,n,a,da,w,z,dz,info);}
 DDLA_FOR_EACH_BACKEND_TYPE(STUB)
 #undef STUB
+namespace detail {
+#define LOCAL_STUB(B,T) template<> void pheevd_local<B,T>(const DdlaHandle_t& h,char job,char uplo,int n,T* a,const int* da,typename real_type<T>::type* w,T* z,const int* dz,int& info) {record(3,h,job,uplo,n,a,da,w,z,dz,info);}
+DDLA_FOR_EACH_BACKEND_TYPE(LOCAL_STUB)
+#undef LOCAL_STUB
+}
 }
 namespace {
 template<DdlaBackend B,class T>void test(DdlaHandle_t h,bool device) {
@@ -38,6 +44,8 @@ template<DdlaBackend B,class T>void test(DdlaHandle_t h,bool device) {
         try {pheevd<B,T>(h,job,uplo,n,&a,d,&w,out,dz,info);}catch(const std::exception&){caught=true;}
         require_close(h,"public dispatcher collective rejection",caught==reject?0:1,0);
         if(reject){require_close(h,"rejection before algorithm",calls,0);return;}
+        const char* mode=std::getenv("DDLA_EIGEN_METHOD");
+        if(h->nprocs==1 && (!mode || !*mode || std::strcmp(mode,"auto")==0)) expected=3;
         bool same=calls==1&&called==expected&&info==17&&numbers[0]==job&&numbers[1]==uplo&&numbers[2]==n;
         const void* wanted[6]={h,&a,d,&w,out,dz};
         for(int i=0;i<6;++i)same=same&&pointers[i]==wanted[i];

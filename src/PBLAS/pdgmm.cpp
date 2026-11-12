@@ -44,6 +44,11 @@ void pdgmm_run(const DdlaHandle_t& h, char side, int m, int n,
     const int rows=num_loc(m,descA[DDLA_MB_],h->myprow_,descA[DDLA_RSRC_],h->nprows_);
     const int columns=num_loc(n,descA[DDLA_NB_],h->mypcol_,descA[DDLA_CSRC_],h->npcols_);
     if (rows==0 || columns==0) return;
+    if (h->nprocs == 1) {
+        blas_impl::dgmm_run<Backend,T,U>(h,side,m,n,A,descA[DDLA_LLD_],
+            x,incx,C,descC[DDLA_LLD_]);
+        return;
+    }
     side=blas_impl::upper(side);
     const bool left=side=='L';
     const int length=left ? m : n;

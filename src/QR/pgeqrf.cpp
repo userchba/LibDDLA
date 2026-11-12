@@ -474,6 +474,12 @@ void pgeqrf_workspace_size(const DdlaHandle_t& handle, char uplo, bool inplace, 
 {
     *backend_bytes = *host_bytes = 0;
     if (m == 0 || n == 0) return;
+    if (handle->nprocs == 1 && !inplace && (uplo!='L' || handle->backend==DdlaBackend::CPU)) {
+        lapack_impl::geqrf_workspace_size<T>(handle,uplo,m,n,A,descA[DDLA_LLD_],tau,backend_bytes);
+        if (handle->backend == DdlaBackend::GPU)
+            *backend_bytes += detail::padded_bytes<T>(std::min(m,n));
+        return;
+    }
     qr_block_workspace_size<T>(handle, qr_geometry(handle, descA, uplo, m, n, /*ja=*/0), false, false, inplace,
                                A, descA[DDLA_LLD_], tau, backend_bytes, host_bytes);
 }
@@ -487,6 +493,23 @@ void pgeqrf_run(const DdlaHandle_t& handle, char uplo, bool inplace, int m, int 
 {
     try {
         if (m == 0 || n == 0) return;
+        if (handle->nprocs == 1 && !inplace && (uplo!='L' || handle->backend==DdlaBackend::CPU)) {
+            const int k=std::min(m,n), first=uplo=='L' ? n-k : 0;
+            char* work=static_cast<char*>(backend_work);
+            T* factors=tau+first;
+            std::size_t used=0;
+            if constexpr (Backend == DdlaBackend::GPU) {
+                factors=detail::take<T>(work,k);
+                used=detail::padded_bytes<T>(k);
+            }
+            lapack_impl::geqrf_run<Backend,T>(handle,uplo,m,n,A,descA[DDLA_LLD_],factors,
+                work,backend_bytes-used);
+            if constexpr (Backend == DdlaBackend::GPU) {
+                DDLA_CHECK(ddlaMemcpy(handle,tau+first,factors,std::size_t(k)*sizeof(T)));
+                DDLA_CHECK(ddlaSynchronize(handle));
+            }
+            return;
+        }
         const QrPlan p = qr_geometry(handle, descA, uplo, m, n, /*ja=*/0);
 
         const T* const taus = qr_block_run<Backend, T>(handle, A, descA, p, false, false, inplace, nullptr, 0, nullptr, 0,

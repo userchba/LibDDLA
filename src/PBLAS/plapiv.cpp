@@ -52,6 +52,7 @@ template <typename T>
 void plapiv_workspace_size(const DdlaHandle_t& handle, int n, const int* array_descA,
                            std::size_t* backend_bytes)
 {
+    if(handle->nprocs==1){*backend_bytes=0;return;}
     const int length_rowcol_R = num_loc(n, array_descA[DDLA_NB_], handle->mypcol_, array_descA[DDLA_CSRC_], handle->npcols_);
     const int length_rowcol_C = num_loc(n, array_descA[DDLA_MB_], handle->myprow_, array_descA[DDLA_RSRC_], handle->nprows_);
     *backend_bytes = std::size_t(std::max(length_rowcol_R, length_rowcol_C)) * sizeof(T);
@@ -65,6 +66,18 @@ void plapiv_run(const DdlaHandle_t& handle, char direc, char rowcol,
                 void* backend_work, [[maybe_unused]] std::size_t backend_bytes)
 {
     try {
+        if(handle->nprocs==1) {
+            if(m<=1 || n<=0)return;
+            const int ld=array_descA[DDLA_LLD_];
+            const int first=direc=='F'?0:m-2, end=direc=='F'?m-1:-1, step=direc=='F'?1:-1;
+            for(int i=first;i!=end;i+=step) {
+                const int target=ipiv[i]-1;
+                if(target==i)continue;
+                if(rowcol=='R')blas_impl::swap_run<Backend,T>(handle,n,A+i,ld,A+target,ld);
+                else blas_impl::swap_run<Backend,T>(handle,n,A+std::size_t(i)*ld,1,A+std::size_t(target)*ld,1);
+            }
+            return;
+        }
         int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
         ddlaGetGridDims(handle, nprows, npcols);
         ddlaGetGridCoords(handle, myprow, mypcol);
