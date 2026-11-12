@@ -59,15 +59,7 @@ inline gpublasStatus_t gpublasTrmv(
     float* x, int incx
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasStrmv(handle, uplo, trans, diag, n, A, lda, x, incx);
-    #else
-    // Neither vendor macro: this can only happen if the translation unit was
-    // built without a GPU language while DDLA_HAS_GPU is set, which the build
-    // system does not do (see the LANGUAGE CUDA/HIP source lists).  Throw
-    // rather than fall through to a host pointer.
-    throw std::runtime_error("gpublasTrmv: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasTrmv(
@@ -78,11 +70,7 @@ inline gpublasStatus_t gpublasTrmv(
     double* x, int incx
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasDtrmv(handle, uplo, trans, diag, n, A, lda, x, incx);
-    #else
-    throw std::runtime_error("gpublasTrmv: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasTrmv(
@@ -93,12 +81,8 @@ inline gpublasStatus_t gpublasTrmv(
     std::complex<float>* x, int incx
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasCtrmv(handle, uplo, trans, diag, n,
         (gpublasComplex*)A, lda, (gpublasComplex*)x, incx);
-    #else
-    throw std::runtime_error("gpublasTrmv: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasTrmv(
@@ -109,12 +93,8 @@ inline gpublasStatus_t gpublasTrmv(
     std::complex<double>* x, int incx
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasZtrmv(handle, uplo, trans, diag, n,
         (gpublasDoubleComplex*)A, lda, (gpublasDoubleComplex*)x, incx);
-    #else
-    throw std::runtime_error("gpublasTrmv: no GPU vendor selected at compile time");
-    #endif
 }
 
 } // namespace ddla
@@ -136,9 +116,9 @@ void trmv_check(
     detail::require_backend<Backend>(handle, "trmv");
 
     if constexpr (Backend == DdlaBackend::GPU) {
-        (void)detail::to_fill_mode(uplo);
-        (void)detail::to_blas_op(trans);
-        (void)detail::to_diag_type(diag);
+        (void)detail::check_uplo(uplo);
+        (void)detail::check_trans(trans);
+        (void)detail::check_diag(diag);
     }
 }
 

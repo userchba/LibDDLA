@@ -60,7 +60,7 @@ void dgmm_run(const DdlaHandle_t& h, char side, int m, int n,
             }
         }
     } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         const auto handle=static_cast<gpublasHandle_t>(h->blasH);
         if (length==1) incx=0;
         if constexpr (!std::is_same_v<T,U>) {

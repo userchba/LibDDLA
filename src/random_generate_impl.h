@@ -10,7 +10,9 @@ namespace ddla { namespace random_impl {
 // Prepared resources are outside check/run. The CPU engine and GPU generator
 // retain their sequence across reuse; neither retains ownership of a handle.
 class PreparedRng {
+#if DDLA_HAS_GPU
     gpurandGenerator_t generator_=nullptr;
+#endif
 public:
     std::mt19937_64 engine;
     PreparedRng(DdlaHandle_t h,std::uint64_t seed):engine(seed)
@@ -34,7 +36,9 @@ public:
         if(generator_)(void)gpurandDestroyGenerator(generator_);
 #endif
     }
+#if DDLA_HAS_GPU
     gpurandGenerator_t generator() const noexcept{return generator_;}
+#endif
     void reset() {
 #if DDLA_HAS_GPU
         if(generator_){GPURAND_CHECK(gpurandDestroyGenerator(generator_));generator_=nullptr;}

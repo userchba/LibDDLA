@@ -904,12 +904,12 @@ private. Operation sources are grouped under `src/BLAS`, `src/PBLAS`,
 `src/LU`, `src/Cholesky`, `src/LDLT`, `src/QR`, `src/Eigensolver`,
 `src/SVD` and `src/vbatched`.
 
-CPU support is unconditional. The public `DDLA_HAS_GPU` macro describes GPU
-availability. Private `DDLA_USE_CUDA` / `DDLA_USE_HIP` definitions select the
-vendor API available in a source file; `src/gpu/gpu.h` derives
-`DDLA_GPU_VENDOR` from them. These conditions are distinct: a CPU-only
-consumer can link a GPU-enabled library. `gpu_cpu.h` supplies compatibility
-types for private shared code when neither vendor is selected.
+CPU support is unconditional. The generated `DDLA_HAS_GPU` macro gates GPU
+code in the public headers and library sources. Private `DDLA_USE_CUDA` /
+`DDLA_USE_HIP` definitions select the vendor API in `src/gpu/gpu.h`; a GPU
+library build supplies exactly one. CPU-only builds use no dummy GPU types
+or no-op vendor calls. Consumers use the public headers and can select the
+CPU backend of a GPU-enabled library without vendor definitions.
 
 ## Version
 

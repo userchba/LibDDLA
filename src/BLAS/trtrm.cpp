@@ -21,7 +21,7 @@ namespace {
 // Columns of C per CPU product panel; the panel is n x min(n, trtrm_panel_width).
 constexpr int trtrm_panel_width = 256;
 
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
 // Retain these two-triangular-input kernels: the measured packed vendor
 // TRMM composition was 1.5-4.9x slower for n=1024..4096 on V100.
 // std::complex arrays may be accessed as their interleaved real components.
@@ -450,7 +450,7 @@ void trtrm_impl(const DdlaHandle_t& handle, int n, const T& alpha,
         trtrm_cpu(handle, Upper ? 'U' : 'L', 'N', Upper ? 'U' : 'L', 'N',
                    n, alpha, A, lda, B, ldb, beta, C, ldc, work, bytes);
     } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         using D = detail::DeviceScalarT<T>;
         using R = typename detail::DeviceScalar<T>::real;
         static_assert(sizeof(D) == sizeof(T) && alignof(T) >= alignof(R) && sizeof(T) % alignof(R) == 0,
@@ -498,7 +498,7 @@ void trtrm_general_impl(const DdlaHandle_t& handle, int n, const T& alpha,
                    (UpB != tb) ? 'U' : 'L', cb ? 'C' : (tb ? 'T' : 'N'),
                    n, alpha, A, lda, B, ldb, beta, C, ldc, work, bytes);
     } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         using D = detail::DeviceScalarT<T>;
         using R = typename detail::DeviceScalar<T>::real;
         static_assert(sizeof(D) == sizeof(T) && alignof(T) >= alignof(R) && sizeof(T) % alignof(R) == 0,

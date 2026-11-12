@@ -53,11 +53,7 @@ inline gpublasStatus_t gpublasGeam(
     const float& beta, const float* B, int ldb,
     float* C, int ldc)
 {
-#if DDLA_GPU_VENDOR
     return gpublasSgeam(handle, transA, transB, m, n, &alpha, A, lda, &beta, B, ldb, C, ldc);
-#else
-    throw std::runtime_error("geam: no GPU vendor selected at compile time");
-#endif
 }
 
 inline gpublasStatus_t gpublasGeam(
@@ -67,11 +63,7 @@ inline gpublasStatus_t gpublasGeam(
     const double& beta, const double* B, int ldb,
     double* C, int ldc)
 {
-#if DDLA_GPU_VENDOR
     return gpublasDgeam(handle, transA, transB, m, n, &alpha, A, lda, &beta, B, ldb, C, ldc);
-#else
-    throw std::runtime_error("geam: no GPU vendor selected at compile time");
-#endif
 }
 
 inline gpublasStatus_t gpublasGeam(
@@ -81,16 +73,12 @@ inline gpublasStatus_t gpublasGeam(
     const std::complex<float>& beta, const std::complex<float>* B, int ldb,
     std::complex<float>* C, int ldc)
 {
-#if DDLA_GPU_VENDOR
     return gpublasCgeam(handle, transA, transB, m, n,
                         reinterpret_cast<const gpublasComplex*>(&alpha),
                         reinterpret_cast<const gpublasComplex*>(A), lda,
                         reinterpret_cast<const gpublasComplex*>(&beta),
                         reinterpret_cast<const gpublasComplex*>(B), ldb,
                         reinterpret_cast<gpublasComplex*>(C), ldc);
-#else
-    throw std::runtime_error("geam: no GPU vendor selected at compile time");
-#endif
 }
 
 inline gpublasStatus_t gpublasGeam(
@@ -100,16 +88,12 @@ inline gpublasStatus_t gpublasGeam(
     const std::complex<double>& beta, const std::complex<double>* B, int ldb,
     std::complex<double>* C, int ldc)
 {
-#if DDLA_GPU_VENDOR
     return gpublasZgeam(handle, transA, transB, m, n,
                         reinterpret_cast<const gpublasDoubleComplex*>(&alpha),
                         reinterpret_cast<const gpublasDoubleComplex*>(A), lda,
                         reinterpret_cast<const gpublasDoubleComplex*>(&beta),
                         reinterpret_cast<const gpublasDoubleComplex*>(B), ldb,
                         reinterpret_cast<gpublasDoubleComplex*>(C), ldc);
-#else
-    throw std::runtime_error("geam: no GPU vendor selected at compile time");
-#endif
 }
 
 } // anonymous namespace

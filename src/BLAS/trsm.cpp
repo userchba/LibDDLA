@@ -59,15 +59,7 @@ inline gpublasStatus_t gpublasTrsm(
     std::complex<double> *B, int ldb
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasZtrsm(handle, side, uplo, trans, diag, m, n, (gpublasDoubleComplex*)&alpha, (gpublasDoubleComplex*)A, lda, (gpublasDoubleComplex*)B, ldb);
-    #else
-    // Neither vendor macro: this can only happen if the translation unit was
-    // built without a GPU language while DDLA_HAS_GPU is set, which the build
-    // system does not do (see the LANGUAGE CUDA/HIP source lists).  Throw
-    // rather than fall through to a host pointer.
-    throw std::runtime_error("gpublasTrsm: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasTrsm(
@@ -78,11 +70,7 @@ inline gpublasStatus_t gpublasTrsm(
     std::complex<float> *B, int ldb
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasCtrsm(handle, side, uplo, trans, diag, m, n, (gpublasComplex*)&alpha, (gpublasComplex*)A, lda, (gpublasComplex*)B, ldb);
-    #else
-    throw std::runtime_error("gpublasTrsm: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasTrsm(
@@ -93,11 +81,7 @@ inline gpublasStatus_t gpublasTrsm(
     float *B, int ldb
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasStrsm(handle, side, uplo, trans, diag, m, n, &alpha, A, lda, B, ldb);
-    #else
-    throw std::runtime_error("gpublasTrsm: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasTrsm(
@@ -108,11 +92,7 @@ inline gpublasStatus_t gpublasTrsm(
     double *B, int ldb
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasDtrsm(handle, side, uplo, trans, diag, m, n, &alpha, A, lda, B, ldb);
-    #else
-    throw std::runtime_error("gpublasTrsm: no GPU vendor selected at compile time");
-    #endif
 }
 
 } // namespace ddla
@@ -135,10 +115,10 @@ void trsm_check(
     detail::require_backend<Backend>(handle, "trsm");
 
     if constexpr (Backend == DdlaBackend::GPU) {
-        (void)detail::to_side_mode(side);
-        (void)detail::to_fill_mode(uplo);
-        (void)detail::to_blas_op(trans);
-        (void)detail::to_diag_type(diag);
+        (void)detail::check_side(side);
+        (void)detail::check_uplo(uplo);
+        (void)detail::check_trans(trans);
+        (void)detail::check_diag(diag);
     }
 }
 

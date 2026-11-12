@@ -30,7 +30,7 @@ template <class T> auto re(T x) {
     return std::real(x);
 }
 
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
 template <class T> __device__ T dr(T x) {
     return x;
 }
@@ -405,7 +405,7 @@ void form_u(const DdlaHandle_t& h, int n, const T* v, const T* y, const T* tau, 
         for (int i = 0; i < n; ++i)
             u[i] = detail::host_conj(t) * y[i] - T(0.5) * t * detail::host_conj(t) * re(*dot) * v[i];
     } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         using D = DeviceScalarT<T>;
         if (n)
             form_u_kernel<D><<<(n + 255) / 256, 256, 0, static_cast<gpuStream_t>(h->stream)>>>(
@@ -426,7 +426,7 @@ void factor_one(const DdlaHandle_t& h, int j, T* a, bool lower, int nb, int ld, 
     const int nr = num_loc(j, nb, mr, 0, pr), inc = lower ? ld : 1;
     const int tail = num_loc(j - 1, nb, mr, 0, pr), pivot_owner = (j - 1) / nb % pr;
     const int owner = j / nb % pc, localj = indxg2l(j, nb, pc);
-#if DDLA_GPU_VENDOR && defined(DDLA_USE_CCL) && !defined(DDLA_USE_GPU_CPU_TUNNEL)
+#if DDLA_HAS_GPU && defined(DDLA_USE_CCL) && !defined(DDLA_USE_GPU_CPU_TUNNEL)
     if constexpr (B == DdlaBackend::GPU) {
         using D = DeviceScalarT<T>;
         detail::agree_local(h,"one-stage eigensolver", [&] {
@@ -487,7 +487,7 @@ void factor_one(const DdlaHandle_t& h, int j, T* a, bool lower, int nb, int ld, 
             packet[1] = std::real(endpoint);
             packet[2] = std::imag(endpoint);
         } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
             using D = DeviceScalarT<T>;
             const T* column = nr ? a + triangle_offset(lower, ld, 0, localj) : nullptr;
             norm_pack_kernel<D, R><<<1, 256, 0, static_cast<gpuStream_t>(h->stream)>>>(
@@ -564,7 +564,7 @@ void factor_one(const DdlaHandle_t& h, int j, T* a, bool lower, int nb, int ld, 
                     v[i] = value;
                 }
             } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
                 using D = DeviceScalarT<T>;
                 normalize_kernel<D, R>
                     <<<std::max(1, (nr + 255) / 256), 256, 0, static_cast<gpuStream_t>(h->stream)>>>(
@@ -620,7 +620,7 @@ void triangle_av(const DdlaHandle_t& h, int n, const T* a, bool lower, int nb, i
         return;
     }
     if constexpr (B == DdlaBackend::GPU) {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         const int ar = lower ? nc : nr, ac = lower ? nr : nc;
         T* row_out = lower ? yc : yr;
         T* col_out = lower ? yr : yc;
@@ -930,7 +930,7 @@ void reduce(const DdlaHandle_t& h, char uplo, int n, T* a, const int* desc, T* t
                     packed[n + j - 1] = re(a[triangle_offset(lower, ld, indxg2l(j - 1, nb, pr), c)]);
             }
     } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         using D = DeviceScalarT<T>;
         extract_kernel<D, R><<<(n + 255) / 256, 256, 0, static_cast<gpuStream_t>(h->stream)>>>(
             n, nb, mr, mc, pr, pc, reinterpret_cast<const D*>(a), ld, packed, lower);

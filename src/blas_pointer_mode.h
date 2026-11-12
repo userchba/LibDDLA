@@ -28,7 +28,7 @@
 namespace ddla {
 namespace detail {
 
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
 
 using blas_pointer_mode_t = gpublasPointerMode_t;
 
@@ -42,13 +42,9 @@ inline void blas_set_pointer_mode(gpublasHandle_t h, blas_pointer_mode_t m)
     BLAS_CHECK(gpublasSetPointerMode(h, m));
 }
 
-#endif
-
 /// RAII: put @p handle into DEVICE pointer mode, restoring the previous mode
-/// on scope exit.  A compile-time no-op without a GPU backend (no handle
-/// state exists there).
+/// on scope exit. Only GPU execution uses this scope.
 struct blas_device_pointer_mode_scope {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
     gpublasHandle_t h_;
     blas_pointer_mode_t saved_;
 
@@ -61,13 +57,12 @@ struct blas_device_pointer_mode_scope {
     {
         if (saved_ != blas_pointer_mode_device()) blas_set_pointer_mode(h_, saved_);
     }
-#else
-    explicit blas_device_pointer_mode_scope(gpublasHandle_t) {}
-#endif
 
     blas_device_pointer_mode_scope(const blas_device_pointer_mode_scope&) = delete;
     blas_device_pointer_mode_scope& operator=(const blas_device_pointer_mode_scope&) = delete;
 };
+
+#endif // DDLA_HAS_GPU
 
 } // namespace detail
 } // namespace ddla

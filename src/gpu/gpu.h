@@ -4,15 +4,15 @@
 // Vendor-neutral GPU layer.  Everything below the umbrella is chosen at compile time by exactly one of
 //   DDLA_USE_CUDA -> gpu_cuda.h   (cuda* / cublas* / cusolverDn* / curand* / nccl*  ->  gpu*)
 //   DDLA_USE_HIP  -> gpu_hip.h    (hip*  / hipblas* / hipsolver*  / hiprand* / rccl ->  gpu*)
-//   neither       -> gpu_cpu.h    (CPU-only stand-ins for the types, enums and no-op macros)
 // and the rest of the library spells only gpu* names: gpu<Runtime>, gpublas<..>, gpusolver<..>, gpurand<..>,
-// gpuccl<..>.  DDLA_GPU_VENDOR is 1 when a GPU vendor is active in this translation unit.
+// gpuccl<..>. DDLA_HAS_GPU gates GPU code; CPU-only builds need no vendor types.
 //
 // This is a hand-written alias layer (the MAGMA approach of writing CUDA once and running hipify at build
 // time is deliberately not used: it only works through a Makefile and leaves HIP code spelled in CUDA).
 // gpu_alias.h holds the aliases whose vendor names differ only by the family prefix (cuda/hip, cublas/hipblas,
 // cusolverDn/hipsolver, curand/hiprand); each vendor header defines the prefixes and lists the rest itself.
 
+#include <ddla/ddla_config.h>
 #include <cstddef>
 #include <stdexcept>
 
@@ -20,18 +20,19 @@
 #error "LibDDLA: DDLA_USE_CUDA and DDLA_USE_HIP are mutually exclusive"
 #endif
 
+#if DDLA_HAS_GPU
 #if defined(DDLA_USE_CUDA)
-#define DDLA_GPU_VENDOR 1
 #include "gpu_cuda.h"
 #elif defined(DDLA_USE_HIP)
-#define DDLA_GPU_VENDOR 1
 #include "gpu_hip.h"
 #else
-#define DDLA_GPU_VENDOR 0
-#include "gpu_cpu.h"
+#error "LibDDLA private GPU headers require DDLA_USE_CUDA or DDLA_USE_HIP"
+#endif
+#elif defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#error "LibDDLA GPU vendor selection disagrees with ddla_config.h"
 #endif
 
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
 namespace ddla {
 
 /// Where a pointer lives, as the GPU runtime sees it.
@@ -59,6 +60,6 @@ inline GpuMemType gpuPointerMemType(const void* p)
 }
 
 } // namespace ddla
-#endif // DDLA_GPU_VENDOR
+#endif // DDLA_HAS_GPU
 
 #endif // DDLA_GPU_GPU_H

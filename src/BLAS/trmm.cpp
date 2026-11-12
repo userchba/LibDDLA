@@ -57,15 +57,7 @@ inline gpublasStatus_t gpublasTrmm(
     float* B, int ldb
 )
 {
-#if DDLA_GPU_VENDOR
     return gpublasStrmm(handle, side, uplo, trans, diag, m, n, &alpha, A, lda, B, ldb, B, ldb);
-#else
-    // Neither vendor macro: this can only happen if the translation unit was
-    // built without a GPU language while DDLA_HAS_GPU is set, which the build
-    // system does not do (see the LANGUAGE CUDA/HIP source lists).  Throw
-    // rather than fall through to a host pointer.
-    throw std::runtime_error("gpublasTrmm: no GPU vendor selected at compile time");
-#endif
 }
 
 inline gpublasStatus_t gpublasTrmm(
@@ -77,11 +69,7 @@ inline gpublasStatus_t gpublasTrmm(
     double* B, int ldb
 )
 {
-#if DDLA_GPU_VENDOR
     return gpublasDtrmm(handle, side, uplo, trans, diag, m, n, &alpha, A, lda, B, ldb, B, ldb);
-#else
-    throw std::runtime_error("gpublasTrmm: no GPU vendor selected at compile time");
-#endif
 }
 
 inline gpublasStatus_t gpublasTrmm(
@@ -93,15 +81,11 @@ inline gpublasStatus_t gpublasTrmm(
     std::complex<float>* B, int ldb
 )
 {
-#if DDLA_GPU_VENDOR
     return gpublasCtrmm(handle, side, uplo, trans, diag, m, n,
                         reinterpret_cast<const gpublasComplex*>(&alpha),
                         reinterpret_cast<const gpublasComplex*>(A), lda,
                         reinterpret_cast<gpublasComplex*>(B), ldb,
                         reinterpret_cast<gpublasComplex*>(B), ldb);
-#else
-    throw std::runtime_error("gpublasTrmm: no GPU vendor selected at compile time");
-#endif
 }
 
 inline gpublasStatus_t gpublasTrmm(
@@ -113,15 +97,11 @@ inline gpublasStatus_t gpublasTrmm(
     std::complex<double>* B, int ldb
 )
 {
-#if DDLA_GPU_VENDOR
     return gpublasZtrmm(handle, side, uplo, trans, diag, m, n,
                         reinterpret_cast<const gpublasDoubleComplex*>(&alpha),
                         reinterpret_cast<const gpublasDoubleComplex*>(A), lda,
                         reinterpret_cast<gpublasDoubleComplex*>(B), ldb,
                         reinterpret_cast<gpublasDoubleComplex*>(B), ldb);
-#else
-    throw std::runtime_error("gpublasTrmm: no GPU vendor selected at compile time");
-#endif
 }
 
 } // namespace ddla
@@ -145,10 +125,10 @@ void trmm_check(
 
     // Check the BLAS shape even on quick-return paths. Scalar zero must not
     // read A or the old B, and must leave leading-dimension padding untouched.
-    (void)detail::to_side_mode(side);
-    (void)detail::to_fill_mode(uplo);
-    (void)detail::to_blas_op(trans);
-    (void)detail::to_diag_type(diag);
+    (void)detail::check_side(side);
+    (void)detail::check_uplo(uplo);
+    (void)detail::check_trans(trans);
+    (void)detail::check_diag(diag);
     const int order = (side == 'L' || side == 'l') ? m : n;
     if (m < 0 || n < 0 || lda < std::max(1, order) || ldb < std::max(1, m))
         throw std::invalid_argument("trmm: invalid dimensions or leading dimension");

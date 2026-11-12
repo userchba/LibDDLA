@@ -80,7 +80,7 @@ template<class T>void punmtr_trd_workspace_size(const DdlaHandle_t& h,const Unmt
         2*detail::padded_bytes<T>(cap*axis)+(transpose?detail::padded_bytes<T>(lv*cap):0)+transfer;
 }
 namespace {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
 template <class T>
 __global__ void anchors_kernel(T* v, int ld, int width, int first, int nb, int row, int rows) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x, j = blockIdx.y;
@@ -138,7 +138,7 @@ template<DdlaBackend B,class T>void punmtr_trd_run(const DdlaHandle_t& h,const U
                     if(global>=anchor)stored[i+std::size_t(j)*lv]=global==anchor?T(1):T(0);
                 }
             } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
                 using D=detail::DeviceScalarT<T>;
                 anchors_kernel<D><<<dim3((lv+255)/256,width),256,0,static_cast<gpuStream_t>(h->stream)>>>(
                     reinterpret_cast<D*>(stored),lv,width,first,nb,logical_mr,logical_pr);

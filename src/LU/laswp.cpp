@@ -65,7 +65,7 @@ inline void cpu_laswp(int n, std::complex<double>* A, int lda, int k1, int k2, c
 }
 
 #if DDLA_HAS_GPU
-#if DDLA_GPU_VENDOR && GPU_HAS_SOLVER_LASWP
+#if DDLA_HAS_GPU && GPU_HAS_SOLVER_LASWP
 
 inline gpusolverStatus_t solver_laswp(gpusolverHandle_t h, int n, float* A, int lda, int k1, int k2, const int* ipiv,
                                       int incx)
@@ -88,13 +88,13 @@ inline gpusolverStatus_t solver_laswp(gpusolverHandle_t h, int n, std::complex<d
     return gpusolverZlaswp(h, n, (gpusolverDoubleComplex*)A, lda, k1, k2, ipiv, incx);
 }
 
-#endif // DDLA_GPU_VENDOR && GPU_HAS_SOLVER_LASWP
+#endif // DDLA_HAS_GPU && GPU_HAS_SOLVER_LASWP
 
 // Whether a GPU call goes through the row-by-row fallback (and so needs the host copy of the pivots): every case but
 // the vendor's laswp with incx == 1.
 inline bool gpu_laswp_uses_rows(int incx)
 {
-#if DDLA_GPU_VENDOR && GPU_HAS_SOLVER_LASWP
+#if DDLA_HAS_GPU && GPU_HAS_SOLVER_LASWP
     return incx != 1;
 #else
     (void)incx;
@@ -132,17 +132,13 @@ template <typename T>
 void gpu_laswp(const DdlaHandle_t& handle, void* host_work, std::size_t host_bytes, int n, T* A, int lda, int k1,
                int k2, const int* ipiv, int incx)
 {
-#if DDLA_GPU_VENDOR && GPU_HAS_SOLVER_LASWP
+#if DDLA_HAS_GPU && GPU_HAS_SOLVER_LASWP
     if (incx == 1) {
         SOLVER_CHECK(solver_laswp(static_cast<gpusolverHandle_t>(handle->solverH), n, A, lda, k1, k2, ipiv, incx));
         return;
     }
 #endif
-#if DDLA_GPU_VENDOR
     gpu_laswp_rows(handle, static_cast<int*>(host_work), host_bytes, n, A, lda, k1, k2, ipiv, incx);
-#else
-    throw std::runtime_error("laswp: no GPU vendor selected at compile time");
-#endif
 }
 
 #endif // DDLA_HAS_GPU

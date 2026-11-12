@@ -57,11 +57,7 @@ inline gpublasStatus_t gpublasGerc(
     const float& alpha, const float* x, int incx,
     const float* y, int incy, float* A, int lda)
 {
-    #if DDLA_GPU_VENDOR
     return gpublasSger(handle, m, n, &alpha, x, incx, y, incy, A, lda);
-    #else
-    throw std::runtime_error("gpublasGerc: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasGerc(
@@ -69,11 +65,7 @@ inline gpublasStatus_t gpublasGerc(
     const double& alpha, const double* x, int incx,
     const double* y, int incy, double* A, int lda)
 {
-    #if DDLA_GPU_VENDOR
     return gpublasDger(handle, m, n, &alpha, x, incx, y, incy, A, lda);
-    #else
-    throw std::runtime_error("gpublasGerc: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasGerc(
@@ -81,15 +73,11 @@ inline gpublasStatus_t gpublasGerc(
     const std::complex<float>& alpha, const std::complex<float>* x, int incx,
     const std::complex<float>* y, int incy, std::complex<float>* A, int lda)
 {
-    #if DDLA_GPU_VENDOR
     return gpublasCgerc(handle, m, n,
                         (gpublasComplex*)&alpha,
                         (gpublasComplex*)x, incx,
                         (gpublasComplex*)y, incy,
                         (gpublasComplex*)A, lda);
-    #else
-    throw std::runtime_error("gpublasGerc: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasGerc(
@@ -97,15 +85,11 @@ inline gpublasStatus_t gpublasGerc(
     const std::complex<double>& alpha, const std::complex<double>* x, int incx,
     const std::complex<double>* y, int incy, std::complex<double>* A, int lda)
 {
-    #if DDLA_GPU_VENDOR
     return gpublasZgerc(handle, m, n,
                       (gpublasDoubleComplex*)&alpha,
                       (gpublasDoubleComplex*)x, incx,
                       (gpublasDoubleComplex*)y, incy,
                       (gpublasDoubleComplex*)A, lda);
-    #else
-    throw std::runtime_error("gpublasGerc: no GPU vendor selected at compile time");
-    #endif
 }
 
 } // namespace ddla

@@ -88,41 +88,21 @@ void gemm_run(
         const gpublasOperation_t opA = op(transa);
         const gpublasOperation_t opB = op(transb);
         if constexpr (std::is_same_v<T, float>) {
-#if DDLA_GPU_VENDOR
             BLAS_CHECK(gpublasSgemm(static_cast<gpublasHandle_t>(handle->blasH), opA, opB, m, n, k,
                                     &alpha, A, lda, B, ldb, &beta, C, ldc));
-#else
-            throw std::runtime_error(
-                "gemm: GPU backend requires DDLA_USE_CUDA or DDLA_USE_HIP");
-#endif
         } else if constexpr (std::is_same_v<T, double>) {
-#if DDLA_GPU_VENDOR
             BLAS_CHECK(gpublasDgemm(static_cast<gpublasHandle_t>(handle->blasH), opA, opB, m, n, k,
                                     &alpha, A, lda, B, ldb, &beta, C, ldc));
-#else
-            throw std::runtime_error(
-                "gemm: GPU backend requires DDLA_USE_CUDA or DDLA_USE_HIP");
-#endif
         } else if constexpr (std::is_same_v<T, std::complex<float>>) {
-#if DDLA_GPU_VENDOR
             BLAS_CHECK(gpublasCgemm(static_cast<gpublasHandle_t>(handle->blasH), opA, opB, m, n, k,
                                     (gpublasComplex*)&alpha, (gpublasComplex*)A, lda,
                                     (gpublasComplex*)B, ldb,
                                     (gpublasComplex*)&beta, (gpublasComplex*)C, ldc));
-#else
-            throw std::runtime_error(
-                "gemm: GPU backend requires DDLA_USE_CUDA or DDLA_USE_HIP");
-#endif
         } else if constexpr (std::is_same_v<T, std::complex<double>>) {
-#if DDLA_GPU_VENDOR
             BLAS_CHECK(gpublasZgemm(static_cast<gpublasHandle_t>(handle->blasH), opA, opB, m, n, k,
                                     (gpublasDoubleComplex*)&alpha, (gpublasDoubleComplex*)A, lda,
                                     (gpublasDoubleComplex*)B, ldb,
                                     (gpublasDoubleComplex*)&beta, (gpublasDoubleComplex*)C, ldc));
-#else
-            throw std::runtime_error(
-                "gemm: GPU backend requires DDLA_USE_CUDA or DDLA_USE_HIP");
-#endif
         } else {
             static_assert(sizeof(T) == 0, "gemm: unsupported scalar type T");
         }

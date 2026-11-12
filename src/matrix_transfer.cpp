@@ -109,7 +109,7 @@ void recv(const DdlaHandle_t& h, CommScope scope, T* data, std::size_t count, in
 template <DdlaBackend B>
 void require_device([[maybe_unused]] const void* p, [[maybe_unused]] const char* what)
 {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
     if constexpr (B == DdlaBackend::GPU) {
         if (gpuPointerMemType(p) != GpuMemType::Device) throw std::invalid_argument(what);
     }

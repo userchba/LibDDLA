@@ -400,11 +400,8 @@ endif()
 
 add_executable(test_cpu_pgemm test_cpu_pgemm.cpp)
 target_link_libraries(test_cpu_pgemm PRIVATE ddla_lib)
-# CPU-only test: needs DDLA_USE_CPU, never GPU backend macros
-target_compile_definitions(test_cpu_pgemm PRIVATE DDLA_USE_CPU)
-if(DDLA_USE_DEBUG)
-    target_compile_definitions(test_cpu_pgemm PRIVATE DDLA_USE_DEBUG)
-endif()
+# CPU handles in every build; private headers use the library's vendor selection.
+apply_test_connector_defs(test_cpu_pgemm)
 add_test(NAME test_cpu_pgemm_mpi4
     COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4
             ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_cpu_pgemm> 2 2
@@ -442,10 +439,7 @@ if(_scalapack_lib)
             benchmark_cpu_pgemm_scalapack.cpp)
         target_link_libraries(benchmark_cpu_pgemm_scalapack PRIVATE
             ddla_lib "${_scalapack_lib}")
-        target_compile_definitions(benchmark_cpu_pgemm_scalapack PRIVATE DDLA_USE_CPU)
-        if(DDLA_USE_DEBUG)
-            target_compile_definitions(benchmark_cpu_pgemm_scalapack PRIVATE DDLA_USE_DEBUG)
-        endif()
+        apply_test_connector_defs(benchmark_cpu_pgemm_scalapack)
         # Heavy benchmark -- not added to CTest
     else()
         message(STATUS "Skipping missing benchmark source: benchmark_cpu_pgemm_scalapack.cpp")
@@ -457,10 +451,7 @@ if(_scalapack_lib)
             benchmark_cpu_pgetrf_scalapack.cpp)
         target_link_libraries(benchmark_cpu_pgetrf_scalapack PRIVATE
             ddla_lib "${_scalapack_lib}")
-        target_compile_definitions(benchmark_cpu_pgetrf_scalapack PRIVATE DDLA_USE_CPU)
-        if(DDLA_USE_DEBUG)
-            target_compile_definitions(benchmark_cpu_pgetrf_scalapack PRIVATE DDLA_USE_DEBUG)
-        endif()
+        apply_test_connector_defs(benchmark_cpu_pgetrf_scalapack)
         # Heavy benchmark -- not added to CTest
     else()
         message(STATUS "Skipping missing benchmark source: benchmark_cpu_pgetrf_scalapack.cpp")

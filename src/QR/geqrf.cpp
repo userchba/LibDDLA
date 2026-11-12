@@ -103,7 +103,6 @@ void cpu_geqrf(void* work, std::size_t work_bytes, bool lower, int m, int n, T* 
 }
 
 #if DDLA_HAS_GPU
-#if DDLA_GPU_VENDOR
 
 // Per scalar type: the buffer-size query and the factorization itself.
 inline gpusolverStatus_t geqrf_buffer_size(gpusolverHandle_t h, int m, int n, float* A, int lda, int* lwork)
@@ -184,20 +183,6 @@ void gpu_geqrf_ql(const DdlaHandle_t& handle, char* w, std::size_t bytes, int m,
     detail::qr_reverse<T>(handle, k, 1, taur, k, tau, k);
 }
 
-#else // DDLA_GPU_VENDOR
-
-template <typename T>
-void gpu_geqrf_qr(const DdlaHandle_t&, char*, std::size_t, int, int, T*, int, T*)
-{
-    throw std::runtime_error("geqrf: no GPU vendor selected at compile time");
-}
-template <typename T>
-void gpu_geqrf_ql(const DdlaHandle_t&, char*, std::size_t, int, int, T*, int, T*)
-{
-    throw std::runtime_error("geqrf: no GPU vendor selected at compile time");
-}
-
-#endif // DDLA_GPU_VENDOR
 #endif // DDLA_HAS_GPU
 
 } // anonymous namespace
@@ -235,7 +220,7 @@ void geqrf_workspace_size(const DdlaHandle_t& handle, char uplo, int m, int n, T
     if (handle->backend == DdlaBackend::CPU) {
         *backend_bytes = static_cast<std::size_t>(cpu_geqrf_lwork(lower, m, n, A, lda, tau)) * sizeof(T);
     } else {
-#if DDLA_HAS_GPU && DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         int lwork = 0;
         SOLVER_CHECK(geqrf_buffer_size(static_cast<gpusolverHandle_t>(handle->solverH), m, n, A, lower ? m : lda,
                                        &lwork));

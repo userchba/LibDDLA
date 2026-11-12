@@ -65,38 +65,22 @@ inline void cpu_geru(int m, int n, const std::complex<double>& alpha,
 // unit -- the public interface is the templated ddla::geru declared in <ddla/ddla.h>.
 inline gpublasStatus_t gpublasGeru(gpublasHandle_t handle, int m, int n, const float& alpha, const float *x, int incx, const float *y, int incy, float *A, int lda)
 {
-#if DDLA_GPU_VENDOR
     return gpublasSger(handle, m, n, &alpha, x, incx, y, incy, A, lda);
-#else
-    throw std::runtime_error("geru: no GPU vendor selected at compile time");
-#endif
 }
 
 inline gpublasStatus_t gpublasGeru(gpublasHandle_t handle, int m, int n, const double& alpha, const double *x, int incx, const double *y, int incy, double *A, int lda)
 {
-#if DDLA_GPU_VENDOR
     return gpublasDger(handle, m, n, &alpha, x, incx, y, incy, A, lda);
-#else
-    throw std::runtime_error("geru: no GPU vendor selected at compile time");
-#endif
 }
 
 inline gpublasStatus_t gpublasGeru(gpublasHandle_t handle, int m, int n, const std::complex<float>& alpha, const std::complex<float> *x, int incx, const std::complex<float> *y, int incy, std::complex<float> *A, int lda)
 {
-#if DDLA_GPU_VENDOR
     return gpublasCgeru(handle, m, n, (gpublasComplex*)&alpha, (gpublasComplex*)x, incx, (gpublasComplex*)y, incy, (gpublasComplex*)A, lda);
-#else
-    throw std::runtime_error("geru: no GPU vendor selected at compile time");
-#endif
 }
 
 inline gpublasStatus_t gpublasGeru(gpublasHandle_t handle, int m, int n, const std::complex<double>& alpha, const std::complex<double> *x, int incx, const std::complex<double> *y, int incy, std::complex<double> *A, int lda)
 {
-#if DDLA_GPU_VENDOR
     return gpublasZgeru(handle, m, n, (gpublasDoubleComplex*)&alpha, (gpublasDoubleComplex*)x, incx, (gpublasDoubleComplex*)y, incy, (gpublasDoubleComplex*)A, lda);
-#else
-    throw std::runtime_error("geru: no GPU vendor selected at compile time");
-#endif
 }
 #endif // DDLA_HAS_GPU
 
