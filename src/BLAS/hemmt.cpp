@@ -19,7 +19,7 @@ template <typename R> std::complex<R> diagonal_value(const std::complex<R>* x) {
     return {x->real(), R(0)};
 }
 
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
 // Load complex input by its real components. A Hermitian imaginary diagonal
 // may be uninitialized, so even a by-value complex load there is forbidden.
 template <typename T>
@@ -62,7 +62,7 @@ void diagonal_block_run(const DdlaHandle_t& h, bool upper, bool hermitian, int w
             }
         }
     } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         using D = detail::DeviceScalarT<T>;
         static_assert(sizeof(D) == sizeof(T));
         const dim3 threads(16,16), blocks((width-1)/16+1,(width-1)/16+1);

@@ -73,16 +73,8 @@ inline gpublasStatus_t gpublasDotc(
     float* result
 )
 {
-    #if DDLA_GPU_VENDOR
     detail::blas_device_pointer_mode_scope pm(handle);
     return gpublasSdot(handle, n, x, incx, y, incy, result);
-    #else
-    // Neither vendor macro: this can only happen if the translation unit was
-    // built without a GPU language while DDLA_HAS_GPU is set, which the build
-    // system does not do (see the LANGUAGE CUDA/HIP source lists).  Throw
-    // rather than fall through to a host pointer.
-    throw std::runtime_error("gpublasDotc: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasDotc(
@@ -92,12 +84,8 @@ inline gpublasStatus_t gpublasDotc(
     double* result
 )
 {
-    #if DDLA_GPU_VENDOR
     detail::blas_device_pointer_mode_scope pm(handle);
     return gpublasDdot(handle, n, x, incx, y, incy, result);
-    #else
-    throw std::runtime_error("gpublasDotc: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasDotc(
@@ -107,13 +95,9 @@ inline gpublasStatus_t gpublasDotc(
     std::complex<float>* result
 )
 {
-    #if DDLA_GPU_VENDOR
     detail::blas_device_pointer_mode_scope pm(handle);
     return gpublasCdotc(handle, n, (gpublasComplex*)x, incx, (gpublasComplex*)y, incy,
                         (gpublasComplex*)result);
-    #else
-    throw std::runtime_error("gpublasDotc: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasDotc(
@@ -123,13 +107,9 @@ inline gpublasStatus_t gpublasDotc(
     std::complex<double>* result
 )
 {
-    #if DDLA_GPU_VENDOR
     detail::blas_device_pointer_mode_scope pm(handle);
     return gpublasZdotc(handle, n, (gpublasDoubleComplex*)x, incx, (gpublasDoubleComplex*)y, incy,
                         (gpublasDoubleComplex*)result);
-    #else
-    throw std::runtime_error("gpublasDotc: no GPU vendor selected at compile time");
-    #endif
 }
 
 } // namespace ddla

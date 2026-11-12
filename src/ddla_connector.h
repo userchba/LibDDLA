@@ -3,7 +3,7 @@
 
 #include <mpi.h>
 #include <iostream>
-#include "gpu/gpu.h"     // vendor headers + the gpu* names (CUDA, HIP or the CPU stand-ins)
+#include "gpu/gpu.h"     // GPU vendor headers and aliases when DDLA_HAS_GPU is enabled
 
 #include <cmath>
 #include <cstddef>
@@ -35,7 +35,7 @@ const auto cclSum=MPI_SUM;
 // ---------------------------------------------------------------------------
 namespace detail {
 
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
 inline constexpr DdlaBackend local_backend_v = DdlaBackend::GPU;
 #elif defined(DDLA_USE_CPU)
 inline constexpr DdlaBackend local_backend_v = DdlaBackend::CPU;
@@ -59,7 +59,7 @@ ddlaStatus_t event_wait_on(const DdlaHandle_t& handle, ddlaEvent_t event, void* 
 } // namespace detail
 
 // ---------------------------------------------------------------------------
-// The gpublas* / gpusolver* / gpurand* handle, status and enum names, their CPU-only stand-ins and the
+// The GPU-only gpublas* / gpusolver* / gpurand* handle, status and enum names and the
 // vendor function aliases (gpuMalloc, gpublasZgemm, ...) are defined by gpu/gpu.h, the only place
 // that spells CUDA / HIP API names.  The public <ddla/ddla.h> stays vendor-free.
 // ---------------------------------------------------------------------------
@@ -94,7 +94,7 @@ static inline void MPI_CHECK(int status, const char* file = __builtin_FILE(), in
 // the error could leave peers blocked in a collective.  MPI_CHECK already
 // aborts the job directly (see above); the other CHECK macros cannot, since
 // they have no communicator available.
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
 // Check a vendor runtime call made directly through a gpu* name.  Only code that has no DdlaHandle_t to go through
 // uses this (the stream-ordered solver workspace in getrf.cpp / potrf.cpp, write_matrix.cpp, the handle
 // implementation itself); everything else calls the ddla* functions and checks them with DDLA_CHECK.
@@ -108,7 +108,6 @@ static inline void GPU_CHECK(gpuError_t status, const char* file = __builtin_FIL
                                  gpuGetErrorString(status));
     }
 }
-#endif
 
 static inline void BLAS_CHECK(gpublasStatus_t err_, const char* file = __builtin_FILE(), int line = __builtin_LINE())
 {
@@ -130,6 +129,8 @@ static inline void SOLVER_CHECK(gpusolverStatus_t err_, const char* file = __bui
     }
 }
 
+#endif // DDLA_HAS_GPU
+
 #ifdef DDLA_USE_CCL
 static inline void CCL_CHECK(gpucclResult_t status, const char* file = __builtin_FILE(), int line = __builtin_LINE())
 {
@@ -147,6 +148,7 @@ static inline void CCL_CHECK(int status, const char* file = __builtin_FILE(), in
 }
 #endif
 
+#if DDLA_HAS_GPU
 static inline void GPURAND_CHECK(gpurandStatus_t status, const char* file = __builtin_FILE(), int line = __builtin_LINE())
 {
     if (status != GPURAND_STATUS_SUCCESS)
@@ -156,7 +158,7 @@ static inline void GPURAND_CHECK(gpurandStatus_t status, const char* file = __bu
                                  " at " + std::string(file) + ":" + std::to_string(line));
     }
 }
-
+#endif // DDLA_HAS_GPU
 
 } // namespace ddla
 

@@ -59,7 +59,6 @@ inline void cpu_potrf(char uplo, int n, std::complex<double>* A, int lda, int* i
 }
 
 #if DDLA_HAS_GPU
-#if DDLA_GPU_VENDOR
 
 // Per scalar type: the buffer-size query and the factorization itself.
 inline gpusolverStatus_t potrf_buffer_size(gpusolverHandle_t h, gpublasFillMode_t uplo, int n, float* A, int lda, int* lwork)
@@ -113,15 +112,6 @@ gpusolverStatus_t gpu_potrf(const DdlaHandle_t& handle, void* work, std::size_t 
                       info);
 }
 
-#else // DDLA_GPU_VENDOR
-
-template <typename T>
-gpusolverStatus_t gpu_potrf(const DdlaHandle_t&, void*, std::size_t, gpublasFillMode_t, int, T*, int, int*)
-{
-    throw std::runtime_error("potrf: no GPU vendor selected at compile time");
-}
-
-#endif // DDLA_GPU_VENDOR
 #endif // DDLA_HAS_GPU
 
 } // anonymous namespace
@@ -134,11 +124,10 @@ char potrf_check(const DdlaHandle_t& handle, char uplo, int n, const void* A, in
 {
     detail::require_backend<Backend>(handle, "potrf");
     // 'U' / 'L' in either case; anything else throws instead of silently picking a triangle.
-    const gpublasFillMode_t fill = detail::to_fill_mode(uplo);
+    const char u = detail::check_uplo(uplo);
     if (n < 0) throw std::runtime_error("potrf: negative matrix size");
     if (info == nullptr) throw std::runtime_error("potrf: null info");
 
-    const char u = fill == GPUBLAS_FILL_MODE_UPPER ? 'U' : 'L';
     if (n == 0) return u;   // nothing to factor: the pointers are not read
     if (A == nullptr) throw std::runtime_error("potrf: null A");
     if (lda < std::max(1, n)) throw std::runtime_error("potrf: lda too small");
@@ -151,7 +140,7 @@ template <typename T>
 void potrf_workspace_size(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda, std::size_t* backend_bytes)
 {
     *backend_bytes = 0;
-#if DDLA_HAS_GPU && DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
     if (handle->backend == DdlaBackend::GPU && n > 0) {
         const gpublasFillMode_t fill = uplo == 'U' ? GPUBLAS_FILL_MODE_UPPER : GPUBLAS_FILL_MODE_LOWER;
         int lwork = 0;

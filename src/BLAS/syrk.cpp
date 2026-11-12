@@ -22,8 +22,8 @@ void syrk_check(const DdlaHandle_t& h, char uplo, char trans, int n, int k,
 {
     detail::require_backend<Backend>(h,"syrk");
     if constexpr (Backend == DdlaBackend::GPU) {
-        (void)detail::to_fill_mode(uplo);
-        if constexpr (!std::is_arithmetic_v<T>) (void)detail::to_blas_op(trans);
+        (void)detail::check_uplo(uplo);
+        if constexpr (!std::is_arithmetic_v<T>) (void)detail::check_trans(trans);
     }
 }
 template <DdlaBackend Backend, typename T>
@@ -41,7 +41,7 @@ void syrk_run(const DdlaHandle_t& h, char uplo, char trans, int n, int k,
         else if constexpr (std::is_same_v<T,std::complex<double>>)
             zsyrk_(&uplo, &trans,&n, &k,&alpha,A,&lda,&beta,C,&ldc);
     } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         if constexpr (std::is_same_v<T,float>) {
             BLAS_CHECK(gpublasSsyrk(static_cast<gpublasHandle_t>(h->blasH),blas_impl::fill(uplo),blas_impl::op(trans),n,k,&alpha,A,lda,&beta,C,ldc));
         }

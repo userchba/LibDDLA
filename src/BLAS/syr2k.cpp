@@ -21,8 +21,8 @@ void syr2k_check(const DdlaHandle_t& h, char uplo, char trans, int n, int k,
     detail::require_backend<Backend>(h,"syr2k");
     if constexpr (std::is_arithmetic_v<T>) blas_impl::her2k_check<Backend,T>(h,uplo,detail::trans_real(trans),n,k,alpha,A,lda,B,ldb,beta,C,ldc);
     if constexpr (Backend == DdlaBackend::GPU) {
-        (void)detail::to_fill_mode(uplo);
-        if constexpr (!std::is_arithmetic_v<T>) (void)detail::to_blas_op(trans);
+        (void)detail::check_uplo(uplo);
+        if constexpr (!std::is_arithmetic_v<T>) (void)detail::check_trans(trans);
     }
 }
 template <DdlaBackend Backend, typename T>
@@ -38,7 +38,7 @@ void syr2k_run(const DdlaHandle_t& h, char uplo, char trans, int n, int k,
         else if constexpr (std::is_same_v<T,std::complex<double>>)
             zsyr2k_(&uplo, &trans,&n, &k,&alpha,A,&lda,B,&ldb,&beta,C,&ldc);
     } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         if constexpr (std::is_same_v<T,std::complex<float>>) {
             using D=gpublasComplex;
             BLAS_CHECK(gpublasCsyr2k(static_cast<gpublasHandle_t>(h->blasH),blas_impl::fill(uplo),blas_impl::op(trans),n,k,

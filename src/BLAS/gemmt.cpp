@@ -49,7 +49,7 @@ template <typename T>
 const T* b_cols(const T* b, int ldb, char trans, int first)
 { return b + (trans == 'N' ? std::size_t(first)*ldb : std::size_t(first)); }
 
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
 // std::complex need not have the alignment required by thrust::complex.
 // Read/write its real components explicitly, as in the existing TRTRM path.
 template <typename T> struct Global {
@@ -174,7 +174,7 @@ void scale_triangle(const DdlaHandle_t& h, char uplo, int n, const T& beta, T* c
             }
         }
     } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         using D=detail::DeviceScalarT<T>;
         const dim3 grid((n-1)/16+1,(n-1)/16+1), block(16,16);
         scale_triangle_kernel<D><<<grid,block,0,static_cast<gpuStream_t>(h->stream)>>>(uplo=='U',n,detail::to_device_scalar(beta),c,ldc);
@@ -204,7 +204,7 @@ void batched_triangle(const DdlaHandle_t& h,char uplo,char ta,char tb,int n,int 
     T** cp=reinterpret_cast<T**>(pointers+2*count*sizeof(T*));
     const std::size_t mixed_bytes=bytes-std::size_t(cursor-static_cast<char*>(workspace));
     if constexpr (Backend==DdlaBackend::GPU) {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         triangular_pointers<T,TA,TB><<<static_cast<unsigned>(std::min<std::size_t>((count+255)/256,65535)),256,0,static_cast<gpuStream_t>(h->stream)>>>(
             upper_triangle,n,block,ta,tb,a,lda,b,ldb,c,ldc,temporary,ap,bp,cp,count);
         DDLA_CHECK(ddlaGetLastError(h));
@@ -282,7 +282,7 @@ void gemmt_copy_run(const DdlaHandle_t& h,char uplo,int block,int full,int tail,
             }
         }
     } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         using D=detail::DeviceScalarT<T>;
         for (int first=0;first<count;) {
             const int batch=std::min(count-first,65535);
@@ -346,7 +346,7 @@ void real_diagonal(const DdlaHandle_t& h, int n, T* c, int ldc)
         if constexpr (Backend==DdlaBackend::CPU) {
             for (int i=0;i<n;++i) c[i+std::size_t(i)*ldc].imag(R(0));
         } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
             real_diagonal_kernel<R><<<(n-1)/256+1,256,0,static_cast<gpuStream_t>(h->stream)>>>(n,reinterpret_cast<R*>(c),ldc);
             DDLA_CHECK(ddlaGetLastError(h));
 #endif

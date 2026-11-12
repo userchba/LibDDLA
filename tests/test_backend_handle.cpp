@@ -484,7 +484,7 @@ int main(int argc, char** argv)
                      ddlaFree(h, d1) == ok && ddlaFree(h, d2) == ok);
             }
 
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
             // 12d. pinned host memory is host memory: host(pinned) -> device -> host(pinned)
             {
                 const std::size_t n = 200;
@@ -720,14 +720,14 @@ int main(int argc, char** argv)
                 bool good = ddlaEventCreate(h, &ev) == ok && ddlaEventCreate(h, &ev2) == ok;
                 TEST(nm + "event create succeeds", good);
                 TEST(nm + "level queue: a GPU handle gets a private queue, a CPU handle none",
-                     gpu == (q != nullptr) && gpu == (ev != nullptr) && (!gpu || q != static_cast<gpuStream_t>(h->stream)));
+                     gpu == (q != nullptr) && gpu == (ev != nullptr) && (!gpu || q != h->stream));
 
                 void* d1 = nullptr;
                 void* d2 = nullptr;
                 good = ddlaMalloc(h, &d1, n) == ok && ddlaMalloc(h, &d2, n) == ok;
                 good = good && ddlaMemset(h, d1, 0x00, n) == ok && ddlaMemset(h, d2, 0x00, n) == ok;
                 good = good && ddlaSynchronize(h) == ok;
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
                 if (gpu) {
                     // a long copy on the private queue leaves the handle's own queue idle
                     good = good && detail::memcpy_on(h, d2, d1, n, q) == ok;
@@ -783,7 +783,7 @@ int main(int argc, char** argv)
             // 13d. error query, device queries, status names
             {
                 TEST(nm + "getLastError starts clean", ddlaGetLastError(h) == ok);
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
                 if (gpu) {
                     // an invalid vendor call leaves a sticky error; ddlaGetLastError reports it once and clears it
                     (void)gpuMemcpyAsync(nullptr, nullptr, 8, gpuMemcpyDeviceToDevice, static_cast<gpuStream_t>(ddlaGetStream(h)));

@@ -57,7 +57,6 @@ inline void cpu_getrf(int m, int n, std::complex<double>* A, int lda, int* ipiv,
 }
 
 #if DDLA_HAS_GPU
-#if DDLA_GPU_VENDOR
 
 // Per scalar type: the buffer-size query and the factorization itself.
 inline gpusolverStatus_t getrf_buffer_size(gpusolverHandle_t h, int m, int n, float* A, int lda, int* lwork)
@@ -108,15 +107,6 @@ gpusolverStatus_t gpu_getrf(const DdlaHandle_t& handle, void* work, std::size_t 
                       ipiv, info);
 }
 
-#else // DDLA_GPU_VENDOR
-
-template <typename T>
-gpusolverStatus_t gpu_getrf(const DdlaHandle_t&, void*, std::size_t, int, int, T*, int, int*, int*)
-{
-    throw std::runtime_error("getrf: no GPU vendor selected at compile time");
-}
-
-#endif // DDLA_GPU_VENDOR
 #endif // DDLA_HAS_GPU
 
 } // anonymous namespace
@@ -143,7 +133,7 @@ template <typename T>
 void getrf_workspace_size(const DdlaHandle_t& handle, int m, int n, T* A, int lda, std::size_t* backend_bytes)
 {
     *backend_bytes = 0;
-#if DDLA_HAS_GPU && DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
     if (handle->backend == DdlaBackend::GPU && m > 0 && n > 0) {
         int lwork = 0;
         SOLVER_CHECK(getrf_buffer_size(static_cast<gpusolverHandle_t>(handle->solverH), m, n, A, lda, &lwork));

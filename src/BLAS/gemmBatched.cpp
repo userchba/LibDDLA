@@ -87,7 +87,6 @@ inline gpublasStatus_t gpublasGemmBatched(
     int batchCount
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasZgemmBatched(
         handle, transa, transb, m, n, k,
         (gpublasDoubleComplex*)(&alpha),
@@ -97,13 +96,6 @@ inline gpublasStatus_t gpublasGemmBatched(
         (gpublasDoubleComplex**)(Carray), ldc,
         batchCount
     );
-    #else
-    // Neither vendor macro: this can only happen if the translation unit was
-    // built without a GPU language while DDLA_HAS_GPU is set, which the build
-    // system does not do (see the LANGUAGE CUDA/HIP source lists).  Throw
-    // rather than fall through to a host pointer.
-    throw std::runtime_error("gpublasGemmBatched: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasGemmBatched(
@@ -117,7 +109,6 @@ inline gpublasStatus_t gpublasGemmBatched(
     int batchCount
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasCgemmBatched(
         handle, transa, transb, m, n, k,
         (gpublasComplex*)(&alpha),
@@ -127,9 +118,6 @@ inline gpublasStatus_t gpublasGemmBatched(
         (gpublasComplex**)(Carray), ldc,
         batchCount
     );
-    #else
-    throw std::runtime_error("gpublasGemmBatched: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasGemmBatched(
@@ -143,7 +131,6 @@ inline gpublasStatus_t gpublasGemmBatched(
     int batchCount
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasSgemmBatched(
         handle, transa, transb, m, n, k,
         &alpha,
@@ -153,9 +140,6 @@ inline gpublasStatus_t gpublasGemmBatched(
         Carray, ldc,
         batchCount
     );
-    #else
-    throw std::runtime_error("gpublasGemmBatched: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasGemmBatched(
@@ -169,7 +153,6 @@ inline gpublasStatus_t gpublasGemmBatched(
     int batchCount
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasDgemmBatched(
         handle, transa, transb, m, n, k,
         &alpha,
@@ -179,9 +162,6 @@ inline gpublasStatus_t gpublasGemmBatched(
         Carray, ldc,
         batchCount
     );
-    #else
-    throw std::runtime_error("gpublasGemmBatched: no GPU vendor selected at compile time");
-    #endif
 }
 
 } // namespace ddla
@@ -227,8 +207,8 @@ void gemmBatched_check(
     }
 
     if constexpr (Backend == DdlaBackend::GPU) {
-        (void)detail::to_blas_op(transa);
-        (void)detail::to_blas_op(transb);
+        (void)detail::check_trans(transa);
+        (void)detail::check_trans(transb);
     }
 }
 

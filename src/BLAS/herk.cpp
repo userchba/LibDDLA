@@ -56,19 +56,11 @@ inline gpublasStatus_t gpublasHerk(
     std::complex<double> *C, int ldc
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasZherk(
         handle, uplo, trans, n, k, 
         &alpha, (gpublasDoubleComplex*)A, lda, 
         &beta, (gpublasDoubleComplex*)C, ldc
     );
-    #else
-    // Neither vendor macro: this can only happen if the translation unit was
-    // built without a GPU language while DDLA_HAS_GPU is set, which the build
-    // system does not do (see the LANGUAGE CUDA/HIP source lists).  Throw
-    // rather than fall through to a host pointer.
-    throw std::runtime_error("gpublasHerk: no GPU vendor selected at compile time");
-    #endif
 }
 
 
@@ -85,12 +77,8 @@ inline gpublasStatus_t gpublasHerk(
     // Real HERK == SYRK.  For real data a conjugate transpose is identical
     // to a plain transpose, so map GPUBLAS_OP_C -> transpose as well.
     gpublasOperation_t trans_real = (trans == GPUBLAS_OP_N) ? GPUBLAS_OP_N : GPUBLAS_OP_T;
-    #if DDLA_GPU_VENDOR
     return gpublasSsyrk(handle, uplo, trans_real, n, k,
         &alpha, A, lda, &beta, C, ldc);
-    #else
-    throw std::runtime_error("gpublasHerk: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasHerk(
@@ -104,12 +92,8 @@ inline gpublasStatus_t gpublasHerk(
 )
 {
     gpublasOperation_t trans_real = (trans == GPUBLAS_OP_N) ? GPUBLAS_OP_N : GPUBLAS_OP_T;
-    #if DDLA_GPU_VENDOR
     return gpublasDsyrk(handle, uplo, trans_real, n, k,
         &alpha, A, lda, &beta, C, ldc);
-    #else
-    throw std::runtime_error("gpublasHerk: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasHerk(
@@ -122,15 +106,11 @@ inline gpublasStatus_t gpublasHerk(
     std::complex<float> *C, int ldc
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasCherk(
         handle, uplo, trans, n, k, 
         &alpha, (gpublasComplex*)A, lda,
         &beta, (gpublasComplex*)C, ldc
     );
-    #else
-    throw std::runtime_error("gpublasHerk: no GPU vendor selected at compile time");
-    #endif
 }
 
 } // namespace ddla
@@ -156,8 +136,8 @@ void herk_check(
     detail::require_backend<Backend>(handle, "herk");
 
     if constexpr (Backend == DdlaBackend::GPU) {
-        (void)detail::to_fill_mode(uplo);
-        (void)detail::to_blas_op(trans);
+        (void)detail::check_uplo(uplo);
+        (void)detail::check_trans(trans);
     }
 }
 

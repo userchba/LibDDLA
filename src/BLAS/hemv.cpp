@@ -60,11 +60,7 @@ inline gpublasStatus_t gpublasHemv(
 )
 {
     // Real HEMV == SYMV.
-    #if DDLA_GPU_VENDOR
     return gpublasSsymv(handle, uplo, n, &alpha, A, lda, x, incx, &beta, y, incy);
-    #else
-    throw std::runtime_error("gpublasHemv: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasHemv(
@@ -76,11 +72,7 @@ inline gpublasStatus_t gpublasHemv(
     double* y, int incy
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasDsymv(handle, uplo, n, &alpha, A, lda, x, incx, &beta, y, incy);
-    #else
-    throw std::runtime_error("gpublasHemv: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasHemv(
@@ -92,13 +84,9 @@ inline gpublasStatus_t gpublasHemv(
     std::complex<float>* y, int incy
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasChemv(handle, uplo, n,
         (gpublasComplex*)&alpha, (gpublasComplex*)A, lda,
         (gpublasComplex*)x, incx, (gpublasComplex*)&beta, (gpublasComplex*)y, incy);
-    #else
-    throw std::runtime_error("gpublasHemv: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasHemv(
@@ -110,13 +98,9 @@ inline gpublasStatus_t gpublasHemv(
     std::complex<double>* y, int incy
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasZhemv(handle, uplo, n,
         (gpublasDoubleComplex*)&alpha, (gpublasDoubleComplex*)A, lda,
         (gpublasDoubleComplex*)x, incx, (gpublasDoubleComplex*)&beta, (gpublasDoubleComplex*)y, incy);
-    #else
-    throw std::runtime_error("gpublasHemv: no GPU vendor selected at compile time");
-    #endif
 }
 
 } // namespace ddla
@@ -141,7 +125,7 @@ void hemv_check(
     detail::require_backend<Backend>(handle, "hemv");
 
     if constexpr (Backend == DdlaBackend::GPU) {
-        (void)detail::to_fill_mode(uplo);
+        (void)detail::check_uplo(uplo);
     }
 }
 

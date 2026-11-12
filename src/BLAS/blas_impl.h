@@ -13,10 +13,12 @@ namespace ddla { namespace blas_impl {
 // need scratch: a size function (backend bytes) and a run that takes them.
 // These conversions assume the caller has already checked the flags.
 inline char upper(char c) noexcept { return static_cast<char>(std::toupper(static_cast<unsigned char>(c))); }
+#if DDLA_HAS_GPU
 inline gpublasOperation_t op(char c) noexcept { c=upper(c); return c=='N' ? GPUBLAS_OP_N : c=='T' ? GPUBLAS_OP_T : GPUBLAS_OP_C; }
 inline gpublasFillMode_t fill(char c) noexcept { return upper(c)=='U' ? GPUBLAS_FILL_MODE_UPPER : GPUBLAS_FILL_MODE_LOWER; }
 inline gpublasSideMode_t side(char c) noexcept { return upper(c)=='L' ? GPUBLAS_SIDE_LEFT : GPUBLAS_SIDE_RIGHT; }
 inline gpublasDiagType_t diag(char c) noexcept { return upper(c)=='U' ? GPUBLAS_DIAG_UNIT : GPUBLAS_DIAG_NON_UNIT; }
+#endif
 // diagonal_length describes the complete replicated vector for overlap checks.
 template <DdlaBackend Backend, typename T, typename U>
 void dgmm_check(const DdlaHandle_t& h, char side, int m, int n,

@@ -64,11 +64,7 @@ inline gpublasStatus_t gpublasHemm(
 )
 {
     // Real HEMM == SYMM.
-    #if DDLA_GPU_VENDOR
     return gpublasSsymm(handle, side, uplo, m, n, &alpha, A, lda, B, ldb, &beta, C, ldc);
-    #else
-    throw std::runtime_error("gpublasHemm: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasHemm(
@@ -81,11 +77,7 @@ inline gpublasStatus_t gpublasHemm(
     double* C, int ldc
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasDsymm(handle, side, uplo, m, n, &alpha, A, lda, B, ldb, &beta, C, ldc);
-    #else
-    throw std::runtime_error("gpublasHemm: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasHemm(
@@ -98,13 +90,9 @@ inline gpublasStatus_t gpublasHemm(
     std::complex<float>* C, int ldc
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasChemm(handle, side, uplo, m, n,
         (gpublasComplex*)&alpha, (gpublasComplex*)A, lda,
         (gpublasComplex*)B, ldb, (gpublasComplex*)&beta, (gpublasComplex*)C, ldc);
-    #else
-    throw std::runtime_error("gpublasHemm: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasHemm(
@@ -117,13 +105,9 @@ inline gpublasStatus_t gpublasHemm(
     std::complex<double>* C, int ldc
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasZhemm(handle, side, uplo, m, n,
         (gpublasDoubleComplex*)&alpha, (gpublasDoubleComplex*)A, lda,
         (gpublasDoubleComplex*)B, ldb, (gpublasDoubleComplex*)&beta, (gpublasDoubleComplex*)C, ldc);
-    #else
-    throw std::runtime_error("gpublasHemm: no GPU vendor selected at compile time");
-    #endif
 }
 
 } // namespace ddla
@@ -148,8 +132,8 @@ void hemm_check(
     detail::require_backend<Backend>(handle, "hemm");
 
     if constexpr (Backend == DdlaBackend::GPU) {
-        (void)detail::to_side_mode(side);
-        (void)detail::to_fill_mode(uplo);
+        (void)detail::check_side(side);
+        (void)detail::check_uplo(uplo);
     }
 }
 

@@ -2,7 +2,7 @@
  * @file benchmark_cpu_pgemm_scalapack.cpp
  * @brief DDLA CPU pgemm vs ScaLAPACK pzgemm correctness and performance benchmark.
  *
- * Only built for DDLA_USE_CPU when a ScaLAPACK library is available.
+ * Uses CPU handles in every build when a ScaLAPACK library is available.
  * Compares std::complex<double>, N,N only, on a 2x2 process grid (4 ranks).
  */
 

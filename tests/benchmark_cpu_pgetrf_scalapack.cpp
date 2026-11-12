@@ -2,7 +2,7 @@
  * @file benchmark_cpu_pgetrf_scalapack.cpp
  * @brief DDLA CPU pgetrf vs ScaLAPACK getrf correctness and performance benchmark.
  *
- * Only built for DDLA_USE_CPU when a ScaLAPACK library is available.
+ * Uses CPU handles in every build when a ScaLAPACK library is available.
  * Compares double (pdgetrf) and std::complex<double> (pzgetrf), full-matrix
  * factorization A(1:n,1:n), on a 2x2 process grid (4 ranks).
  * The DDLA panel method follows --method: gather (default), inplace, or both

@@ -9,7 +9,7 @@
 namespace ddla {
 namespace {
 
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
 static_assert(std::is_pointer_v<gpuStream_t>);
 static_assert(std::is_pointer_v<gpublasHandle_t>);
 static_assert(std::is_pointer_v<gpusolverHandle_t>);
@@ -50,7 +50,7 @@ void init_resources(DdlaStream& s)
         s.blasH = s.solverH = nullptr;
         s.nccl_comm = s.nccl_row_comm = s.nccl_col_comm = nullptr;
     } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
 #ifdef DDLA_USE_CCL
         create_comm(s.nccl_comm, s.comm);
         create_comm(s.nccl_row_comm, s.row_comm);
@@ -79,7 +79,7 @@ template <DdlaBackend Backend>
 void clean_resources(DdlaStream& s)
 {
     if constexpr (Backend == DdlaBackend::GPU) {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         if (s.stream) GPU_CHECK(gpuStreamDestroy(static_cast<gpuStream_t>(s.stream)));
         s.stream = nullptr;
         if (s.stream_data) GPU_CHECK(gpuStreamDestroy(static_cast<gpuStream_t>(s.stream_data)));
@@ -111,7 +111,7 @@ void* DdlaStream::level_queue()
 {
     if (backend == DdlaBackend::CPU) return nullptr;
     if (!stream_level) {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         create_stream(stream_level);
 #else
         throw std::runtime_error("ddla: GPU resources unavailable in this build");
@@ -123,7 +123,7 @@ void* DdlaStream::level_queue()
 int DdlaStream::getLocalDevice(MPI_Comm local_comm) const
 {
     if (backend == DdlaBackend::CPU) return 0;
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
     int local_rank = 0;
     MPI_Comm local = MPI_COMM_NULL;
     MPI_CHECK(MPI_Comm_split_type(local_comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &local));
@@ -145,7 +145,7 @@ void DdlaStream::set_local_device(int dev)
         local_device = 0;
         return;
     }
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
     GPU_CHECK(gpuSetDevice(dev));
     local_device = dev;
 #else
@@ -221,7 +221,7 @@ void DdlaStream::check_memory()
     if (backend == DdlaBackend::CPU) {
         std::printf("myid:%d, CPU backend (no device memory to check)\n", myid);
     } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         std::size_t free_mem = 0, total_mem = 0;
         GPU_CHECK(gpuMemGetInfo(&free_mem, &total_mem));
         std::printf("myid:%d, local_device:%d, free_mem:%lf GB, total_mem:%lf GB\n",

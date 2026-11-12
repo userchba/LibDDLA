@@ -21,8 +21,8 @@ void symm_check(const DdlaHandle_t& h, char side, char uplo, int m, int n,
     detail::require_backend<Backend>(h,"symm");
     if constexpr (std::is_arithmetic_v<T>) blas_impl::hemm_check<Backend,T>(h,side,uplo,m,n,alpha,A,lda,B,ldb,beta,C,ldc);
     if constexpr (Backend == DdlaBackend::GPU) {
-        (void)detail::to_fill_mode(uplo);
-        (void)detail::to_side_mode(side);
+        (void)detail::check_uplo(uplo);
+        (void)detail::check_side(side);
     }
 }
 template <DdlaBackend Backend, typename T>
@@ -38,7 +38,7 @@ void symm_run(const DdlaHandle_t& h, char side, char uplo, int m, int n,
         else if constexpr (std::is_same_v<T,std::complex<double>>)
             zsymm_(&side, &uplo,&m, &n,&alpha,A,&lda,B,&ldb,&beta,C,&ldc);
     } else {
-#if DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
         if constexpr (std::is_same_v<T,std::complex<float>>) {
             using D=gpublasComplex;
             BLAS_CHECK(gpublasCsymm(static_cast<gpublasHandle_t>(h->blasH),blas_impl::side(side),blas_impl::fill(uplo),m,n,

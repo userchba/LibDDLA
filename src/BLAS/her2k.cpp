@@ -73,11 +73,7 @@ inline gpublasStatus_t gpublasHer2k(
     // and hipBLAS reject 'C' outright and only the reference SSYR2K tolerates
     // it.  (Same mapping as gpublasHerk's real overloads.)
     const gpublasOperation_t trans_real = (trans == GPUBLAS_OP_N) ? GPUBLAS_OP_N : GPUBLAS_OP_T;
-    #if DDLA_GPU_VENDOR
     return gpublasSsyr2k(handle, uplo, trans_real, n, k, &alpha, A, lda, B, ldb, &beta, C, ldc);
-    #else
-    throw std::runtime_error("gpublasHer2k: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasHer2k(
@@ -92,11 +88,7 @@ inline gpublasStatus_t gpublasHer2k(
 )
 {
     const gpublasOperation_t trans_real = (trans == GPUBLAS_OP_N) ? GPUBLAS_OP_N : GPUBLAS_OP_T;
-    #if DDLA_GPU_VENDOR
     return gpublasDsyr2k(handle, uplo, trans_real, n, k, &alpha, A, lda, B, ldb, &beta, C, ldc);
-    #else
-    throw std::runtime_error("gpublasHer2k: no GPU vendor selected at compile time");
-    #endif
 }
 
 // cuBLAS v2 quirk (mirrored by hipBLAS): xher2k takes a COMPLEX alpha with a
@@ -113,13 +105,9 @@ inline gpublasStatus_t gpublasHer2k(
     std::complex<float>* C, int ldc
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasCher2k(handle, uplo, trans, n, k,
         (gpublasComplex*)&alpha, (gpublasComplex*)A, lda, (gpublasComplex*)B, ldb,
         &beta, (gpublasComplex*)C, ldc);
-    #else
-    throw std::runtime_error("gpublasHer2k: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasHer2k(
@@ -133,13 +121,9 @@ inline gpublasStatus_t gpublasHer2k(
     std::complex<double>* C, int ldc
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasZher2k(handle, uplo, trans, n, k,
         (gpublasDoubleComplex*)&alpha, (gpublasDoubleComplex*)A, lda, (gpublasDoubleComplex*)B, ldb,
         &beta, (gpublasDoubleComplex*)C, ldc);
-    #else
-    throw std::runtime_error("gpublasHer2k: no GPU vendor selected at compile time");
-    #endif
 }
 
 } // namespace ddla
@@ -164,8 +148,8 @@ void her2k_check(
     detail::require_backend<Backend>(handle, "her2k");
 
     if constexpr (Backend == DdlaBackend::GPU) {
-        (void)detail::to_fill_mode(uplo);
-        (void)detail::to_blas_op(trans);
+        (void)detail::check_uplo(uplo);
+        (void)detail::check_trans(trans);
     }
 }
 

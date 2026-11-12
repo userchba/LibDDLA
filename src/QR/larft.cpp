@@ -94,7 +94,6 @@ void cpu_larft(char direct, int n, int k, T* V, int ldv, const T* tau, T* t, int
 }
 
 #if DDLA_HAS_GPU
-#if DDLA_GPU_VENDOR
 
 // T of the block reflector V on the device (see the header comment).  `backward` selects 'B'.
 template <typename T>
@@ -128,15 +127,6 @@ void gpu_larft(const DdlaHandle_t& handle, void* work, bool backward, int n, int
     detail::reflector_build_T<DdlaBackend::GPU, T>(handle, k, vv, tau, t, ldt, backward);
 }
 
-#else // DDLA_GPU_VENDOR
-
-template <typename T>
-void gpu_larft(const DdlaHandle_t&, void*, bool, int, int, T*, int, const T*, T*, int)
-{
-    throw std::runtime_error("larft: no GPU vendor selected at compile time");
-}
-
-#endif // DDLA_GPU_VENDOR
 #endif // DDLA_HAS_GPU
 
 } // anonymous namespace
@@ -172,7 +162,7 @@ void larft_workspace_size(const DdlaHandle_t& handle, int n, int k, std::size_t*
 {
     (void)n;
     *backend_bytes = 0;
-#if DDLA_HAS_GPU && DDLA_GPU_VENDOR
+#if DDLA_HAS_GPU
     if (handle->backend == DdlaBackend::GPU && k > 0)
         *backend_bytes = 2 * detail::padded_bytes<T>(static_cast<std::size_t>(k) * k);
 #else

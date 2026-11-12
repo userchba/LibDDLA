@@ -58,15 +58,7 @@ inline gpublasStatus_t gpublasGemv(
     float* y, int incy
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasSgemv(handle, trans, m, n, &alpha, A, lda, x, incx, &beta, y, incy);
-    #else
-    // Neither vendor macro: this can only happen if the translation unit was
-    // built without a GPU language while DDLA_HAS_GPU is set, which the build
-    // system does not do (see the LANGUAGE CUDA/HIP source lists).  Throw
-    // rather than fall through to a host pointer.
-    throw std::runtime_error("gpublasGemv: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasGemv(
@@ -79,11 +71,7 @@ inline gpublasStatus_t gpublasGemv(
     double* y, int incy
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasDgemv(handle, trans, m, n, &alpha, A, lda, x, incx, &beta, y, incy);
-    #else
-    throw std::runtime_error("gpublasGemv: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasGemv(
@@ -96,13 +84,9 @@ inline gpublasStatus_t gpublasGemv(
     std::complex<float>* y, int incy
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasCgemv(handle, trans, m, n,
         (gpublasComplex*)&alpha, (gpublasComplex*)A, lda,
         (gpublasComplex*)x, incx, (gpublasComplex*)&beta, (gpublasComplex*)y, incy);
-    #else
-    throw std::runtime_error("gpublasGemv: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasGemv(
@@ -115,13 +99,9 @@ inline gpublasStatus_t gpublasGemv(
     std::complex<double>* y, int incy
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasZgemv(handle, trans, m, n,
         (gpublasDoubleComplex*)&alpha, (gpublasDoubleComplex*)A, lda,
         (gpublasDoubleComplex*)x, incx, (gpublasDoubleComplex*)&beta, (gpublasDoubleComplex*)y, incy);
-    #else
-    throw std::runtime_error("gpublasGemv: no GPU vendor selected at compile time");
-    #endif
 }
 
 } // namespace ddla
@@ -145,7 +125,7 @@ void gemv_check(
     detail::require_backend<Backend>(handle, "gemv");
 
     if constexpr (Backend == DdlaBackend::GPU) {
-        (void)detail::to_blas_op(trans);
+        (void)detail::check_trans(trans);
     }
 }
 

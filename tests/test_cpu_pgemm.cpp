@@ -2,7 +2,7 @@
  * @file test_cpu_pgemm.cpp
  * @brief Correctness test for CPU-backend pgemm (DDLA_USE_CPU).
  *
- * Only compiles with CPU builds. Tests N,N N,T T,N T,C C,N C,T matrix
+ * Uses CPU handles in CPU-only and GPU-enabled builds. Tests N,N N,T T,N T,C C,N C,T matrix
  * multiplication correctness across all 4 scalar types at various sizes.
  */
 

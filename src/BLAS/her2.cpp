@@ -60,11 +60,7 @@ inline gpublasStatus_t gpublasHer2(
 )
 {
     // Real HER2 == SYR2.
-    #if DDLA_GPU_VENDOR
     return gpublasSsyr2(handle, uplo, n, &alpha, x, incx, y, incy, A, lda);
-    #else
-    throw std::runtime_error("gpublasHer2: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasHer2(
@@ -75,11 +71,7 @@ inline gpublasStatus_t gpublasHer2(
     double* A, int lda
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasDsyr2(handle, uplo, n, &alpha, x, incx, y, incy, A, lda);
-    #else
-    throw std::runtime_error("gpublasHer2: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasHer2(
@@ -90,12 +82,8 @@ inline gpublasStatus_t gpublasHer2(
     std::complex<float>* A, int lda
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasCher2(handle, uplo, n, (gpublasComplex*)&alpha,
         (gpublasComplex*)x, incx, (gpublasComplex*)y, incy, (gpublasComplex*)A, lda);
-    #else
-    throw std::runtime_error("gpublasHer2: no GPU vendor selected at compile time");
-    #endif
 }
 
 inline gpublasStatus_t gpublasHer2(
@@ -106,12 +94,8 @@ inline gpublasStatus_t gpublasHer2(
     std::complex<double>* A, int lda
 )
 {
-    #if DDLA_GPU_VENDOR
     return gpublasZher2(handle, uplo, n, (gpublasDoubleComplex*)&alpha,
         (gpublasDoubleComplex*)x, incx, (gpublasDoubleComplex*)y, incy, (gpublasDoubleComplex*)A, lda);
-    #else
-    throw std::runtime_error("gpublasHer2: no GPU vendor selected at compile time");
-    #endif
 }
 
 } // namespace ddla
@@ -135,7 +119,7 @@ void her2_check(
     detail::require_backend<Backend>(handle, "her2");
 
     if constexpr (Backend == DdlaBackend::GPU) {
-        (void)detail::to_fill_mode(uplo);
+        (void)detail::check_uplo(uplo);
     }
 }
 

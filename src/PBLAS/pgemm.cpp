@@ -180,7 +180,7 @@ void ab_run(
     auto sync_panel = [&]() {
         if constexpr (Backend != DdlaBackend::CPU) {
             DDLA_CHECK(ddlaSynchronize(h));
-            DDLA_CHECK(detail::synchronize_on(h, static_cast<gpuStream_t>(h->stream_data)));
+            DDLA_CHECK(detail::synchronize_on(h, h->stream_data));
         }
     };
 
