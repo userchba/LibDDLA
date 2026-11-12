@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include "api_grid_test_common.h"
 #include "Cholesky/cholesky_workspace.h"
 #include <array>
@@ -129,9 +130,9 @@ int main(int argc, char** argv)
     for (int pr = 1; pr <= size; ++pr) if (size % pr == 0) for (char major : {'R', 'C'}) {
         const int pc = size / pr;
         DdlaHandle_t h = nullptr;
-        DDLA_CHECK(ddlaInit(h));
+        DDLA_CHECK(ddlaInit(h, ddla_test::execution_backend));
         DDLA_CHECK(ddlaSet(h, MPI_COMM_WORLD, pr, pc, major));
-        constexpr auto backend = default_backend_v;
+        constexpr auto backend = ddla_test::execution_backend;
         cases<backend,float>(h, pr, pc);
         cases<backend,double>(h, pr, pc);
         cases<backend,std::complex<float>>(h, pr, pc);

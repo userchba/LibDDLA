@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include "mpi_test_init.h"
 #include <iostream>
 #include <vector>
@@ -105,7 +106,7 @@ int main(int argc, char* argv[])
     MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
 
     DdlaHandle_t ddla_handle = nullptr;
-    ddlaInit(ddla_handle);
+    ddlaInit(ddla_handle, ddla_test::execution_backend);
     ddlaSet(ddla_handle, MPI_COMM_WORLD, 2, 2);
 
     if (myid == 0) {

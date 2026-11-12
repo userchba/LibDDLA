@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include "mpi_test_init.h"
 #include <iostream>
 #include <vector>
@@ -85,7 +86,7 @@ int main(int argc, char* argv[])
     ddla_test_mpi_init(&argc, &argv);
 
     DdlaHandle_t handle = nullptr;
-    ddlaInit(handle);
+    ddlaInit(handle, ddla_test::execution_backend);
     ddlaSet(handle, MPI_COMM_WORLD);
 
     // Real scalar added to real matrix.

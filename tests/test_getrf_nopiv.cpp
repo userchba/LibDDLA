@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include <cmath>
 #include "LU/lu_internal.h"
 #include <complex>
@@ -54,7 +55,7 @@ void check_getrf_nopiv(int n, const DdlaHandle_t& ddla_handle)
     // Run the local nopiv LU factorization.
     DDLA_CHECK(ddlaSynchronize(ddla_handle));
     double t_nopiv = MPI_Wtime();
-    getrf_nopiv(n, n, d_A, lda, d_info, ddla_handle);
+    getrf_nopiv<ddla_test::execution_backend>(n, n, d_A, lda, d_info, ddla_handle);
     DDLA_CHECK(ddlaSynchronize(ddla_handle));
     t_nopiv = MPI_Wtime() - t_nopiv;
 
@@ -113,7 +114,7 @@ int main(int argc, char* argv[])
     ddla_test_mpi_init(&argc, &argv);
 
     DdlaHandle_t ddla_handle = nullptr;
-    ddlaInit(ddla_handle);
+    ddlaInit(ddla_handle, ddla_test::execution_backend);
     ddlaSet(ddla_handle, MPI_COMM_WORLD);
     check_getrf_nopiv(100, ddla_handle);
     std::cout << "Testing getrf_nopiv against cuSOLVER/hipSOLVER LU" << std::endl;

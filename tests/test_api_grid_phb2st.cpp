@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include "Eigensolver/two_stage/phb2st_impl.h"
 #include <algorithm>
 #include <cmath>
@@ -169,7 +170,7 @@ void check_phb2st(const ddla::DdlaHandle_t &handle, int n, int nblk, int nbw, co
         int info = 0;
         bool caught = false;
         try {
-            ddla::phb2st_node<ddla::default_backend_v, T>(handle, n, nbw, d_A.ptr, descA, diagonal.data(),
+            ddla::phb2st_node<ddla_test::execution_backend, T>(handle, n, nbw, d_A.ptr, descA, diagonal.data(),
                                                           off.data(), history, phases, true, info);
         } catch (const std::invalid_argument &) {
             caught = true;
@@ -228,7 +229,7 @@ void check_phb2st(const ddla::DdlaHandle_t &handle, int n, int nblk, int nbw, co
     ddla::detail::DistributedHistory<T> history;
     std::vector<T> phases;
     int info2 = 0;
-    ddla::phb2st_node<ddla::default_backend_v, T>(handle, n, nbw, d_A.ptr, descA, d_eigs.data(), e_off.data(),
+    ddla::phb2st_node<ddla_test::execution_backend, T>(handle, n, nbw, d_A.ptr, descA, d_eigs.data(), e_off.data(),
                                                   history, phases, true, info2);
     require_close(handle, std::string(label) + " phb2st info", info2, 0.5);
 

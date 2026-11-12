@@ -18,15 +18,6 @@ enum class DdlaBackend {
     GPU   ///< GPU (CUDA or HIP, depending on build configuration)
 };
 
-/// Default used when creating a handle without an explicit backend.
-/// Dual CPU+GPU builds prefer GPU; computations use the created handle.
-inline constexpr DdlaBackend default_backend_v =
-#if DDLA_HAS_GPU
-    DdlaBackend::GPU;
-#else
-    DdlaBackend::CPU;
-#endif
-
 /// Status codes returned by the public API functions.
 enum class ddlaStatus_t {
     DDLA_STATUS_SUCCESS = 0,        ///< Operation completed successfully.
@@ -47,11 +38,8 @@ using DdlaHandle_t = DdlaStream*;      // ABI: opaque pointer
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-/// Create an uninitialized handle using the compile-time default backend
-/// (`default_backend_v`: GPU when compiled with GPU support, else CPU).
-ddlaStatus_t ddlaInit(DdlaHandle_t& handle);
-
-/// Create a handle requesting a specific backend.
+/// Create a handle with an explicitly requested CPU or GPU backend.
+/// Every handle must select its backend here; there is no implicit default.
 /// @throws std::runtime_error if the requested backend is unavailable.
 ddlaStatus_t ddlaInit(DdlaHandle_t& handle, DdlaBackend requested_backend);
 

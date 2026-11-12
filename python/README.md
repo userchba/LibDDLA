@@ -110,3 +110,5 @@ through positive `info`; the driver leaves the right-hand side unchanged
 when factorization fails. Use the regenerated ctypes/Fortran bindings and
 native C library from the same source revision, since the native Cholesky
 argument lists changed as well.
+
+`Handle` requires an explicit `backend=Backend.CPU` or `backend=Backend.GPU`; omitting it or passing `None` is rejected.

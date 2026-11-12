@@ -155,10 +155,6 @@ def check_status(status: int, where: str = ""):
     else:
         raise DdlaError(f"LibDDLA error {status}{ctx}: {msg_str}")
 
-ddla_c_init = lib.ddla_c_init
-ddla_c_init.restype = ctypes.c_int
-ddla_c_init.argtypes = [ctypes.c_void_p]
-
 ddla_c_init_backend = lib.ddla_c_init_backend
 ddla_c_init_backend.restype = ctypes.c_int
 ddla_c_init_backend.argtypes = [ctypes.c_void_p, ctypes.c_int]

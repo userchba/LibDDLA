@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include <cmath>
 #include "LU/lu_internal.h"
 #include <complex>
@@ -60,7 +61,7 @@ void benchmark_getrf_nopiv(int n, const DdlaHandle_t& ddla_handle)
 
     // 1) LibDDLA getrf_nopiv
     double t_lib = MPI_Wtime();
-    getrf_nopiv(n, n, d_A_lib, lda, d_info_lib, ddla_handle);
+    getrf_nopiv<ddla_test::execution_backend>(n, n, d_A_lib, lda, d_info_lib, ddla_handle);
     DDLA_CHECK(ddlaSynchronize(ddla_handle));
     t_lib = MPI_Wtime() - t_lib;
 
@@ -133,7 +134,7 @@ int main(int argc, char* argv[])
     ddla_test_mpi_init(&argc, &argv);
 
     DdlaHandle_t ddla_handle = nullptr;
-    ddlaInit(ddla_handle);
+    ddlaInit(ddla_handle, ddla_test::execution_backend);
     ddlaSet(ddla_handle, MPI_COMM_WORLD);
 
     magma_init();

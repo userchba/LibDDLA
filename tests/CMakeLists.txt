@@ -389,7 +389,7 @@ endif()
 add_bench_executable(benchmark_pheevd)
 
 # Distributed Householder QR benchmark — backend-templated (runs on the
-# build's default backend).  Heavy: never run by ctest.
+# explicitly selected fixture backend).  Heavy: never run by ctest.
 add_bench_executable(benchmark_pgeqrf)
 
 # Distributed SVD benchmark (pgebrd / punmbr / pgesvd stage times, checked at
@@ -549,7 +549,7 @@ endif()
 # Fortran bindings (built only with DDLA_ENABLE_FORTRAN=ON): one MPI program
 # exercising handle lifecycle, descriptors, memory copies and the pgemm /
 # pgesv / ppotrf(+pdam,ppotrs) / pgeqrf paths of the ddla module for real and
-# complex types, on the build's default backend exactly like the C++ grid
+# complex types, on the explicitly selected fixture backend exactly like the C++ grid
 # tests (device buffers + ddla_memcpy on a GPU handle).
 # ---------------------------------------------------------------------------
 if(DDLA_ENABLE_FORTRAN)

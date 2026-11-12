@@ -35,11 +35,6 @@ bool ddlaBackendAvailable(DdlaBackend backend)
 // ---------------------------------------------------------------------------
 // ddlaInit — allocate opaque handle, validate backend
 // ---------------------------------------------------------------------------
-ddlaStatus_t ddlaInit(DdlaHandle_t& handle)
-{
-    return ddlaInit(handle, default_backend_v);
-}
-
 ddlaStatus_t ddlaInit(DdlaHandle_t& handle, DdlaBackend requested_backend)
 {
     // Validate availability

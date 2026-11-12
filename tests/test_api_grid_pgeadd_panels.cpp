@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include "api_grid_test_common.h"
 #include "PBLAS/pblas_workspace.h"
 
@@ -45,7 +46,7 @@ void check_non_square_block_transpose(
             &backend_bytes,&host_bytes);
         ddla::vector<char> scratch(handle,backend_bytes);
         std::vector<char> host_scratch(host_bytes);
-        ddla::pblas::panel_run<ddla::default_backend_v,Complex>(handle,true,trans,row_panel_rows,n,
+        ddla::pblas::panel_run<ddla_test::execution_backend,Complex>(handle,true,trans,row_panel_rows,n,
             d_A.ptr,0,0,desc,desc,d_row.ptr,scratch.data(),backend_bytes,host_scratch.data(),host_bytes);
         auto h_row = download(handle, d_row.ptr, output_count);
 
@@ -85,7 +86,7 @@ void check_non_square_block_transpose(
             &backend_bytes,&host_bytes);
         ddla::vector<char> scratch(handle,backend_bytes);
         std::vector<char> host_scratch(host_bytes);
-        ddla::pblas::panel_run<ddla::default_backend_v,Complex>(handle,false,trans,m,col_panel_cols,
+        ddla::pblas::panel_run<ddla_test::execution_backend,Complex>(handle,false,trans,m,col_panel_cols,
             d_A.ptr,0,0,desc,desc,d_col.ptr,scratch.data(),backend_bytes,host_scratch.data(),host_bytes);
         auto h_col = download(handle, d_col.ptr, output_count);
 
@@ -134,7 +135,7 @@ void check_host_tunnel_workspace(const ddla::DdlaHandle_t& handle)
 
     const size_t count = static_cast<size_t>(mb) * ddla_test::n_loc(handle, desc);
     DeviceBuffer<Complex> d_row(handle, count);
-    ddla::pblas::broadcast_panel<ddla::default_backend_v>(handle, false, mb, n, d_A.ptr, 0, 0, desc, d_row.ptr);
+    ddla::pblas::broadcast_panel<ddla_test::execution_backend>(handle, false, mb, n, d_A.ptr, 0, 0, desc, d_row.ptr);
     auto h_row = download(handle, d_row.ptr, count);
 
     double err = 0.0;
@@ -170,7 +171,7 @@ void check_pgeadd_panels(const ddla::DdlaHandle_t& handle, const Shape& base)
 
     const int rows = std::min(nb, m);
     DeviceBuffer<Complex> d_row(handle, static_cast<size_t>(rows) * ddla_test::n_loc(handle, desc));
-    ddla::pblas::broadcast_panel<ddla::default_backend_v>(handle, false, rows, n, d_A.ptr, 0, 0, desc, d_row.ptr);
+    ddla::pblas::broadcast_panel<ddla_test::execution_backend>(handle, false, rows, n, d_A.ptr, 0, 0, desc, d_row.ptr);
     auto h_row = download(handle, d_row.ptr, static_cast<size_t>(rows) * ddla_test::n_loc(handle, desc));
     double err_row = 0.0;
     for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
@@ -183,7 +184,7 @@ void check_pgeadd_panels(const ddla::DdlaHandle_t& handle, const Shape& base)
 
     const int cols = std::min(nb, n);
     DeviceBuffer<Complex> d_col(handle, static_cast<size_t>(ddla_test::m_loc(handle, desc)) * cols);
-    ddla::pblas::broadcast_panel<ddla::default_backend_v>(handle, true, m, cols, d_A.ptr, 0, 0, desc, d_col.ptr);
+    ddla::pblas::broadcast_panel<ddla_test::execution_backend>(handle, true, m, cols, d_A.ptr, 0, 0, desc, d_col.ptr);
     auto h_col = download(handle, d_col.ptr, static_cast<size_t>(ddla_test::m_loc(handle, desc)) * cols);
     double err_col = 0.0;
     for(int c = 0; c < cols; ++c){

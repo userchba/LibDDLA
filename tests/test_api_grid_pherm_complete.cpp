@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -157,7 +158,7 @@ void check_one(const ddla::DdlaHandle_t& handle, int n, int nb, int extra, bool 
         }
         upload(handle, scratch->ptr, scratch_before);
         check_ddla_sync(handle);
-        ddla::detail::pherm_complete_with_workspace(
+        ddla::detail::pherm_complete_with_workspace<ddla_test::execution_backend>(
             handle, upper ? 'U' : 'L', n, d_A.ptr, descA,
             scratch_mode == 4 ? nullptr : scratch->ptr + guard, capacity);
     } else {

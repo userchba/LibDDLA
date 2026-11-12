@@ -1,9 +1,10 @@
+#include "test_backend.h"
 /**
  * @file test_backend_handle.cpp
  * @brief Test backend selection, handle lifecycle, and public accessors.
  *
  * Covers:
- *  - Default resolution to the compile-time default backend
+ *  - Explicit backend selection on every handle
  *  - Explicit available backend
  *  - Explicit unavailable backend (throws)
  *  - Backend query (ddlaGetBackend)
@@ -81,12 +82,12 @@ int main(int argc, char** argv)
 
     if (myid == 0) std::cout << "=== Backend & Handle Test ===" << std::endl;
 
-    // ---- 1. Default backend resolution --------------------------------
+    // ---- 1. Explicit fixture backend selection --------------------------------
     {
         DdlaHandle_t h1 = nullptr;
-        ddlaInit(h1);
-        TEST("Default resolves to compile-time default backend",
-             ddlaGetBackend(h1) == default_backend_v);
+        ddlaInit(h1, ddla_test::execution_backend);
+        TEST("Handle preserves the explicitly selected backend",
+             ddlaGetBackend(h1) == ddla_test::execution_backend);
         TEST("Resolved backend is available",
              ddlaBackendAvailable(ddlaGetBackend(h1)));
         ddlaDestroy(h1);
@@ -166,7 +167,7 @@ int main(int argc, char** argv)
     // ---- 6. Public accessors after ddlaSet ----------------------------
     {
         DdlaHandle_t h = nullptr;
-        ddlaInit(h);
+        ddlaInit(h, ddla_test::execution_backend);
         ddlaSet(h, MPI_COMM_WORLD, 'R');
 
         int rank = ddlaGetRank(h);
@@ -205,8 +206,8 @@ int main(int argc, char** argv)
     // ---- 7. Two handles from the same original communicator ------------
     {
         DdlaHandle_t ha = nullptr, hb = nullptr;
-        ddlaInit(ha);
-        ddlaInit(hb);
+        ddlaInit(ha, ddla_test::execution_backend);
+        ddlaInit(hb, ddla_test::execution_backend);
         ddlaSet(ha, MPI_COMM_WORLD, 'R');
         ddlaSet(hb, MPI_COMM_WORLD, 'R');
 
@@ -234,8 +235,8 @@ int main(int argc, char** argv)
     // ---- 8. Cleanup in both orders --------------------------------------
     {
         DdlaHandle_t hx = nullptr, hy = nullptr;
-        ddlaInit(hx);
-        ddlaInit(hy);
+        ddlaInit(hx, ddla_test::execution_backend);
+        ddlaInit(hy, ddla_test::execution_backend);
         ddlaSet(hx, MPI_COMM_WORLD, 'R');
         ddlaSet(hy, MPI_COMM_WORLD, 'R');
 
@@ -248,7 +249,7 @@ int main(int argc, char** argv)
     // ---- 9. Idempotent double-destroy -----------------------------------
     {
         DdlaHandle_t h = nullptr;
-        ddlaInit(h);
+        ddlaInit(h, ddla_test::execution_backend);
         ddlaSet(h, MPI_COMM_WORLD, 'R');
         ddlaDestroy(h);
         ddlaDestroy(h);  // should be safe
@@ -258,7 +259,7 @@ int main(int argc, char** argv)
     // ---- 9b. Repeated ddlaSet (reinit lifecycle) -----------------------
     {
         DdlaHandle_t h = nullptr;
-        ddlaInit(h);
+        ddlaInit(h, ddla_test::execution_backend);
         ddlaSet(h, MPI_COMM_WORLD, 'R');
         int rank1 = ddlaGetRank(h);
         int size1 = ddlaGetSize(h);
@@ -288,7 +289,7 @@ int main(int argc, char** argv)
     // ---- 10. Memory helpers smoke test ----------------------------------
     {
         DdlaHandle_t h = nullptr;
-        ddlaInit(h);
+        ddlaInit(h, ddla_test::execution_backend);
         ddlaSet(h, MPI_COMM_WORLD, 'R');
 
         void* ptr = nullptr;

@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include "Eigensolver/pstedc_impl.h"
 // Private row-baseline pstedc benchmark. One warmup, then max-over-rank wall
 // times; inputs are restored before every call. Validation uses row slabs,
@@ -40,7 +41,7 @@ int main(int argc,char** argv)
         }
         if(reps<1||(kind!=0&&kind!=1&&kind!=5))throw std::invalid_argument("invalid repetitions or matrix kind");
         if(sizes.empty())sizes={2000,5000,10000};
-        ddla::DdlaHandle_t h=nullptr;ddla::ddlaInit(h);ddla::ddlaSet(h,MPI_COMM_WORLD,1,P);
+        ddla::DdlaHandle_t h=nullptr;ddla::ddlaInit(h, ddla_test::execution_backend);ddla::ddlaSet(h,MPI_COMM_WORLD,1,P);
         const double eps=std::numeric_limits<double>::epsilon();
         for(int n:sizes){
             if(n<1)throw std::invalid_argument("benchmark n must be positive");

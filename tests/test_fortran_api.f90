@@ -1,8 +1,7 @@
 ! ---------------------------------------------------------------------------
 ! test_fortran_api.f90 -- MPI test of the LibDDLA Fortran bindings (module
 ! ddla).  Runs identically on a CPU handle and (through ddla_malloc device
-! buffers + ddla_memcpy) on a GPU handle; the backend is the build default
-! exactly like the C++ api_grid tests.
+! buffers + ddla_memcpy) on an explicitly selected GPU handle.
 !
 ! What it exercises, in order:
 !   1. handle lifecycle (init / set with the auto process grid / grid queries
@@ -61,8 +60,10 @@ program test_fortran_api
   one = 1.0_c_double; zero = 0.0_c_double; mone = -1.0_c_double
 
   ! ---- 1. lifecycle + grid + descriptor -----------------------------------
-  st = ddla_init(h)
-  call ddla_check(st, 'ddla_init')
+  be = DDLA_BACKEND_CPU
+  if (ddla_backend_available(DDLA_BACKEND_GPU) /= 0) be = DDLA_BACKEND_GPU
+  st = ddla_init_backend(h, be)
+  call ddla_check(st, 'ddla_init_backend')
   st = ddla_set(h, int(MPI_COMM_WORLD, c_int), 0, 0, 'R')
   call ddla_check(st, 'ddla_set')
   st = ddla_grid_dims(h, nprow, npcol)

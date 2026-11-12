@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include "mpi_test_init.h"
 #include "trtrm_test_common.h"
 #include <chrono>
@@ -78,7 +79,7 @@ int main(int argc,char** argv)
     ddla_test_mpi_init(&argc,&argv); int bad=0, np=0; MPI_Comm_size(MPI_COMM_WORLD,&np);
     try {
         if(np!=1) throw std::runtime_error("benchmark_trtrm requires one MPI process");
-        constexpr auto Backend=default_backend_v;
+        constexpr auto Backend=ddla_test::execution_backend;
         DdlaHandle_t h=nullptr; DDLA_CHECK(ddlaInit(h,Backend)); DDLA_CHECK(ddlaSet(h,MPI_COMM_SELF));
         std::cout<<"kind,uplo,type,n,trtrm_ms,gemm_ms,speedup,relative_error,trtrm_gflops,gemm_gflops,trtrm_min,trtrm_max,gemm_min,gemm_max"<<std::endl;
         std::string uplos="U";

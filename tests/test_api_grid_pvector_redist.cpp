@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include <cstddef>
 #include <stdexcept>
 #include <type_traits>
@@ -395,7 +396,7 @@ void check_pvector_redist(const ddla::DdlaHandle_t& handle, const Shape& base)
     const int ld_dst = ddla::num_loc(n, nb, mypcol, 0, npcols);
     const size_t dst_count = static_cast<size_t>(ld_dst) * nvc;
     DeviceBuffer<T> d_dst(handle, dst_count);
-    ddla::ptranspose_vectors(handle, d_src.ptr, ld_src, d_dst.ptr, ld_dst, n, nvc, nb);
+    ddla::ptranspose_vectors<ddla_test::execution_backend>(handle, d_src.ptr, ld_src, d_dst.ptr, ld_dst, n, nvc, nb);
     check_ddla_sync(handle);
     {
         auto out = download(handle, d_dst.ptr, dst_count);
@@ -418,7 +419,7 @@ void check_pvector_redist(const ddla::DdlaHandle_t& handle, const Shape& base)
         const T c = static_cast<rt>(2.0) * redist_value<T>(1, 2);
         for (size_t k = 0; k < dst_count; ++k) h_two[k] = c;
         upload(handle, d_dst.ptr, h_two);
-        ddla::ptranspose_vectors(handle, d_src.ptr, ld_src, d_dst.ptr, ld_dst, n, nvc, nb,
+        ddla::ptranspose_vectors<ddla_test::execution_backend>(handle, d_src.ptr, ld_src, d_dst.ptr, ld_dst, n, nvc, nb,
                                  /*accumulate_dst=*/true);
         check_ddla_sync(handle);
         auto out = download(handle, d_dst.ptr, dst_count);
@@ -459,7 +460,7 @@ void check_pvector_redist(const ddla::DdlaHandle_t& handle, const Shape& base)
             require_close(handle, label, err, 1e-13);
         };
         upload(handle, d_dst.ptr, std::vector<T>(dst_count, T{}));
-        ddla::ptranspose_vectors(handle, d_src.ptr, ld_src, d_dst.ptr, ld_dst, n, nvc, nb,
+        ddla::ptranspose_vectors<ddla_test::execution_backend>(handle, d_src.ptr, ld_src, d_dst.ptr, ld_dst, n, nvc, nb,
                                  /*accumulate_dst=*/false, d_ws.ptr, ws_elems);
         check_ddla_sync(handle);
         check_prefix(n, nvc, "ptranspose_vectors workspace");
@@ -467,14 +468,14 @@ void check_pvector_redist(const ddla::DdlaHandle_t& handle, const Shape& base)
         const int n2 = std::max(n - nb - 1, 1);
         const int nvc2 = std::max(nvc - 2, 1);
         upload(handle, d_dst.ptr, std::vector<T>(dst_count, T{}));
-        ddla::ptranspose_vectors(handle, d_src.ptr, ld_src, d_dst.ptr, ld_dst, n2, nvc2, nb,
+        ddla::ptranspose_vectors<ddla_test::execution_backend>(handle, d_src.ptr, ld_src, d_dst.ptr, ld_dst, n2, nvc2, nb,
                                  /*accumulate_dst=*/false, d_ws.ptr, ws_elems);
         check_ddla_sync(handle);
         check_prefix(n2, nvc2, "ptranspose_vectors workspace reuse (smaller call)");
 
         bool threw = false;
         try {
-            ddla::ptranspose_vectors(handle, d_src.ptr, ld_src, d_dst.ptr, ld_dst, n, nvc, nb,
+            ddla::ptranspose_vectors<ddla_test::execution_backend>(handle, d_src.ptr, ld_src, d_dst.ptr, ld_dst, n, nvc, nb,
                                      /*accumulate_dst=*/false, d_ws.ptr, ws_elems - 1);
         } catch (const std::runtime_error&) {
             threw = true;
@@ -502,7 +503,7 @@ void check_pvector_redist(const ddla::DdlaHandle_t& handle, const Shape& base)
         std::vector<T> zeros(dst_count, T{});
         upload(handle, d_acc.ptr, zeros);
     }
-    ddla::preduce_add_vectors(handle, d_part.ptr, ld_src, d_acc.ptr, ld_dst, n, nvc, nb);
+    ddla::preduce_add_vectors<ddla_test::execution_backend>(handle, d_part.ptr, ld_src, d_acc.ptr, ld_dst, n, nvc, nb);
     check_ddla_sync(handle);
     {
         auto out = download(handle, d_acc.ptr, dst_count);
@@ -521,10 +522,8 @@ void check_pvector_redist(const ddla::DdlaHandle_t& handle, const Shape& base)
     }
 }
 
-// run_grid_test creates the handle with ddlaInit(handle), i.e. on
-// default_backend_v (GPU when the build has one, CPU otherwise), so that is the
-// arm the node-local entries must be instantiated with.  The distribution
-// helpers keep their defaulted template argument for the same reason.
+// The fixture selects its backend explicitly. Private redistribution and
+// node-local entries use the same compile-time backend as that handle.
 template <ddla::DdlaBackend Backend>
 static void check_redist_impl(const ddla::DdlaHandle_t& handle, const Shape& base)
 {
@@ -536,7 +535,7 @@ static void check_redist_impl(const ddla::DdlaHandle_t& handle, const Shape& bas
 
 static void check_redist(const ddla::DdlaHandle_t& handle, const Shape& base)
 {
-    check_redist_impl<ddla::default_backend_v>(handle, base);
+    check_redist_impl<ddla_test::execution_backend>(handle, base);
 }
 
 int main(int argc, char** argv)

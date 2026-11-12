@@ -3,7 +3,7 @@
 // test_backend_solvers exercises handle-driven distributed LU, Cholesky,
 // triangular solves and helpers on every available handle and scalar type.
 // Public calls follow the supplied handle even when it differs from the
-// handle-initialization default. Explicit wrong-Backend calls below are
+// handle's explicit initialization backend. Explicit wrong-Backend calls below are
 // private implementation checks through backend_api.h.
 // ---------------------------------------------------------------------------
 #include "api_grid_test_common.h"

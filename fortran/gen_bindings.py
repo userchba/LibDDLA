@@ -191,7 +191,7 @@ PROLOGUE = r"""// --------------------------------------------------------------
 //     reported as DDLA_C_STATUS_EXCEPTION with its what() text retrievable
 //     from ddla_c_error_string(DDLA_C_STATUS_EXCEPTION).
 //   * The handle travels as void* (the C++ DdlaHandle_t is an opaque
-//     DdlaStream*).  ddla_c_init / ddla_c_destroy hand the pointer itself
+//     DdlaStream*).  ddla_c_init_backend / ddla_c_destroy hand the pointer itself
 //     back and forth through void**.
 //   * Integers are C int (32-bit, the ScaLAPACK convention), sizes long long.
 //     Character flags travel by value.
@@ -269,18 +269,6 @@ const char* ddla_c_error_string(int status)
     if (status >= 0 && status <= 5)
         return ddla::ddlaGetErrorString(static_cast<ddla::ddlaStatus_t>(status));
     return "unknown LibDDLA C API status";
-}
-
-int ddla_c_init(void** handle)
-{
-    try {
-        ddla::DdlaHandle_t h = nullptr;
-        const ddla::ddlaStatus_t st = ddla::ddlaInit(h);
-        if (st != ddla::ddlaStatus_t::DDLA_STATUS_SUCCESS) return static_cast<int>(st);
-        *handle = static_cast<void*>(h);
-        return DDLA_C_STATUS_SUCCESS;
-    } catch (const std::exception& e) { ddla_c_record_error(e.what()); return DDLA_C_STATUS_EXCEPTION; }
-    catch (...) { ddla_c_record_error("unknown C++ exception in ddla_c_init"); return DDLA_C_STATUS_EXCEPTION; }
 }
 
 int ddla_c_init_backend(void** handle, int backend)
@@ -678,7 +666,7 @@ def gen_f90():
 ! type(c_ptr), which a Fortran generic cannot resolve by scalar type.
 !
 ! Argument conventions:
-!   * handle       type(c_ptr), value -- from ddla_init / ddla_init_backend.
+!   * handle       type(c_ptr), value -- from ddla_init_backend.
 !   * matrices     type(c_ptr), value -- host memory for a CPU handle, device
 !                  memory for a GPU handle, exactly where the C++ API puts
 !                  them.  Pass c_loc(fortran_array) on a CPU handle; on a GPU
@@ -702,7 +690,7 @@ module ddla
   private
 """)
     # publics
-    typeless = ["ddla_init", "ddla_init_backend", "ddla_set", "ddla_destroy",
+    typeless = ["ddla_init_backend", "ddla_set", "ddla_destroy",
                 "ddla_backend_available", "ddla_get_backend", "ddla_grid_dims",
                 "ddla_grid_coords", "ddla_rank", "ddla_size", "ddla_descinit",
                 "ddla_numloc", "ddla_malloc", "ddla_free", "ddla_memcpy",
@@ -768,15 +756,7 @@ module ddla
             lines.append("")
             out.extend(lines)
     # type-less lifecycle/memory interfaces
-    out.append("""    function ddla_init(handle) &
-        result(status) bind(C, name="ddla_c_init")
-      import :: c_int, c_ptr
-      implicit none
-      integer(c_int) :: status
-      type(c_ptr), intent(out) :: handle
-    end function ddla_init
-
-    function ddla_init_backend(handle, backend) &
+    out.append("""    function ddla_init_backend(handle, backend) &
         result(status) bind(C, name="ddla_c_init_backend")
       import :: c_int, c_ptr
       implicit none
@@ -1156,10 +1136,6 @@ def check_status(status: int, where: str = ""):
         raise DdlaExceptionError(f"LibDDLA exception{ctx}: {msg_str}")
     else:
         raise DdlaError(f"LibDDLA error {status}{ctx}: {msg_str}")
-
-ddla_c_init = lib.ddla_c_init
-ddla_c_init.restype = ctypes.c_int
-ddla_c_init.argtypes = [ctypes.c_void_p]
 
 ddla_c_init_backend = lib.ddla_c_init_backend
 ddla_c_init_backend.restype = ctypes.c_int

@@ -235,13 +235,6 @@ int main(int argc, char** argv)
     int rank = 0;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-#if DDLA_HAS_GPU
-    static_assert(default_backend_v == DdlaBackend::GPU,
-                  "GPU-capable builds must default to GPU");
-#else
-    static_assert(default_backend_v == DdlaBackend::CPU,
-                  "CPU-only builds must default to CPU");
-#endif
 
     int failures = 0;
     failures += run_backend<DdlaBackend::CPU>();

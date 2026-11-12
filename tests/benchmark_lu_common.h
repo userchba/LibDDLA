@@ -1,5 +1,7 @@
 #ifndef DDLA_BENCHMARK_LU_COMMON_H
 #define DDLA_BENCHMARK_LU_COMMON_H
+
+#include "test_backend.h"
 #include "api_grid_test_common.h"
 #include "LU/lu_internal.h"
 #include "benchmark_grid_options.h"
@@ -132,7 +134,7 @@ template<class T>void run_size(const DdlaHandle_t& h,int n,const Options& o,bool
 #endif
             int info=-1;const double begin=MPI_Wtime();
             if(full)ddla::pgetrf(h,n,n,a.ptr, 1, 1,desc,ipiv.data(),info);
-            else ddla::pgetf2(h,n,n,width,a.ptr, 1, 1,desc,ipiv.data(),info);
+            else ddla::pgetf2<ddla_test::execution_backend>(h,n,n,width,a.ptr, 1, 1,desc,ipiv.data(),info);
             check_ddla_sync(h);double elapsed=MPI_Wtime()-begin;
 #if defined(DDLA_USE_CUDA)
             if(std::getenv("DDLA_BENCH_PROFILE")) GPU_CHECK(cudaProfilerStop());
@@ -178,7 +180,7 @@ inline int main(int argc,char**argv,bool full) {
     if(o.mode!="both" && o.mode!="inplace" && o.mode!="gather")error="mode must be both, inplace or gather";
     if(o.grid.nprows*o.grid.npcols!=size)error="grid does not match MPI rank count";
     if(!error.empty()){if(rank==0)std::cerr<<error<<std::endl;MPI_Abort(MPI_COMM_WORLD,2);}
-    DdlaHandle_t h=nullptr;ddlaInit(h);ddlaSet(h,MPI_COMM_WORLD,o.grid.nprows,o.grid.npcols);
+    DdlaHandle_t h=nullptr;ddlaInit(h, ddla_test::execution_backend);ddlaSet(h,MPI_COMM_WORLD,o.grid.nprows,o.grid.npcols);
     for(int n:o.grid.sizes)if(o.type=="d")run_size<double>(h,n,o,full,rank);else run_size<std::complex<double>>(h,n,o,full,rank);
     ddlaDestroy(h);MPI_Finalize();return 0;
 }

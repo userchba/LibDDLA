@@ -59,8 +59,8 @@ void check_full(const DdlaHandle_t& h,int n,bool upper,bool alias,int nb=8) {
     }
     require_close(h,"HH full output padding",padbad,0);require_close(h,"HH full finite vectors",finite,0);
     upload(h,reference.ptr,full);
-    const double residual=eig_test::residual_metric<T, DdlaBackend::GPU>(h,reference.ptr,descA,output,descZ,w.data(),n);
-    const double orthogonal=eig_test::orthogonality_metric<T, DdlaBackend::GPU>(h,output,descZ,n);
+    const double residual=eig_test::residual_metric<T>(h,reference.ptr,descA,output,descZ,w.data(),n);
+    const double orthogonal=eig_test::orthogonality_metric<T>(h,output,descZ,n);
     require_close(h,"HH full independent residual",std::isfinite(residual)?residual:INFINITY,50);
     require_close(h,"HH full independent orthogonality",std::isfinite(orthogonal)?orthogonal:INFINITY,50);
     upload(h,reference.ptr,input);

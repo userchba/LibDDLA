@@ -1,3 +1,4 @@
+#include "test_backend.h"
 /*
  * Unified 4-GPU benchmark for LibDDLA and cuSOLVERMp POTRF routines.  All
  * paths factor the same deterministic Hermitian positive-
@@ -843,7 +844,7 @@ int main(int argc, char** argv)
     }
 
     ddla::DdlaHandle_t handle = nullptr;
-    ddla::ddlaInit(handle);
+    ddla::ddlaInit(handle, ddla_test::execution_backend);
     ddla::ddlaSet(handle, MPI_COMM_WORLD, kProcessRows, kProcessCols, 'R');
 
     MPI_Comm cal_mpi_comm = MPI_COMM_WORLD;

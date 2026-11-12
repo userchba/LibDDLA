@@ -79,7 +79,7 @@ void preduce_add_vectors_run(const DdlaHandle_t&,const VectorRedistPlan& p,const
 /// @p aux_work_elems.  A caller that transposes many panels allocates one
 /// buffer of the largest size and passes it to every call; with nullptr the
 /// routine allocates and frees its own scratch.
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <DdlaBackend Backend, typename T>
 void ptranspose_vectors(const DdlaHandle_t& handle,
                         const T* src, int ld_src,
                         T* dst, int ld_dst,
@@ -102,7 +102,7 @@ std::size_t ptranspose_vectors_work_elems(const DdlaHandle_t& handle,
 /// to @p dst (which the caller zeroes beforehand, or holds values to be
 /// augmented).  Every block owned by this rank's process column is
 /// augmented; blocks owned by other columns are untouched.
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <DdlaBackend Backend, typename T>
 void preduce_add_vectors(const DdlaHandle_t& handle,
                          const T* src, int ld_src,
                          T* dst, int ld_dst,

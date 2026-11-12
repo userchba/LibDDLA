@@ -84,11 +84,10 @@ constexpr double eig_tolerance(int n, double threshold = 50.0)
     return threshold * static_cast<double>(n) * eps_trait<T>::value;
 }
 
-// Backend is retained only as a test-helper compatibility tag for existing
-// explicit callers; public BLAS operations below always select the handle.
+// Public BLAS operations below select the handle backend.
 /// Residual metric  ||A V - V Lambda||_F / (n ||A||_F eps)  for jobz='V'.
 /// Uses a workspace copy of Z; the input Z is left untouched.
-template <typename T, ddla::DdlaBackend Backend = ddla::default_backend_v>
+template <typename T>
 double residual_metric(const ddla::DdlaHandle_t& handle,
                        const T* d_A, const int* descA,
                        const T* d_Z, const int* descZ,
@@ -127,7 +126,7 @@ double residual_metric(const ddla::DdlaHandle_t& handle,
 
 /// Orthogonality metric  ||V^H V - I||_F / (n eps).  Builds G = Z^H Z in a
 /// small distributed buffer and takes the max deviation from the identity.
-template <typename T, ddla::DdlaBackend Backend = ddla::default_backend_v>
+template <typename T>
 double orthogonality_metric(const ddla::DdlaHandle_t& handle,
                             const T* d_Z, const int* descZ, int n)
 {

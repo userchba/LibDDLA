@@ -1,3 +1,4 @@
+#include "test_backend.h"
 #include <cassert>
 #include <cmath>
 #include "mpi_test_init.h"
@@ -231,7 +232,7 @@ int main(int argc, char* argv[])
 
     for(const auto& grid : grids){
         DdlaHandle_t ddla_handle;
-        ddlaInit(ddla_handle);
+        ddlaInit(ddla_handle, ddla_test::execution_backend);
         if(grid.first < 0){
             ddlaSet(ddla_handle);
         }else{

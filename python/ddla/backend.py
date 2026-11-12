@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 from ._c_api import (
     lib, check_status,
     STATUS_SUCCESS, BACKEND_CPU, BACKEND_GPU,
-    ddla_c_init, ddla_c_init_backend, ddla_c_set, ddla_c_destroy,
+    ddla_c_init_backend, ddla_c_set, ddla_c_destroy,
     ddla_c_backend_available, ddla_c_get_backend,
     ddla_c_grid_dims, ddla_c_grid_coords, ddla_c_rank, ddla_c_size,
     ddla_c_descinit, ddla_c_numloc, ddla_c_malloc, ddla_c_free,
@@ -19,15 +19,13 @@ class Backend(enum.IntEnum):
 
 class Handle:
     """Manages the LibDDLA handle lifecycle, process grid, backend execution, and device streams."""
-    def __init__(self, backend: Optional[Backend] = None, layout: Optional[ProcessorLayout] = None,
+    def __init__(self, backend: Backend, layout: Optional[ProcessorLayout] = None,
                  comm=None, nprows: Optional[int] = None, npcols: Optional[int] = None, major: str = 'R'):
         self._handle = ctypes.c_void_p()
-        if backend is not None:
-            st = ddla_c_init_backend(ctypes.byref(self._handle), int(backend))
-            check_status(st, "ddla_c_init_backend")
-        else:
-            st = ddla_c_init(ctypes.byref(self._handle))
-            check_status(st, "ddla_c_init")
+        if backend is None:
+            raise TypeError("backend must explicitly select CPU or GPU")
+        st = ddla_c_init_backend(ctypes.byref(self._handle), int(backend))
+        check_status(st, "ddla_c_init_backend")
 
         if layout is None:
             layout = ProcessorLayout(comm=comm, np_rows=nprows, np_cols=npcols, major=major)
@@ -42,8 +40,9 @@ class Handle:
         self.destroy()
 
     def destroy(self):
-        if self._handle and self._handle.value is not None:
-            ddla_c_destroy(ctypes.byref(self._handle))
+        handle = getattr(self, "_handle", None)
+        if handle and handle.value is not None:
+            ddla_c_destroy(ctypes.byref(handle))
             self._handle = ctypes.c_void_p()
 
     def __del__(self):

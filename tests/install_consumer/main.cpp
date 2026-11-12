@@ -34,8 +34,7 @@ int main(int argc, char** argv)
     int failed = 0;
     try {
         const bool has_gpu = ddla::ddlaBackendAvailable(ddla::DdlaBackend::GPU);
-        if (has_gpu != bool(DDLA_HAS_GPU) ||
-            ddla::default_backend_v != (has_gpu ? ddla::DdlaBackend::GPU : ddla::DdlaBackend::CPU))
+        if (has_gpu != bool(DDLA_HAS_GPU))
             throw std::runtime_error("installed header/library capability mismatch");
         ddla::DDLA_CHECK(ddla::ddlaInit(handle, ddla::DdlaBackend::CPU));
         ddla::DDLA_CHECK(ddla::ddlaSet(handle, MPI_COMM_WORLD, 1, 1));

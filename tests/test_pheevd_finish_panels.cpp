@@ -1,3 +1,4 @@
+#include "test_backend.h"
 // Test the private finish operation against an independent dense product.
 // Small forced output panels cross ownership/block boundaries and exercise
 // receive sizes larger than row slabs without an expensive eigensolve.
@@ -143,7 +144,7 @@ int main(int argc, char** argv)
         int P = 0; MPI_Comm_size(MPI_COMM_WORLD, &P);
         TestOptions options; std::string error;
         if (!parse_options(argc, argv, P, options, error)) throw std::runtime_error(error);
-        auto backend = ddla::default_backend_v;
+        auto backend = ddla_test::execution_backend;
         if (const char* arg = std::getenv("DDLA_TEST_BACKEND")) {
             const std::string value(arg);
             if (value == "CPU" || value == "cpu") backend = ddla::DdlaBackend::CPU;

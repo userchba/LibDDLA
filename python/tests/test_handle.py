@@ -3,6 +3,12 @@ import numpy as np
 import ddla
 
 class TestHandle(unittest.TestCase):
+    def test_backend_is_required(self):
+        with self.assertRaises(TypeError):
+            ddla.Handle()
+        with self.assertRaises(TypeError):
+            ddla.Handle(backend=None)
+
     def test_handle_lifecycle(self):
         h = ddla.Handle(backend=ddla.Backend.CPU)
         self.assertEqual(h.backend, ddla.Backend.CPU)

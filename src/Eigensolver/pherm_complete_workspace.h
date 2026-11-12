@@ -14,7 +14,7 @@ namespace ddla { namespace detail {
 // Every rank follows the same communication sequence even when only some
 // ranks borrow storage. Plan/workspace allocation failures are agreed before
 // exchange; borrowed storage is never passed to ddlaFree.
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <DdlaBackend Backend, typename T>
 void pherm_complete_with_workspace(const DdlaHandle_t& handle, char uplo, int n,
                                    T* A, const int* descA,
                                    T* scratch, std::size_t scratch_elements);

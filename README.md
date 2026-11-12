@@ -308,13 +308,14 @@ The installed `ddla::ddla` target supplies the include path, MPI dependency
 and configured compile definitions. CPU support is unconditional; public headers
 obtain GPU availability from `<ddla/ddla_config.h>` (`DDLA_HAS_GPU`), so
 applications using only the public API do not need private vendor headers.
-In a dual build, `ddlaInit(handle)` defaults to GPU. Use
-`ddlaInit(handle, ddla::DdlaBackend::CPU)` for CPU data. Public computational
+Every handle requires an explicit backend:
+`ddlaInit(handle, ddla::DdlaBackend::CPU)` for host data or
+`ddlaInit(handle, ddla::DdlaBackend::GPU)` for device data. Public computational
 templates take scalar types only and always use the handle's backend; there
 is no separate backend template argument to keep in sync. Rebuild C++ clients
 after removing the backend template argument, for example using
-`gemm<double>(handle, ...)` with a CPU handle for host data. This backend
-selection change retains the Fortran/Python opaque-handle interface. The
+`gemm<double>(handle, ...)` with a CPU handle for host data. C, Fortran and Python handle initialization must also select a backend
+explicitly; no no-backend initializer remains. The
 separate Cholesky cleanup removes the sign/location arguments: regenerate
 and rebuild native bindings together with their Fortran/Python consumers.
 
@@ -359,12 +360,16 @@ All three paths are implemented once in `src/comm_traits.h` (`commSend`,
 
 ### Handle
 
+Fortran uses `ddla_init_backend(handle, backend)`. Python requires
+`Handle(backend=Backend.CPU)` or `Handle(backend=Backend.GPU)`; neither has
+an implicit backend.
+
 ```cpp
 #include <ddla/ddla.h>
 #include <mpi.h>
 
 ddla::DdlaHandle_t handle = nullptr;   // opaque pointer (DdlaStream*)
-ddla::DDLA_CHECK(ddla::ddlaInit(handle));   // select backend and allocate handle
+ddla::DDLA_CHECK(ddla::ddlaInit(handle, ddla::DdlaBackend::CPU));   // explicitly select CPU and allocate handle
 ddla::DDLA_CHECK(ddla::ddlaSet(handle, MPI_COMM_WORLD, 'R')); // create resources and auto grid
 // or: ddla::DDLA_CHECK(ddla::ddlaSet(handle, MPI_COMM_WORLD, nprows, npcols, 'R'));
 ```
@@ -507,7 +512,7 @@ int main(int argc, char** argv) {
     }
 
     ddla::DdlaHandle_t handle = nullptr;
-    ddla::DDLA_CHECK(ddla::ddlaInit(handle));
+    ddla::DDLA_CHECK(ddla::ddlaInit(handle, ddla::DdlaBackend::CPU));
     ddla::DDLA_CHECK(ddla::ddlaSet(handle, MPI_COMM_WORLD, 'R'));
 
     int n = 4096, nrhs = 64;
@@ -797,7 +802,7 @@ use ddla
 include 'mpif.h'
 type(c_ptr) :: h
 integer(c_int) :: st, desca(9)
-st = ddla_init(h)
+st = ddla_init_backend(h, DDLA_BACKEND_CPU)
 st = ddla_set(h, int(MPI_COMM_WORLD, c_int), 0, 0, 'R')
 st = ddla_descinit(desca, h, n, n, mb, mb, 0, 0, -1)
 st = ddla_d_pgesv(h, 'L', 'N', n, nrhs, pa, desca, pb, descb)
@@ -822,7 +827,7 @@ overload -- call those from C++.
 `tests/test_fortran_api.f90` registers as the `test_fortran_api_mpi` ctest
 when the option is on: handle lifecycle, descriptors, memory round trips, and
 `pgemm` / `pgesv` / `ppotrf`+`pdam`+`ppotrs` / `pgeqrf` residual checks for
-real and complex data on the build's default backend (device buffers +
+real and complex data on an explicitly selected backend (device buffers +
 `ddla_memcpy` on a GPU handle).
 
 ### In-place triangular multiplication
