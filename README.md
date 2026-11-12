@@ -126,8 +126,32 @@ in `src/Eigensolver/`.
 
 `pheevd` reads `DDLA_EIGEN_METHOD` on every call:
 
-- `two_stage` (default when unset or empty): full → band → tridiagonal.
-- `one_stage`: direct Householder reduction to tridiagonal.
+- Unset, empty or `auto` (default): select from the measured one-stage/two-stage policy.
+- `two_stage`: force full → band → tridiagonal.
+- `one_stage`: force direct Householder reduction to tridiagonal.
+
+Automatic selection is conservative: it considers the scalar type, matrix order,
+eigenvalues/eigenvectors request, block/grid layout, cached host thread budget,
+shared-memory topology and GPU support. Unmeasured profiles retain two-stage.
+Nonempty two-stage tuning options, such as `DDLA_EIG_NBW`, keep the two-stage
+route; common tridiagonal-solver and host-thread controls apply to either method.
+Selection performs no matrix allocation and does not change either algorithm's
+workspace ownership. See the measured-profile table below for the calibrated
+limits; these are heuristics, not a promise that one method always wins.
+
+| CUDA scalar type | Eigenvalues only (`N`) | Eigenvectors (`V`) |
+| --- | --- | --- |
+| float | two-stage | one-stage for 4096–16384 |
+| double | two-stage | one-stage for 3072–16384 |
+| complex float | one-stage for 1536–16384 | one-stage for 1024–16384 |
+| complex double | one-stage for 1024–16384 | one-stage for 1024–16384 |
+
+These one-stage ranges require one shared-memory domain, eight CUDA SM70 GPUs
+with NCCL (without host staging), a row-major 2×4 grid, square blocks of64,
+source coordinates zero, matching output blocks, and one configured host and
+recognized BLAS worker per rank. Other cases retain two-stage, including CPU,
+HIP, host-staged transport, and orders above16384. CPU thresholds are not
+inferred from GPU timings. Manual method choices remain available everywhere.
 
 For example, `export DDLA_EIGEN_METHOD=one_stage` selects the one-stage solver
 on CPU or GPU. All MPI ranks must select the same method; invalid values and

@@ -2244,10 +2244,15 @@ struct hb2st_rot {
 /**
  * @brief Distributed Hermitian eigensolver with runtime method selection.
  *
- * DDLA_EIGEN_METHOD=one_stage selects pheevd_one_stage; two_stage selects
- * pheevd_two_stage (the default when unset or empty). The value is read on
- * every call and must agree across the process grid. Invalid values or
- * inconsistent selections throw collectively before either algorithm starts.
+ * When DDLA_EIGEN_METHOD is unset, empty or auto, a conservative measured
+ * policy chooses one-stage or two-stage from the scalar type, order, job,
+ * block/grid layout, cached host budget, shared-node topology and GPU support.
+ * Calls outside the measured profiles retain two-stage. Nonempty two-stage
+ * tuning options (for example DDLA_EIG_NBW) retain their two-stage meaning.
+ * DDLA_EIGEN_METHOD=one_stage or two_stage forces that explicit method.
+ * The selector is read on every call and must agree across the process grid.
+ * Invalid values or inconsistent selections throw collectively before either
+ * algorithm starts. The explicit method entries ignore this variable.
  * Both methods read only UPLO, destroy A, and keep A/Z distributed; w is a
  * host array on every rank. See the explicit entries for method requirements.
  */

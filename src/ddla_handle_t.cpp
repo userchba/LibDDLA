@@ -105,7 +105,7 @@ ddlaStatus_t ddlaSet(DdlaHandle_t handle, const MPI_Comm& comm, char major)
 
     // CPU handles must not execute GPU device setup
     handle->init(comm, major);
-    handle->host_threads = detail::host_thread_budget(handle->comm);
+    handle->host_threads = detail::host_thread_budget(handle->comm, handle->node_ranks);
     handle->initialized = true;
     return ddlaStatus_t::DDLA_STATUS_SUCCESS;
 }
@@ -120,7 +120,7 @@ ddlaStatus_t ddlaSet(DdlaHandle_t handle, const MPI_Comm& comm,
     resolve_and_validate_backend(handle, comm);
 
     handle->init(nprows, npcols, comm, major);
-    handle->host_threads = detail::host_thread_budget(handle->comm);
+    handle->host_threads = detail::host_thread_budget(handle->comm, handle->node_ranks);
     handle->initialized = true;
     return ddlaStatus_t::DDLA_STATUS_SUCCESS;
 }

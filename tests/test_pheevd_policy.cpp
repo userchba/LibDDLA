@@ -11,6 +11,27 @@ template<class T>int choice(char job,int n,int nb,int band,bool explicit_band,in
 }
 void local_policy() {
     auto check=[](bool ok){if(!ok)throw std::runtime_error("measured pheevd policy boundary");};
+    // Public method boundaries are independent of the two-stage HH policy below.
+    const auto method = [&](auto scalar) {
+        using T=decltype(scalar);
+        for(char job:{'N','V'})for(int n:{-1,0,1,511,512,1023,1024,1025,1535,1536,1537,
+                                         2048,3071,3072,3073,4095,4096,4097,6144,8192,16383,16384,16385,32768}) {
+            bool expected=false;
+            if constexpr(std::is_same_v<T,float>)expected=job=='V'&&n>=4096&&n<=16384;
+            else if constexpr(std::is_same_v<T,double>)expected=job=='V'&&n>=3072&&n<=16384;
+            else if constexpr(std::is_same_v<T,std::complex<float>>)
+                expected=n>=(job=='N'?1536:1024)&&n<=16384;
+            else expected=n>=1024&&n<=16384;
+            check((detail::pheevd_one_stage_shape<DdlaBackend::GPU,T>(job,n,64,2,4,'R')==expected));
+            check((!detail::pheevd_one_stage_shape<DdlaBackend::CPU,T>(job,n,64,2,2,'R')));
+            for(int block:{0,32,128})check((!detail::pheevd_one_stage_shape<DdlaBackend::GPU,T>(job,n,block,2,4,'R')));
+            check((!detail::pheevd_one_stage_shape<DdlaBackend::GPU,T>(job,n,64,2,4,'C')));
+            for(auto grid:{std::pair<int,int>{1,8},{4,2},{8,1},{1,1},{0,4}})
+                check((!detail::pheevd_one_stage_shape<DdlaBackend::GPU,T>(job,n,64,grid.first,grid.second,'R')));
+            check((!detail::pheevd_one_stage_shape<DdlaBackend::GPU,T>('X',n,64,2,4,'R')));
+        }
+    };
+    method(float{});method(double{});method(std::complex<float>{});method(std::complex<double>{});
     for(int n:{4096,8192,16384,32768})check(choice<double>('V',n,64,16,false)==64);
     check(choice<double>('V',4095,64,16,false)==0);
     check(choice<double>('V',32767,64,16,true)==0);

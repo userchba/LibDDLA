@@ -30,10 +30,10 @@ template<class T> T entry(int i, int j) {
     }
 }
 template<class T> void solve(const ddla::DdlaHandle_t& h, const Environment& method,
-                            int n, char uplo, bool one, bool alias) {
+                            int n, char uplo, bool one, bool alias, int automatic = -1, int block = 16) {
     using R = typename ddla::real_type<T>::type;
     int da[ddla::DDLA_DLEN_], dz[ddla::DDLA_DLEN_];
-    ddlaDescInit(da, h, n + 2, n + 3, 16, 16, 0, 0);
+    ddlaDescInit(da, h, n + 2, n + 3, block, block, 0, 0);
     da[ddla::DDLA_LLD_] += 3;
     std::copy_n(da, ddla::DDLA_DLEN_, dz);
     const T sentinel = T(12345);
@@ -59,7 +59,8 @@ template<class T> void solve(const ddla::DdlaHandle_t& h, const Environment& met
     if (one) ddla::pheevd_one_stage(h, 'N', uplo, n, a.ptr, da, direct.data(), static_cast<T*>(nullptr), nullptr, info);
     else ddla::pheevd_two_stage(h, 'N', uplo, n, a.ptr, da, direct.data(), static_cast<T*>(nullptr), nullptr, info);
     require_close(h, "explicit method info", info, 0);
-    method.set(one ? "one_stage" : "two_stage");
+    if (automatic < 0) method.set(one ? "one_stage" : "two_stage");
+    else method.set(automatic == 0 ? nullptr : automatic == 1 ? "" : "auto");
     upload(h, a.ptr, input); upload(h, z.ptr, output);
     T* vectors = alias ? a.ptr : z.ptr;
     ddla::pheevd(h, 'V', uplo, n, a.ptr, da, w.data(), vectors, dz, info);
@@ -122,7 +123,7 @@ void selection(const ddla::DdlaHandle_t& h, const Environment& method, const Env
     // Only the two-stage solver validates band width. This proves routing,
     // including the unset/empty defaults and per-call changes in one process.
     band.set("3");
-    for (const char* value : {static_cast<const char*>(nullptr), "", "two_stage", "one_stage", "two_stage", "one_stage"}) {
+    for (const char* value : {static_cast<const char*>(nullptr), "", "auto", "two_stage", "one_stage", "two_stage", "one_stage"}) {
         method.set(value); invoke(17, !value || std::strcmp(value, "one_stage") != 0);
     }
     band.set("16");
@@ -138,6 +139,14 @@ void body(const ddla::DdlaHandle_t& h, const Shape&) {
     selection(h, method, band);
     cases<float>(h, method); cases<double>(h, method);
     cases<std::complex<float>>(h, method); cases<std::complex<double>>(h, method);
+    band.set(nullptr);
+    const auto automatic = [&](auto scalar) {
+        using T = decltype(scalar);
+        for (char uplo : {'U', 'L'}) for (int selector : {0, 1, 2})
+            solve<T>(h, method, 65, uplo, false, selector == 1, selector, 64);
+    };
+    automatic(float{}); automatic(double{});
+    automatic(std::complex<float>{}); automatic(std::complex<double>{});
 }
 }
 int main(int argc, char** argv) { return run_grid_test(argc, argv, "test_pheevd_method", body); }

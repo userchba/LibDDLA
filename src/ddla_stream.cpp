@@ -204,6 +204,7 @@ void DdlaStream::clean()
     row_comm = col_comm = comm = MPI_COMM_NULL;
     myid = -1;
     nprocs = 0;
+    node_ranks = 0;
     myprow_ = mypcol_ = -1;
     nprows_ = npcols_ = 0;
     local_device = -1;
