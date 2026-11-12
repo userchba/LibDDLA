@@ -26,11 +26,6 @@ void ppotrf_check(const DdlaHandle_t& h,char uplo,int n,const void* A,int ia,int
     detail::agree_check(h,"ppotrf",[&](detail::Agree&){check_desc(d,h);detail::require_backend<Backend>(h,"ppotrf");
         if((uplo!='L' && uplo!='U') || n<0 || n>d[DDLA_M_] || n>d[DDLA_N_] || d[DDLA_MB_]!=d[DDLA_NB_] || ia!=1 || ja!=1)
             throw std::invalid_argument("ppotrf: invalid triangle, dimensions, blocks or offsets");
-        // The trailing update transposes panels through the diagonal processes
-        // (myprow == mypcol, broadcast roots taken from the other coordinate),
-        // which is only valid on a square grid whose diagonal blocks sit on it.
-        if(h->nprows_!=h->npcols_ || d[DDLA_RSRC_]!=d[DDLA_CSRC_])
-            throw std::invalid_argument("ppotrf: needs a square process grid and RSRC == CSRC");
         if(head && location!=-1 && (location<1 || location>n))throw std::invalid_argument("ppotrf: invalid head location");
         const int ml=num_loc(n,d[DDLA_MB_],h->myprow_,d[DDLA_RSRC_],h->nprows_),nl=num_loc(n,d[DDLA_NB_],h->mypcol_,d[DDLA_CSRC_],h->npcols_);
         if(n && ml && nl && !A)throw std::invalid_argument("ppotrf: null local matrix");});
@@ -123,6 +118,11 @@ bool ppotrf_run(
     T* const first = detail::take<T>(w, count[1]);
     w = std::max(w, front);
     T* const second = detail::take<T>(w, count[2]);
+    const bool relay = diagonal_relay(handle, array_descA);
+    void* const mirror_work = w;
+    std::size_t mirror_bytes = 0, mirror_host_bytes = 0;
+    ppotrf_mirror_workspace_size<T>(handle, uplo, n, array_descA, &mirror_bytes, &mirror_host_bytes);
+    w += mirror_bytes;
     assert(static_cast<std::size_t>(w - base) <= backend_bytes);
     T* const block_row = uplo == 'U' ? first : second;
     T* const block_col = uplo == 'U' ? second : first;
@@ -130,7 +130,8 @@ bool ppotrf_run(
     T** const h_A_array = detail::take<T*>(hw, batch_count);
     T** const h_B_array = detail::take<T*>(hw, batch_count);
     T** const h_C_array = detail::take<T*>(hw, batch_count);
-    assert(static_cast<std::size_t>(hw - static_cast<char*>(host_work)) <= host_bytes);
+    void* const mirror_host = hw;
+    assert(static_cast<std::size_t>(hw - static_cast<char*>(host_work)) + mirror_host_bytes <= host_bytes);
     DDLA_CHECK(ddlaMemset(handle,info_buffer,0,sizeof(int)));
     int owner_row,owner_col,mm_row_start,mm_col_start,nb_real;
     for(int n_s = 0; n_s < n; n_s += nb)
@@ -253,22 +254,68 @@ bool ppotrf_run(
             (lower ? mm_col_start : mm_row_start) += nb_real;
         const int length_row = m_loc_A - mm_row_start;
         const int length_col = n_loc_A - mm_col_start;
-        // `first` is the panel, spread across; `second` is the same panel for the other index of the update: the
-        // diagonal processes hold both extents, so they copy it and spread it along.
+        // Spread the solved panel across the grid. On matching square layouts,
+        // diagonal ranks can relay the same packed data in the other direction.
         const int length_mirror = lower ? length_col : length_row;
         if(length_panel > 0){
             commBcast<Backend>(ddla_handle, across, first, (std::size_t)length_panel * nb_real, lower ? owner_col : owner_row);
         }
-        if(myprow == mypcol){
-            if(length_mirror > 0)
+        if (relay) {
+            if(myprow == mypcol && length_mirror > 0)
                 DDLA_CHECK(ddlaMemcpy(ddla_handle, second, first, length_mirror * nb_real * sizeof(T)));
-        }
-        if(length_mirror > 0){
-            commBcast<Backend>(ddla_handle, along, second, (std::size_t)nb_real * length_mirror, lower ? mypcol : myprow);
+            if(length_mirror > 0)
+                commBcast<Backend>(ddla_handle, along, second, (std::size_t)nb_real * length_mirror, lower ? mypcol : myprow);
+        } else {
+            // Transpose the solved panel into the other grid direction, then
+            // broadcast it. PGEADD handles rectangular grids, shifted sources
+            // and either rank order; only a block-wide panel is redistributed.
+            const int end = n_s + nb_real;
+            pblas::panel_run<Backend,T>(handle, !lower, 'C',
+                lower ? n - end : nb_real, lower ? nb_real : n - end,
+                A, lower ? end : n_s, lower ? n_s : end, array_descA, array_descA,
+                second, mirror_work, mirror_bytes, mirror_host, mirror_host_bytes);
         }
 
         // ---- the trailing update ----
-        if(myprow == mypcol){
+        if (!relay) {
+            // Global diagonal tiles need HERK even when their process row and
+            // column differ. Strictly selected tiles use GEMM; never touch the
+            // opposite triangle or the parent matrix outside the logical n.
+            int batches = 0;
+            const int ld_left = std::max(1, length_row);
+            const int ld_right = nb_real;
+            for (int col = 0; col < length_col; col += nb) {
+                const int gc = indx_l2g_c(array_descA, handle, mm_col_start + col);
+                const int cols = std::min(nb, length_col - col);
+                for (int row = 0; row < length_row; row += nb) {
+                    const int gr = indx_l2g_r(array_descA, handle, mm_row_start + row);
+                    const int rows = std::min(nb, length_row - row);
+                    if (lower ? gr < gc : gr > gc) continue;
+                    T* const target = A + mm_row_start + row + std::size_t(mm_col_start + col) * lldA;
+                    T* const left = block_col + row;
+                    T* const right = block_row + std::size_t(col) * nb_real;
+                    if (gr == gc) {
+                        T* const panel = lower ? first + row : first + std::size_t(col) * nb_real;
+                        blas_impl::herk_run<Backend,T>(handle, uplo, lower ? 'N' : 'C',
+                            rows, nb_real, -1.0, panel, lower ? length_row : nb_real, 1.0, target, lldA);
+                    } else if (rows == nb && cols == nb) {
+                        h_A_array[batches] = left;
+                        h_B_array[batches] = right;
+                        h_C_array[batches++] = target;
+                    } else {
+                        blas_impl::gemm_run<Backend,T>(handle, 'N', 'N', rows, cols, nb_real,
+                            T(-1), left, ld_left, right, ld_right, T(1), target, lldA);
+                    }
+                }
+            }
+            if (batches > 0) {
+                DDLA_CHECK(ddlaMemcpy(handle, A_array, h_A_array, batches * sizeof(T*)));
+                DDLA_CHECK(ddlaMemcpy(handle, B_array, h_B_array, batches * sizeof(T*)));
+                DDLA_CHECK(ddlaMemcpy(handle, C_array, h_C_array, batches * sizeof(T*)));
+                blas_impl::gemmBatched_run<Backend,T>(handle, 'N', 'N', nb, nb, nb_real,
+                    T(-1), A_array, ld_left, B_array, ld_right, T(1), C_array, lldA, batches);
+            }
+        } else if(myprow == mypcol){
             // A diagonal process holds diagonal blocks: one herk on the stored triangle.
             if(length_panel > 0)
                 blas_impl::herk_run<Backend, T>(

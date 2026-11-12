@@ -4,7 +4,6 @@ using namespace api_grid_test;
 
 void check_pposv(const ddla::DdlaHandle_t& handle, const Shape& base)
 {
-    if(skip_non_square_grid(handle, "pposv")) return;
 
     const int nb = base.nb;
     const int n = square_size(handle, base);
@@ -88,7 +87,6 @@ inline std::vector<Complex> build_head_rhs_side(const ddla::DdlaHandle_t& handle
 // bookkeeping from its caller, so its absence here is the point.
 void check_pposv_head(const ddla::DdlaHandle_t& handle, const Shape& base)
 {
-    if(skip_non_square_grid(handle, "pposv_head")) return;
 
     const int nb = base.nb;
     const int n = square_size(handle, base);

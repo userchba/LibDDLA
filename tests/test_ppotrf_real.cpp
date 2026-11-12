@@ -26,7 +26,6 @@ inline T x_value_real(int i, int j)
 template <typename T>
 void check_ppotrf_real(const ddla::DdlaHandle_t& handle, const Shape& base)
 {
-    if(skip_non_square_grid(handle, "ppotrf_real")) return;
 
     const int nb = base.nb;
     const int n = square_size(handle, base);
@@ -71,7 +70,6 @@ void check_ppotrf_real(const ddla::DdlaHandle_t& handle, const Shape& base)
 template <typename T>
 void check_pposv_real(const ddla::DdlaHandle_t& handle, const Shape& base)
 {
-    if(skip_non_square_grid(handle, "pposv_real")) return;
 
     const int nb = base.nb;
     const int n = square_size(handle, base);
