@@ -46,7 +46,10 @@ void scalBatched(const DdlaHandle_t& h, int m, int n, const T& alpha,
 }
 
 template <DdlaBackend Backend,typename T,typename Alpha>
-std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void>
+typename std::enable_if<
+    std::is_same<T, std::complex<Alpha>>::value,
+    void
+>::type
 scalBatched(const DdlaHandle_t& h, int m, int n, const Alpha& alpha,
                  T* const arrays[], int lda, int count)
 {

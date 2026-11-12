@@ -1884,13 +1884,22 @@ void scalBatched(const DdlaHandle_t& handle, int m, int n, const T& alpha,
  * T is the matrix type; Alpha is inferred, so scal<T> needs no cast.
  */
 template <typename T, typename Alpha>
-std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void>
+typename std::enable_if<
+    std::is_same<T, std::complex<Alpha>>::value,
+    void
+>::type
 scal(const DdlaHandle_t& h,int m,int n,const Alpha& alpha,T* A,int lda);
 template <typename T, typename Alpha>
-std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void>
+typename std::enable_if<
+    std::is_same<T, std::complex<Alpha>>::value,
+    void
+>::type
 pscal(const DdlaHandle_t& h,int m,int n,const Alpha& alpha,T* A,const int* descA);
 template <typename T, typename Alpha>
-std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void>
+typename std::enable_if<
+    std::is_same<T, std::complex<Alpha>>::value,
+    void
+>::type
 scalBatched(const DdlaHandle_t& h,int m,int n,const Alpha& alpha,T* const Aarray[],int lda,int count);
 
 

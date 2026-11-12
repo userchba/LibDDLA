@@ -39,7 +39,10 @@ template <DdlaBackend Backend,typename T>
 void pscal(const DdlaHandle_t& h,int m,int n,const T& alpha,T* a,const int* desc)
 {pscal_matrix<Backend,T,T>(h,m,n,alpha,a,desc);}
 template <DdlaBackend Backend,typename T,typename Alpha>
-std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void>
+typename std::enable_if<
+    std::is_same<T, std::complex<Alpha>>::value,
+    void
+>::type
 pscal(const DdlaHandle_t& h,int m,int n,const Alpha& alpha,T* a,const int* desc)
 {pscal_matrix<Backend,T,Alpha>(h,m,n,alpha,a,desc);}
 #define MIXED_PSCAL(B,R) template void pscal<B,std::complex<R>,R>(const DdlaHandle_t&,int,int,const R&,std::complex<R>*,const int*)
