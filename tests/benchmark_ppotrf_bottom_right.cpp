@@ -382,11 +382,10 @@ double run_once(Algorithm algorithm, int n, Complex* d_work,
     reset_matrix(handle, d_work, d_reference, count);
 
     int info = -1;
-    bool sign_correction = false;
     MPI_CHECK(MPI_Barrier(handle->comm));
     const double start = MPI_Wtime();
     if(algorithm == Algorithm::standard){
-        sign_correction = ddla::ppotrf(handle, 
+        ddla::ppotrf(handle,
             options.uplo, n, d_work, 1, 1, desc, info);
     }else{
         ddla::ppotrf_bottom_right(handle, options.uplo, n, d_work, desc, info);
@@ -394,7 +393,7 @@ double run_once(Algorithm algorithm, int n, Complex* d_work,
     DDLA_CHECK(ddlaSynchronize(handle));
     const double local_elapsed = MPI_Wtime() - start;
 
-    const int local_failure = (info != 0 || sign_correction) ? 1 : 0;
+    const int local_failure = (info != 0) ? 1 : 0;
     int global_failure = 0;
     MPI_CHECK(MPI_Allreduce(&local_failure, &global_failure, 1, MPI_INT,
                             MPI_MAX, handle->comm));
@@ -403,7 +402,7 @@ double run_once(Algorithm algorithm, int n, Complex* d_work,
             std::cerr << algorithm_name(algorithm, options.uplo)
                       << " failed for n=" << n
                       << ", info=" << info
-                      << ", sign_correction=" << sign_correction << std::endl;
+                      << std::endl;
         }
         MPI_Abort(handle->comm, 1);
     }

@@ -718,9 +718,9 @@ the system is `op(A)·X = B`; for `side='R'` B is `nrhs × n` and the system is
 (`ppotrs`, `pposv`) accept `trans` = 'N' or 'C', which are equivalent for a
 Hermitian matrix ('T' is not supported).  `plapiv` applies the pivot
 permutation to either rows (`rowcol`='R') or columns (`rowcol`='C'), in
-forward (`direc`='F') or backward (`direc`='B') order.  `ppotrs` applies the
-head-correction relocation permutation to B itself (rows for side='L',
-columns for side='R') when given the same `location` passed to `ppotrf`.
+forward (`direc`='F') or backward (`direc`='B') order. Cholesky factorization
+reports a nonpositive pivot through `info`; the driver solves only when
+factorization succeeds. The factor passed to `ppotrs` is read-only.
 
 ### Auxiliary and advanced
 

@@ -44,7 +44,7 @@ program test_fortran_api
   type(c_ptr) :: za_p, za0_p, zb_p, zb0_p, zx_p, zr_p, pbuf, pbuf2
   real(c_double) :: resid2, bnorm2, rel, tval, dval
   real(c_double) :: rsum(2), rmax
-  integer(c_int) :: info, is_nega, i, j, nfail, global_row, global_col
+  integer(c_int) :: info, i, j, nfail, global_row, global_col
   integer(c_int64_t) :: nbytes, seed
   real(c_double), parameter :: TOL = 1.0d-8
 
@@ -278,7 +278,7 @@ program test_fortran_api
   call ddla_check(st, 'copy A2->A20')
 
   info = -1_c_int
-  st = ddla_d_ppotrf(h, 'L', n, pa2, 1_c_int, 1_c_int, desca, info, is_nega)
+  st = ddla_d_ppotrf(h, 'L', n, pa2, 1_c_int, 1_c_int, desca, info)
   call ddla_check(st, 'ppotrf')
   if (info /= 0_c_int) then
      write (*, '(A,I0,A,I0)') 'rank ', me, ': d ppotrf info ', info
@@ -289,7 +289,7 @@ program test_fortran_api
   call ddla_check(st, 'pgemm B2=A2X')
   st = ddla_memcpy(h, pb20, pb2, bytes_d(lldb, bcols))
   call ddla_check(st, 'copy B2->B20')
-  st = ddla_d_ppotrs(h, 'L', 'L', 'N', n, nrhs, pa2, desca, pb2, descb, is_nega, -1_c_int)
+  st = ddla_d_ppotrs(h, 'L', 'L', 'N', n, nrhs, pa2, desca, pb2, descb)
   call ddla_check(st, 'ppotrs')
   st = ddla_memcpy(h, pr2, pb20, bytes_d(lldb, bcols))
   call ddla_check(st, 'copy B20->R2')

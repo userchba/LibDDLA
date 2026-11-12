@@ -32,11 +32,11 @@ void ptrtrs_workspace_size(const DdlaHandle_t& handle, char side, char trans, in
                            std::size_t* backend_bytes, std::size_t* host_bytes);
 
 // Component 3: B := op(A)^{-1} B (side 'L') or B := B op(A)^{-1} (side 'R').
-// No validation, no allocation.
+// A is read-only. No validation, no allocation.
 template <DdlaBackend Backend, typename T>
 void ptrtrs_run(const DdlaHandle_t& handle,
                 char side, char uplo, char trans, char diag, int m, int n,
-                T* A, const int* array_descA, T* B, const int* array_descB,
+                const T* A, const int* array_descA, T* B, const int* array_descB,
                 void* backend_work, std::size_t backend_bytes,
                 void* host_work, std::size_t host_bytes);
 

@@ -467,13 +467,13 @@ void destroy_vendor_problem(VendorProblem& problem, cudaStream_t stream)
 }
 
 void check_factorization_status(const char* label, int info,
-                                bool sign_correction, MPI_Comm comm, int rank)
+                                MPI_Comm comm, int rank)
 {
-    const int local_failure = (info != 0 || sign_correction) ? 1 : 0;
+    const int local_failure = (info != 0) ? 1 : 0;
     if(local_failure){
         std::cerr << "[rank " << rank << "] " << label
                   << " failed: info=" << info
-                  << " sign_correction=" << sign_correction << std::endl;
+                  << std::endl;
     }
     int global_failure = 0;
     BENCH_MPI_CHECK(MPI_Allreduce(&local_failure, &global_failure, 1, MPI_INT,
@@ -639,11 +639,10 @@ RunResult run_libddla(Algorithm algorithm, int n,
     BENCH_CUDA_CHECK(cudaStreamSynchronize(static_cast<ddla::gpuStream_t>(handle->stream)));
 
     int info = 0;
-    bool sign_correction = false;
     BENCH_MPI_CHECK(MPI_Barrier(handle->comm));
     const double start = MPI_Wtime();
     if(algorithm == Algorithm::libddla_ppotrf_lower){
-        sign_correction = ddla::ppotrf(handle, 
+        ddla::ppotrf(handle,
             'L', n, d_matrix, 1, 1, desc, info);
     }else{
         abort_with_message("internal error: vendor algorithm sent to LibDDLA");
@@ -654,7 +653,7 @@ RunResult run_libddla(Algorithm algorithm, int n,
     double max_elapsed = 0.0;
     BENCH_MPI_CHECK(MPI_Allreduce(&local_elapsed, &max_elapsed, 1, MPI_DOUBLE,
                                   MPI_MAX, handle->comm));
-    check_factorization_status(algorithm_name(algorithm), info, sign_correction,
+    check_factorization_status(algorithm_name(algorithm), info,
                                handle->comm, handle->myid);
     const bool cholesky = algorithm == Algorithm::libddla_ppotrf_lower;
     const double logdet_error = compact_logdet_error(
@@ -693,7 +692,7 @@ RunResult run_cusolvermp(VendorProblem& problem,
                                      cudaMemcpyDeviceToHost, static_cast<ddla::gpuStream_t>(handle->stream)));
     BENCH_CUDA_CHECK(cudaStreamSynchronize(static_cast<ddla::gpuStream_t>(handle->stream)));
     check_factorization_status(algorithm_name(Algorithm::cusolvermp_ppotrf_lower),
-                               info, false, handle->comm, handle->myid);
+                               info, handle->comm, handle->myid);
     const double logdet_error = padded_logdet_error(
         problem, true, static_cast<ddla::gpuStream_t>(handle->stream), handle->comm, handle->myid,
         algorithm_name(Algorithm::cusolvermp_ppotrf_lower));

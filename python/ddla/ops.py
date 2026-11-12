@@ -91,40 +91,37 @@ def pgesv(A: DistributedMatrix, B: DistributedMatrix,
         pgetrs(A, B, ipiv, trans='N')
     return B, ipiv, info
 
-def ppotrf(A: DistributedMatrix, uplo: str = 'L') -> Tuple[DistributedMatrix, int, bool]:
+def ppotrf(A: DistributedMatrix, uplo: str = 'L') -> Tuple[DistributedMatrix, int]:
     """Distributed Cholesky factorization of a symmetric/Hermitian positive-definite matrix."""
     u = _to_char_bytes(uplo)
     info = ctypes.c_int(0)
-    is_nega = ctypes.c_int(0)
     func = getattr(lib, f"ddla_{A.type_char}_ppotrf")
     st = func(
         A.handle.ptr, u, A.n, ctypes.c_void_p(A.data_ptr), 1, 1,
         ctypes.c_void_p(A.desc.ctypes.data),
-        ctypes.byref(info), ctypes.byref(is_nega)
+        ctypes.byref(info)
     )
     check_status(st, f"ddla_{A.type_char}_ppotrf")
-    return A, info.value, bool(is_nega.value)
+    return A, info.value
 
-def ppotrs(A: DistributedMatrix, B: DistributedMatrix, uplo: str = 'L',
-           is_nega: bool = False, location: int = -1) -> DistributedMatrix:
+def ppotrs(A: DistributedMatrix, B: DistributedMatrix, uplo: str = 'L') -> DistributedMatrix:
     """Solve distributed linear system A * X = B using Cholesky factor from ppotrf."""
     u = _to_char_bytes(uplo)
     func = getattr(lib, f"ddla_{A.type_char}_ppotrs")
     st = func(
         A.handle.ptr, b'L', u, b'N', A.n, B.n,
         ctypes.c_void_p(A.data_ptr), ctypes.c_void_p(A.desc.ctypes.data),
-        ctypes.c_void_p(B.data_ptr), ctypes.c_void_p(B.desc.ctypes.data),
-        int(is_nega), int(location)
+        ctypes.c_void_p(B.data_ptr), ctypes.c_void_p(B.desc.ctypes.data)
     )
     check_status(st, f"ddla_{A.type_char}_ppotrs")
     return B
 
-def pposv(A: DistributedMatrix, B: DistributedMatrix, uplo: str = 'L') -> Tuple[DistributedMatrix, int, bool]:
+def pposv(A: DistributedMatrix, B: DistributedMatrix, uplo: str = 'L') -> Tuple[DistributedMatrix, int]:
     """Distributed Cholesky driver: factors A and solves A * X = B."""
-    A, info, is_nega = ppotrf(A, uplo=uplo)
+    A, info = ppotrf(A, uplo=uplo)
     if info == 0:
-        ppotrs(A, B, uplo=uplo, is_nega=is_nega, location=-1)
-    return B, info, is_nega
+        ppotrs(A, B, uplo=uplo)
+    return B, info
 
 def _qr_factor(A: DistributedMatrix, tau: Optional[np.ndarray], routine: str,
                default_tau_size: int) -> Tuple[DistributedMatrix, np.ndarray, int]:

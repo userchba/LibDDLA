@@ -91,20 +91,17 @@ FUNCS = [
     ("pdam", "all4", [("h","handle"),("s","alpha"),("pm_io","A"),("d","descA"),("i","n")], {}),
     # ---------------- distributed: Cholesky family ----------------
     ("ppotrf", "all4", [("h","handle"),("c","uplo"),("i","n"),("pm_io","A"),("i","ia"),
-                        ("i","ja"),("d","descA"),("ip","info"),("ip","is_nega")],
-     {"ret_bool": "is_nega", "drop_args": ["is_head", "location"]}),
+                        ("i","ja"),("d","descA"),("ip","info")], {}),
     ("potrf_bottom_right", "all4", [("h","handle"),("c","uplo"),("i","n"),("pm_io","A"),
                                     ("i","lda"),("ip","info")],
      {"cpp_order": [1, 2, 3, 4, 5, 0]}),   # C++ API takes the handle LAST
     ("ppotrf_bottom_right", "all4", [("h","handle"),("c","uplo"),("i","n"),("pm_io","A"),
                                      ("d","descA"),("ip","info")], {}),
     ("ppotrs", "all4", [("h","handle"),("c","side"),("c","uplo"),("c","trans"),("i","n"),
-                        ("i","nrhs"),("pm_io","A"),("d","descA"),("pm_io","B"),("d","descB"),
-                        ("b","is_nega"),("b","location")], {}),
+                        ("i","nrhs"),("pm_i","A"),("d","descA"),("pm_io","B"),("d","descB")], {}),
     ("pposv", "all4", [("h","handle"),("c","side"),("c","uplo"),("c","trans"),("i","n"),
                        ("i","nrhs"),("pm_io","A"),("i","ia"),("i","ja"),("d","descA"),
-                       ("pm_io","B"),("i","ib"),("i","jb"),("d","descB"),("ip","info")],
-     {"drop_args": ["is_head", "location"]}),
+                       ("pm_io","B"),("i","ib"),("i","jb"),("d","descB"),("ip","info")], {}),
     # ---------------- local BLAS ----------------
     ("gemm", "all4", [("h","handle"),("c","transa"),("c","transb"),("i","m"),("i","n"),
                       ("i","k"),("s","alpha"),("pm_i","A"),("i","lda"),("pm_i","B"),
@@ -629,8 +626,6 @@ def gen_cpp():
             sfx, ST = t[0], t[1]
             cname = "ddla_%s_%s" % (sfx, name)
             sig_args = args
-            if "drop_args" in opts:
-                sig_args = [a for a in args if a[1] not in opts["drop_args"]]
             params = ", ".join(cpp_param(k, n, t) for k, n in sig_args)
             decls = []
             if any(k == "s" and t[3] for k, n in sig_args):
@@ -650,12 +645,7 @@ def gen_cpp():
             lines.append("        using BE = decltype(be);")
             lines.append("        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);")
             lines.extend(decls)
-            if "ret_bool" in opts:
-                lines.append("        const bool nega = ddla::%s<BE::value, %s>(%s);" % (name, ST, call_args))
-                rn = opts["ret_bool"]
-                lines.append("        if (%s != nullptr) *%s = nega ? 1 : 0;" % (rn, rn))
-            else:
-                lines.append("        ddla::%s<BE::value, %s>(%s);" % (name, ST, call_args))
+            lines.append("        ddla::%s<BE::value, %s>(%s);" % (name, ST, call_args))
             lines.append("        return DDLA_C_STATUS_SUCCESS;")
             lines.append("    });")
             lines.append("}")
@@ -771,8 +761,6 @@ module ddla
             sfx = t[0]
             cname = "ddla_%s_%s" % (sfx, name)
             sig_args = args
-            if "drop_args" in opts:
-                sig_args = [a for a in args if a[1] not in opts["drop_args"]]
             dummies = [n.lower() for k, n in sig_args]
             arglist = ", ".join(dummies)
             lines = []
@@ -1278,8 +1266,6 @@ _ROUTINE_ARGS = {}
             sfx = t[0]
             cname = "ddla_%s_%s" % (sfx, name)
             sig_args = args
-            if "drop_args" in opts:
-                sig_args = [a for a in args if a[1] not in opts["drop_args"]]
 
             arg_types = []
             for k, n in sig_args:
