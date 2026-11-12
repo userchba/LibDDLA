@@ -72,7 +72,7 @@ void test(DdlaHandle_t h, int n, char uplo, int pattern, double scale, bool imag
         DDLA_CHECK(ddlaSynchronize(h));
         reset();
         const auto start = std::chrono::steady_clock::now();
-        hetrf<DdlaBackend::GPU, Z>(h, uplo, n, device.data(), ld, piv.data(), info);
+        hetrf<Z>(h, uplo, n, device.data(), ld, piv.data(), info);
         DDLA_CHECK(ddlaSynchronize(h));
         const double elapsed =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();

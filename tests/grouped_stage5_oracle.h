@@ -76,8 +76,8 @@ template<class T> Fixture<T> ql_fixture(const ddla::DdlaHandle_t&h,int n,int b,i
         std::vector<T>w(std::size_t(m)*k),tau(k),tl(std::size_t(k)*k,T(0));
         for(int c=0;c<k;++c)for(int r=0;r<m;++r)
             w[r+std::size_t(c)*m]=(pattern==1||(pattern==2&&c%2==0))?T(0):scalar<T>(hash(r,start+c,31),hash(r,start+c,43));
-        ddla::geqrf<ddla::DdlaBackend::CPU,T>(h,'L',m,k,w.data(),m,tau.data());
-        ddla::larft<ddla::DdlaBackend::CPU,T>(h,'B','C',m,k,w.data(),m,tau.data(),tl.data(),k);
+        ddla::geqrf<T>(h,'L',m,k,w.data(),m,tau.data());
+        ddla::larft<T>(h,'B','C',m,k,w.data(),m,tau.data(),tl.data(),k);
         for(int c=0;c<k;++c) {
             const int pivot=start+c-b;
             for(int r=0;r<pivot;++r) f.a[r+std::size_t(start+c)*n]=w[r+std::size_t(c)*m];
@@ -162,7 +162,7 @@ template<class T> Result prepared(const ddla::DdlaHandle_t&h,const Fixture<T>&f,
     const int parent_rows=ddla::num_loc(dz[ddla::DDLA_M_],dz[ddla::DDLA_MB_],g.mr,0,g.pr),parent_cols=ddla::num_loc(dz[ddla::DDLA_N_],dz[ddla::DDLA_NB_],g.mc,zsource,g.pc);
     for(char trans:{'N','C','T'}) {
         auto old=input;int info=0;
-        ddla::punmtr_he2hb<ddla::DdlaBackend::CPU,T>(h,trans,n,b,A,da,f.t.data(),old.data(),dz,info);
+        ddla::punmtr_he2hb<T>(h,trans,n,b,A,da,f.t.data(),old.data(),dz,info);
         if(info)throw std::runtime_error("current stage5 info");
         const auto ref=expected(f,q,trans);long double scale=1;for(auto x:ref)scale=std::max(scale,std::abs(x));
         const long double denominator=std::max(1,n)*std::numeric_limits<Real<T>>::epsilon()*scale;
@@ -227,7 +227,7 @@ template<class T> Result shared_parent(const ddla::DdlaHandle_t&h,int n,int nb,i
     for(int rank=0;rank<g.pr*g.pc;++rank)if(ddla::num_loc(n,nb,rank/g.pc,0,g.pr)>0&&ddla::num_loc(n,nb,rank%g.pc,0,g.pc)>0&&ddla::num_loc(n,zb,rank%g.pc,zs,g.pc)>0){target=rank;break;}
     for(char trans:{'N','C','T'}) {
         auto old=local_matrix<T>(h,dz,[&](int i,int j){return i<n&&j<n?input_z<T>(i,j):T(31);});int info=0;
-        ddla::punmtr_he2hb<ddla::DdlaBackend::CPU,T>(h,trans,n,b,A,da,f.t.data(),old.data(),dz,info);
+        ddla::punmtr_he2hb<T>(h,trans,n,b,A,da,f.t.data(),old.data(),dz,info);
         if(info)throw std::runtime_error("shared-parent current stage5 info");
         const auto dense=expected(f,q,trans);long double scale=1;for(auto v:dense)scale=std::max(scale,std::abs(v));
         const long double denominator=std::max(1,n)*std::numeric_limits<Real<T>>::epsilon()*scale;

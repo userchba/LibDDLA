@@ -152,9 +152,9 @@ void run_case(const ddla::DdlaHandle_t& handle, int cls, int k, char uplo, int l
     DeviceBuffer<rt> dU(handle, std::size_t(ld)*k), dV(handle, std::size_t(ld)*k);
     int info = -1;
 #if DDLA_HAS_GPU
-    ddla::pbdsdc<ddla::DdlaBackend::GPU,rt>(handle,uplo,k,d.data(),e.data(),s.data(),dU.ptr,dV.ptr,ld,info);
+    ddla::pbdsdc<rt>(handle,uplo,k,d.data(),e.data(),s.data(),dU.ptr,dV.ptr,ld,info);
 #else
-    ddla::pbdsdc<ddla::DdlaBackend::CPU,rt>(handle,uplo,k,d.data(),e.data(),s.data(),dU.ptr,dV.ptr,ld,info);
+    ddla::pbdsdc<rt>(handle,uplo,k,d.data(),e.data(),s.data(),dU.ptr,dV.ptr,ld,info);
 #endif
     check_ddla_sync(handle);
     require_close(handle, tag + " info", static_cast<double>(info), 0.0);

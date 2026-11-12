@@ -86,7 +86,7 @@ void local_case(DdlaHandle_t h, char side, int m, int n, int incx, bool inplace)
         DDLA_CHECK(ddlaMemcpy(h,A.data(),input.data(),input.size()*sizeof(T)));
         DDLA_CHECK(ddlaMemcpy(h,C.data(),seed.data(),seed.size()*sizeof(T)));
         T* output=inplace ? A.data() : C.data();
-        if (mode==0) dgmm<B,T,U>(h,side,m,n,A.data(),lda,x.data(),incx,output,ldc);
+        if (mode==0) dgmm<T,U>(h,side,m,n,A.data(),lda,x.data(),incx,output,ldc);
         else blas_impl::dgmm_run<B,T,U>(h,side,m,n,A.data(),lda,x.data(),incx,output,ldc);
         std::vector<T> actual(inplace ? input.size() : seed.size());
         DDLA_CHECK(ddlaMemcpy(h,actual.data(),output,actual.size()*sizeof(T)));
@@ -111,7 +111,7 @@ void distributed_case(DdlaHandle_t h, char side, int m, int n, int incx, bool in
         A.reset(); C.reset();
         T* output=inplace ? A.data : C.data;
         const int* desc=inplace ? A.d : C.d;
-        if (mode==0) pdgmm<B,T,U>(h,side,m,n,active ? A.data : nullptr,A.d,
+        if (mode==0) pdgmm<T,U>(h,side,m,n,active ? A.data : nullptr,A.d,
             active ? x.data() : nullptr,incx,active ? output : nullptr,desc);
         else pdgmm_impl::pdgmm_run<B,T,U>(h,side,m,n,active ? A.data : nullptr,A.d,
             active ? x.data() : nullptr,incx,active ? output : nullptr,desc);
@@ -135,26 +135,26 @@ template <DdlaBackend B>
 void invalid_cases(DdlaHandle_t h)
 {
     ddla::vector<double> A(h,128),x(h,128),C(h,128);
-    rejected(h,[&]{dgmm<B>(h,'X',3,4,A.data(),3,x.data(),1,C.data(),3);});
-    rejected(h,[&]{dgmm<B>(h,'L',-1,4,A.data(),3,x.data(),1,C.data(),3);});
-    rejected(h,[&]{dgmm<B>(h,'L',3,4,A.data(),2,x.data(),1,C.data(),3);});
-    rejected(h,[&]{dgmm<B,double,double>(h,'L',3,4,nullptr,3,x.data(),1,C.data(),3);});
-    rejected(h,[&]{dgmm<B,double,double>(h,'L',3,4,A.data(),3,x.data(),1,nullptr,3);});
-    rejected(h,[&]{dgmm<B>(h,'L',3,4,A.data(),3,x.data(),1,A.data(),4);});
-    rejected(h,[&]{dgmm<B>(h,'R',3,4,A.data(),3,x.data(),1,A.data()+1,3);});
-    rejected(h,[&]{dgmm<B>(h,'R',3,4,A.data(),3,C.data(),1,C.data(),3);});
-    rejected(h,[&]{dgmm<B>(h,'L',INT_MAX,1,A.data(),INT_MAX,x.data(),INT_MIN,C.data(),INT_MAX);});
-    dgmm<B,double,double>(h,'l',0,4,nullptr,1,nullptr,0,nullptr,1);
-    dgmm<B,double,double>(h,'r',3,0,nullptr,3,nullptr,-2,nullptr,3);
+    rejected(h,[&]{dgmm(h,'X',3,4,A.data(),3,x.data(),1,C.data(),3);});
+    rejected(h,[&]{dgmm(h,'L',-1,4,A.data(),3,x.data(),1,C.data(),3);});
+    rejected(h,[&]{dgmm(h,'L',3,4,A.data(),2,x.data(),1,C.data(),3);});
+    rejected(h,[&]{dgmm<double,double>(h,'L',3,4,nullptr,3,x.data(),1,C.data(),3);});
+    rejected(h,[&]{dgmm<double,double>(h,'L',3,4,A.data(),3,x.data(),1,nullptr,3);});
+    rejected(h,[&]{dgmm(h,'L',3,4,A.data(),3,x.data(),1,A.data(),4);});
+    rejected(h,[&]{dgmm(h,'R',3,4,A.data(),3,x.data(),1,A.data()+1,3);});
+    rejected(h,[&]{dgmm(h,'R',3,4,A.data(),3,C.data(),1,C.data(),3);});
+    rejected(h,[&]{dgmm(h,'L',INT_MAX,1,A.data(),INT_MAX,x.data(),INT_MIN,C.data(),INT_MAX);});
+    dgmm<double,double>(h,'l',0,4,nullptr,1,nullptr,0,nullptr,1);
+    dgmm<double,double>(h,'r',3,0,nullptr,3,nullptr,-2,nullptr,3);
     Matrix<double> a(h,7,11,2,3,0,0,1,false),c(h,7,11,2,3,0,0,2,true);
     int bad[DDLA_DLEN_]; std::copy(c.d,c.d+DDLA_DLEN_,bad);
     if (ddlaGetRank(h)==0) bad[DDLA_MB_]=0;
-    rejected(h,[&]{pdgmm<B>(h,'L',7,11,a.data,a.d,x.data(),1,c.data,bad);});
-    rejected(h,[&]{pdgmm<B,double,double>(h,'L',7,11,a.data,a.d,
+    rejected(h,[&]{pdgmm(h,'L',7,11,a.data,a.d,x.data(),1,c.data,bad);});
+    rejected(h,[&]{pdgmm<double,double>(h,'L',7,11,a.data,a.d,
         ddlaGetRank(h)==0 ? nullptr : x.data(),1,c.data,c.d);});
     if (ddlaGetSize(h)>1) {
-        rejected(h,[&]{pdgmm<B>(h,'L',7,ddlaGetRank(h)==0 ? 10 : 11,a.data,a.d,x.data(),1,c.data,c.d);});
-        rejected(h,[&]{pdgmm<B>(h,ddlaGetRank(h)==0 ? 'L' : 'R',7,11,a.data,a.d,x.data(),1,c.data,c.d);});
+        rejected(h,[&]{pdgmm(h,'L',7,ddlaGetRank(h)==0 ? 10 : 11,a.data,a.d,x.data(),1,c.data,c.d);});
+        rejected(h,[&]{pdgmm(h,ddlaGetRank(h)==0 ? 'L' : 'R',7,11,a.data,a.d,x.data(),1,c.data,c.d);});
     }
 }
 

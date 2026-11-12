@@ -84,6 +84,8 @@ constexpr double eig_tolerance(int n, double threshold = 50.0)
     return threshold * static_cast<double>(n) * eps_trait<T>::value;
 }
 
+// Backend is retained only as a test-helper compatibility tag for existing
+// explicit callers; public BLAS operations below always select the handle.
 /// Residual metric  ||A V - V Lambda||_F / (n ||A||_F eps)  for jobz='V'.
 /// Uses a workspace copy of Z; the input Z is left untouched.
 template <typename T, ddla::DdlaBackend Backend = ddla::default_backend_v>
@@ -103,7 +105,7 @@ double residual_metric(const ddla::DdlaHandle_t& handle,
     // AZ = A * Z (pgemm with the Z descriptor for both operands and output).
     api_grid_test::DeviceBuffer<T> d_AZ(handle, api_grid_test::local_size(handle, descZ));
     const T zero{};
-    ddla::pgemm<Backend, T>(handle, 'N', 'N', n, n, n,
+    ddla::pgemm<T>(handle, 'N', 'N', n, n, n,
                    T(1.0), d_A, descA, d_Z, descZ, zero, d_AZ.ptr, descZ);
     // AZ -= Z * diag(w): subtract w[global column] * Z[:, j] from the
     // matching local column of AZ.
@@ -111,7 +113,7 @@ double residual_metric(const ddla::DdlaHandle_t& handle,
         const int gj = ddla::indx_l2g_c(descZ, handle, j);
         if (gj >= n) continue;
         const T alpha = T(-static_cast<rt>(w[gj]));
-        ddla::axpy<Backend, T>(handle, m_loc, alpha,
+        ddla::axpy<T>(handle, m_loc, alpha,
                    d_Z + j * static_cast<std::ptrdiff_t>(lld), 1,
                    d_AZ.ptr + j * static_cast<std::ptrdiff_t>(lld), 1);
     }
@@ -136,7 +138,7 @@ double orthogonality_metric(const ddla::DdlaHandle_t& handle,
                  descZ[ddla::DDLA_RSRC_], descZ[ddla::DDLA_CSRC_]);
     api_grid_test::DeviceBuffer<T> d_G(handle, api_grid_test::local_size(handle, descG));
     const T zero{};
-    ddla::pgemm<Backend, T>(handle, 'C', 'N', n, n, n,
+    ddla::pgemm<T>(handle, 'C', 'N', n, n, n,
                    T(1.0), d_Z, descZ, d_Z, descZ, zero, d_G.ptr, descG);
     api_grid_test::check_ddla_sync(handle);
 

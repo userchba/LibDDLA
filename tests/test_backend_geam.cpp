@@ -1,3 +1,4 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 // ---------------------------------------------------------------------------
 // Backend-templated coverage of ddla::geam:  C := alpha*op(A) + beta*op(B).
 //
@@ -11,7 +12,7 @@
 //   * the CPU arm's exact-copy contract (-0.0, Inf, NaN survive bit for bit),
 //   * thread-count independence: the same large problem on a 1-thread and a
 //     4-thread handle gives identical bits (CPU),
-//   * the argument checks (null handle, backend mismatch, bad flag, null B,
+//   * the argument checks (null handle, internal backend mismatch, bad flag, null B,
 //     leading dimensions).
 // The reference arithmetic is written out by hand, not taken from the library.
 //
@@ -164,7 +165,7 @@ int check_case(const DdlaHandle_t& h, char ta, char tb, int m, int n, int mode, 
     const bool use_b = (mode == 0);
     const T b_coef = use_b ? beta : Tr<T>::make(0.0, 0.0);
     const T* pB = (mode == 1) ? nullptr : dB.p;
-    geam<Backend, T>(h, ta, tb, m, n, alpha, dA.p, lda, b_coef, pB, ldb, dC.p, ldc);
+    geam<T>(h, ta, tb, m, n, alpha, dA.p, lda, b_coef, pB, ldb, dC.p, ldc);
     std::vector<T> C;
     dC.down(C);
 
@@ -215,7 +216,7 @@ int check_alpha_zero_cpu(const DdlaHandle_t& h, char ta, char tb, int m, int n)
     std::vector<T> C(static_cast<std::size_t>(m) * n, Tr<T>::make(0, 0));
     Buf<T> dA(h, A.size()), dB(h, B.size()), dC(h, C.size());
     dA.up(A); dB.up(B); dC.up(C);
-    geam<DdlaBackend::CPU, T>(h, ta, tb, m, n, Tr<T>::make(0, 0), dA.p, lda, beta, dB.p, ldb, dC.p, m);
+    geam<T>(h, ta, tb, m, n, Tr<T>::make(0, 0), dA.p, lda, beta, dB.p, ldb, dC.p, m);
     dC.down(C);
     for (int j = 0; j < n; ++j)
         for (int i = 0; i < m; ++i) {
@@ -265,7 +266,7 @@ int check_exact_copy(const DdlaHandle_t& h, char ta, int m, int n)
     dA.up(A); dC.up(C);
     const T zero = Tr<T>::make(0, 0);
     if constexpr (Backend == DdlaBackend::CPU) {
-        geam<Backend, T>(h, ta, 'N', m, n, Tr<T>::make(1, 0), dA.p, lda, zero, nullptr, 1, dC.p, ldc);
+        geam<T>(h, ta, 'N', m, n, Tr<T>::make(1, 0), dA.p, lda, zero, nullptr, 1, dC.p, ldc);
     } else {
 #if DDLA_HAS_GPU
         // Check the actual QR T^H path. Vendor GPU GEAM has no bitwise-copy
@@ -316,9 +317,9 @@ int check_inplace(const DdlaHandle_t& h, int m, int n, bool with_b)
     Buf<T> dA(h, A.size()), dB(h, B.size());
     dA.up(A); dB.up(B);
     if (with_b)
-        geam<Backend, T>(h, 'N', 'N', m, n, alpha, dA.p, ld, beta, dB.p, ld, dA.p, ld);
+        geam<T>(h, 'N', 'N', m, n, alpha, dA.p, ld, beta, dB.p, ld, dA.p, ld);
     else
-        geam<Backend, T>(h, 'N', 'N', m, n, alpha, dA.p, ld, Tr<T>::make(0, 0), nullptr, 1, dA.p, ld);
+        geam<T>(h, 'N', 'N', m, n, alpha, dA.p, ld, Tr<T>::make(0, 0), nullptr, 1, dA.p, ld);
     std::vector<T> C;
     dA.down(C);
     const double eps = std::numeric_limits<R>::epsilon();
@@ -366,8 +367,8 @@ int run_type(const DdlaHandle_t& h)
     bad += check_inplace<Backend, T>(h, 37, 53, false);
 
     // empty problems return before any pointer is looked at
-    geam<Backend, T>(h, 'N', 'N', 0, 5, alpha, nullptr, 1, beta, nullptr, 1, nullptr, 1);
-    geam<Backend, T>(h, 'T', 'C', 5, 0, alpha, nullptr, 1, beta, nullptr, 1, nullptr, 1);
+    geam<T>(h, 'N', 'N', 0, 5, alpha, nullptr, 1, beta, nullptr, 1, nullptr, 1);
+    geam<T>(h, 'T', 'C', 5, 0, alpha, nullptr, 1, beta, nullptr, 1, nullptr, 1);
 
     if constexpr (Backend == DdlaBackend::GPU) {
         // QR retains its exact GPU copy after the vendor GEAM compatibility
@@ -428,7 +429,7 @@ int check_thread_invariance(const DdlaHandle_t& h1, const DdlaHandle_t& h4, int 
             dA.up(A); dB.up(B);
             std::vector<T> zero(static_cast<std::size_t>(ldc) * n, Tr<T>::make(0, 0));
             dC.up(zero);
-            geam<DdlaBackend::CPU, T>(*hs[k], ta, tb, m, n, alpha, dA.p, lda, beta, dB.p, ldb, dC.p, ldc);
+            geam<T>(*hs[k], ta, tb, m, n, alpha, dA.p, lda, beta, dB.p, ldb, dC.p, ldc);
             dC.down(out[k]);
         }
         if (std::memcmp(out[0].data(), out[1].data(), out[0].size() * sizeof(T)) != 0) {
@@ -487,23 +488,23 @@ int check_rejections(const DdlaHandle_t& h, const DdlaHandle_t& other)
             ++failures;
         }
     };
-    expect_throw([&] { geam<Backend, double>(nullptr, 'N', 'N', 2, 2, one, x, 2, zero, nullptr, 1, x, 2); },
+    expect_throw([&] { geam<double>(nullptr, 'N', 'N', 2, 2, one, x, 2, zero, nullptr, 1, x, 2); },
                  "null handle");
-    expect_throw([&] { geam<Backend, double>(h, 'X', 'N', 2, 2, one, x, 2, zero, nullptr, 1, x, 2); },
+    expect_throw([&] { geam<double>(h, 'X', 'N', 2, 2, one, x, 2, zero, nullptr, 1, x, 2); },
                  "invalid trans");
-    expect_throw([&] { geam<Backend, double>(h, 'N', 'Q', 2, 2, one, x, 2, zero, nullptr, 1, x, 2); },
+    expect_throw([&] { geam<double>(h, 'N', 'Q', 2, 2, one, x, 2, zero, nullptr, 1, x, 2); },
                  "invalid trans");
-    expect_throw([&] { geam<Backend, double>(h, 'N', 'N', 2, 2, one, x, 2, one, nullptr, 2, x + 8, 2); },
+    expect_throw([&] { geam<double>(h, 'N', 'N', 2, 2, one, x, 2, one, nullptr, 2, x + 8, 2); },
                  "null B");
-    expect_throw([&] { geam<Backend, double>(h, 'N', 'N', 2, 2, one, nullptr, 2, zero, nullptr, 1, x, 2); },
+    expect_throw([&] { geam<double>(h, 'N', 'N', 2, 2, one, nullptr, 2, zero, nullptr, 1, x, 2); },
                  "null A");
-    expect_throw([&] { geam<Backend, double>(h, 'N', 'N', 4, 2, one, x, 3, zero, nullptr, 1, x + 8, 4); },
+    expect_throw([&] { geam<double>(h, 'N', 'N', 4, 2, one, x, 3, zero, nullptr, 1, x + 8, 4); },
                  "lda too small");
-    expect_throw([&] { geam<Backend, double>(h, 'T', 'N', 4, 2, one, x, 1, zero, nullptr, 1, x + 8, 4); },
+    expect_throw([&] { geam<double>(h, 'T', 'N', 4, 2, one, x, 1, zero, nullptr, 1, x + 8, 4); },
                  "lda too small");
-    expect_throw([&] { geam<Backend, double>(h, 'N', 'N', 4, 2, one, x, 4, one, x, 2, x + 8, 4); },
+    expect_throw([&] { geam<double>(h, 'N', 'N', 4, 2, one, x, 4, one, x, 2, x + 8, 4); },
                  "ldb too small");
-    expect_throw([&] { geam<Backend, double>(h, 'N', 'N', 4, 2, one, x, 4, zero, nullptr, 1, x + 8, 3); },
+    expect_throw([&] { geam<double>(h, 'N', 'N', 4, 2, one, x, 4, zero, nullptr, 1, x + 8, 3); },
                  "ldc too small");
     if (other != nullptr)
         expect_throw([&] { geam<Backend, double>(other, 'N', 'N', 2, 2, one, x, 2, zero, nullptr, 1, x + 8, 2); },

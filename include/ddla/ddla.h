@@ -26,7 +26,7 @@ namespace ddla{
  * except for the explicitly requested in-place matrix update.
  * Execution is ordered on the handle stream and requires no DDLA workspace.
  */
-template <DdlaBackend Backend = default_backend_v, typename T, typename U>
+template <typename T, typename U>
 void dgmm(const DdlaHandle_t& handle, char side, int m, int n,
     const T* A, int lda, const U* x, int incx, T* C, int ldc);
 
@@ -43,7 +43,7 @@ void dgmm(const DdlaHandle_t& handle, char side, int m, int n,
  * matching diagonal values. Execution uses local block strips without matrix
  * communication, DDLA allocation or workspace and follows the handle stream.
  */
-template <DdlaBackend Backend = default_backend_v, typename T, typename U>
+template <typename T, typename U>
 void pdgmm(const DdlaHandle_t& handle, char side, int m, int n,
     const T* A, const int* descA, const U* x, int incx, T* C, const int* descC);
 
@@ -57,11 +57,9 @@ template <typename U> struct real_type<std::complex<U>> { using type = U; };
 
 // ---------------------------------------------------------------------------
 // Distributed triangular solves, LU and Cholesky factorizations/solvers and their helpers (ptrtrs ... pdam, below).
-// Like pgemm, every routine is templated on the backend and runs on both: `pgetrf<DdlaBackend::CPU>(handle, ...)` for a
-// CPU handle, `pgetrf<DdlaBackend::GPU>(handle, ...)` for a GPU one.  The default is the build's default backend, so a
-// plain `pgetrf(handle, ...)` deduces the scalar type as before.  The template backend must equal the handle's backend
-// (anything else throws).  Pointers in the parameter documentation below refer to the handle's own
-// memory: host memory for a CPU handle, device memory for a GPU handle.
+// The handle selects CPU or GPU execution and its pointers use that memory
+// domain. Calls such as pgetrf(handle, ...) deduce the scalar type; an explicit
+// scalar argument, pgetrf<double>(handle, ...), is also supported.
 // ---------------------------------------------------------------------------
 
 
@@ -94,7 +92,7 @@ template <typename U> struct real_type<std::complex<U>> { using type = U; };
  * (leading block anchored at global (0,0)); only the leading m x n block of B
  * and the corresponding leading block of A are referenced.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void ptrtrs(
     const DdlaHandle_t& handle,
     char side, char uplo, char trans, char diag,
@@ -106,7 +104,6 @@ void ptrtrs(
 /**
  * @brief Distributed triangular multiply: B := alpha * op(A) * B (side='L')
  *                                      or B := alpha * B * op(A) (side='R').
- * @tparam Backend Must match the handle's backend (CPU or GPU).
  * @tparam T float, double, complex<float> or complex<double>.
  * @param handle Handle owning the process grid and execution stream.
  * @param side 'L' or 'R'.
@@ -131,7 +128,7 @@ void ptrtrs(
  * throw std::invalid_argument, including in Release builds. All ranks in the
  * handle's grid must call with the same global arguments.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void ptrmm(
     const DdlaHandle_t& handle, char side, char uplo, char trans, char diag,
     int m, int n, const T& alpha,
@@ -154,12 +151,11 @@ void ptrmm(
  * null matrix pointers. Otherwise pointers are required where local entries
  * are referenced. Flags, dimensions and coefficient modes agree collectively.
  *
- * @tparam Backend CPU or GPU; must match the handle.
  * @tparam T float, double, complex<float> or complex<double>.
  * @param side 'L' or 'R' (case-insensitive).
  * @param uplo 'U' or 'L' (case-insensitive), the stored triangle of A.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void phemm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
     const T& alpha, const T* A, const int* descA,
     const T* B, const int* descB, const T& beta, T* C, const int* descC);
@@ -168,12 +164,12 @@ void phemm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
  * Alpha, beta and C are complex. A real structured input is symmetric;
  * a complex Hermitian input ignores its imaginary diagonal.
  */
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void phemm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
     const std::complex<R>& alpha, const R* A, const int* descA,
     const std::complex<R>* B, const int* descB, const std::complex<R>& beta,
     std::complex<R>* C, const int* descC);
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void phemm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
     const std::complex<R>& alpha, const std::complex<R>* A, const int* descA,
     const R* B, const int* descB, const std::complex<R>& beta,
@@ -193,7 +189,7 @@ void phemm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
  * Flags are case-insensitive. Four real/complex scalar types are supported.
  * All ranks call collectively and validation precedes matrix communication.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void phemmt(const DdlaHandle_t& handle,char side,char uploA,char uploC,int n,
     const T& alpha,const T* A,const int* descA,const T* B,const int* descB,
     const T& beta,T* C,const int* descC);
@@ -202,12 +198,12 @@ void phemmt(const DdlaHandle_t& handle,char side,char uploA,char uploC,int n,
  * Alpha, beta and C are complex. A real structured input is symmetric;
  * a complex Hermitian input ignores its imaginary diagonal.
  */
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void phemmt(const DdlaHandle_t& handle, char side, char uploA, char uploC, int n,
     const std::complex<R>& alpha, const R* A, const int* descA,
     const std::complex<R>* B, const int* descB, const std::complex<R>& beta,
     std::complex<R>* C, const int* descC);
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void phemmt(const DdlaHandle_t& handle, char side, char uploA, char uploC, int n,
     const std::complex<R>& alpha, const std::complex<R>* A, const int* descA,
     const R* B, const int* descB, const std::complex<R>& beta,
@@ -219,7 +215,7 @@ void phemmt(const DdlaHandle_t& handle, char side, char uploA, char uploC, int n
  * contract as phemm. Complex symmetry uses transpose, not conjugate transpose;
  * the diagonal is complex. Only uplo of A is read; C is fully updated.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void psymm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
     const T& alpha, const T* A, const int* descA,
     const T* B, const int* descB, const T& beta, T* C, const int* descC);
@@ -235,7 +231,7 @@ void psymm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
  * Only leading n-by-n regions are used. Backend and four scalar types follow
  * psymm. side accepts L/R and both triangles accept U/L, case-insensitively.
  */
-template <DdlaBackend Backend = default_backend_v,typename T>
+template <typename T>
 void psymmt(const DdlaHandle_t& handle,char side,char uploA,char uploC,int n,
     const T& alpha,const T* A,const int* descA,const T* B,const int* descB,
     const T& beta,T* C,const int* descC);
@@ -258,7 +254,7 @@ void psymmt(const DdlaHandle_t& handle,char side,char uploA,char uploC,int n,
  * unrestricted. Flags are case-insensitive; transa/transb are N/T/C.
  * Invalid arguments are rejected collectively before matrix communication.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgemmt(const DdlaHandle_t& handle, char uplo,
     char transa, char transb, int n, int k,
     const T& alpha, const T* A, const int* descA,
@@ -268,12 +264,12 @@ void pgemmt(const DdlaHandle_t& handle, char uplo,
  * Alpha, beta and C are complex. A real structured input is symmetric;
  * a complex Hermitian input ignores its imaginary diagonal.
  */
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void pgemmt(const DdlaHandle_t& handle, char uplo, char transa, char transb, int n, int k,
     const std::complex<R>& alpha, const R* A, const int* descA,
     const std::complex<R>* B, const int* descB, const std::complex<R>& beta,
     std::complex<R>* C, const int* descC);
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void pgemmt(const DdlaHandle_t& handle, char uplo, char transa, char transb, int n, int k,
     const std::complex<R>& alpha, const std::complex<R>* A, const int* descA,
     const R* B, const int* descB, const std::complex<R>& beta,
@@ -290,7 +286,7 @@ void pgemmt(const DdlaHandle_t& handle, char uplo, char transa, char transb, int
  * no old C. Flags are case-insensitive. Real types also accept C as T;
  * complex symmetric operations accept N/T only. Validation is collective.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void psyrk(const DdlaHandle_t& handle, char uplo, char trans, int n, int k,
     const T& alpha, const T* A, const int* descA,
     const T& beta, T* C, const int* descC);
@@ -300,7 +296,7 @@ void psyrk(const DdlaHandle_t& handle, char uplo, char trans, int n, int k,
  * C := alpha*(A*B^T+B*A^T)+beta*C (N), or
  * alpha*(A^T*B+B^T*A)+beta*C (T). A and B have the same logical shape.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void psyr2k(const DdlaHandle_t& handle, char uplo, char trans, int n, int k,
     const T& alpha, const T* A, const int* descA, const T* B, const int* descB,
     const T& beta, T* C, const int* descC);
@@ -312,7 +308,7 @@ void psyr2k(const DdlaHandle_t& handle, char uplo, char trans, int n, int k,
  * and beta are real; imaginary input diagonal components of C are ignored
  * and the resulting diagonal is real. The opposite triangle is untouched.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pherk(const DdlaHandle_t& handle, char uplo, char trans, int n, int k,
     const typename real_type<T>::type& alpha, const T* A, const int* descA,
     const typename real_type<T>::type& beta, T* C, const int* descC);
@@ -322,19 +318,19 @@ void pherk(const DdlaHandle_t& handle, char uplo, char trans, int n, int k,
  * C := alpha*A*B^H+conj(alpha)*B*A^H+beta*C (N), or
  * alpha*A^H*B+conj(alpha)*B^H*A+beta*C (C). beta is real.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pher2k(const DdlaHandle_t& handle, char uplo, char trans, int n, int k,
     const T& alpha, const T* A, const int* descA, const T* B, const int* descB,
     const typename real_type<T>::type& beta, T* C, const int* descC);
 
 /** @brief Local symmetric matrix product for real or complex scalars. */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void symm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
     const T& alpha, const T* A, int lda, const T* B, int ldb,
     const T& beta, T* C, int ldc);
 
 /** @brief Local symmetric rank-2k update for real or complex scalars. */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void syr2k(const DdlaHandle_t& handle, char uplo, char trans, int n, int k,
     const T& alpha, const T* A, int lda, const T* B, int ldb,
     const T& beta, T* C, int ldc);
@@ -370,7 +366,7 @@ void syr2k(const DdlaHandle_t& handle, char uplo, char trans, int n, int k,
  * 'R') / m columns (rowcol 'C') and the leading n-column / n-row segment are
  * pivoted.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void plapiv(
     const DdlaHandle_t& handle,
     char direc, char rowcol, char pivroc,
@@ -402,7 +398,7 @@ void plapiv(
  * @param descB ScaLAPACK int[9] descriptor for B.
  * @param incb  Increment for B (must match inca when inca == 1).
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pswap(
     const DdlaHandle_t& handle,
     int N,
@@ -424,7 +420,7 @@ void pswap(
  * Temporary packing storage is managed internally. Partial overlap is unsupported;
  * an exact local-view alias is allowed when root owns the complete selected region.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void gather(const DdlaHandle_t& handle, int m, int n,
             const T* A, int ia, int ja, const int* descA,
             int root, T* dst, int lddst);
@@ -438,7 +434,7 @@ void gather(const DdlaHandle_t& handle, int m, int n,
  * null src. Only selected A entries are modified; padding and src are preserved.
  * Empty regions access no data. GPU work is ordered on the handle stream.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void scatter(const DdlaHandle_t& handle, int m, int n,
              T* A, int ia, int ja, const int* descA,
              int root, const T* src, int ldsrc);
@@ -478,7 +474,7 @@ void scatter(const DdlaHandle_t& handle, int m, int n,
  *                absolute global one-based pivot rows. Other entries stay unchanged.
  * @param info     0 on success; >0 is the failing one-based position within the selected submatrix (early stop).
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgetrf(
     const DdlaHandle_t& handle,
     int m, int n,
@@ -507,7 +503,7 @@ void pgetrf(
  * @param descA    ScaLAPACK int[9] descriptor for A (mb == nb required).
  * @param info     0 on success; >0 if U(k,k) is exactly zero.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgetrf_nopiv(
     const DdlaHandle_t& handle,
     int m, int n,
@@ -539,7 +535,7 @@ void pgetrf_nopiv(
  * @param descB   ScaLAPACK int[9] descriptor for B (same MB as A; rows for
  *                side 'L' / columns for side 'R' distributed like A's).
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgetrs(
     const DdlaHandle_t& handle,
     char side, char trans, int n, int nrhs,
@@ -568,7 +564,7 @@ void pgetrs(
  * @param B     Pointer in the selected backend to RHS / solution B (input/output).
  * @param descB   ScaLAPACK int[9] descriptor for B.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgetrs_nopiv(
     const DdlaHandle_t& handle,
     char side, char trans, int n, int nrhs,
@@ -596,7 +592,7 @@ void pgetrs_nopiv(
  * @param descB   ScaLAPACK int[9] descriptor for B.
  * @throws std::runtime_error if LU factorization fails (info != 0).
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgesv(
     const DdlaHandle_t& handle,
     char side, char trans, int n, int nrhs,
@@ -623,7 +619,7 @@ void pgesv(
  * @param descB   ScaLAPACK int[9] descriptor for B.
  * @throws std::runtime_error if LU factorization fails (info != 0).
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgesv_nopiv(
     const DdlaHandle_t& handle,
     char side, char trans, int n, int nrhs,
@@ -659,7 +655,7 @@ void pgesv_nopiv(
  * @param pivots   Pivot array in the selected backend (output, 1-based block-local offsets, length >= local rows).
  * @param info     0 on success; >0 if a diagonal block is singular.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgetrf_bpiv(
     const DdlaHandle_t& handle,
     int m, int n,
@@ -695,7 +691,7 @@ void pgetrf_bpiv(
  * @param B     Pointer in the selected backend to RHS / solution B (input/output).
  * @param descB   ScaLAPACK int[9] descriptor for B.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgetrs_bpiv(
     const DdlaHandle_t& handle,
     char side, char trans, int n, int nrhs,
@@ -725,7 +721,7 @@ void pgetrs_bpiv(
  * @param descB   ScaLAPACK int[9] descriptor for B.
  * @throws std::runtime_error if LU factorization fails (info != 0).
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgesv_bpiv(
     const DdlaHandle_t& handle,
     char side, char trans, int n, int nrhs,
@@ -774,7 +770,7 @@ void pgesv_bpiv(
  * @param C      Pointer to distributed C (input/output; host for CPU, device for GPU).
  * @param descC    ScaLAPACK int[9] descriptor for C.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgemm(
     const DdlaHandle_t& handle,
     char transa, char transb,
@@ -805,7 +801,6 @@ void pgemm(
  * distributed panel (inplace). All ranks must select the same policy and
  * factorization. The gathered GPU panel follows the vendor QR sign convention.
  *
- * @tparam Backend CPU or GPU, matching the handle.
  * @tparam T float, double, complex<float> or complex<double>.
  * @param handle Handle owning the process grid and stream.
  * @param m Rows of the leading block, 0 <= m <= descA[M_].
@@ -815,7 +810,7 @@ void pgemm(
  * @param tau HOST reflector scalars, indexed by local column.
  * @param info HOST status, zero on success. Invalid arguments throw collectively.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgeqrf(const DdlaHandle_t& handle, int m, int n,
             T* A, const int* descA, T* tau, int& info);
 
@@ -837,7 +832,7 @@ void pgeqrf(const DdlaHandle_t& handle, int m, int n,
  * null data pointers. info=0 on return. Invalid arguments throw collectively.
  * Rank deficiency is not detected, as in the underlying triangular solve.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgeqrs(const DdlaHandle_t& handle, int m, int n, int nrhs,
             const T* A, const int* descA, const T* tau,
             T* B, const int* descB, int& info);
@@ -863,19 +858,19 @@ void pgeqrs(const DdlaHandle_t& handle, int m, int n, int nrhs,
  * row-distributed throughout the solve and on return; no descriptor conversion
  * or full replicated factor is used. Scalar vectors and bounded panels may be replicated.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pbdsdc(const DdlaHandle_t& handle, char uplo, int n,
             T* d, T* e, T* s, T* U, T* V, int ld, int& info);
 
 // Bidiagonalization and SVD interfaces used by the registered solver sources.
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgebrd(const DdlaHandle_t& handle, int m, int n,
             T* A, const int* descA,
             typename real_type<T>::type* d, typename real_type<T>::type* e,
             T* tauq, T* taup,
             int& info);
 
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgesvd(const DdlaHandle_t& handle,
             char jobu, char jobvt,
             int m, int n,
@@ -885,7 +880,7 @@ void pgesvd(const DdlaHandle_t& handle,
             T* VT, const int* descVT,
             int& info);
 
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void punmbr(const DdlaHandle_t& handle,
             char vect, char side, char trans,
             int m, int n, int k,
@@ -916,7 +911,7 @@ void punmbr(const DdlaHandle_t& handle,
  * @param tau HOST reflector scalars, indexed by local column.
  * @param info HOST status, zero on success. Invalid arguments throw collectively.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgeqlf(const DdlaHandle_t& handle, int m, int n,
             T* A, const int* descA, T* tau, int& info);
 
@@ -956,7 +951,7 @@ void pgeqlf(const DdlaHandle_t& handle, int m, int n,
  * @param jc       Starting global column in C (one-based).
  * @param descC    ScaLAPACK int[9] descriptor for C.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pgeadd(
     const DdlaHandle_t& handle, char transa, char transb,
     int m, int n,
@@ -990,7 +985,7 @@ void pgeadd(
  * @param n      Logical order of the leading sub-matrix (<= desc[DDLA_M_]);
  *               n < 0 means the whole matrix.  Default -1.
  */
-template <DdlaBackend Backend = default_backend_v, typename T1, typename T2>
+template <typename T1, typename T2>
 void pdam(const DdlaHandle_t& handle, const T1& alpha, T2* A, const int* descA, int n = -1);
 
 /**
@@ -1019,7 +1014,7 @@ void pdam(const DdlaHandle_t& handle, const T1& alpha, T2* A, const int* descA, 
  * sub-matrix (leading block anchored at global (0,0)); only the leading
  * n x n block is factored.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void ppotrf(
     const DdlaHandle_t& handle,
     char uplo, int n,
@@ -1044,7 +1039,7 @@ void ppotrf(
  * @param info    0 on success; i > 0 identifies the failed reverse pivot.
  * @param handle  DDLA handle providing the GPU stream and BLAS handle.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void potrf_bottom_right(
     char uplo, int n, T* A, int lda,
     int& info, const DdlaHandle_t& handle
@@ -1071,7 +1066,7 @@ void potrf_bottom_right(
  * sub-matrix (leading block anchored at global (0,0)); only the leading
  * n x n block is factored.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void ppotrf_bottom_right(
     const DdlaHandle_t& handle,
     char uplo, int n, T* A,
@@ -1103,7 +1098,7 @@ void ppotrf_bottom_right(
  *                 rows (side 'L') / columns (side 'R') distributed like A's
  *                 (equal RSRC, resp. equal NB and CSRC).
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void ppotrs(
     const DdlaHandle_t& handle,
     char side, char uplo, char trans,
@@ -1138,7 +1133,7 @@ void ppotrs(
  * @param descB    ScaLAPACK int[9] descriptor for B.
  * @param info     Output: 0 on success, >0 if not positive-definite.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pposv(
     const DdlaHandle_t& handle,
     char side, char uplo, char trans,
@@ -1158,7 +1153,7 @@ void pposv(
 // the private headers for inline wrappers.
 // ---------------------------------------------------------------------------
 
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void gemm(
     const DdlaHandle_t& handle,
     char transa, char transb,
@@ -1186,7 +1181,7 @@ void gemm(
  * CPU and large GPU products use bounded column panels of real GEMM;
  * small GPU products use a fused tiled kernel with no temporary matrices.
  */
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void gemm(
     const DdlaHandle_t& handle,
     char transa, char transb,
@@ -1201,17 +1196,16 @@ void gemm(
  * @brief Hermitian rank-k update: C := alpha*A*A**H + beta*C  ('N')  or
  *        C := alpha*A**H*A + beta*C.
  *
- * Same unified backend-templated form as @ref gemm: the CPU instantiation
- * calls Fortran xHERK (xSYRK for the real scalar types), the GPU instantiation
+ * Same unified handle-driven form as @ref gemm: the CPU handle path
+ * calls Fortran xHERK (xSYRK for the real scalar types), the GPU handle path
  * calls cuBLAS/hipBLAS.  CPU consumes HOST pointers, GPU DEVICE pointers.
  *
  * @p alpha and @p beta are the REAL type of @p T (the xHERK convention).  For
  * the real scalar types this is xSYRK, and a conjugate-transpose request is
  * normalised to a plain transpose.
  *
- * @tparam Backend DdlaBackend::CPU or DdlaBackend::GPU; must match the handle.
  * @tparam T       float, double, complex<float> or complex<double>.
- * @param handle Handle whose backend must equal @p Backend.
+ * @param handle Handle selecting execution backend and memory domain.
  * @param uplo   'U' or 'L' -- which triangle of C is updated.
  * @param trans  'N' or 'C' (also accepts 'T').
  * @param n      Order of C.
@@ -1223,7 +1217,7 @@ void gemm(
  * @param C      In/out matrix; only the @p uplo triangle is referenced.
  * @param ldc    Leading dimension of C.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void herk(
     const DdlaHandle_t& handle,
     char uplo, char trans,
@@ -1237,7 +1231,7 @@ void herk(
  * @brief Hermitian rank-2k update: C := alpha*A*B**H + conj(alpha)*B*A**H +
  *        beta*C  ('N')  or  C := alpha*A**H*B + conj(alpha)*B**H*A + beta*C.
  *
- * Same unified backend-templated form as @ref gemm: the CPU instantiation
+ * Same unified handle-driven form as @ref gemm: the CPU handle path
  * calls Fortran xHER2K (xSYR2K for the real scalar types), the GPU
  * instantiation calls cuBLAS/hipBLAS.  CPU consumes HOST pointers, GPU DEVICE
  * pointers.
@@ -1247,9 +1241,8 @@ void herk(
  * scalars are real and a conjugate-transpose request is normalised to a plain
  * transpose.
  *
- * @tparam Backend DdlaBackend::CPU or DdlaBackend::GPU; must match the handle.
  * @tparam T       float, double, complex<float> or complex<double>.
- * @param handle Handle whose backend must equal @p Backend.
+ * @param handle Handle selecting execution backend and memory domain.
  * @param uplo   'U' or 'L' -- which triangle of C is updated.
  * @param trans  'N' or 'C' (also accepts 'T').
  * @param n      Order of C.
@@ -1263,7 +1256,7 @@ void herk(
  * @param C      In/out matrix; only the @p uplo triangle is referenced.
  * @param ldc    Leading dimension of C.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void her2k(
     const DdlaHandle_t& handle,
     char uplo, char trans,
@@ -1277,13 +1270,12 @@ void her2k(
 /**
  * @brief Hermitian matrix-vector product: y := alpha*A*x + beta*y.
  *
- * Same unified backend-templated form as @ref gemm: the CPU instantiation
- * calls Fortran xHEMV (xSYMV for the real scalar types), the GPU instantiation
+ * Same unified handle-driven form as @ref gemm: the CPU handle path
+ * calls Fortran xHEMV (xSYMV for the real scalar types), the GPU handle path
  * calls cuBLAS/hipBLAS.  CPU consumes HOST pointers, GPU DEVICE pointers.
  *
- * @tparam Backend DdlaBackend::CPU or DdlaBackend::GPU; must match the handle.
  * @tparam T       float, double, complex<float> or complex<double>.
- * @param handle Handle whose backend must equal @p Backend.
+ * @param handle Handle selecting execution backend and memory domain.
  * @param uplo   'U' or 'L' -- which triangle of A is referenced.
  * @param n      Order of A and length of x and y.
  * @param alpha  Scaling factor for A*x.
@@ -1295,7 +1287,7 @@ void her2k(
  * @param y      In/out vector.
  * @param incy   Stride between elements of y.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void hemv(
     const DdlaHandle_t& handle,
     char uplo,
@@ -1310,13 +1302,12 @@ void hemv(
  * @brief Hermitian matrix-matrix product: C := alpha*A*B + beta*C  ('L')  or
  *        C := alpha*B*A + beta*C  ('R').
  *
- * Same unified backend-templated form as @ref gemm: the CPU instantiation
- * calls Fortran xHEMM (xSYMM for the real scalar types), the GPU instantiation
+ * Same unified handle-driven form as @ref gemm: the CPU handle path
+ * calls Fortran xHEMM (xSYMM for the real scalar types), the GPU handle path
  * calls cuBLAS/hipBLAS.  CPU consumes HOST pointers, GPU DEVICE pointers.
  *
- * @tparam Backend DdlaBackend::CPU or DdlaBackend::GPU; must match the handle.
  * @tparam T       float, double, complex<float> or complex<double>.
- * @param handle Handle whose backend must equal @p Backend.
+ * @param handle Handle selecting execution backend and memory domain.
  * @param side   'L' (A multiplies B on the left) or 'R' (on the right).
  * @param uplo   'U' or 'L' -- which triangle of A is referenced.
  * @param m      Number of rows of C.
@@ -1330,7 +1321,7 @@ void hemv(
  * @param C      In/out matrix.
  * @param ldc    Leading dimension of C.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void hemm(
     const DdlaHandle_t& handle,
     char side, char uplo,
@@ -1345,12 +1336,12 @@ void hemm(
  * Alpha, beta and C are complex. A real structured input is symmetric;
  * a complex Hermitian input ignores its imaginary diagonal.
  */
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void hemm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
     const std::complex<R>& alpha, const R* A, int lda,
     const std::complex<R>* B, int ldb, const std::complex<R>& beta,
     std::complex<R>* C, int ldc);
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void hemm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
     const std::complex<R>& alpha, const std::complex<R>* A, int lda,
     const R* B, int ldb, const std::complex<R>& beta,
@@ -1365,7 +1356,7 @@ void hemm(const DdlaHandle_t& handle, char side, char uplo, int m, int n,
  * performs no rank communication. Temporary storage holds one bounded input
  * panel and diagonal GEMMT scratch. Private check/query/run components allow reuse.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void hemmt(const DdlaHandle_t& handle,char side,char uploA,char uploC,int n,
     const T& alpha,const T* A,int lda,const T* B,int ldb,const T& beta,T* C,int ldc);
 /** @brief Mixed real/complex product with matching float/double precision.
@@ -1373,12 +1364,12 @@ void hemmt(const DdlaHandle_t& handle,char side,char uploA,char uploC,int n,
  * Alpha, beta and C are complex. A real structured input is symmetric;
  * a complex Hermitian input ignores its imaginary diagonal.
  */
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void hemmt(const DdlaHandle_t& handle, char side, char uploA, char uploC, int n,
     const std::complex<R>& alpha, const R* A, int lda,
     const std::complex<R>* B, int ldb, const std::complex<R>& beta,
     std::complex<R>* C, int ldc);
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void hemmt(const DdlaHandle_t& handle, char side, char uploA, char uploC, int n,
     const std::complex<R>& alpha, const std::complex<R>* A, int lda,
     const R* B, int ldb, const std::complex<R>& beta,
@@ -1395,23 +1386,22 @@ void hemmt(const DdlaHandle_t& handle, char side, char uploA, char uploC, int n,
  * The call uses the shared bounded HEMMT panel workspace and performs no MPI
  * communication. Backend and four scalar types follow symm.
  */
-template <DdlaBackend Backend = default_backend_v,typename T>
+template <typename T>
 void symmt(const DdlaHandle_t& handle,char side,char uploA,char uploC,int n,
     const T& alpha,const T* A,int lda,const T* B,int ldb,const T& beta,T* C,int ldc);
 
 /**
  * @brief Hermitian rank-2 update: A := alpha*x*y**H + conj(alpha)*y*x**H + A.
  *
- * Same unified backend-templated form as @ref gemm: the CPU instantiation
- * calls Fortran xHER2 (xSYR2 for the real scalar types), the GPU instantiation
+ * Same unified handle-driven form as @ref gemm: the CPU handle path
+ * calls Fortran xHER2 (xSYR2 for the real scalar types), the GPU handle path
  * calls cuBLAS/hipBLAS.  CPU consumes HOST pointers, GPU DEVICE pointers.
  *
  * There is no @p beta and no transpose flag: the update is applied in place to
  * @p A, which is therefore the LAST argument (matching xHER2 / cuBLAS v2).
  *
- * @tparam Backend DdlaBackend::CPU or DdlaBackend::GPU; must match the handle.
  * @tparam T       float, double, complex<float> or complex<double>.
- * @param handle Handle whose backend must equal @p Backend.
+ * @param handle Handle selecting execution backend and memory domain.
  * @param uplo   'U' or 'L' -- which triangle of A is updated.
  * @param n      Order of A and length of x and y.
  * @param alpha  Scaling factor for x*y**H.
@@ -1422,7 +1412,7 @@ void symmt(const DdlaHandle_t& handle,char side,char uploA,char uploC,int n,
  * @param A      In/out Hermitian matrix; only the @p uplo triangle is updated.
  * @param lda    Leading dimension of A.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void her2(
     const DdlaHandle_t& handle,
     char uplo,
@@ -1435,13 +1425,12 @@ void her2(
 /**
  * @brief Matrix-vector product: y := alpha*op(A)*x + beta*y.
  *
- * Same unified backend-templated form as @ref gemm: the CPU instantiation
- * calls Fortran xGEMV, the GPU instantiation calls cuBLAS/hipBLAS.  CPU
+ * Same unified handle-driven form as @ref gemm: the CPU handle path
+ * calls Fortran xGEMV, the GPU handle path calls cuBLAS/hipBLAS.  CPU
  * consumes HOST pointers, GPU DEVICE pointers.
  *
- * @tparam Backend DdlaBackend::CPU or DdlaBackend::GPU; must match the handle.
  * @tparam T       float, double, complex<float> or complex<double>.
- * @param handle Handle whose backend must equal @p Backend.
+ * @param handle Handle selecting execution backend and memory domain.
  * @param trans  'N' (y := alpha*A*x + beta*y), 'T' or 'C' (y :=
  *               alpha*A**T*x / alpha*A**H*x + beta*y).
  * @param m      Number of rows of A (and length of y under 'N').
@@ -1455,7 +1444,7 @@ void her2(
  * @param y      In/out vector of length m ('N') or n (otherwise).
  * @param incy   Stride between elements of y.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void gemv(
     const DdlaHandle_t& handle,
     char trans, int m, int n,
@@ -1468,16 +1457,15 @@ void gemv(
 /**
  * @brief Triangular matrix-vector product: x := op(A)*x, IN PLACE.
  *
- * Same unified backend-templated form as @ref gemm: the CPU instantiation
- * calls Fortran xTRMV, the GPU instantiation calls cuBLAS/hipBLAS.  CPU
+ * Same unified handle-driven form as @ref gemm: the CPU handle path
+ * calls Fortran xTRMV, the GPU handle path calls cuBLAS/hipBLAS.  CPU
  * consumes HOST pointers, GPU DEVICE pointers.
  *
  * @p x is modified in place, so a caller that needs the original vector must
  * keep its own copy (or re-upload it) before comparing results.
  *
- * @tparam Backend DdlaBackend::CPU or DdlaBackend::GPU; must match the handle.
  * @tparam T       float, double, complex<float> or complex<double>.
- * @param handle Handle whose backend must equal @p Backend.
+ * @param handle Handle selecting execution backend and memory domain.
  * @param uplo   'U' or 'L' -- which triangle of A is referenced.
  * @param trans  'N' (x := A*x), 'T' or 'C' (x := A**T*x / A**H*x).
  * @param diag   'U' (unit diagonal, A's diagonal not referenced) or 'N'.
@@ -1487,7 +1475,7 @@ void gemv(
  * @param x      In/out vector, overwritten with op(A)*x.
  * @param incx   Stride between elements of x.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void trmv(
     const DdlaHandle_t& handle,
     char uplo, char trans, char diag,
@@ -1498,26 +1486,25 @@ void trmv(
 /**
  * @brief Euclidean norm: result := ||x||_2.
  *
- * Same unified backend-templated form as @ref gemm: the CPU instantiation
- * calls Fortran xNRM2/xCNRM2/xZNRM2, the GPU instantiation calls
+ * Same unified handle-driven form as @ref gemm: the CPU handle path
+ * calls Fortran xNRM2/xCNRM2/xZNRM2, the GPU handle path calls
  * cuBLAS/hipBLAS.  The result is written THROUGH THE POINTER @p result, not
  * returned by value, because the two backends disagree on the pointer's
  * address space:
- *   - GPU handles: @p result is DEVICE memory.  The GPU instantiation forces
+ *   - GPU handles: @p result is DEVICE memory.  The GPU handle path forces
  *     the vendor handle into DEVICE pointer mode for the call (and restores
  *     the previous mode afterwards); passing a host pointer there is undefined.
  *   - CPU handles: @p result is HOST memory.
  *
- * @tparam Backend DdlaBackend::CPU or DdlaBackend::GPU; must match the handle.
  * @tparam T       float, double, complex<float> or complex<double>.
- * @param handle Handle whose backend must equal @p Backend.
+ * @param handle Handle selecting execution backend and memory domain.
  * @param n      Length of x.
  * @param x      Input vector.
  * @param incx   Stride between elements of x.
  * @param result Scalar result; DEVICE memory for GPU handles, HOST memory for
  *               CPU handles.  Always the REAL type of @p T.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void nrm2(
     const DdlaHandle_t& handle,
     int n,
@@ -1527,20 +1514,19 @@ void nrm2(
 /**
  * @brief Conjugate dot product: result := x**H * y (plain dot for real types).
  *
- * Same unified backend-templated form as @ref gemm: the CPU instantiation
+ * Same unified handle-driven form as @ref gemm: the CPU handle path
  * calls Fortran xDOT for real scalars and CBLAS's output-pointer xDOTC for
  * complex scalars. CPU-enabled builds require cblas_cdotc_sub and
  * cblas_zdotc_sub from the selected BLAS library. The GPU arm calls cuBLAS/hipBLAS. The result
  * is written THROUGH THE POINTER @p result, not returned by value, because the
  * two backends disagree on the pointer's address space:
- *   - GPU handles: @p result is DEVICE memory.  The GPU instantiation forces
+ *   - GPU handles: @p result is DEVICE memory.  The GPU handle path forces
  *     the vendor handle into DEVICE pointer mode for the call (and restores
  *     the previous mode afterwards); passing a host pointer there is undefined.
  *   - CPU handles: @p result is HOST memory.
  *
- * @tparam Backend DdlaBackend::CPU or DdlaBackend::GPU; must match the handle.
  * @tparam T       float, double, complex<float> or complex<double>.
- * @param handle Handle whose backend must equal @p Backend.
+ * @param handle Handle selecting execution backend and memory domain.
  * @param n      Length of x and y.
  * @param x      First input vector, conjugated in the product.
  * @param incx   Stride between elements of x.
@@ -1549,7 +1535,7 @@ void nrm2(
  * @param result Scalar result; DEVICE memory for GPU handles, HOST memory for
  *               CPU handles.  Same scalar type as @p x and @p y.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void dotc(
     const DdlaHandle_t& handle,
     int n,
@@ -1562,16 +1548,15 @@ void dotc(
  *        side='L' -> B := alpha*op(A)**-1*B  (A is m-by-m),
  *        side='R' -> B := alpha*B*op(A)**-1  (A is n-by-n).
  *
- * Same unified backend-templated form as @ref gemm: the CPU instantiation
- * calls Fortran xTRSM, the GPU instantiation calls cuBLAS/hipBLAS.  CPU
+ * Same unified handle-driven form as @ref gemm: the CPU handle path
+ * calls Fortran xTRSM, the GPU handle path calls cuBLAS/hipBLAS.  CPU
  * consumes HOST pointers, GPU DEVICE pointers.
  *
  * @p A and @p B are non-const: the vendor prototypes require non-const
  * pointers even though A is only read.  @p B is read and written in place.
  *
- * @tparam Backend DdlaBackend::CPU or DdlaBackend::GPU; must match the handle.
  * @tparam T       float, double, complex<float> or complex<double>.
- * @param handle Handle whose backend must equal @p Backend.
+ * @param handle Handle selecting execution backend and memory domain.
  * @param side   'L' or 'R' -- whether op(A) multiplies B on the left or right.
  * @param uplo   'U' or 'L' -- which triangle of A holds the factor.
  * @param trans  'N', 'T' or 'C' -- op(A) = A, A**T or A**H.
@@ -1584,7 +1569,7 @@ void dotc(
  * @param B      Right-hand sides (in) / solution (out).
  * @param ldb    Leading dimension of B.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void trsm(
     const DdlaHandle_t& handle,
     char side, char uplo, char trans, char diag,
@@ -1600,7 +1585,7 @@ void trsm(
  * @param trans N/T for complex inputs; real inputs also accept C as T.
  * Complex symmetry uses no conjugation. Use herk for a Hermitian update.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void syrk(
     const DdlaHandle_t& handle,
     char uplo, char trans,
@@ -1622,9 +1607,8 @@ void syrk(
  * matrix without reading A or the old B, and A may then be null.
  * Flags are case-insensitive; invalid flags or dimensions throw.
  *
- * @tparam Backend DdlaBackend::CPU or DdlaBackend::GPU; must match the handle.
  * @tparam T float, double, complex<float> or complex<double>.
- * @param handle Handle whose backend must equal Backend.
+ * @param handle Handle selecting execution backend and memory domain.
  * @param side 'L' or 'R': side on which op(A) multiplies B.
  * @param uplo 'U' or 'L': referenced triangle of A.
  * @param trans 'N', 'T' or 'C': op(A) = A, A**T or A**H.
@@ -1637,7 +1621,7 @@ void syrk(
  * @param B Input matrix overwritten by the product.
  * @param ldb Leading dimension of B, at least max(1,m).
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void trmm(
     const DdlaHandle_t& handle,
     char side, char uplo, char trans, char diag,
@@ -1670,9 +1654,8 @@ void trmm(
  * the written region of C need not be initialized. n=0, or alpha=0 and beta=1,
  * is a no-op and all matrix pointers may be null. Leading dimensions must
  * still be >= max(1,n). Invalid flags, dimensions, pointers or overlap throw
- * std::invalid_argument; a null/mismatched handle throws std::runtime_error.
+ * std::invalid_argument; a null handle throws std::runtime_error.
  *
- * @tparam Backend CPU or GPU; must match the handle.
  * @tparam T float, double, std::complex<float> or std::complex<double>.
  *
  * @param uplo_a 'U' or 'L' (case insensitive): triangle of stored A read.
@@ -1680,7 +1663,7 @@ void trmm(
  * @param uplo_b 'U' or 'L' (case insensitive): triangle of stored B read.
  * @param transb 'N', 'T' or 'C' (case insensitive): op applied to B.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void trtrm(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, char transb,
            int n, const T& alpha, const T* A, int lda, const T* B, int ldb,
            const T& beta, T* C, int ldc);
@@ -1690,8 +1673,8 @@ void trtrm(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, ch
  *        i in [0, batchCount),
  *        C[i] := alpha*op(A[i])*op(B[i]) + beta*C[i].
  *
- * Same unified backend-templated form as @ref gemm: the CPU instantiation
- * loops over Fortran xGEMM, the GPU instantiation calls cuBLAS/hipBLAS
+ * Same unified handle-driven form as @ref gemm: the CPU handle path
+ * loops over Fortran xGEMM, the GPU handle path calls cuBLAS/hipBLAS
  * xgemmBatched.  Everything lives where the handle's memory does: on a CPU
  * handle the matrices AND the arrays of pointers are host memory, on a GPU
  * handle both are device memory (the vendor routine reads the pointer arrays
@@ -1706,9 +1689,8 @@ void trtrm(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, ch
  * not overlap (the cuBLAS contract as well); the result does not depend on
  * the thread count.
  *
- * @tparam Backend DdlaBackend::CPU or DdlaBackend::GPU; must match the handle.
  * @tparam T       float, double, complex<float> or complex<double>.
- * @param handle     Handle whose backend must equal @p Backend.
+ * @param handle     Handle selecting execution backend and memory domain.
  * @param transa     'N', 'T' or 'C' -- op(A[i]).
  * @param transb     'N', 'T' or 'C' -- op(B[i]).
  * @param m          Rows of op(A[i]) and C[i].
@@ -1724,7 +1706,7 @@ void trtrm(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, ch
  * @param ldc        Leading dimension of every C[i].
  * @param batchCount Number of matrix triples.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void gemmBatched(
     const DdlaHandle_t& handle,
     char transa, char transb,
@@ -1740,12 +1722,12 @@ void gemmBatched(
  * precision and complex alpha, beta and C. Flags and zero coefficients
  * follow GEMM. Output matrices must not overlap inputs or each other.
  */
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void gemmBatched(const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k,
     const std::complex<R>& alpha, const R* const Aarray[], int lda,
     const std::complex<R>* const Barray[], int ldb, const std::complex<R>& beta,
     std::complex<R>* const Carray[], int ldc, int batchCount);
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void gemmBatched(const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k,
     const std::complex<R>& alpha, const std::complex<R>* const Aarray[], int lda,
     const R* const Barray[], int ldb, const std::complex<R>& beta,
@@ -1757,11 +1739,11 @@ void gemmBatched(const DdlaHandle_t& handle, char transa, char transb, int m, in
  *
  * op(X) is X, X^T or X^H for transX = 'N', 'T', 'C' (either case).  C is m x n (column-major, leading
  * dimension ldc); op(A) and op(B) are m x n, so A is m x n for 'N' and n x m otherwise, and likewise B.
- * Same call shape as ddla::gemm: the handle, then the LAPACK character flags.  The template backend must
- * equal the handle's.
+ * Same call shape as ddla::gemm: the handle, then the LAPACK character flags.
+ * The handle selects execution and the memory domain.
  *
  * - Scaled transpose-copy (what omatcopy was): beta = 0, B = nullptr,
- *   `geam<Backend, T>(h, 'T', 'N', m, n, alpha, A, lda, T(0), nullptr, 1, C, ldc)`.
+ *   `geam<T>(h, 'T', 'N', m, n, alpha, A, lda, T(0), nullptr, 1, C, ldc)`.
  * - beta == 0 means B is not read (and may be nullptr).  On the CPU backend alpha == 0 likewise leaves A
  *   unread.  The GPU backend is cuBLAS / hipBLAS geam, which reads the operands it is given (0 * NaN is NaN
  *   there) and, for beta == 0, aliases B to A.
@@ -1771,11 +1753,11 @@ void gemmBatched(const DdlaHandle_t& handle, char transa, char transb, int m, in
  *   OMP_NUM_THREADS; otherwise each allowed CPU contributes 1 / the node-local ranks sharing it,
  *   with the sum rounded down to at least one. Environment/affinity changes require another ddlaSet.
  *   The result does not depend on the thread count.
- * - Throws std::runtime_error for a null handle, a template backend that differs from the handle's, an
+ * - Throws std::runtime_error for a null handle, an
  *   invalid flag, a null A or C, a null B with beta != 0, or a leading dimension smaller than the row count of
  *   its matrix.  m <= 0 or n <= 0 returns without touching memory.
  *
- * @param handle  Handle whose backend must equal @p Backend.
+ * @param handle  Handle selecting execution backend and memory domain.
  * @param transa  'N', 'T' or 'C' -- op(A).
  * @param transb  'N', 'T' or 'C' -- op(B); ignored when beta == 0.
  * @param m       Rows of op(A), op(B) and C.
@@ -1789,7 +1771,7 @@ void gemmBatched(const DdlaHandle_t& handle, char transa, char transb, int m, in
  * @param C       Result.
  * @param ldc     Leading dimension of C.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void geam(const DdlaHandle_t& handle, char transa, char transb, int m, int n,
           const T& alpha, const T* A, int lda,
           const T& beta, const T* B, int ldb,
@@ -1798,12 +1780,12 @@ void geam(const DdlaHandle_t& handle, char transa, char transb, int m, int n,
 /**
  * @brief Execute a batch of GEMMs whose dimensions and leading dimensions may differ.
  *
- * Handle-first like every other backend-templated routine.  The kernels are device code, so only the GPU backend does
- * the work: `gemmVbatched<DdlaBackend::CPU, T>` throws std::invalid_argument, as does a null handle or a handle of the
- * other backend.  Dimension, leading-dimension and matrix-pointer arrays are device resident.  The operation is
+ * The kernels are device code, so this operation requires a GPU handle.
+ * A CPU or null handle throws std::invalid_argument, including an empty batch.
+ * Dimension, leading-dimension and matrix-pointer arrays are device resident. The operation is
  * enqueued on the handle's stream.  A zero batch count is a no-op.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void gemmVbatched(
     const DdlaHandle_t& handle,
     char transA, char transB,
@@ -1824,7 +1806,7 @@ void gemmVbatched(
  * Stage-zero beta must be zero, every segment must be positive, and the segment total must
  * equal batch_count. Backend rules as for gemmVbatched.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void gemmVbatched2s(
     const DdlaHandle_t& handle,
     char transA_0, char transB_0,
@@ -1860,26 +1842,33 @@ void gemmVbatched2s(
  *
  * Supported T: float, double, std::complex<float>, std::complex<double>.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void random_generate(const DdlaHandle_t& handle, T* data, const int64_t& lengthOfData);
 
-template <DdlaBackend Backend = default_backend_v, typename T>
-void write_matrix(const T* A, int m, int n, const char* filename);
+/** @brief Write a column-major m-by-n matrix in the handle's memory domain.
+ * CPU handles read host memory directly. GPU handles read device memory on
+ * their own stream and synchronize that stream before formatting the host copy.
+ * Host arrays require a CPU handle even when GPU support is available.
+ * A null A/filename or nonpositive dimensions remain silent no-ops; a null
+ * handle throws std::runtime_error. Supports the four standard scalar types.
+ */
+template <typename T>
+void write_matrix(const DdlaHandle_t& handle, const T* A, int m, int n, const char* filename);
 
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void scal(const DdlaHandle_t& handle, int n, const T& alpha, T* x, int incx);
 /** @brief Scale an m-by-n matrix region in place, preserving its padding.
  * Alpha zero overwrites active entries without reading their old values.
  * Unlike the vector overload, lda is a column-major leading dimension.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void scal(const DdlaHandle_t& handle, int m, int n, const T& alpha, T* A, int lda);
 
 /** @brief Collective matrix-region scaling in a block-cyclic descriptor.
  * Scales the leading m-by-n region, with no redistribution or workspace.
  * Alpha zero overwrites active entries without reading them.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pscal(const DdlaHandle_t& handle, int m, int n, const T& alpha,
            T* A, const int* descA);
 
@@ -1887,60 +1876,60 @@ void pscal(const DdlaHandle_t& handle, int m, int n, const T& alpha,
  * Pointer arrays reside in the handle backend. Padding is preserved, alpha
  * zero never reads old entries, and the operation requires no workspace.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void scalBatched(const DdlaHandle_t& handle, int m, int n, const T& alpha,
                  T* const Aarray[], int lda, int batchCount);
 /** @brief Real-coefficient scaling of complex matrix regions, componentwise.
  * Precision must match. Zero alpha never reads old entries; padding is kept.
- * T is the matrix type; Alpha is inferred, so scal<Backend,T> needs no cast.
+ * T is the matrix type; Alpha is inferred, so scal<T> needs no cast.
  */
-template <DdlaBackend Backend = default_backend_v,typename T,typename Alpha>
+template <typename T, typename Alpha>
 std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void>
 scal(const DdlaHandle_t& h,int m,int n,const Alpha& alpha,T* A,int lda);
-template <DdlaBackend Backend = default_backend_v,typename T,typename Alpha>
+template <typename T, typename Alpha>
 std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void>
 pscal(const DdlaHandle_t& h,int m,int n,const Alpha& alpha,T* A,const int* descA);
-template <DdlaBackend Backend = default_backend_v,typename T,typename Alpha>
+template <typename T, typename Alpha>
 std::enable_if_t<std::is_same_v<T,std::complex<Alpha>>,void>
 scalBatched(const DdlaHandle_t& h,int m,int n,const Alpha& alpha,T* const Aarray[],int lda,int count);
 
 
 
 
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void axpy(const DdlaHandle_t& handle, int n, const T& alpha,
           const T* x, int incx, T* y, int incy);
 
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void iamax(const DdlaHandle_t& handle, int n, const T* x, int incx, int& result);
 
 /**
- * @brief Backend-templated BLAS Level-1 swap: x <-> y.
+ * @brief Handle-driven BLAS Level-1 swap: x <-> y.
  *
  * `n` elements of x and y with strides incx / incy (a negative stride walks the vector backwards, the BLAS
  * convention); both strides must be nonzero and x, y must not overlap.  CPU: ?swap on host pointers.  GPU: cuBLAS /
  * hipBLAS swap on device pointers, enqueued on the handle's stream.  n <= 0 returns.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void swap(const DdlaHandle_t& handle, int n, T* x, int incx, T* y, int incy);
 
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void geru(const DdlaHandle_t& handle, int m, int n, const T& alpha,
           const T* x, int incx, const T* y, int incy, T* A, int lda);
 
 /**
- * @brief Backend-templated conjugate rank-1 update: A := alpha * x * y^H + A.
+ * @brief Handle-driven conjugate rank-1 update: A := alpha * x * y^H + A.
  *
  * This is the routine LAPACK's xLARF uses to apply a Householder reflector
  * from the left:  A := A - tau * v * w^H.  The update touches the leading
  * m x n submatrix of A only.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void gerc(const DdlaHandle_t& handle, int m, int n, const T& alpha,
           const T* x, int incx, const T* y, int incy, T* A, int lda);
 
 /**
- * @brief Backend-templated LU factorization with partial pivoting, A = P * L * U (LAPACK ?getrf).
+ * @brief Handle-driven LU factorization with partial pivoting, A = P * L * U (LAPACK ?getrf).
  *
  * A is m x n column-major with lda >= max(1, m); on exit it holds L (unit lower triangular, diagonal not stored) and
  * U.  `ipiv` has min(m, n) entries: row i was interchanged with row ipiv[i] (1-based, LAPACK convention).  `info` is
@@ -1951,33 +1940,33 @@ void gerc(const DdlaHandle_t& handle, int m, int n, const T& alpha,
  * and `info` included.  A GPU call is asynchronous on the handle's stream, so `info` is valid once the stream has been
  * synchronized.  m <= 0 or n <= 0 sets *info = 0 and returns.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void getrf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, int* ipiv, int* info);
 
 /**
- * @brief Backend-templated Cholesky factorization of a Hermitian (symmetric) positive-definite matrix (LAPACK ?potrf):
+ * @brief Handle-driven Cholesky factorization of a Hermitian (symmetric) positive-definite matrix (LAPACK ?potrf):
  * A = U^H * U for uplo = 'U', A = L * L^H for uplo = 'L'.
  *
  * A is n x n column-major with lda >= max(1, n).  Only the `uplo` triangle is read and overwritten; the other triangle
  * is left untouched.  `info` is 0 on success and k > 0 when the leading minor of order k is not positive definite.
  * Pointer placement, asynchrony and the n <= 0 case are as for getrf.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void potrf(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda, int* info);
 
 /**
- * @brief Backend-templated row interchanges (LAPACK ?laswp): for i = k1..k2 (1-based), swap row i of the n-column
+ * @brief Handle-driven row interchanges (LAPACK ?laswp): for i = k1..k2 (1-based), swap row i of the n-column
  * matrix A with row ipiv[k1 - 1 + (i - k1) * |incx|].
  *
  * Rows run k1..k2 for incx > 0 and k2..k1 for incx < 0, so incx = -1 undoes incx = 1 for the same pivots.  `ipiv`
  * (1-based row numbers, as ?getrf produces them) must hold at least k2 * |incx| entries; it lives with A (device memory
  * on a GPU handle).  lda >= max(1, k2).  n <= 0 or k1 > k2 returns.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void laswp(const DdlaHandle_t& handle, int n, T* A, int lda, int k1, int k2, const int* ipiv, int incx);
 
 /**
- * @brief Backend-templated QR or QL factorization of one matrix (LAPACK ?geqrf / ?geqlf): A = Q * R for uplo = 'U',
+ * @brief Handle-driven QR or QL factorization of one matrix (LAPACK ?geqrf / ?geqlf): A = Q * R for uplo = 'U',
  * A = Q * L for uplo = 'L'.
  *
  * A is m x n column-major with lda >= max(1, m); k = min(m, n) Householder reflectors H(i) = I - tau(i) v(i) v(i)^H are
@@ -1993,14 +1982,14 @@ void laswp(const DdlaHandle_t& handle, int n, T* A, int lda, int k1, int k2, con
  * Every pointer lives where the backend does: host memory for a CPU handle, device memory for a GPU handle.  A GPU call
  * is asynchronous on the handle's stream (the vendor scratch is allocated and freed stream-ordered).  The GPU
  * implementation has no ?geqlf to call: 'L' factors the row- and column-reversed copy J A J with the vendor geqrf.
- * m <= 0 or n <= 0 returns; invalid arguments (null handle, backend mismatch, uplo other than 'U'/'u'/'L'/'l',
+ * m <= 0 or n <= 0 returns; invalid arguments (null handle, uplo other than 'U'/'u'/'L'/'l',
  * negative sizes, lda < max(1, m), null A or tau) throw.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void geqrf(const DdlaHandle_t& handle, char uplo, int m, int n, T* A, int lda, T* tau);
 
 /**
- * @brief Backend-templated triangular factor of a block reflector (LAPACK ?larft, STOREV = 'C'): the T of the compact-WY
+ * @brief Handle-driven triangular factor of a block reflector (LAPACK ?larft, STOREV = 'C'): the T of the compact-WY
  * form H = I - V T V^H of k Householder reflectors H(i) = I - tau(i) v(i) v(i)^H.
  *
  * V is n x k column-major with ldv >= max(1, n), tau holds k scalars, T is k x k with ldt >= k, and k <= n.
@@ -2014,14 +2003,13 @@ void geqrf(const DdlaHandle_t& handle, char uplo, int m, int n, T* A, int lda, T
  * runs and restores them).
  *
  * Every pointer lives where the backend does: host memory for a CPU handle, device memory for a GPU handle, tau
- * included.  The CPU instantiation calls LAPACK ?larft.  The GPU one needs no vendor routine (cuSOLVER has
+ * included.  The CPU handle path calls LAPACK ?larft.  The GPU one needs no vendor routine (cuSOLVER has
  * cusolverDnXlarft only from CUDA 12.4, hipSOLVER none): it forms V^H V with herk on an explicit unit-triangular head /
  * tail of V and runs the column recurrence of T in one small kernel, asynchronously on the handle's stream (a k x k
- * scratch pair is allocated and freed stream-ordered).  k <= 0 returns; invalid arguments (null handle, backend
- * mismatch, direct other than 'F'/'B', storev other than 'C', negative sizes, k > n, ldv < max(1, n), ldt < k, null
+ * scratch pair is allocated and freed stream-ordered).  k <= 0 returns; invalid arguments (null handle, direct other than 'F'/'B', storev other than 'C', negative sizes, k > n, ldv < max(1, n), ldt < k, null
  * V / tau / T) throw.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void larft(const DdlaHandle_t& handle, char direct, char storev, int n, int k, T* V, int ldv, const T* tau, T* Tmat,
            int ldt);
 
@@ -2036,7 +2024,7 @@ void larft(const DdlaHandle_t& handle, char direct, char storev, int n, int k, T
  * alpha=0 or k=0 does not read A/B; beta=0 does not read the previous C.
  * Null local storage is allowed when that rank owns no active entries.
  */
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void pgemm(const DdlaHandle_t& handle, char transa, char transb,
            int m, int n, int k, const std::complex<R>& alpha,
            const R* A, const int* descA,
@@ -2046,7 +2034,7 @@ void pgemm(const DdlaHandle_t& handle, char transa, char transb,
 /** @brief Distributed mixed-domain product, complex A/C and real B.
  *  Shares the contract of the real-by-complex overload above.
  */
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void pgemm(const DdlaHandle_t& handle, char transa, char transb,
            int m, int n, int k, const std::complex<R>& alpha,
            const std::complex<R>* A, const int* descA,
@@ -2061,7 +2049,7 @@ void pgemm(const DdlaHandle_t& handle, char transa, char transb,
  * ((n-1)/nbw) slots of nbw-by-nbw compact reflector factors (zero for n=0).
  * Supports all four scalar types and owns its internal workspace.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void phe2hb(const DdlaHandle_t& handle, int n, T* A, const int* descA,
             int nbw, T* tmat, int& info);
 
@@ -2078,7 +2066,7 @@ void phe2hb(const DdlaHandle_t& handle, int n, T* A, const int* descA,
  * The operation owns internal workspace; info is zero on success.
  * Argument checks are local; callers provide consistent arguments on all ranks.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void punmtr_he2hb(
     const DdlaHandle_t& handle,
     char trans,
@@ -2089,7 +2077,7 @@ void punmtr_he2hb(
     int& info
 );
 
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pherm_complete(
     const DdlaHandle_t& handle,
     char uplo, int n,
@@ -2115,7 +2103,7 @@ void pherm_complete(
  * tau distribution/conjugation and lower reflector storage differ from
  * ScaLAPACK's Fortran P?HETRD representation. Outputs must be disjoint.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void phetrd(const DdlaHandle_t& handle, char uplo, int n, T* A, const int* descA,
     typename real_type<T>::type* d, typename real_type<T>::type* e, T* tau, int& info);
 
@@ -2132,7 +2120,7 @@ void phetrd(const DdlaHandle_t& handle, char uplo, int n, T* A, const int* descA
  * Globally empty C or an order below two references no data pointers.
  * The existing explicit (V,T) overload remains available for prepared blocks.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void punmtr(const DdlaHandle_t& handle, char side, char uplo, char trans, int m, int n,
     const T* A, const int* descA, const T* tau, T* C, const int* descC);
 
@@ -2155,7 +2143,7 @@ void punmtr(const DdlaHandle_t& handle, char side, char uplo, char trans, int m,
  * null V/Tmat/C. Checks and workspace allocation are collective; GPU execution
  * is stream ordered. Internal callers reuse the no-check, allocation-free run.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void punmtr(const DdlaHandle_t& handle, char side, char uplo, char trans,
     int m, int n, int k, const T* V, int ldv, const T* Tmat, int ldt,
     T* C, const int* descC);
@@ -2174,7 +2162,7 @@ void punmtr(const DdlaHandle_t& handle, char side, char uplo, char trans,
  * [Re op(A); Im op(A)] into one real matrix and drives a single real GEMM
  * per column panel.
  */
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void gemm(
     const DdlaHandle_t& handle,
     char transa, char transb,
@@ -2225,7 +2213,7 @@ void pstedc(
  * for nonconvergence. GPU work is ordered on the handle stream; synchronize
  * before consuming results on the host. n=0 only sets info to zero.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void syevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
            T* A, int lda, T* w, int* info);
 
@@ -2235,7 +2223,7 @@ void syevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
  * Same storage, job, triangle and info conventions as syevd; w has the real
  * component type. The imaginary diagonal is ignored. Eigenvectors replace A.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void heevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
            T* A, int lda, typename real_type<T>::type* w, int* info);
 
@@ -2264,7 +2252,7 @@ struct hb2st_rot {
  * Both methods read only UPLO, destroy A, and keep A/Z distributed; w is a
  * host array on every rank. See the explicit entries for method requirements.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pheevd(
     const DdlaHandle_t& handle,
     char jobz, char uplo, int n,
@@ -2290,7 +2278,7 @@ void pheevd(
  * Eigenvalues-only, other devices/grids/thread budgets and float types retain
  * their existing GPU policy. Both algorithms keep quadratic storage distributed.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pheevd_two_stage(const DdlaHandle_t& handle, char jobz, char uplo, int n,
     T* A, const int* descA, typename real_type<T>::type* w,
     T* Z, const int* descZ, int& info);
@@ -2315,7 +2303,7 @@ void pheevd_two_stage(const DdlaHandle_t& handle, char jobz, char uplo, int n,
  * restored on return; discarded cache entries are not restored. Coordinate
  * concurrent changes to this vendor process-wide setting.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void pheevd_one_stage(const DdlaHandle_t& handle, char jobz, char uplo, int n,
     T* A, const int* descA, typename real_type<T>::type* w,
     T* Z, const int* descZ, int& info);
@@ -2340,7 +2328,7 @@ void pheevd_one_stage(const DdlaHandle_t& handle, char jobz, char uplo, int n,
  * unrestricted. Flags are case-insensitive; transa/transb are N/T/C.
  * The four standard real/complex scalar types are supported.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void gemmt(const DdlaHandle_t& handle, char uplo,
     char transa, char transb, int n, int k,
     const T& alpha, const T* A, int lda, const T* B, int ldb,
@@ -2350,12 +2338,12 @@ void gemmt(const DdlaHandle_t& handle, char uplo,
  * Alpha, beta and C are complex. A real structured input is symmetric;
  * a complex Hermitian input ignores its imaginary diagonal.
  */
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void gemmt(const DdlaHandle_t& handle, char uplo, char transa, char transb, int n, int k,
     const std::complex<R>& alpha, const R* A, int lda,
     const std::complex<R>* B, int ldb, const std::complex<R>& beta,
     std::complex<R>* C, int ldc);
-template <DdlaBackend Backend = default_backend_v, typename R>
+template <typename R>
 void gemmt(const DdlaHandle_t& handle, char uplo, char transa, char transb, int n, int k,
     const std::complex<R>& alpha, const std::complex<R>* A, int lda,
     const R* B, int ldb, const std::complex<R>& beta,
@@ -2382,7 +2370,7 @@ void gemmt(const DdlaHandle_t& handle, char uplo, char transa, char transb, int 
  * replicating full matrices. NN retains the batched triangular sweep. This
  * four-flag interface is the only public ptrtrm interface.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void ptrtrm(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, char transb,
     int n, const T& alpha, const T* A, const int* descA, const T* B, const int* descB,
     const T& beta, T* C, const int* descC);
@@ -2411,37 +2399,37 @@ void ptrtrm(const DdlaHandle_t& handle, char uplo_a, char transa, char uplo_b, c
  * quadratic root storage. Local GPU hetrs/hetrs_nopiv also retain host staging.
  * Flags/global metadata must agree across ranks.
  */
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void sytrf(const DdlaHandle_t& h, char uplo, int n, T* A, int lda, int* ipiv, int& info);
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void sytrs(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A, int lda, const int* ipiv, T* B, int ldb, int& info);
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void sytrf_nopiv(const DdlaHandle_t& h, char uplo, int n, T* A, int lda, int& info);
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void sytrs_nopiv(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A, int lda, T* B, int ldb, int& info);
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void hetrf(const DdlaHandle_t& h, char uplo, int n, T* A, int lda, int* ipiv, int& info);
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void hetrs(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A, int lda, const int* ipiv, T* B, int ldb, int& info);
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void hetrf_nopiv(const DdlaHandle_t& h, char uplo, int n, T* A, int lda, int& info);
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void hetrs_nopiv(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A, int lda, T* B, int ldb, int& info);
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void psytrf(const DdlaHandle_t& h, char uplo, int n, T* A, const int* descA, int* ipiv, int& info);
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void psytrs(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A, const int* descA, const int* ipiv, T* B, const int* descB, int& info);
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void psytrf_nopiv(const DdlaHandle_t& h, char uplo, int n, T* A, const int* descA, int& info);
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void psytrs_nopiv(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A, const int* descA, T* B, const int* descB, int& info);
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void phetrf(const DdlaHandle_t& h, char uplo, int n, T* A, const int* descA, int* ipiv, int& info);
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void phetrs(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A, const int* descA, const int* ipiv, T* B, const int* descB, int& info);
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void phetrf_nopiv(const DdlaHandle_t& h, char uplo, int n, T* A, const int* descA, int& info);
-template <DdlaBackend Backend = default_backend_v, typename T>
+template <typename T>
 void phetrs_nopiv(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A, const int* descA, T* B, const int* descB, int& info);
 
 
@@ -2456,10 +2444,10 @@ void phetrs_nopiv(const DdlaHandle_t& h, char uplo, int n, int nrhs, const T* A,
  * invalid arguments throw (collectively for distributed interfaces).
  * Distributed scratch includes replicated nq by min(k,32) panels per rank.
  */
-template<DdlaBackend Backend=default_backend_v,typename T>
+template <typename T>
 void ormqr(const DdlaHandle_t& h,char side,char trans,int m,int n,int k,
            const T* A,int lda,const T* tau,T* C,int ldc,int& info);
-template<DdlaBackend Backend=default_backend_v,typename T>
+template <typename T>
 void pormqr(const DdlaHandle_t& h,char side,char trans,int m,int n,int k,
             const T* A,const int* descA,const T* tau,T* C,const int* descC,int& info);
 /** Replace the leading m by n of QR factors A by the first n columns of Q.
@@ -2469,9 +2457,9 @@ void pormqr(const DdlaHandle_t& h,char side,char trans,int m,int n,int k,
  * Parent entries and leading-dimension padding are preserved. Reflector tails
  * are saved before A is overwritten. info is zero on success.
  */
-template<DdlaBackend Backend=default_backend_v,typename T>
+template <typename T>
 void orgqr(const DdlaHandle_t& h,int m,int n,int k,T* A,int lda,const T* tau,int& info);
-template<DdlaBackend Backend=default_backend_v,typename T>
+template <typename T>
 void porgqr(const DdlaHandle_t& h,int m,int n,int k,T* A,const int* descA,const T* tau,int& info);
 
 } // namespace ddla

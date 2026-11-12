@@ -85,6 +85,23 @@ function(add_bench_executable test_name)
 endfunction()
 
 enable_testing()
+# This client must compile without private connector/vendor definitions.
+add_executable(test_public_handle_dispatch test_public_handle_dispatch.cpp)
+target_link_libraries(test_public_handle_dispatch PRIVATE ddla_lib)
+add_test(NAME test_public_handle_dispatch_mpi
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${DDLA_TEST_NP}
+            ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_public_handle_dispatch>
+            ${MPIEXEC_POSTFLAGS})
+set_tests_properties(test_public_handle_dispatch_mpi PROPERTIES PROCESSORS ${DDLA_TEST_NP})
+if(DDLA_HAS_GPU)
+    set_tests_properties(test_public_handle_dispatch_mpi PROPERTIES LABELS gpu
+        ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+else()
+    set_tests_properties(test_public_handle_dispatch_mpi PROPERTIES LABELS cpu)
+endif()
+set(DDLA_PUBLIC_CHECK_INCLUDES "${PROJECT_SOURCE_DIR}/include" "${PROJECT_BINARY_DIR}/include")
+include(${CMAKE_CURRENT_SOURCE_DIR}/public_api_compile_checks.cmake)
+ddla_check_public_scalar_api()
 add_test_executable(test_api_grid_punmtr)
 if(TARGET test_api_grid_punmtr)
     target_link_libraries(test_api_grid_punmtr PRIVATE ${CMAKE_DL_LIBS})
@@ -191,10 +208,9 @@ add_bench_executable(benchmark_products)
 add_test_executable(test_backend_geam)
 # LAPACK-level wrappers (getrf, potrf, laswp) and swap: CPU arm = host LAPACK, GPU arm = cuSOLVER / hipSOLVER.
 add_test_executable(test_backend_lapack)
-# The distributed triangular solves, LU and Cholesky factorizations/solvers and their helpers are backend-templated like pgemm.
-# The api_grid tests call them bare (the build's default backend: a CPU handle in a CPU-only build, a GPU handle otherwise);
-# test_backend_solvers calls them with an explicit backend on every backend the build contains, which is what exercises the CPU
-# arms in a dual build.
+# Distributed operations dispatch from the supplied handle. The same scalar-only
+# calls exercise CPU and GPU handles in dual builds; explicitly private tests
+# retain implementation mismatch checks through backend_api.h.
 add_test_executable(test_backend_solvers)
 add_test_executable(test_api_grid_pgeadd_panels)
 add_test_executable(test_api_grid_ptrtrs)

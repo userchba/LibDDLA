@@ -191,16 +191,16 @@ void call_pgesvd(const ddla::DdlaHandle_t& handle, char jobu, char jobvt, int m,
 {
 #if DDLA_HAS_GPU
     if (ddlaGetBackend(handle) == DdlaBackend::CPU)
-        ddla::pgesvd<DdlaBackend::CPU, T>(handle, jobu, jobvt, m, n, d_A, descA, s, d_U, descU,
+        ddla::pgesvd<T>(handle, jobu, jobvt, m, n, d_A, descA, s, d_U, descU,
                                           d_VT, descVT, info);
     else
-        ddla::pgesvd<DdlaBackend::GPU, T>(handle, jobu, jobvt, m, n, d_A, descA, s, d_U, descU,
+        ddla::pgesvd<T>(handle, jobu, jobvt, m, n, d_A, descA, s, d_U, descU,
                                           d_VT, descVT, info);
 #elif DDLA_HAS_GPU
-    ddla::pgesvd<DdlaBackend::GPU, T>(handle, jobu, jobvt, m, n, d_A, descA, s, d_U, descU, d_VT,
+    ddla::pgesvd<T>(handle, jobu, jobvt, m, n, d_A, descA, s, d_U, descU, d_VT,
                                       descVT, info);
 #else
-    ddla::pgesvd<DdlaBackend::CPU, T>(handle, jobu, jobvt, m, n, d_A, descA, s, d_U, descU, d_VT,
+    ddla::pgesvd<T>(handle, jobu, jobvt, m, n, d_A, descA, s, d_U, descU, d_VT,
                                       descVT, info);
 #endif
 }

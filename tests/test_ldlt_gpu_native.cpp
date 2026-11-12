@@ -129,11 +129,11 @@ void test(DdlaHandle_t h, DdlaHandle_t cpu, const Trace& trace, int operation, i
         trace.reset();
         const auto start = std::chrono::steady_clock::now();
         if (operation == 0)
-            hetrf_nopiv<DdlaBackend::GPU, T>(h, u, n, a.data(), ld, info);
+            hetrf_nopiv<T>(h, u, n, a.data(), ld, info);
         else if (pivot)
-            phetrf<DdlaBackend::GPU, T>(h, u, n, a.data(), d, piv.data(), info);
+            phetrf<T>(h, u, n, a.data(), d, piv.data(), info);
         else
-            phetrf_nopiv<DdlaBackend::GPU, T>(h, u, n, a.data(), d, info);
+            phetrf_nopiv<T>(h, u, n, a.data(), d, info);
         DDLA_CHECK(ddlaSynchronize(h));
         double seconds =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
@@ -194,7 +194,7 @@ void test(DdlaHandle_t h, DdlaHandle_t cpu, const Trace& trace, int operation, i
     {
         vector<T> gathered(h, distributed && h->myid == 0 ? std::size_t(n) * n : 0);
         if (distributed)
-            gather<DdlaBackend::GPU, T>(h, n, n, a.data(), 1, 1, d, 0, gathered.data(), n);
+            gather<T>(h, n, n, a.data(), 1, 1, d, 0, gathered.data(), n);
         if (!distributed || h->myid == 0)
         {
             std::vector<T> dense(std::size_t(n) * n);
@@ -218,7 +218,7 @@ void test(DdlaHandle_t h, DdlaHandle_t cpu, const Trace& trace, int operation, i
                 ldlt_impl::solve(std::true_type{}, u, n, 1, dense.data(), n, piv.data(), rhs.data(),
                                  n, solve_info);
             else
-                hetrs_nopiv<DdlaBackend::CPU, T>(cpu, u, n, 1, dense.data(), n, rhs.data(), n,
+                hetrs_nopiv<T>(cpu, u, n, 1, dense.data(), n, rhs.data(), n,
                                                  solve_info);
             double denominator = 0;
             for (int i = 0; i < n; ++i)
@@ -334,17 +334,17 @@ void invalid_calls(DdlaHandle_t h)
         if (count != h->nprocs)
             throw std::runtime_error("Invalid metadata did not fail collectively");
     };
-    rejects([&] { phetrf<DdlaBackend::GPU, T>(h, 'L', -1, a.data(), d, piv, info); });
+    rejects([&] { phetrf<T>(h, 'L', -1, a.data(), d, piv, info); });
     rejects(
         [&]
         {
-            phetrf<DdlaBackend::GPU, T>(h, 'L', 17, h->myid == 0 ? nullptr : a.data(), d, piv,
+            phetrf<T>(h, 'L', 17, h->myid == 0 ? nullptr : a.data(), d, piv,
                                         info);
         });
     rejects(
         [&]
         {
-            phetrf<DdlaBackend::GPU, T>(h, 'L', 17, a.data(), d, h->myid == 0 ? nullptr : piv,
+            phetrf<T>(h, 'L', 17, a.data(), d, h->myid == 0 ? nullptr : piv,
                                         info);
         });
     if (h->nprocs > 1)
@@ -352,13 +352,13 @@ void invalid_calls(DdlaHandle_t h)
         rejects(
             [&]
             {
-                phetrf<DdlaBackend::GPU, T>(h, h->myid == 0 ? 'L' : 'U', 17, a.data(), d, piv,
+                phetrf<T>(h, h->myid == 0 ? 'L' : 'U', 17, a.data(), d, piv,
                                             info);
             });
         rejects(
             [&]
             {
-                phetrf_nopiv<DdlaBackend::GPU, T>(h, 'L', h->myid == 0 ? 16 : 17, a.data(), d,
+                phetrf_nopiv<T>(h, 'L', h->myid == 0 ? 16 : 17, a.data(), d,
                                                   info);
             });
     }

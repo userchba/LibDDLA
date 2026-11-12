@@ -19,9 +19,9 @@
 //     complex(c_float) / complex(c_double) dummy of the same intent).
 //   * Matrices and vectors are void*: host memory for a CPU handle, device
 //     memory for a GPU handle, exactly as the C++ API documents each argument.
-//   * The backend is taken from the handle at run time (ddlaGetBackend) and
-//     dispatched to the matching template instantiation; requesting a backend
-//     this build does not contain reports DDLA_C_STATUS_BACKEND_UNAVAILABLE.
+//   * Public C++ computational calls select their backend from the handle.
+//     The shim preserves C handle/backend error statuses before calling that
+//     public API; it does not dispatch CPU/GPU template instantiations itself.
 //
 // The MPI communicator of ddla_c_set arrives as the Fortran handle and is
 // converted with MPI_Comm_f2c.
@@ -34,7 +34,6 @@
 #include <cstdlib>
 #include <exception>
 #include <string>
-#include <type_traits>
 
 // Two-field complex scalars; ddla.f90 declares the same layouts as
 // type, bind(C) :: ddla_complex_float / ddla_complex_double.
@@ -61,9 +60,8 @@ void ddla_c_record_error(const char* what)
     catch (...) { g_ddla_c_last_error.clear(); }
 }
 
-// Run one library call on the handle's backend.  body is a template lambda
-// invoked with std::integral_constant<DdlaBackend, ...>. CPU is always available;
-// DDLA_HAS_GPU from ddla_config.h guards the optional GPU branch.
+// Preserve C status codes and catch C++ exceptions around one public call.
+// Backend execution is selected by the public API from the same handle.
 template <typename F>
 int ddla_c_run(void* handle, F&& body)
 {
@@ -71,18 +69,12 @@ int ddla_c_run(void* handle, F&& body)
         return DDLA_C_STATUS_INVALID_HANDLE;
     try {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        switch (ddla::ddlaGetBackend(hh)) {
-        case ddla::DdlaBackend::CPU:
-            return body(std::integral_constant<ddla::DdlaBackend, ddla::DdlaBackend::CPU>{});
-        case ddla::DdlaBackend::GPU:
-#if DDLA_HAS_GPU
-            return body(std::integral_constant<ddla::DdlaBackend, ddla::DdlaBackend::GPU>{});
-#else
-            return DDLA_C_STATUS_BACKEND_UNAVAILABLE;
-#endif
-        default:
+        const auto backend = ddla::ddlaGetBackend(hh);
+        if (backend != ddla::DdlaBackend::CPU && backend != ddla::DdlaBackend::GPU)
             return DDLA_C_STATUS_INVALID_VALUE;
-        }
+        if (!ddla::ddlaBackendAvailable(backend))
+            return DDLA_C_STATUS_BACKEND_UNAVAILABLE;
+        return body();
     } catch (const std::exception& e) {
         ddla_c_record_error(e.what());
         return DDLA_C_STATUS_EXCEPTION;
@@ -337,2072 +329,1870 @@ int ddla_c_bcast_dims(int f_comm, int* m, int* n, int* type_char, int root)
 
 extern "C" int ddla_s_ptrtrs(void* handle, char side, char uplo, char trans, char diag, int m, int n, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ptrtrs<BE::value, float>(hh, side, uplo, trans, diag, m, n, static_cast<float*>(A), descA, static_cast<float*>(B), descB);
+        ddla::ptrtrs<float>(hh, side, uplo, trans, diag, m, n, static_cast<float*>(A), descA, static_cast<float*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_ptrtrs(void* handle, char side, char uplo, char trans, char diag, int m, int n, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ptrtrs<BE::value, double>(hh, side, uplo, trans, diag, m, n, static_cast<double*>(A), descA, static_cast<double*>(B), descB);
+        ddla::ptrtrs<double>(hh, side, uplo, trans, diag, m, n, static_cast<double*>(A), descA, static_cast<double*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_ptrtrs(void* handle, char side, char uplo, char trans, char diag, int m, int n, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ptrtrs<BE::value, std::complex<float>>(hh, side, uplo, trans, diag, m, n, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(B), descB);
+        ddla::ptrtrs<std::complex<float>>(hh, side, uplo, trans, diag, m, n, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_ptrtrs(void* handle, char side, char uplo, char trans, char diag, int m, int n, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ptrtrs<BE::value, std::complex<double>>(hh, side, uplo, trans, diag, m, n, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(B), descB);
+        ddla::ptrtrs<std::complex<double>>(hh, side, uplo, trans, diag, m, n, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_ptrmm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const float* alpha, const void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ptrmm<BE::value, float>(hh, side, uplo, trans, diag, m, n, *alpha, static_cast<const float*>(A), descA, static_cast<float*>(B), descB);
+        ddla::ptrmm<float>(hh, side, uplo, trans, diag, m, n, *alpha, static_cast<const float*>(A), descA, static_cast<float*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_ptrmm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const double* alpha, const void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ptrmm<BE::value, double>(hh, side, uplo, trans, diag, m, n, *alpha, static_cast<const double*>(A), descA, static_cast<double*>(B), descB);
+        ddla::ptrmm<double>(hh, side, uplo, trans, diag, m, n, *alpha, static_cast<const double*>(A), descA, static_cast<double*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_ptrmm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const ddla_c_float_complex* alpha, const void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
-        ddla::ptrmm<BE::value, std::complex<float>>(hh, side, uplo, trans, diag, m, n, alpha_v, static_cast<const std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(B), descB);
+        ddla::ptrmm<std::complex<float>>(hh, side, uplo, trans, diag, m, n, alpha_v, static_cast<const std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_ptrmm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const ddla_c_double_complex* alpha, const void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
-        ddla::ptrmm<BE::value, std::complex<double>>(hh, side, uplo, trans, diag, m, n, alpha_v, static_cast<const std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(B), descB);
+        ddla::ptrmm<std::complex<double>>(hh, side, uplo, trans, diag, m, n, alpha_v, static_cast<const std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_plapiv(void* handle, char direc, char rowcol, char pivroc, int m, int n, void* A, const int* descA, const int* ipiv, const int* descIP, void* iwork)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::plapiv<BE::value, float>(hh, direc, rowcol, pivroc, m, n, static_cast<float*>(A), descA, ipiv, descIP, static_cast<int*>(iwork));
+        ddla::plapiv<float>(hh, direc, rowcol, pivroc, m, n, static_cast<float*>(A), descA, ipiv, descIP, static_cast<int*>(iwork));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_plapiv(void* handle, char direc, char rowcol, char pivroc, int m, int n, void* A, const int* descA, const int* ipiv, const int* descIP, void* iwork)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::plapiv<BE::value, double>(hh, direc, rowcol, pivroc, m, n, static_cast<double*>(A), descA, ipiv, descIP, static_cast<int*>(iwork));
+        ddla::plapiv<double>(hh, direc, rowcol, pivroc, m, n, static_cast<double*>(A), descA, ipiv, descIP, static_cast<int*>(iwork));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_plapiv(void* handle, char direc, char rowcol, char pivroc, int m, int n, void* A, const int* descA, const int* ipiv, const int* descIP, void* iwork)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::plapiv<BE::value, std::complex<float>>(hh, direc, rowcol, pivroc, m, n, static_cast<std::complex<float>*>(A), descA, ipiv, descIP, static_cast<int*>(iwork));
+        ddla::plapiv<std::complex<float>>(hh, direc, rowcol, pivroc, m, n, static_cast<std::complex<float>*>(A), descA, ipiv, descIP, static_cast<int*>(iwork));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_plapiv(void* handle, char direc, char rowcol, char pivroc, int m, int n, void* A, const int* descA, const int* ipiv, const int* descIP, void* iwork)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::plapiv<BE::value, std::complex<double>>(hh, direc, rowcol, pivroc, m, n, static_cast<std::complex<double>*>(A), descA, ipiv, descIP, static_cast<int*>(iwork));
+        ddla::plapiv<std::complex<double>>(hh, direc, rowcol, pivroc, m, n, static_cast<std::complex<double>*>(A), descA, ipiv, descIP, static_cast<int*>(iwork));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_pswap(void* handle, int N, void* A, int ia, int ja, const int* descA, int inca, void* B, int ib, int jb, const int* descB, int incb)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pswap<BE::value, float>(hh, N, static_cast<float*>(A), ia, ja, descA, inca, static_cast<float*>(B), ib, jb, descB, incb);
+        ddla::pswap<float>(hh, N, static_cast<float*>(A), ia, ja, descA, inca, static_cast<float*>(B), ib, jb, descB, incb);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_pswap(void* handle, int N, void* A, int ia, int ja, const int* descA, int inca, void* B, int ib, int jb, const int* descB, int incb)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pswap<BE::value, double>(hh, N, static_cast<double*>(A), ia, ja, descA, inca, static_cast<double*>(B), ib, jb, descB, incb);
+        ddla::pswap<double>(hh, N, static_cast<double*>(A), ia, ja, descA, inca, static_cast<double*>(B), ib, jb, descB, incb);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_pswap(void* handle, int N, void* A, int ia, int ja, const int* descA, int inca, void* B, int ib, int jb, const int* descB, int incb)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pswap<BE::value, std::complex<float>>(hh, N, static_cast<std::complex<float>*>(A), ia, ja, descA, inca, static_cast<std::complex<float>*>(B), ib, jb, descB, incb);
+        ddla::pswap<std::complex<float>>(hh, N, static_cast<std::complex<float>*>(A), ia, ja, descA, inca, static_cast<std::complex<float>*>(B), ib, jb, descB, incb);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_pswap(void* handle, int N, void* A, int ia, int ja, const int* descA, int inca, void* B, int ib, int jb, const int* descB, int incb)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pswap<BE::value, std::complex<double>>(hh, N, static_cast<std::complex<double>*>(A), ia, ja, descA, inca, static_cast<std::complex<double>*>(B), ib, jb, descB, incb);
+        ddla::pswap<std::complex<double>>(hh, N, static_cast<std::complex<double>*>(A), ia, ja, descA, inca, static_cast<std::complex<double>*>(B), ib, jb, descB, incb);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_gather(void* handle, int m, int n, const void* A, int ia, int ja, const int* descA, int root, void* dst, int lddst)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::gather<BE::value, float>(hh, m, n, static_cast<const float*>(A), ia, ja, descA, root, static_cast<float*>(dst), lddst);
+        ddla::gather<float>(hh, m, n, static_cast<const float*>(A), ia, ja, descA, root, static_cast<float*>(dst), lddst);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_gather(void* handle, int m, int n, const void* A, int ia, int ja, const int* descA, int root, void* dst, int lddst)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::gather<BE::value, double>(hh, m, n, static_cast<const double*>(A), ia, ja, descA, root, static_cast<double*>(dst), lddst);
+        ddla::gather<double>(hh, m, n, static_cast<const double*>(A), ia, ja, descA, root, static_cast<double*>(dst), lddst);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_gather(void* handle, int m, int n, const void* A, int ia, int ja, const int* descA, int root, void* dst, int lddst)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::gather<BE::value, std::complex<float>>(hh, m, n, static_cast<const std::complex<float>*>(A), ia, ja, descA, root, static_cast<std::complex<float>*>(dst), lddst);
+        ddla::gather<std::complex<float>>(hh, m, n, static_cast<const std::complex<float>*>(A), ia, ja, descA, root, static_cast<std::complex<float>*>(dst), lddst);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_gather(void* handle, int m, int n, const void* A, int ia, int ja, const int* descA, int root, void* dst, int lddst)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::gather<BE::value, std::complex<double>>(hh, m, n, static_cast<const std::complex<double>*>(A), ia, ja, descA, root, static_cast<std::complex<double>*>(dst), lddst);
+        ddla::gather<std::complex<double>>(hh, m, n, static_cast<const std::complex<double>*>(A), ia, ja, descA, root, static_cast<std::complex<double>*>(dst), lddst);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_scatter(void* handle, int m, int n, void* A, int ia, int ja, const int* descA, int root, const void* src, int ldsrc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::scatter<BE::value, float>(hh, m, n, static_cast<float*>(A), ia, ja, descA, root, static_cast<const float*>(src), ldsrc);
+        ddla::scatter<float>(hh, m, n, static_cast<float*>(A), ia, ja, descA, root, static_cast<const float*>(src), ldsrc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_scatter(void* handle, int m, int n, void* A, int ia, int ja, const int* descA, int root, const void* src, int ldsrc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::scatter<BE::value, double>(hh, m, n, static_cast<double*>(A), ia, ja, descA, root, static_cast<const double*>(src), ldsrc);
+        ddla::scatter<double>(hh, m, n, static_cast<double*>(A), ia, ja, descA, root, static_cast<const double*>(src), ldsrc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_scatter(void* handle, int m, int n, void* A, int ia, int ja, const int* descA, int root, const void* src, int ldsrc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::scatter<BE::value, std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), ia, ja, descA, root, static_cast<const std::complex<float>*>(src), ldsrc);
+        ddla::scatter<std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), ia, ja, descA, root, static_cast<const std::complex<float>*>(src), ldsrc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_scatter(void* handle, int m, int n, void* A, int ia, int ja, const int* descA, int root, const void* src, int ldsrc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::scatter<BE::value, std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), ia, ja, descA, root, static_cast<const std::complex<double>*>(src), ldsrc);
+        ddla::scatter<std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), ia, ja, descA, root, static_cast<const std::complex<double>*>(src), ldsrc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_pgetrf(void* handle, int m, int n, void* A, int ia, int ja, const int* descA, int* ipiv, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrf<BE::value, float>(hh, m, n, static_cast<float*>(A), ia, ja, descA, ipiv, *info);
+        ddla::pgetrf<float>(hh, m, n, static_cast<float*>(A), ia, ja, descA, ipiv, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_pgetrf(void* handle, int m, int n, void* A, int ia, int ja, const int* descA, int* ipiv, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrf<BE::value, double>(hh, m, n, static_cast<double*>(A), ia, ja, descA, ipiv, *info);
+        ddla::pgetrf<double>(hh, m, n, static_cast<double*>(A), ia, ja, descA, ipiv, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_pgetrf(void* handle, int m, int n, void* A, int ia, int ja, const int* descA, int* ipiv, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrf<BE::value, std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), ia, ja, descA, ipiv, *info);
+        ddla::pgetrf<std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), ia, ja, descA, ipiv, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_pgetrf(void* handle, int m, int n, void* A, int ia, int ja, const int* descA, int* ipiv, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrf<BE::value, std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), ia, ja, descA, ipiv, *info);
+        ddla::pgetrf<std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), ia, ja, descA, ipiv, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_pgetrf_nopiv(void* handle, int m, int n, void* A, const int* descA, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrf_nopiv<BE::value, float>(hh, m, n, static_cast<float*>(A), descA, *info);
+        ddla::pgetrf_nopiv<float>(hh, m, n, static_cast<float*>(A), descA, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_pgetrf_nopiv(void* handle, int m, int n, void* A, const int* descA, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrf_nopiv<BE::value, double>(hh, m, n, static_cast<double*>(A), descA, *info);
+        ddla::pgetrf_nopiv<double>(hh, m, n, static_cast<double*>(A), descA, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_pgetrf_nopiv(void* handle, int m, int n, void* A, const int* descA, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrf_nopiv<BE::value, std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), descA, *info);
+        ddla::pgetrf_nopiv<std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), descA, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_pgetrf_nopiv(void* handle, int m, int n, void* A, const int* descA, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrf_nopiv<BE::value, std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), descA, *info);
+        ddla::pgetrf_nopiv<std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), descA, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_pgetrs(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, const int* ipiv, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrs<BE::value, float>(hh, side, trans, n, nrhs, static_cast<float*>(A), descA, ipiv, static_cast<float*>(B), descB);
+        ddla::pgetrs<float>(hh, side, trans, n, nrhs, static_cast<float*>(A), descA, ipiv, static_cast<float*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_pgetrs(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, const int* ipiv, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrs<BE::value, double>(hh, side, trans, n, nrhs, static_cast<double*>(A), descA, ipiv, static_cast<double*>(B), descB);
+        ddla::pgetrs<double>(hh, side, trans, n, nrhs, static_cast<double*>(A), descA, ipiv, static_cast<double*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_pgetrs(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, const int* ipiv, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrs<BE::value, std::complex<float>>(hh, side, trans, n, nrhs, static_cast<std::complex<float>*>(A), descA, ipiv, static_cast<std::complex<float>*>(B), descB);
+        ddla::pgetrs<std::complex<float>>(hh, side, trans, n, nrhs, static_cast<std::complex<float>*>(A), descA, ipiv, static_cast<std::complex<float>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_pgetrs(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, const int* ipiv, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrs<BE::value, std::complex<double>>(hh, side, trans, n, nrhs, static_cast<std::complex<double>*>(A), descA, ipiv, static_cast<std::complex<double>*>(B), descB);
+        ddla::pgetrs<std::complex<double>>(hh, side, trans, n, nrhs, static_cast<std::complex<double>*>(A), descA, ipiv, static_cast<std::complex<double>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_pgetrs_nopiv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrs_nopiv<BE::value, float>(hh, side, trans, n, nrhs, static_cast<float*>(A), descA, static_cast<float*>(B), descB);
+        ddla::pgetrs_nopiv<float>(hh, side, trans, n, nrhs, static_cast<float*>(A), descA, static_cast<float*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_pgetrs_nopiv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrs_nopiv<BE::value, double>(hh, side, trans, n, nrhs, static_cast<double*>(A), descA, static_cast<double*>(B), descB);
+        ddla::pgetrs_nopiv<double>(hh, side, trans, n, nrhs, static_cast<double*>(A), descA, static_cast<double*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_pgetrs_nopiv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrs_nopiv<BE::value, std::complex<float>>(hh, side, trans, n, nrhs, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(B), descB);
+        ddla::pgetrs_nopiv<std::complex<float>>(hh, side, trans, n, nrhs, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_pgetrs_nopiv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrs_nopiv<BE::value, std::complex<double>>(hh, side, trans, n, nrhs, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(B), descB);
+        ddla::pgetrs_nopiv<std::complex<double>>(hh, side, trans, n, nrhs, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_pgesv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgesv<BE::value, float>(hh, side, trans, n, nrhs, static_cast<float*>(A), descA, static_cast<float*>(B), descB);
+        ddla::pgesv<float>(hh, side, trans, n, nrhs, static_cast<float*>(A), descA, static_cast<float*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_pgesv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgesv<BE::value, double>(hh, side, trans, n, nrhs, static_cast<double*>(A), descA, static_cast<double*>(B), descB);
+        ddla::pgesv<double>(hh, side, trans, n, nrhs, static_cast<double*>(A), descA, static_cast<double*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_pgesv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgesv<BE::value, std::complex<float>>(hh, side, trans, n, nrhs, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(B), descB);
+        ddla::pgesv<std::complex<float>>(hh, side, trans, n, nrhs, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_pgesv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgesv<BE::value, std::complex<double>>(hh, side, trans, n, nrhs, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(B), descB);
+        ddla::pgesv<std::complex<double>>(hh, side, trans, n, nrhs, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_pgesv_nopiv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgesv_nopiv<BE::value, float>(hh, side, trans, n, nrhs, static_cast<float*>(A), descA, static_cast<float*>(B), descB);
+        ddla::pgesv_nopiv<float>(hh, side, trans, n, nrhs, static_cast<float*>(A), descA, static_cast<float*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_pgesv_nopiv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgesv_nopiv<BE::value, double>(hh, side, trans, n, nrhs, static_cast<double*>(A), descA, static_cast<double*>(B), descB);
+        ddla::pgesv_nopiv<double>(hh, side, trans, n, nrhs, static_cast<double*>(A), descA, static_cast<double*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_pgesv_nopiv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgesv_nopiv<BE::value, std::complex<float>>(hh, side, trans, n, nrhs, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(B), descB);
+        ddla::pgesv_nopiv<std::complex<float>>(hh, side, trans, n, nrhs, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_pgesv_nopiv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgesv_nopiv<BE::value, std::complex<double>>(hh, side, trans, n, nrhs, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(B), descB);
+        ddla::pgesv_nopiv<std::complex<double>>(hh, side, trans, n, nrhs, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_pgetrf_bpiv(void* handle, int m, int n, void* A, const int* descA, void* pivots, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrf_bpiv<BE::value, float>(hh, m, n, static_cast<float*>(A), descA, static_cast<int*>(pivots), *info);
+        ddla::pgetrf_bpiv<float>(hh, m, n, static_cast<float*>(A), descA, static_cast<int*>(pivots), *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_pgetrf_bpiv(void* handle, int m, int n, void* A, const int* descA, void* pivots, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrf_bpiv<BE::value, double>(hh, m, n, static_cast<double*>(A), descA, static_cast<int*>(pivots), *info);
+        ddla::pgetrf_bpiv<double>(hh, m, n, static_cast<double*>(A), descA, static_cast<int*>(pivots), *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_pgetrf_bpiv(void* handle, int m, int n, void* A, const int* descA, void* pivots, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrf_bpiv<BE::value, std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), descA, static_cast<int*>(pivots), *info);
+        ddla::pgetrf_bpiv<std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), descA, static_cast<int*>(pivots), *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_pgetrf_bpiv(void* handle, int m, int n, void* A, const int* descA, void* pivots, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrf_bpiv<BE::value, std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), descA, static_cast<int*>(pivots), *info);
+        ddla::pgetrf_bpiv<std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), descA, static_cast<int*>(pivots), *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_pgetrs_bpiv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* pivots, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrs_bpiv<BE::value, float>(hh, side, trans, n, nrhs, static_cast<float*>(A), descA, static_cast<int*>(pivots), static_cast<float*>(B), descB);
+        ddla::pgetrs_bpiv<float>(hh, side, trans, n, nrhs, static_cast<float*>(A), descA, static_cast<int*>(pivots), static_cast<float*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_pgetrs_bpiv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* pivots, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrs_bpiv<BE::value, double>(hh, side, trans, n, nrhs, static_cast<double*>(A), descA, static_cast<int*>(pivots), static_cast<double*>(B), descB);
+        ddla::pgetrs_bpiv<double>(hh, side, trans, n, nrhs, static_cast<double*>(A), descA, static_cast<int*>(pivots), static_cast<double*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_pgetrs_bpiv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* pivots, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrs_bpiv<BE::value, std::complex<float>>(hh, side, trans, n, nrhs, static_cast<std::complex<float>*>(A), descA, static_cast<int*>(pivots), static_cast<std::complex<float>*>(B), descB);
+        ddla::pgetrs_bpiv<std::complex<float>>(hh, side, trans, n, nrhs, static_cast<std::complex<float>*>(A), descA, static_cast<int*>(pivots), static_cast<std::complex<float>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_pgetrs_bpiv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* pivots, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgetrs_bpiv<BE::value, std::complex<double>>(hh, side, trans, n, nrhs, static_cast<std::complex<double>*>(A), descA, static_cast<int*>(pivots), static_cast<std::complex<double>*>(B), descB);
+        ddla::pgetrs_bpiv<std::complex<double>>(hh, side, trans, n, nrhs, static_cast<std::complex<double>*>(A), descA, static_cast<int*>(pivots), static_cast<std::complex<double>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_pgesv_bpiv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgesv_bpiv<BE::value, float>(hh, side, trans, n, nrhs, static_cast<float*>(A), descA, static_cast<float*>(B), descB);
+        ddla::pgesv_bpiv<float>(hh, side, trans, n, nrhs, static_cast<float*>(A), descA, static_cast<float*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_pgesv_bpiv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgesv_bpiv<BE::value, double>(hh, side, trans, n, nrhs, static_cast<double*>(A), descA, static_cast<double*>(B), descB);
+        ddla::pgesv_bpiv<double>(hh, side, trans, n, nrhs, static_cast<double*>(A), descA, static_cast<double*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_pgesv_bpiv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgesv_bpiv<BE::value, std::complex<float>>(hh, side, trans, n, nrhs, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(B), descB);
+        ddla::pgesv_bpiv<std::complex<float>>(hh, side, trans, n, nrhs, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_pgesv_bpiv(void* handle, char side, char trans, int n, int nrhs, void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgesv_bpiv<BE::value, std::complex<double>>(hh, side, trans, n, nrhs, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(B), descB);
+        ddla::pgesv_bpiv<std::complex<double>>(hh, side, trans, n, nrhs, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_pgemm(void* handle, char transa, char transb, int m, int n, int k, const float* alpha, const void* A, const int* descA, const void* B, const int* descB, const float* beta, void* C, const int* descC)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgemm<BE::value, float>(hh, transa, transb, m, n, k, *alpha, static_cast<const float*>(A), descA, static_cast<const float*>(B), descB, *beta, static_cast<float*>(C), descC);
+        ddla::pgemm<float>(hh, transa, transb, m, n, k, *alpha, static_cast<const float*>(A), descA, static_cast<const float*>(B), descB, *beta, static_cast<float*>(C), descC);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_pgemm(void* handle, char transa, char transb, int m, int n, int k, const double* alpha, const void* A, const int* descA, const void* B, const int* descB, const double* beta, void* C, const int* descC)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgemm<BE::value, double>(hh, transa, transb, m, n, k, *alpha, static_cast<const double*>(A), descA, static_cast<const double*>(B), descB, *beta, static_cast<double*>(C), descC);
+        ddla::pgemm<double>(hh, transa, transb, m, n, k, *alpha, static_cast<const double*>(A), descA, static_cast<const double*>(B), descB, *beta, static_cast<double*>(C), descC);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_pgemm(void* handle, char transa, char transb, int m, int n, int k, const ddla_c_float_complex* alpha, const void* A, const int* descA, const void* B, const int* descB, const ddla_c_float_complex* beta, void* C, const int* descC)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
         const std::complex<float> beta_v(beta->re, beta->im);
-        ddla::pgemm<BE::value, std::complex<float>>(hh, transa, transb, m, n, k, alpha_v, static_cast<const std::complex<float>*>(A), descA, static_cast<const std::complex<float>*>(B), descB, beta_v, static_cast<std::complex<float>*>(C), descC);
+        ddla::pgemm<std::complex<float>>(hh, transa, transb, m, n, k, alpha_v, static_cast<const std::complex<float>*>(A), descA, static_cast<const std::complex<float>*>(B), descB, beta_v, static_cast<std::complex<float>*>(C), descC);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_pgemm(void* handle, char transa, char transb, int m, int n, int k, const ddla_c_double_complex* alpha, const void* A, const int* descA, const void* B, const int* descB, const ddla_c_double_complex* beta, void* C, const int* descC)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
         const std::complex<double> beta_v(beta->re, beta->im);
-        ddla::pgemm<BE::value, std::complex<double>>(hh, transa, transb, m, n, k, alpha_v, static_cast<const std::complex<double>*>(A), descA, static_cast<const std::complex<double>*>(B), descB, beta_v, static_cast<std::complex<double>*>(C), descC);
+        ddla::pgemm<std::complex<double>>(hh, transa, transb, m, n, k, alpha_v, static_cast<const std::complex<double>*>(A), descA, static_cast<const std::complex<double>*>(B), descB, beta_v, static_cast<std::complex<double>*>(C), descC);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_pgeqrf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgeqrf<BE::value, float>(hh, m, n, static_cast<float*>(A), descA, static_cast<float*>(tau), *info);
+        ddla::pgeqrf<float>(hh, m, n, static_cast<float*>(A), descA, static_cast<float*>(tau), *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_pgeqrf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgeqrf<BE::value, double>(hh, m, n, static_cast<double*>(A), descA, static_cast<double*>(tau), *info);
+        ddla::pgeqrf<double>(hh, m, n, static_cast<double*>(A), descA, static_cast<double*>(tau), *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_pgeqrf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgeqrf<BE::value, std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(tau), *info);
+        ddla::pgeqrf<std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(tau), *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_pgeqrf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgeqrf<BE::value, std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(tau), *info);
+        ddla::pgeqrf<std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(tau), *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_pgeqlf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgeqlf<BE::value, float>(hh, m, n, static_cast<float*>(A), descA, static_cast<float*>(tau), *info);
+        ddla::pgeqlf<float>(hh, m, n, static_cast<float*>(A), descA, static_cast<float*>(tau), *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_pgeqlf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgeqlf<BE::value, double>(hh, m, n, static_cast<double*>(A), descA, static_cast<double*>(tau), *info);
+        ddla::pgeqlf<double>(hh, m, n, static_cast<double*>(A), descA, static_cast<double*>(tau), *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_pgeqlf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgeqlf<BE::value, std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(tau), *info);
+        ddla::pgeqlf<std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(tau), *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_pgeqlf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgeqlf<BE::value, std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(tau), *info);
+        ddla::pgeqlf<std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(tau), *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_pgeadd(void* handle, char transa, char transb, int m, int n, const float* alpha, const void* A, int ia, int ja, const int* descA, const float* beta, const void* B, int ib, int jb, const int* descB, void* C, int ic, int jc, const int* descC)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgeadd<BE::value, float>(hh, transa, transb, m, n, *alpha, static_cast<const float*>(A), ia, ja, descA, *beta, static_cast<const float*>(B), ib, jb, descB, static_cast<float*>(C), ic, jc, descC);
+        ddla::pgeadd<float>(hh, transa, transb, m, n, *alpha, static_cast<const float*>(A), ia, ja, descA, *beta, static_cast<const float*>(B), ib, jb, descB, static_cast<float*>(C), ic, jc, descC);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_pgeadd(void* handle, char transa, char transb, int m, int n, const double* alpha, const void* A, int ia, int ja, const int* descA, const double* beta, const void* B, int ib, int jb, const int* descB, void* C, int ic, int jc, const int* descC)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pgeadd<BE::value, double>(hh, transa, transb, m, n, *alpha, static_cast<const double*>(A), ia, ja, descA, *beta, static_cast<const double*>(B), ib, jb, descB, static_cast<double*>(C), ic, jc, descC);
+        ddla::pgeadd<double>(hh, transa, transb, m, n, *alpha, static_cast<const double*>(A), ia, ja, descA, *beta, static_cast<const double*>(B), ib, jb, descB, static_cast<double*>(C), ic, jc, descC);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_pgeadd(void* handle, char transa, char transb, int m, int n, const ddla_c_float_complex* alpha, const void* A, int ia, int ja, const int* descA, const ddla_c_float_complex* beta, const void* B, int ib, int jb, const int* descB, void* C, int ic, int jc, const int* descC)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
         const std::complex<float> beta_v(beta->re, beta->im);
-        ddla::pgeadd<BE::value, std::complex<float>>(hh, transa, transb, m, n, alpha_v, static_cast<const std::complex<float>*>(A), ia, ja, descA, beta_v, static_cast<const std::complex<float>*>(B), ib, jb, descB, static_cast<std::complex<float>*>(C), ic, jc, descC);
+        ddla::pgeadd<std::complex<float>>(hh, transa, transb, m, n, alpha_v, static_cast<const std::complex<float>*>(A), ia, ja, descA, beta_v, static_cast<const std::complex<float>*>(B), ib, jb, descB, static_cast<std::complex<float>*>(C), ic, jc, descC);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_pgeadd(void* handle, char transa, char transb, int m, int n, const ddla_c_double_complex* alpha, const void* A, int ia, int ja, const int* descA, const ddla_c_double_complex* beta, const void* B, int ib, int jb, const int* descB, void* C, int ic, int jc, const int* descC)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
         const std::complex<double> beta_v(beta->re, beta->im);
-        ddla::pgeadd<BE::value, std::complex<double>>(hh, transa, transb, m, n, alpha_v, static_cast<const std::complex<double>*>(A), ia, ja, descA, beta_v, static_cast<const std::complex<double>*>(B), ib, jb, descB, static_cast<std::complex<double>*>(C), ic, jc, descC);
+        ddla::pgeadd<std::complex<double>>(hh, transa, transb, m, n, alpha_v, static_cast<const std::complex<double>*>(A), ia, ja, descA, beta_v, static_cast<const std::complex<double>*>(B), ib, jb, descB, static_cast<std::complex<double>*>(C), ic, jc, descC);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_pdam(void* handle, const float* alpha, void* A, const int* descA, int n)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pdam<BE::value, float>(hh, *alpha, static_cast<float*>(A), descA, n);
+        ddla::pdam<float>(hh, *alpha, static_cast<float*>(A), descA, n);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_pdam(void* handle, const double* alpha, void* A, const int* descA, int n)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pdam<BE::value, double>(hh, *alpha, static_cast<double*>(A), descA, n);
+        ddla::pdam<double>(hh, *alpha, static_cast<double*>(A), descA, n);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_pdam(void* handle, const ddla_c_float_complex* alpha, void* A, const int* descA, int n)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
-        ddla::pdam<BE::value, std::complex<float>>(hh, alpha_v, static_cast<std::complex<float>*>(A), descA, n);
+        ddla::pdam<std::complex<float>>(hh, alpha_v, static_cast<std::complex<float>*>(A), descA, n);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_pdam(void* handle, const ddla_c_double_complex* alpha, void* A, const int* descA, int n)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
-        ddla::pdam<BE::value, std::complex<double>>(hh, alpha_v, static_cast<std::complex<double>*>(A), descA, n);
+        ddla::pdam<std::complex<double>>(hh, alpha_v, static_cast<std::complex<double>*>(A), descA, n);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_ppotrf(void* handle, char uplo, int n, void* A, int ia, int ja, const int* descA, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ppotrf<BE::value, float>(hh, uplo, n, static_cast<float*>(A), ia, ja, descA, *info);
+        ddla::ppotrf<float>(hh, uplo, n, static_cast<float*>(A), ia, ja, descA, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_ppotrf(void* handle, char uplo, int n, void* A, int ia, int ja, const int* descA, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ppotrf<BE::value, double>(hh, uplo, n, static_cast<double*>(A), ia, ja, descA, *info);
+        ddla::ppotrf<double>(hh, uplo, n, static_cast<double*>(A), ia, ja, descA, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_ppotrf(void* handle, char uplo, int n, void* A, int ia, int ja, const int* descA, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ppotrf<BE::value, std::complex<float>>(hh, uplo, n, static_cast<std::complex<float>*>(A), ia, ja, descA, *info);
+        ddla::ppotrf<std::complex<float>>(hh, uplo, n, static_cast<std::complex<float>*>(A), ia, ja, descA, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_ppotrf(void* handle, char uplo, int n, void* A, int ia, int ja, const int* descA, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ppotrf<BE::value, std::complex<double>>(hh, uplo, n, static_cast<std::complex<double>*>(A), ia, ja, descA, *info);
+        ddla::ppotrf<std::complex<double>>(hh, uplo, n, static_cast<std::complex<double>*>(A), ia, ja, descA, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_potrf_bottom_right(void* handle, char uplo, int n, void* A, int lda, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::potrf_bottom_right<BE::value, float>(uplo, n, static_cast<float*>(A), lda, *info, hh);
+        ddla::potrf_bottom_right<float>(uplo, n, static_cast<float*>(A), lda, *info, hh);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_potrf_bottom_right(void* handle, char uplo, int n, void* A, int lda, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::potrf_bottom_right<BE::value, double>(uplo, n, static_cast<double*>(A), lda, *info, hh);
+        ddla::potrf_bottom_right<double>(uplo, n, static_cast<double*>(A), lda, *info, hh);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_potrf_bottom_right(void* handle, char uplo, int n, void* A, int lda, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::potrf_bottom_right<BE::value, std::complex<float>>(uplo, n, static_cast<std::complex<float>*>(A), lda, *info, hh);
+        ddla::potrf_bottom_right<std::complex<float>>(uplo, n, static_cast<std::complex<float>*>(A), lda, *info, hh);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_potrf_bottom_right(void* handle, char uplo, int n, void* A, int lda, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::potrf_bottom_right<BE::value, std::complex<double>>(uplo, n, static_cast<std::complex<double>*>(A), lda, *info, hh);
+        ddla::potrf_bottom_right<std::complex<double>>(uplo, n, static_cast<std::complex<double>*>(A), lda, *info, hh);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_ppotrf_bottom_right(void* handle, char uplo, int n, void* A, const int* descA, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ppotrf_bottom_right<BE::value, float>(hh, uplo, n, static_cast<float*>(A), descA, *info);
+        ddla::ppotrf_bottom_right<float>(hh, uplo, n, static_cast<float*>(A), descA, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_ppotrf_bottom_right(void* handle, char uplo, int n, void* A, const int* descA, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ppotrf_bottom_right<BE::value, double>(hh, uplo, n, static_cast<double*>(A), descA, *info);
+        ddla::ppotrf_bottom_right<double>(hh, uplo, n, static_cast<double*>(A), descA, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_ppotrf_bottom_right(void* handle, char uplo, int n, void* A, const int* descA, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ppotrf_bottom_right<BE::value, std::complex<float>>(hh, uplo, n, static_cast<std::complex<float>*>(A), descA, *info);
+        ddla::ppotrf_bottom_right<std::complex<float>>(hh, uplo, n, static_cast<std::complex<float>*>(A), descA, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_ppotrf_bottom_right(void* handle, char uplo, int n, void* A, const int* descA, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ppotrf_bottom_right<BE::value, std::complex<double>>(hh, uplo, n, static_cast<std::complex<double>*>(A), descA, *info);
+        ddla::ppotrf_bottom_right<std::complex<double>>(hh, uplo, n, static_cast<std::complex<double>*>(A), descA, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_ppotrs(void* handle, char side, char uplo, char trans, int n, int nrhs, const void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ppotrs<BE::value, float>(hh, side, uplo, trans, n, nrhs, static_cast<const float*>(A), descA, static_cast<float*>(B), descB);
+        ddla::ppotrs<float>(hh, side, uplo, trans, n, nrhs, static_cast<const float*>(A), descA, static_cast<float*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_ppotrs(void* handle, char side, char uplo, char trans, int n, int nrhs, const void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ppotrs<BE::value, double>(hh, side, uplo, trans, n, nrhs, static_cast<const double*>(A), descA, static_cast<double*>(B), descB);
+        ddla::ppotrs<double>(hh, side, uplo, trans, n, nrhs, static_cast<const double*>(A), descA, static_cast<double*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_ppotrs(void* handle, char side, char uplo, char trans, int n, int nrhs, const void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ppotrs<BE::value, std::complex<float>>(hh, side, uplo, trans, n, nrhs, static_cast<const std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(B), descB);
+        ddla::ppotrs<std::complex<float>>(hh, side, uplo, trans, n, nrhs, static_cast<const std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_ppotrs(void* handle, char side, char uplo, char trans, int n, int nrhs, const void* A, const int* descA, void* B, const int* descB)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::ppotrs<BE::value, std::complex<double>>(hh, side, uplo, trans, n, nrhs, static_cast<const std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(B), descB);
+        ddla::ppotrs<std::complex<double>>(hh, side, uplo, trans, n, nrhs, static_cast<const std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(B), descB);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_pposv(void* handle, char side, char uplo, char trans, int n, int nrhs, void* A, int ia, int ja, const int* descA, void* B, int ib, int jb, const int* descB, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pposv<BE::value, float>(hh, side, uplo, trans, n, nrhs, static_cast<float*>(A), ia, ja, descA, static_cast<float*>(B), ib, jb, descB, *info);
+        ddla::pposv<float>(hh, side, uplo, trans, n, nrhs, static_cast<float*>(A), ia, ja, descA, static_cast<float*>(B), ib, jb, descB, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_pposv(void* handle, char side, char uplo, char trans, int n, int nrhs, void* A, int ia, int ja, const int* descA, void* B, int ib, int jb, const int* descB, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pposv<BE::value, double>(hh, side, uplo, trans, n, nrhs, static_cast<double*>(A), ia, ja, descA, static_cast<double*>(B), ib, jb, descB, *info);
+        ddla::pposv<double>(hh, side, uplo, trans, n, nrhs, static_cast<double*>(A), ia, ja, descA, static_cast<double*>(B), ib, jb, descB, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_pposv(void* handle, char side, char uplo, char trans, int n, int nrhs, void* A, int ia, int ja, const int* descA, void* B, int ib, int jb, const int* descB, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pposv<BE::value, std::complex<float>>(hh, side, uplo, trans, n, nrhs, static_cast<std::complex<float>*>(A), ia, ja, descA, static_cast<std::complex<float>*>(B), ib, jb, descB, *info);
+        ddla::pposv<std::complex<float>>(hh, side, uplo, trans, n, nrhs, static_cast<std::complex<float>*>(A), ia, ja, descA, static_cast<std::complex<float>*>(B), ib, jb, descB, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_pposv(void* handle, char side, char uplo, char trans, int n, int nrhs, void* A, int ia, int ja, const int* descA, void* B, int ib, int jb, const int* descB, int* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::pposv<BE::value, std::complex<double>>(hh, side, uplo, trans, n, nrhs, static_cast<std::complex<double>*>(A), ia, ja, descA, static_cast<std::complex<double>*>(B), ib, jb, descB, *info);
+        ddla::pposv<std::complex<double>>(hh, side, uplo, trans, n, nrhs, static_cast<std::complex<double>*>(A), ia, ja, descA, static_cast<std::complex<double>*>(B), ib, jb, descB, *info);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_gemm(void* handle, char transa, char transb, int m, int n, int k, const float* alpha, const void* A, int lda, const void* B, int ldb, const float* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::gemm<BE::value, float>(hh, transa, transb, m, n, k, *alpha, static_cast<const float*>(A), lda, static_cast<const float*>(B), ldb, *beta, static_cast<float*>(C), ldc);
+        ddla::gemm<float>(hh, transa, transb, m, n, k, *alpha, static_cast<const float*>(A), lda, static_cast<const float*>(B), ldb, *beta, static_cast<float*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_gemm(void* handle, char transa, char transb, int m, int n, int k, const double* alpha, const void* A, int lda, const void* B, int ldb, const double* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::gemm<BE::value, double>(hh, transa, transb, m, n, k, *alpha, static_cast<const double*>(A), lda, static_cast<const double*>(B), ldb, *beta, static_cast<double*>(C), ldc);
+        ddla::gemm<double>(hh, transa, transb, m, n, k, *alpha, static_cast<const double*>(A), lda, static_cast<const double*>(B), ldb, *beta, static_cast<double*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_gemm(void* handle, char transa, char transb, int m, int n, int k, const ddla_c_float_complex* alpha, const void* A, int lda, const void* B, int ldb, const ddla_c_float_complex* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
         const std::complex<float> beta_v(beta->re, beta->im);
-        ddla::gemm<BE::value, std::complex<float>>(hh, transa, transb, m, n, k, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<const std::complex<float>*>(B), ldb, beta_v, static_cast<std::complex<float>*>(C), ldc);
+        ddla::gemm<std::complex<float>>(hh, transa, transb, m, n, k, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<const std::complex<float>*>(B), ldb, beta_v, static_cast<std::complex<float>*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_gemm(void* handle, char transa, char transb, int m, int n, int k, const ddla_c_double_complex* alpha, const void* A, int lda, const void* B, int ldb, const ddla_c_double_complex* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
         const std::complex<double> beta_v(beta->re, beta->im);
-        ddla::gemm<BE::value, std::complex<double>>(hh, transa, transb, m, n, k, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<const std::complex<double>*>(B), ldb, beta_v, static_cast<std::complex<double>*>(C), ldc);
+        ddla::gemm<std::complex<double>>(hh, transa, transb, m, n, k, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<const std::complex<double>*>(B), ldb, beta_v, static_cast<std::complex<double>*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_gemv(void* handle, char trans, int m, int n, const float* alpha, const void* A, int lda, const void* x, int incx, const float* beta, void* y, int incy)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::gemv<BE::value, float>(hh, trans, m, n, *alpha, static_cast<const float*>(A), lda, static_cast<const float*>(x), incx, *beta, static_cast<float*>(y), incy);
+        ddla::gemv<float>(hh, trans, m, n, *alpha, static_cast<const float*>(A), lda, static_cast<const float*>(x), incx, *beta, static_cast<float*>(y), incy);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_gemv(void* handle, char trans, int m, int n, const double* alpha, const void* A, int lda, const void* x, int incx, const double* beta, void* y, int incy)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::gemv<BE::value, double>(hh, trans, m, n, *alpha, static_cast<const double*>(A), lda, static_cast<const double*>(x), incx, *beta, static_cast<double*>(y), incy);
+        ddla::gemv<double>(hh, trans, m, n, *alpha, static_cast<const double*>(A), lda, static_cast<const double*>(x), incx, *beta, static_cast<double*>(y), incy);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_gemv(void* handle, char trans, int m, int n, const ddla_c_float_complex* alpha, const void* A, int lda, const void* x, int incx, const ddla_c_float_complex* beta, void* y, int incy)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
         const std::complex<float> beta_v(beta->re, beta->im);
-        ddla::gemv<BE::value, std::complex<float>>(hh, trans, m, n, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<const std::complex<float>*>(x), incx, beta_v, static_cast<std::complex<float>*>(y), incy);
+        ddla::gemv<std::complex<float>>(hh, trans, m, n, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<const std::complex<float>*>(x), incx, beta_v, static_cast<std::complex<float>*>(y), incy);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_gemv(void* handle, char trans, int m, int n, const ddla_c_double_complex* alpha, const void* A, int lda, const void* x, int incx, const ddla_c_double_complex* beta, void* y, int incy)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
         const std::complex<double> beta_v(beta->re, beta->im);
-        ddla::gemv<BE::value, std::complex<double>>(hh, trans, m, n, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<const std::complex<double>*>(x), incx, beta_v, static_cast<std::complex<double>*>(y), incy);
+        ddla::gemv<std::complex<double>>(hh, trans, m, n, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<const std::complex<double>*>(x), incx, beta_v, static_cast<std::complex<double>*>(y), incy);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_trmv(void* handle, char uplo, char trans, char diag, int n, const void* A, int lda, void* x, int incx)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::trmv<BE::value, float>(hh, uplo, trans, diag, n, static_cast<const float*>(A), lda, static_cast<float*>(x), incx);
+        ddla::trmv<float>(hh, uplo, trans, diag, n, static_cast<const float*>(A), lda, static_cast<float*>(x), incx);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_trmv(void* handle, char uplo, char trans, char diag, int n, const void* A, int lda, void* x, int incx)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::trmv<BE::value, double>(hh, uplo, trans, diag, n, static_cast<const double*>(A), lda, static_cast<double*>(x), incx);
+        ddla::trmv<double>(hh, uplo, trans, diag, n, static_cast<const double*>(A), lda, static_cast<double*>(x), incx);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_trmv(void* handle, char uplo, char trans, char diag, int n, const void* A, int lda, void* x, int incx)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::trmv<BE::value, std::complex<float>>(hh, uplo, trans, diag, n, static_cast<const std::complex<float>*>(A), lda, static_cast<std::complex<float>*>(x), incx);
+        ddla::trmv<std::complex<float>>(hh, uplo, trans, diag, n, static_cast<const std::complex<float>*>(A), lda, static_cast<std::complex<float>*>(x), incx);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_trmv(void* handle, char uplo, char trans, char diag, int n, const void* A, int lda, void* x, int incx)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::trmv<BE::value, std::complex<double>>(hh, uplo, trans, diag, n, static_cast<const std::complex<double>*>(A), lda, static_cast<std::complex<double>*>(x), incx);
+        ddla::trmv<std::complex<double>>(hh, uplo, trans, diag, n, static_cast<const std::complex<double>*>(A), lda, static_cast<std::complex<double>*>(x), incx);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_trsm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const float* alpha, void* A, int lda, void* B, int ldb)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::trsm<BE::value, float>(hh, side, uplo, trans, diag, m, n, *alpha, static_cast<float*>(A), lda, static_cast<float*>(B), ldb);
+        ddla::trsm<float>(hh, side, uplo, trans, diag, m, n, *alpha, static_cast<float*>(A), lda, static_cast<float*>(B), ldb);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_trsm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const double* alpha, void* A, int lda, void* B, int ldb)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::trsm<BE::value, double>(hh, side, uplo, trans, diag, m, n, *alpha, static_cast<double*>(A), lda, static_cast<double*>(B), ldb);
+        ddla::trsm<double>(hh, side, uplo, trans, diag, m, n, *alpha, static_cast<double*>(A), lda, static_cast<double*>(B), ldb);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_trsm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const ddla_c_float_complex* alpha, void* A, int lda, void* B, int ldb)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
-        ddla::trsm<BE::value, std::complex<float>>(hh, side, uplo, trans, diag, m, n, alpha_v, static_cast<std::complex<float>*>(A), lda, static_cast<std::complex<float>*>(B), ldb);
+        ddla::trsm<std::complex<float>>(hh, side, uplo, trans, diag, m, n, alpha_v, static_cast<std::complex<float>*>(A), lda, static_cast<std::complex<float>*>(B), ldb);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_trsm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const ddla_c_double_complex* alpha, void* A, int lda, void* B, int ldb)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
-        ddla::trsm<BE::value, std::complex<double>>(hh, side, uplo, trans, diag, m, n, alpha_v, static_cast<std::complex<double>*>(A), lda, static_cast<std::complex<double>*>(B), ldb);
+        ddla::trsm<std::complex<double>>(hh, side, uplo, trans, diag, m, n, alpha_v, static_cast<std::complex<double>*>(A), lda, static_cast<std::complex<double>*>(B), ldb);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_trmm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const float* alpha, const void* A, int lda, void* B, int ldb)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::trmm<BE::value, float>(hh, side, uplo, trans, diag, m, n, *alpha, static_cast<const float*>(A), lda, static_cast<float*>(B), ldb);
+        ddla::trmm<float>(hh, side, uplo, trans, diag, m, n, *alpha, static_cast<const float*>(A), lda, static_cast<float*>(B), ldb);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_trmm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const double* alpha, const void* A, int lda, void* B, int ldb)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::trmm<BE::value, double>(hh, side, uplo, trans, diag, m, n, *alpha, static_cast<const double*>(A), lda, static_cast<double*>(B), ldb);
+        ddla::trmm<double>(hh, side, uplo, trans, diag, m, n, *alpha, static_cast<const double*>(A), lda, static_cast<double*>(B), ldb);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_trmm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const ddla_c_float_complex* alpha, const void* A, int lda, void* B, int ldb)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
-        ddla::trmm<BE::value, std::complex<float>>(hh, side, uplo, trans, diag, m, n, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<std::complex<float>*>(B), ldb);
+        ddla::trmm<std::complex<float>>(hh, side, uplo, trans, diag, m, n, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<std::complex<float>*>(B), ldb);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_trmm(void* handle, char side, char uplo, char trans, char diag, int m, int n, const ddla_c_double_complex* alpha, const void* A, int lda, void* B, int ldb)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
-        ddla::trmm<BE::value, std::complex<double>>(hh, side, uplo, trans, diag, m, n, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<std::complex<double>*>(B), ldb);
+        ddla::trmm<std::complex<double>>(hh, side, uplo, trans, diag, m, n, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<std::complex<double>*>(B), ldb);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_syrk(void* handle, char uplo, char trans, int n, int k, const float* alpha, const void* A, int lda, const float* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::syrk<BE::value, float>(hh, uplo, trans, n, k, *alpha, static_cast<const float*>(A), lda, *beta, static_cast<float*>(C), ldc);
+        ddla::syrk<float>(hh, uplo, trans, n, k, *alpha, static_cast<const float*>(A), lda, *beta, static_cast<float*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_syrk(void* handle, char uplo, char trans, int n, int k, const double* alpha, const void* A, int lda, const double* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::syrk<BE::value, double>(hh, uplo, trans, n, k, *alpha, static_cast<const double*>(A), lda, *beta, static_cast<double*>(C), ldc);
+        ddla::syrk<double>(hh, uplo, trans, n, k, *alpha, static_cast<const double*>(A), lda, *beta, static_cast<double*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_trtrm(void* handle, char uplo_a, char transa, char uplo_b, char transb, int n, const float* alpha, const void* A, int lda, const void* B, int ldb, const float* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::trtrm<BE::value, float>(hh, uplo_a, transa, uplo_b, transb, n, *alpha, static_cast<const float*>(A), lda, static_cast<const float*>(B), ldb, *beta, static_cast<float*>(C), ldc);
+        ddla::trtrm<float>(hh, uplo_a, transa, uplo_b, transb, n, *alpha, static_cast<const float*>(A), lda, static_cast<const float*>(B), ldb, *beta, static_cast<float*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_trtrm(void* handle, char uplo_a, char transa, char uplo_b, char transb, int n, const double* alpha, const void* A, int lda, const void* B, int ldb, const double* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::trtrm<BE::value, double>(hh, uplo_a, transa, uplo_b, transb, n, *alpha, static_cast<const double*>(A), lda, static_cast<const double*>(B), ldb, *beta, static_cast<double*>(C), ldc);
+        ddla::trtrm<double>(hh, uplo_a, transa, uplo_b, transb, n, *alpha, static_cast<const double*>(A), lda, static_cast<const double*>(B), ldb, *beta, static_cast<double*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_trtrm(void* handle, char uplo_a, char transa, char uplo_b, char transb, int n, const ddla_c_float_complex* alpha, const void* A, int lda, const void* B, int ldb, const ddla_c_float_complex* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
         const std::complex<float> beta_v(beta->re, beta->im);
-        ddla::trtrm<BE::value, std::complex<float>>(hh, uplo_a, transa, uplo_b, transb, n, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<const std::complex<float>*>(B), ldb, beta_v, static_cast<std::complex<float>*>(C), ldc);
+        ddla::trtrm<std::complex<float>>(hh, uplo_a, transa, uplo_b, transb, n, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<const std::complex<float>*>(B), ldb, beta_v, static_cast<std::complex<float>*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_trtrm(void* handle, char uplo_a, char transa, char uplo_b, char transb, int n, const ddla_c_double_complex* alpha, const void* A, int lda, const void* B, int ldb, const ddla_c_double_complex* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
         const std::complex<double> beta_v(beta->re, beta->im);
-        ddla::trtrm<BE::value, std::complex<double>>(hh, uplo_a, transa, uplo_b, transb, n, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<const std::complex<double>*>(B), ldb, beta_v, static_cast<std::complex<double>*>(C), ldc);
+        ddla::trtrm<std::complex<double>>(hh, uplo_a, transa, uplo_b, transb, n, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<const std::complex<double>*>(B), ldb, beta_v, static_cast<std::complex<double>*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_geam(void* handle, char transa, char transb, int m, int n, const float* alpha, const void* A, int lda, const float* beta, const void* B, int ldb, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::geam<BE::value, float>(hh, transa, transb, m, n, *alpha, static_cast<const float*>(A), lda, *beta, static_cast<const float*>(B), ldb, static_cast<float*>(C), ldc);
+        ddla::geam<float>(hh, transa, transb, m, n, *alpha, static_cast<const float*>(A), lda, *beta, static_cast<const float*>(B), ldb, static_cast<float*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_geam(void* handle, char transa, char transb, int m, int n, const double* alpha, const void* A, int lda, const double* beta, const void* B, int ldb, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::geam<BE::value, double>(hh, transa, transb, m, n, *alpha, static_cast<const double*>(A), lda, *beta, static_cast<const double*>(B), ldb, static_cast<double*>(C), ldc);
+        ddla::geam<double>(hh, transa, transb, m, n, *alpha, static_cast<const double*>(A), lda, *beta, static_cast<const double*>(B), ldb, static_cast<double*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_geam(void* handle, char transa, char transb, int m, int n, const ddla_c_float_complex* alpha, const void* A, int lda, const ddla_c_float_complex* beta, const void* B, int ldb, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
         const std::complex<float> beta_v(beta->re, beta->im);
-        ddla::geam<BE::value, std::complex<float>>(hh, transa, transb, m, n, alpha_v, static_cast<const std::complex<float>*>(A), lda, beta_v, static_cast<const std::complex<float>*>(B), ldb, static_cast<std::complex<float>*>(C), ldc);
+        ddla::geam<std::complex<float>>(hh, transa, transb, m, n, alpha_v, static_cast<const std::complex<float>*>(A), lda, beta_v, static_cast<const std::complex<float>*>(B), ldb, static_cast<std::complex<float>*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_geam(void* handle, char transa, char transb, int m, int n, const ddla_c_double_complex* alpha, const void* A, int lda, const ddla_c_double_complex* beta, const void* B, int ldb, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
         const std::complex<double> beta_v(beta->re, beta->im);
-        ddla::geam<BE::value, std::complex<double>>(hh, transa, transb, m, n, alpha_v, static_cast<const std::complex<double>*>(A), lda, beta_v, static_cast<const std::complex<double>*>(B), ldb, static_cast<std::complex<double>*>(C), ldc);
+        ddla::geam<std::complex<double>>(hh, transa, transb, m, n, alpha_v, static_cast<const std::complex<double>*>(A), lda, beta_v, static_cast<const std::complex<double>*>(B), ldb, static_cast<std::complex<double>*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_herk(void* handle, char uplo, char trans, int n, int k, const float* alpha, const void* A, int lda, const float* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::herk<BE::value, float>(hh, uplo, trans, n, k, *alpha, static_cast<const float*>(A), lda, *beta, static_cast<float*>(C), ldc);
+        ddla::herk<float>(hh, uplo, trans, n, k, *alpha, static_cast<const float*>(A), lda, *beta, static_cast<float*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_herk(void* handle, char uplo, char trans, int n, int k, const double* alpha, const void* A, int lda, const double* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::herk<BE::value, double>(hh, uplo, trans, n, k, *alpha, static_cast<const double*>(A), lda, *beta, static_cast<double*>(C), ldc);
+        ddla::herk<double>(hh, uplo, trans, n, k, *alpha, static_cast<const double*>(A), lda, *beta, static_cast<double*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_herk(void* handle, char uplo, char trans, int n, int k, const float* alpha, const void* A, int lda, const float* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::herk<BE::value, std::complex<float>>(hh, uplo, trans, n, k, *alpha, static_cast<const std::complex<float>*>(A), lda, *beta, static_cast<std::complex<float>*>(C), ldc);
+        ddla::herk<std::complex<float>>(hh, uplo, trans, n, k, *alpha, static_cast<const std::complex<float>*>(A), lda, *beta, static_cast<std::complex<float>*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_herk(void* handle, char uplo, char trans, int n, int k, const double* alpha, const void* A, int lda, const double* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::herk<BE::value, std::complex<double>>(hh, uplo, trans, n, k, *alpha, static_cast<const std::complex<double>*>(A), lda, *beta, static_cast<std::complex<double>*>(C), ldc);
+        ddla::herk<std::complex<double>>(hh, uplo, trans, n, k, *alpha, static_cast<const std::complex<double>*>(A), lda, *beta, static_cast<std::complex<double>*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_her2k(void* handle, char uplo, char trans, int n, int k, const float* alpha, const void* A, int lda, const void* B, int ldb, const float* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::her2k<BE::value, float>(hh, uplo, trans, n, k, *alpha, static_cast<const float*>(A), lda, static_cast<const float*>(B), ldb, *beta, static_cast<float*>(C), ldc);
+        ddla::her2k<float>(hh, uplo, trans, n, k, *alpha, static_cast<const float*>(A), lda, static_cast<const float*>(B), ldb, *beta, static_cast<float*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_her2k(void* handle, char uplo, char trans, int n, int k, const double* alpha, const void* A, int lda, const void* B, int ldb, const double* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::her2k<BE::value, double>(hh, uplo, trans, n, k, *alpha, static_cast<const double*>(A), lda, static_cast<const double*>(B), ldb, *beta, static_cast<double*>(C), ldc);
+        ddla::her2k<double>(hh, uplo, trans, n, k, *alpha, static_cast<const double*>(A), lda, static_cast<const double*>(B), ldb, *beta, static_cast<double*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_her2k(void* handle, char uplo, char trans, int n, int k, const ddla_c_float_complex* alpha, const void* A, int lda, const void* B, int ldb, const float* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
-        ddla::her2k<BE::value, std::complex<float>>(hh, uplo, trans, n, k, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<const std::complex<float>*>(B), ldb, *beta, static_cast<std::complex<float>*>(C), ldc);
+        ddla::her2k<std::complex<float>>(hh, uplo, trans, n, k, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<const std::complex<float>*>(B), ldb, *beta, static_cast<std::complex<float>*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_her2k(void* handle, char uplo, char trans, int n, int k, const ddla_c_double_complex* alpha, const void* A, int lda, const void* B, int ldb, const double* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
-        ddla::her2k<BE::value, std::complex<double>>(hh, uplo, trans, n, k, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<const std::complex<double>*>(B), ldb, *beta, static_cast<std::complex<double>*>(C), ldc);
+        ddla::her2k<std::complex<double>>(hh, uplo, trans, n, k, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<const std::complex<double>*>(B), ldb, *beta, static_cast<std::complex<double>*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_hemv(void* handle, char uplo, int n, const float* alpha, const void* A, int lda, const void* x, int incx, const float* beta, void* y, int incy)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::hemv<BE::value, float>(hh, uplo, n, *alpha, static_cast<const float*>(A), lda, static_cast<const float*>(x), incx, *beta, static_cast<float*>(y), incy);
+        ddla::hemv<float>(hh, uplo, n, *alpha, static_cast<const float*>(A), lda, static_cast<const float*>(x), incx, *beta, static_cast<float*>(y), incy);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_hemv(void* handle, char uplo, int n, const double* alpha, const void* A, int lda, const void* x, int incx, const double* beta, void* y, int incy)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::hemv<BE::value, double>(hh, uplo, n, *alpha, static_cast<const double*>(A), lda, static_cast<const double*>(x), incx, *beta, static_cast<double*>(y), incy);
+        ddla::hemv<double>(hh, uplo, n, *alpha, static_cast<const double*>(A), lda, static_cast<const double*>(x), incx, *beta, static_cast<double*>(y), incy);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_hemv(void* handle, char uplo, int n, const ddla_c_float_complex* alpha, const void* A, int lda, const void* x, int incx, const ddla_c_float_complex* beta, void* y, int incy)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
         const std::complex<float> beta_v(beta->re, beta->im);
-        ddla::hemv<BE::value, std::complex<float>>(hh, uplo, n, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<const std::complex<float>*>(x), incx, beta_v, static_cast<std::complex<float>*>(y), incy);
+        ddla::hemv<std::complex<float>>(hh, uplo, n, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<const std::complex<float>*>(x), incx, beta_v, static_cast<std::complex<float>*>(y), incy);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_hemv(void* handle, char uplo, int n, const ddla_c_double_complex* alpha, const void* A, int lda, const void* x, int incx, const ddla_c_double_complex* beta, void* y, int incy)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
         const std::complex<double> beta_v(beta->re, beta->im);
-        ddla::hemv<BE::value, std::complex<double>>(hh, uplo, n, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<const std::complex<double>*>(x), incx, beta_v, static_cast<std::complex<double>*>(y), incy);
+        ddla::hemv<std::complex<double>>(hh, uplo, n, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<const std::complex<double>*>(x), incx, beta_v, static_cast<std::complex<double>*>(y), incy);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_hemm(void* handle, char side, char uplo, int m, int n, const float* alpha, const void* A, int lda, const void* B, int ldb, const float* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::hemm<BE::value, float>(hh, side, uplo, m, n, *alpha, static_cast<const float*>(A), lda, static_cast<const float*>(B), ldb, *beta, static_cast<float*>(C), ldc);
+        ddla::hemm<float>(hh, side, uplo, m, n, *alpha, static_cast<const float*>(A), lda, static_cast<const float*>(B), ldb, *beta, static_cast<float*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_hemm(void* handle, char side, char uplo, int m, int n, const double* alpha, const void* A, int lda, const void* B, int ldb, const double* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::hemm<BE::value, double>(hh, side, uplo, m, n, *alpha, static_cast<const double*>(A), lda, static_cast<const double*>(B), ldb, *beta, static_cast<double*>(C), ldc);
+        ddla::hemm<double>(hh, side, uplo, m, n, *alpha, static_cast<const double*>(A), lda, static_cast<const double*>(B), ldb, *beta, static_cast<double*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_hemm(void* handle, char side, char uplo, int m, int n, const ddla_c_float_complex* alpha, const void* A, int lda, const void* B, int ldb, const ddla_c_float_complex* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
         const std::complex<float> beta_v(beta->re, beta->im);
-        ddla::hemm<BE::value, std::complex<float>>(hh, side, uplo, m, n, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<const std::complex<float>*>(B), ldb, beta_v, static_cast<std::complex<float>*>(C), ldc);
+        ddla::hemm<std::complex<float>>(hh, side, uplo, m, n, alpha_v, static_cast<const std::complex<float>*>(A), lda, static_cast<const std::complex<float>*>(B), ldb, beta_v, static_cast<std::complex<float>*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_hemm(void* handle, char side, char uplo, int m, int n, const ddla_c_double_complex* alpha, const void* A, int lda, const void* B, int ldb, const ddla_c_double_complex* beta, void* C, int ldc)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
         const std::complex<double> beta_v(beta->re, beta->im);
-        ddla::hemm<BE::value, std::complex<double>>(hh, side, uplo, m, n, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<const std::complex<double>*>(B), ldb, beta_v, static_cast<std::complex<double>*>(C), ldc);
+        ddla::hemm<std::complex<double>>(hh, side, uplo, m, n, alpha_v, static_cast<const std::complex<double>*>(A), lda, static_cast<const std::complex<double>*>(B), ldb, beta_v, static_cast<std::complex<double>*>(C), ldc);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_her2(void* handle, char uplo, int n, const float* alpha, const void* x, int incx, const void* y, int incy, void* A, int lda)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::her2<BE::value, float>(hh, uplo, n, *alpha, static_cast<const float*>(x), incx, static_cast<const float*>(y), incy, static_cast<float*>(A), lda);
+        ddla::her2<float>(hh, uplo, n, *alpha, static_cast<const float*>(x), incx, static_cast<const float*>(y), incy, static_cast<float*>(A), lda);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_her2(void* handle, char uplo, int n, const double* alpha, const void* x, int incx, const void* y, int incy, void* A, int lda)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::her2<BE::value, double>(hh, uplo, n, *alpha, static_cast<const double*>(x), incx, static_cast<const double*>(y), incy, static_cast<double*>(A), lda);
+        ddla::her2<double>(hh, uplo, n, *alpha, static_cast<const double*>(x), incx, static_cast<const double*>(y), incy, static_cast<double*>(A), lda);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_her2(void* handle, char uplo, int n, const ddla_c_float_complex* alpha, const void* x, int incx, const void* y, int incy, void* A, int lda)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
-        ddla::her2<BE::value, std::complex<float>>(hh, uplo, n, alpha_v, static_cast<const std::complex<float>*>(x), incx, static_cast<const std::complex<float>*>(y), incy, static_cast<std::complex<float>*>(A), lda);
+        ddla::her2<std::complex<float>>(hh, uplo, n, alpha_v, static_cast<const std::complex<float>*>(x), incx, static_cast<const std::complex<float>*>(y), incy, static_cast<std::complex<float>*>(A), lda);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_her2(void* handle, char uplo, int n, const ddla_c_double_complex* alpha, const void* x, int incx, const void* y, int incy, void* A, int lda)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
-        ddla::her2<BE::value, std::complex<double>>(hh, uplo, n, alpha_v, static_cast<const std::complex<double>*>(x), incx, static_cast<const std::complex<double>*>(y), incy, static_cast<std::complex<double>*>(A), lda);
+        ddla::her2<std::complex<double>>(hh, uplo, n, alpha_v, static_cast<const std::complex<double>*>(x), incx, static_cast<const std::complex<double>*>(y), incy, static_cast<std::complex<double>*>(A), lda);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_scal(void* handle, int n, const float* alpha, void* x, int incx)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::scal<BE::value, float>(hh, n, *alpha, static_cast<float*>(x), incx);
+        ddla::scal<float>(hh, n, *alpha, static_cast<float*>(x), incx);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_scal(void* handle, int n, const double* alpha, void* x, int incx)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::scal<BE::value, double>(hh, n, *alpha, static_cast<double*>(x), incx);
+        ddla::scal<double>(hh, n, *alpha, static_cast<double*>(x), incx);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_scal(void* handle, int n, const ddla_c_float_complex* alpha, void* x, int incx)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
-        ddla::scal<BE::value, std::complex<float>>(hh, n, alpha_v, static_cast<std::complex<float>*>(x), incx);
+        ddla::scal<std::complex<float>>(hh, n, alpha_v, static_cast<std::complex<float>*>(x), incx);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_scal(void* handle, int n, const ddla_c_double_complex* alpha, void* x, int incx)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
-        ddla::scal<BE::value, std::complex<double>>(hh, n, alpha_v, static_cast<std::complex<double>*>(x), incx);
+        ddla::scal<std::complex<double>>(hh, n, alpha_v, static_cast<std::complex<double>*>(x), incx);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_axpy(void* handle, int n, const float* alpha, const void* x, int incx, void* y, int incy)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::axpy<BE::value, float>(hh, n, *alpha, static_cast<const float*>(x), incx, static_cast<float*>(y), incy);
+        ddla::axpy<float>(hh, n, *alpha, static_cast<const float*>(x), incx, static_cast<float*>(y), incy);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_axpy(void* handle, int n, const double* alpha, const void* x, int incx, void* y, int incy)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::axpy<BE::value, double>(hh, n, *alpha, static_cast<const double*>(x), incx, static_cast<double*>(y), incy);
+        ddla::axpy<double>(hh, n, *alpha, static_cast<const double*>(x), incx, static_cast<double*>(y), incy);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_axpy(void* handle, int n, const ddla_c_float_complex* alpha, const void* x, int incx, void* y, int incy)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
-        ddla::axpy<BE::value, std::complex<float>>(hh, n, alpha_v, static_cast<const std::complex<float>*>(x), incx, static_cast<std::complex<float>*>(y), incy);
+        ddla::axpy<std::complex<float>>(hh, n, alpha_v, static_cast<const std::complex<float>*>(x), incx, static_cast<std::complex<float>*>(y), incy);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_axpy(void* handle, int n, const ddla_c_double_complex* alpha, const void* x, int incx, void* y, int incy)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
-        ddla::axpy<BE::value, std::complex<double>>(hh, n, alpha_v, static_cast<const std::complex<double>*>(x), incx, static_cast<std::complex<double>*>(y), incy);
+        ddla::axpy<std::complex<double>>(hh, n, alpha_v, static_cast<const std::complex<double>*>(x), incx, static_cast<std::complex<double>*>(y), incy);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_swap(void* handle, int n, void* x, int incx, void* y, int incy)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::swap<BE::value, float>(hh, n, static_cast<float*>(x), incx, static_cast<float*>(y), incy);
+        ddla::swap<float>(hh, n, static_cast<float*>(x), incx, static_cast<float*>(y), incy);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_swap(void* handle, int n, void* x, int incx, void* y, int incy)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::swap<BE::value, double>(hh, n, static_cast<double*>(x), incx, static_cast<double*>(y), incy);
+        ddla::swap<double>(hh, n, static_cast<double*>(x), incx, static_cast<double*>(y), incy);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_swap(void* handle, int n, void* x, int incx, void* y, int incy)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::swap<BE::value, std::complex<float>>(hh, n, static_cast<std::complex<float>*>(x), incx, static_cast<std::complex<float>*>(y), incy);
+        ddla::swap<std::complex<float>>(hh, n, static_cast<std::complex<float>*>(x), incx, static_cast<std::complex<float>*>(y), incy);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_swap(void* handle, int n, void* x, int incx, void* y, int incy)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::swap<BE::value, std::complex<double>>(hh, n, static_cast<std::complex<double>*>(x), incx, static_cast<std::complex<double>*>(y), incy);
+        ddla::swap<std::complex<double>>(hh, n, static_cast<std::complex<double>*>(x), incx, static_cast<std::complex<double>*>(y), incy);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_geru(void* handle, int m, int n, const float* alpha, const void* x, int incx, const void* y, int incy, void* A, int lda)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::geru<BE::value, float>(hh, m, n, *alpha, static_cast<const float*>(x), incx, static_cast<const float*>(y), incy, static_cast<float*>(A), lda);
+        ddla::geru<float>(hh, m, n, *alpha, static_cast<const float*>(x), incx, static_cast<const float*>(y), incy, static_cast<float*>(A), lda);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_geru(void* handle, int m, int n, const double* alpha, const void* x, int incx, const void* y, int incy, void* A, int lda)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::geru<BE::value, double>(hh, m, n, *alpha, static_cast<const double*>(x), incx, static_cast<const double*>(y), incy, static_cast<double*>(A), lda);
+        ddla::geru<double>(hh, m, n, *alpha, static_cast<const double*>(x), incx, static_cast<const double*>(y), incy, static_cast<double*>(A), lda);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_geru(void* handle, int m, int n, const ddla_c_float_complex* alpha, const void* x, int incx, const void* y, int incy, void* A, int lda)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
-        ddla::geru<BE::value, std::complex<float>>(hh, m, n, alpha_v, static_cast<const std::complex<float>*>(x), incx, static_cast<const std::complex<float>*>(y), incy, static_cast<std::complex<float>*>(A), lda);
+        ddla::geru<std::complex<float>>(hh, m, n, alpha_v, static_cast<const std::complex<float>*>(x), incx, static_cast<const std::complex<float>*>(y), incy, static_cast<std::complex<float>*>(A), lda);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_geru(void* handle, int m, int n, const ddla_c_double_complex* alpha, const void* x, int incx, const void* y, int incy, void* A, int lda)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
-        ddla::geru<BE::value, std::complex<double>>(hh, m, n, alpha_v, static_cast<const std::complex<double>*>(x), incx, static_cast<const std::complex<double>*>(y), incy, static_cast<std::complex<double>*>(A), lda);
+        ddla::geru<std::complex<double>>(hh, m, n, alpha_v, static_cast<const std::complex<double>*>(x), incx, static_cast<const std::complex<double>*>(y), incy, static_cast<std::complex<double>*>(A), lda);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_gerc(void* handle, int m, int n, const float* alpha, const void* x, int incx, const void* y, int incy, void* A, int lda)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::gerc<BE::value, float>(hh, m, n, *alpha, static_cast<const float*>(x), incx, static_cast<const float*>(y), incy, static_cast<float*>(A), lda);
+        ddla::gerc<float>(hh, m, n, *alpha, static_cast<const float*>(x), incx, static_cast<const float*>(y), incy, static_cast<float*>(A), lda);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_gerc(void* handle, int m, int n, const double* alpha, const void* x, int incx, const void* y, int incy, void* A, int lda)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::gerc<BE::value, double>(hh, m, n, *alpha, static_cast<const double*>(x), incx, static_cast<const double*>(y), incy, static_cast<double*>(A), lda);
+        ddla::gerc<double>(hh, m, n, *alpha, static_cast<const double*>(x), incx, static_cast<const double*>(y), incy, static_cast<double*>(A), lda);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_gerc(void* handle, int m, int n, const ddla_c_float_complex* alpha, const void* x, int incx, const void* y, int incy, void* A, int lda)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<float> alpha_v(alpha->re, alpha->im);
-        ddla::gerc<BE::value, std::complex<float>>(hh, m, n, alpha_v, static_cast<const std::complex<float>*>(x), incx, static_cast<const std::complex<float>*>(y), incy, static_cast<std::complex<float>*>(A), lda);
+        ddla::gerc<std::complex<float>>(hh, m, n, alpha_v, static_cast<const std::complex<float>*>(x), incx, static_cast<const std::complex<float>*>(y), incy, static_cast<std::complex<float>*>(A), lda);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_gerc(void* handle, int m, int n, const ddla_c_double_complex* alpha, const void* x, int incx, const void* y, int incy, void* A, int lda)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         const std::complex<double> alpha_v(alpha->re, alpha->im);
-        ddla::gerc<BE::value, std::complex<double>>(hh, m, n, alpha_v, static_cast<const std::complex<double>*>(x), incx, static_cast<const std::complex<double>*>(y), incy, static_cast<std::complex<double>*>(A), lda);
+        ddla::gerc<std::complex<double>>(hh, m, n, alpha_v, static_cast<const std::complex<double>*>(x), incx, static_cast<const std::complex<double>*>(y), incy, static_cast<std::complex<double>*>(A), lda);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_iamax(void* handle, int n, const void* x, int incx, int* result)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::iamax<BE::value, float>(hh, n, static_cast<const float*>(x), incx, *result);
+        ddla::iamax<float>(hh, n, static_cast<const float*>(x), incx, *result);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_iamax(void* handle, int n, const void* x, int incx, int* result)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::iamax<BE::value, double>(hh, n, static_cast<const double*>(x), incx, *result);
+        ddla::iamax<double>(hh, n, static_cast<const double*>(x), incx, *result);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_iamax(void* handle, int n, const void* x, int incx, int* result)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::iamax<BE::value, std::complex<float>>(hh, n, static_cast<const std::complex<float>*>(x), incx, *result);
+        ddla::iamax<std::complex<float>>(hh, n, static_cast<const std::complex<float>*>(x), incx, *result);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_iamax(void* handle, int n, const void* x, int incx, int* result)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::iamax<BE::value, std::complex<double>>(hh, n, static_cast<const std::complex<double>*>(x), incx, *result);
+        ddla::iamax<std::complex<double>>(hh, n, static_cast<const std::complex<double>*>(x), incx, *result);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_nrm2(void* handle, int n, const void* x, int incx, void* result)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::nrm2<BE::value, float>(hh, n, static_cast<const float*>(x), incx, static_cast<float*>(result));
+        ddla::nrm2<float>(hh, n, static_cast<const float*>(x), incx, static_cast<float*>(result));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_nrm2(void* handle, int n, const void* x, int incx, void* result)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::nrm2<BE::value, double>(hh, n, static_cast<const double*>(x), incx, static_cast<double*>(result));
+        ddla::nrm2<double>(hh, n, static_cast<const double*>(x), incx, static_cast<double*>(result));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_nrm2(void* handle, int n, const void* x, int incx, void* result)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::nrm2<BE::value, std::complex<float>>(hh, n, static_cast<const std::complex<float>*>(x), incx, static_cast<float*>(result));
+        ddla::nrm2<std::complex<float>>(hh, n, static_cast<const std::complex<float>*>(x), incx, static_cast<float*>(result));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_nrm2(void* handle, int n, const void* x, int incx, void* result)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::nrm2<BE::value, std::complex<double>>(hh, n, static_cast<const std::complex<double>*>(x), incx, static_cast<double*>(result));
+        ddla::nrm2<std::complex<double>>(hh, n, static_cast<const std::complex<double>*>(x), incx, static_cast<double*>(result));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_dotc(void* handle, int n, const void* x, int incx, const void* y, int incy, void* result)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::dotc<BE::value, float>(hh, n, static_cast<const float*>(x), incx, static_cast<const float*>(y), incy, static_cast<float*>(result));
+        ddla::dotc<float>(hh, n, static_cast<const float*>(x), incx, static_cast<const float*>(y), incy, static_cast<float*>(result));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_dotc(void* handle, int n, const void* x, int incx, const void* y, int incy, void* result)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::dotc<BE::value, double>(hh, n, static_cast<const double*>(x), incx, static_cast<const double*>(y), incy, static_cast<double*>(result));
+        ddla::dotc<double>(hh, n, static_cast<const double*>(x), incx, static_cast<const double*>(y), incy, static_cast<double*>(result));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_dotc(void* handle, int n, const void* x, int incx, const void* y, int incy, void* result)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::dotc<BE::value, std::complex<float>>(hh, n, static_cast<const std::complex<float>*>(x), incx, static_cast<const std::complex<float>*>(y), incy, static_cast<std::complex<float>*>(result));
+        ddla::dotc<std::complex<float>>(hh, n, static_cast<const std::complex<float>*>(x), incx, static_cast<const std::complex<float>*>(y), incy, static_cast<std::complex<float>*>(result));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_dotc(void* handle, int n, const void* x, int incx, const void* y, int incy, void* result)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::dotc<BE::value, std::complex<double>>(hh, n, static_cast<const std::complex<double>*>(x), incx, static_cast<const std::complex<double>*>(y), incy, static_cast<std::complex<double>*>(result));
+        ddla::dotc<std::complex<double>>(hh, n, static_cast<const std::complex<double>*>(x), incx, static_cast<const std::complex<double>*>(y), incy, static_cast<std::complex<double>*>(result));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_getrf(void* handle, int m, int n, void* A, int lda, void* ipiv, void* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::getrf<BE::value, float>(hh, m, n, static_cast<float*>(A), lda, static_cast<int*>(ipiv), static_cast<int*>(info));
+        ddla::getrf<float>(hh, m, n, static_cast<float*>(A), lda, static_cast<int*>(ipiv), static_cast<int*>(info));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_getrf(void* handle, int m, int n, void* A, int lda, void* ipiv, void* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::getrf<BE::value, double>(hh, m, n, static_cast<double*>(A), lda, static_cast<int*>(ipiv), static_cast<int*>(info));
+        ddla::getrf<double>(hh, m, n, static_cast<double*>(A), lda, static_cast<int*>(ipiv), static_cast<int*>(info));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_getrf(void* handle, int m, int n, void* A, int lda, void* ipiv, void* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::getrf<BE::value, std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), lda, static_cast<int*>(ipiv), static_cast<int*>(info));
+        ddla::getrf<std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), lda, static_cast<int*>(ipiv), static_cast<int*>(info));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_getrf(void* handle, int m, int n, void* A, int lda, void* ipiv, void* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::getrf<BE::value, std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), lda, static_cast<int*>(ipiv), static_cast<int*>(info));
+        ddla::getrf<std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), lda, static_cast<int*>(ipiv), static_cast<int*>(info));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_potrf(void* handle, char uplo, int n, void* A, int lda, void* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::potrf<BE::value, float>(hh, uplo, n, static_cast<float*>(A), lda, static_cast<int*>(info));
+        ddla::potrf<float>(hh, uplo, n, static_cast<float*>(A), lda, static_cast<int*>(info));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_potrf(void* handle, char uplo, int n, void* A, int lda, void* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::potrf<BE::value, double>(hh, uplo, n, static_cast<double*>(A), lda, static_cast<int*>(info));
+        ddla::potrf<double>(hh, uplo, n, static_cast<double*>(A), lda, static_cast<int*>(info));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_potrf(void* handle, char uplo, int n, void* A, int lda, void* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::potrf<BE::value, std::complex<float>>(hh, uplo, n, static_cast<std::complex<float>*>(A), lda, static_cast<int*>(info));
+        ddla::potrf<std::complex<float>>(hh, uplo, n, static_cast<std::complex<float>*>(A), lda, static_cast<int*>(info));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_potrf(void* handle, char uplo, int n, void* A, int lda, void* info)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::potrf<BE::value, std::complex<double>>(hh, uplo, n, static_cast<std::complex<double>*>(A), lda, static_cast<int*>(info));
+        ddla::potrf<std::complex<double>>(hh, uplo, n, static_cast<std::complex<double>*>(A), lda, static_cast<int*>(info));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_laswp(void* handle, int n, void* A, int lda, int k1, int k2, void* ipiv, int incx)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::laswp<BE::value, float>(hh, n, static_cast<float*>(A), lda, k1, k2, static_cast<const int*>(ipiv), incx);
+        ddla::laswp<float>(hh, n, static_cast<float*>(A), lda, k1, k2, static_cast<const int*>(ipiv), incx);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_laswp(void* handle, int n, void* A, int lda, int k1, int k2, void* ipiv, int incx)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::laswp<BE::value, double>(hh, n, static_cast<double*>(A), lda, k1, k2, static_cast<const int*>(ipiv), incx);
+        ddla::laswp<double>(hh, n, static_cast<double*>(A), lda, k1, k2, static_cast<const int*>(ipiv), incx);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_laswp(void* handle, int n, void* A, int lda, int k1, int k2, void* ipiv, int incx)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::laswp<BE::value, std::complex<float>>(hh, n, static_cast<std::complex<float>*>(A), lda, k1, k2, static_cast<const int*>(ipiv), incx);
+        ddla::laswp<std::complex<float>>(hh, n, static_cast<std::complex<float>*>(A), lda, k1, k2, static_cast<const int*>(ipiv), incx);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_laswp(void* handle, int n, void* A, int lda, int k1, int k2, void* ipiv, int incx)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::laswp<BE::value, std::complex<double>>(hh, n, static_cast<std::complex<double>*>(A), lda, k1, k2, static_cast<const int*>(ipiv), incx);
+        ddla::laswp<std::complex<double>>(hh, n, static_cast<std::complex<double>*>(A), lda, k1, k2, static_cast<const int*>(ipiv), incx);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_geqrf(void* handle, char uplo, int m, int n, void* A, int lda, void* tau)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::geqrf<BE::value, float>(hh, uplo, m, n, static_cast<float*>(A), lda, static_cast<float*>(tau));
+        ddla::geqrf<float>(hh, uplo, m, n, static_cast<float*>(A), lda, static_cast<float*>(tau));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_geqrf(void* handle, char uplo, int m, int n, void* A, int lda, void* tau)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::geqrf<BE::value, double>(hh, uplo, m, n, static_cast<double*>(A), lda, static_cast<double*>(tau));
+        ddla::geqrf<double>(hh, uplo, m, n, static_cast<double*>(A), lda, static_cast<double*>(tau));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_geqrf(void* handle, char uplo, int m, int n, void* A, int lda, void* tau)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::geqrf<BE::value, std::complex<float>>(hh, uplo, m, n, static_cast<std::complex<float>*>(A), lda, static_cast<std::complex<float>*>(tau));
+        ddla::geqrf<std::complex<float>>(hh, uplo, m, n, static_cast<std::complex<float>*>(A), lda, static_cast<std::complex<float>*>(tau));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_geqrf(void* handle, char uplo, int m, int n, void* A, int lda, void* tau)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::geqrf<BE::value, std::complex<double>>(hh, uplo, m, n, static_cast<std::complex<double>*>(A), lda, static_cast<std::complex<double>*>(tau));
+        ddla::geqrf<std::complex<double>>(hh, uplo, m, n, static_cast<std::complex<double>*>(A), lda, static_cast<std::complex<double>*>(tau));
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_s_larft(void* handle, char direct, char storev, int n, int k, void* V, int ldv, const void* tau, void* Tmat, int ldt)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::larft<BE::value, float>(hh, direct, storev, n, k, static_cast<float*>(V), ldv, static_cast<const float*>(tau), static_cast<float*>(Tmat), ldt);
+        ddla::larft<float>(hh, direct, storev, n, k, static_cast<float*>(V), ldv, static_cast<const float*>(tau), static_cast<float*>(Tmat), ldt);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_d_larft(void* handle, char direct, char storev, int n, int k, void* V, int ldv, const void* tau, void* Tmat, int ldt)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::larft<BE::value, double>(hh, direct, storev, n, k, static_cast<double*>(V), ldv, static_cast<const double*>(tau), static_cast<double*>(Tmat), ldt);
+        ddla::larft<double>(hh, direct, storev, n, k, static_cast<double*>(V), ldv, static_cast<const double*>(tau), static_cast<double*>(Tmat), ldt);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_c_larft(void* handle, char direct, char storev, int n, int k, void* V, int ldv, const void* tau, void* Tmat, int ldt)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::larft<BE::value, std::complex<float>>(hh, direct, storev, n, k, static_cast<std::complex<float>*>(V), ldv, static_cast<const std::complex<float>*>(tau), static_cast<std::complex<float>*>(Tmat), ldt);
+        ddla::larft<std::complex<float>>(hh, direct, storev, n, k, static_cast<std::complex<float>*>(V), ldv, static_cast<const std::complex<float>*>(tau), static_cast<std::complex<float>*>(Tmat), ldt);
         return DDLA_C_STATUS_SUCCESS;
     });
 }
 
 extern "C" int ddla_z_larft(void* handle, char direct, char storev, int n, int k, void* V, int ldv, const void* tau, void* Tmat, int ldt)
 {
-    return ddla_c_run(handle, [&](auto be) -> int {
-        using BE = decltype(be);
+    return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        ddla::larft<BE::value, std::complex<double>>(hh, direct, storev, n, k, static_cast<std::complex<double>*>(V), ldv, static_cast<const std::complex<double>*>(tau), static_cast<std::complex<double>*>(Tmat), ldt);
+        ddla::larft<std::complex<double>>(hh, direct, storev, n, k, static_cast<std::complex<double>*>(V), ldv, static_cast<const std::complex<double>*>(tau), static_cast<std::complex<double>*>(Tmat), ldt);
         return DDLA_C_STATUS_SUCCESS;
     });
 }

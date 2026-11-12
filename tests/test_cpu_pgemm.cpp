@@ -99,7 +99,7 @@ static int check_one(
     char transa, char transb,
     int M, int N, int K, int nb,
     int irsrc, int icsrc,
-    bool use_default_backend = false)
+    bool use_empty_template_arguments = false)
 {
     int nprows = 0, npcols = 0;
     ddlaGetGridDims(handle, nprows, npcols);
@@ -153,14 +153,14 @@ static int check_one(
     }
 
     // ---- compute with ddla::pgemm ----
-    if (use_default_backend) {
+    if (use_empty_template_arguments) {
         pgemm<>(handle, transa, transb, M, N, K, alpha,
                 h_A.data(), descA,
                 h_B.data(), descB,
                 beta,
                 h_C.data(), descC);
     } else {
-        pgemm<DdlaBackend::CPU>(handle, 
+        pgemm(handle,
             transa, transb, M, N, K, alpha,
             h_A.data(), descA,
             h_B.data(), descB,
@@ -336,16 +336,11 @@ static int run_tests_for_type(const char* type_name,
             char ta = trans_pairs[pi][0];
             char tb = trans_pairs[pi][1];
 
-            // For Trans/C cases, ensure K is appropriate
-            // pgemm<>() (bracket-free, defaulted Backend) only resolves to
-            // CPU when this build has no GPU capability -- in a dual build
-            // default_backend_v prefers GPU (see ddla_handle_t.h), so
-            // exercising the bare-default call site against this test's CPU
-            // handle would throw a backend-mismatch std::runtime_error there.
-            const bool use_default_backend =
-                (si == 0 && pi == 0) && (default_backend_v == DdlaBackend::CPU);
+            // Both pgemm(...) and pgemm<>(...) deduce the scalar type and
+            // select this CPU handle, including in a dual build.
+            const bool use_empty_template_arguments = (si == 0 && pi == 0);
             int nf = check_one<T>(handle, ta, tb, M, N, K, nb,
-                                  irsrc, icsrc, use_default_backend);
+                                  irsrc, icsrc, use_empty_template_arguments);
             nfailed += nf;
         }
     }
@@ -380,7 +375,7 @@ static int run_tests_for_type(const char* type_name,
             beta = T(-0.75, 0.5);
         }
 
-        pgemm<DdlaBackend::CPU>(handle, 'N', 'N', M, N, 0, alpha,
+        pgemm(handle, 'N', 'N', M, N, 0, alpha,
                                 h_A.data(), descA,
                                 h_B.data(), descB,
                                 beta,

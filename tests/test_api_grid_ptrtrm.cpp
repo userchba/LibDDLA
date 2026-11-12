@@ -1,3 +1,4 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 #include "api_grid_test_common.h"
 #include "PBLAS/ptrtrm_impl.h"
 #include <ddla/ddla_vector.h>
@@ -99,7 +100,7 @@ void check_case(DdlaHandle_t h, char uplo, int n, int nb, int mode,
             a.data.data(), a.d, b.data.data(), b.d, beta, cmat.data.data(), cmat.d,
             backend_work.data(), backend_bytes, host_work.data(), host_bytes);
     } else {
-        ptrtrm<Backend,T>(h,u,'N',u,'N',n,alpha,a.data.data(),a.d,b.data.data(),b.d,beta,
+        ptrtrm<T>(h,u,'N',u,'N',n,alpha,a.data.data(),a.d,b.data.data(),b.d,beta,
                           cmat.data.data(),cmat.d);
     }
     auto out=cmat.download(), aa=a.download(), bb=b.download();
@@ -230,7 +231,7 @@ void mixed_case(DdlaHandle_t h, char ua, char ub, int n, int nb, int mode,
                 work.data(),wb,host.data(),hb);
         }
     } else
-        ptrtrm<Backend,T>(h,flag(ua),flag(ta),flag(ub),flag(tb),n,alpha,ap,a.d,bp,b.d,beta,cp,c.d);
+        ptrtrm<T>(h,flag(ua),flag(ta),flag(ub),flag(tb),n,alpha,ap,a.d,bp,b.d,beta,cp,c.d);
     const auto out=c.download(),aa=a.download(),bb=b.download();
     int bad=std::memcmp(aa.data(),a.host.data(),aa.size()*sizeof(T))!=0 ||
             std::memcmp(bb.data(),b.host.data(),bb.size()*sizeof(T))!=0;
@@ -322,7 +323,7 @@ void transpose_invalid_cases(DdlaHandle_t h)
         const char ta=kind==0 && root?'?':kind==2 && root?'T':'N';
         const char tb=kind==1 && root?'?':kind==3 && root?'C':'N';
         bool caught=false;
-        try {ptrtrm<Backend,double>(h,'U',ta,'L',tb,8,1.,a.data.data(),a.d,b.data.data(),b.d,0.,c.data.data(),c.d);}
+        try {ptrtrm<double>(h,'U',ta,'L',tb,8,1.,a.data.data(),a.d,b.data.data(),b.d,0.,c.data.data(),c.d);}
         catch(const std::invalid_argument&){if(kind>=2) throw;caught=true;}
         catch(const std::runtime_error&){if(kind<2) throw;caught=true;}
         int all=0,yes=caught?1:0,np=0;MPI_Comm_size(ddlaGetCommunicator(h),&np);
@@ -346,7 +347,7 @@ void mixed_invalid_cases(DdlaHandle_t h)
         double* cp=kind==5 && root ? nullptr : kind==6 && root ? a.data.data() :
                    kind==7 && root ? b.data.data()+1 : c.data.data();
         bool rejected=false;
-        try { ptrtrm<Backend,double>(h,ua,'N',ub,'N',n,1.,ap,a.d,b.data.data(),b.d,0.,cp,c.d); }
+        try { ptrtrm<double>(h,ua,'N',ub,'N',n,1.,ap,a.d,b.data.data(),b.d,0.,cp,c.d); }
         catch(const std::exception&) { rejected=true; }
         int caught=rejected ? 1 : 0,all=0;
         MPI_Allreduce(&caught,&all,1,MPI_INT,MPI_MIN,ddlaGetCommunicator(h));
@@ -369,7 +370,7 @@ void mixed_invalid_cases(DdlaHandle_t h)
         DDLA_CHECK(ddlaDescInit(db,h,12,12,4,4,rs,cs));
         DDLA_CHECK(ddlaDescInit(dc,h,12,12,4,4,rs,cs));
         int caught=0,all=0;
-        try { ptrtrm<Backend,double>(h,'U','N','L','N',0,0.,nullptr,da,nullptr,db,1.,nullptr,dc); }
+        try { ptrtrm<double>(h,'U','N','L','N',0,0.,nullptr,da,nullptr,db,1.,nullptr,dc); }
         catch(const std::exception&) { caught=1; }
         MPI_Allreduce(&caught,&all,1,MPI_INT,MPI_MIN,ddlaGetCommunicator(h));
         if(!all) throw std::runtime_error("ptrtrm source disagreement not rejected collectively");
@@ -380,7 +381,7 @@ void mixed_invalid_cases(DdlaHandle_t h)
         const double alpha=kind==2 && root ? 1. : 0.;
         const double beta=kind==2 && root ? 0. : 1.;
         int caught=0,all=0;
-        try { ptrtrm<Backend,double>(h,'U','N',ub,'N',n,alpha,nullptr,a.d,nullptr,b.d,beta,nullptr,c.d); }
+        try { ptrtrm<double>(h,'U','N',ub,'N',n,alpha,nullptr,a.d,nullptr,b.d,beta,nullptr,c.d); }
         catch(const std::exception&) { caught=1; }
         MPI_Allreduce(&caught,&all,1,MPI_INT,MPI_MIN,ddlaGetCommunicator(h));
         if(!all) throw std::runtime_error("ptrtrm mode/order disagreement not rejected collectively");
@@ -424,7 +425,7 @@ void invalid_cases(DdlaHandle_t h) {
     DDLA_CHECK(ddlaDescInit(cc,h,12,12,4,4,0,0));
     auto reject_args=[&](char u,int n,const double* A,const double* B2) {
         bool caught=false;
-        try { ptrtrm<Backend,double>(h,u,'N',u,'N',n,0.,A,a,B2,b,0.,nullptr,cc); }
+        try { ptrtrm<double>(h,u,'N',u,'N',n,0.,A,a,B2,b,0.,nullptr,cc); }
         catch(const std::invalid_argument&) { caught=true; }
         if (!caught) throw std::runtime_error("ptrtrm invalid argument not rejected");
     };
@@ -461,7 +462,7 @@ void invalid_cases(DdlaHandle_t h) {
         if (kind==2 && bad_rank) bad_desc[DDLA_LLD_]=0;
         bool rejected=false;
         try {
-            ptrtrm<Backend,double>(h,'U','N','U','N',12,1.,kind==0 && bad_rank ? nullptr : ma.data.data(),bad_desc,
+            ptrtrm<double>(h,'U','N','U','N',12,1.,kind==0 && bad_rank ? nullptr : ma.data.data(),bad_desc,
                 mb.data.data(),mb.d,0.,kind==1 && bad_rank ? nullptr : mc.data.data(),mc.d);
         } catch(const std::invalid_argument&) { rejected=true; }
         int local=rejected ? 1 : 0, all=0, size=0;
@@ -473,7 +474,7 @@ void invalid_cases(DdlaHandle_t h) {
             throw std::runtime_error("ptrtrm invalid call modified a matrix");
     }
     bool caught=false;
-    try { ptrtrm<Backend,double>(nullptr,'U','N','U','N',0,0.,nullptr,a,nullptr,b,0.,nullptr,cc); }
+    try { ptrtrm<double>(nullptr,'U','N','U','N',0,0.,nullptr,a,nullptr,b,0.,nullptr,cc); }
     catch(const std::runtime_error&) { caught=true; }
     if (!caught) throw std::runtime_error("ptrtrm null handle not rejected");
 #if DDLA_HAS_GPU
@@ -481,7 +482,7 @@ void invalid_cases(DdlaHandle_t h) {
     constexpr auto Wrong = Backend==DdlaBackend::CPU ? DdlaBackend::GPU : DdlaBackend::CPU;
     try { ptrtrm<Wrong,double>(h,'U','N','U','N',0,0.,nullptr,a,nullptr,b,0.,nullptr,cc); }
     catch(const std::runtime_error&) { caught=true; }
-    if (!caught) throw std::runtime_error("ptrtrm backend mismatch not rejected");
+    if (!caught) throw std::runtime_error("ptrtrm internal backend mismatch not rejected");
 #endif
 }
 

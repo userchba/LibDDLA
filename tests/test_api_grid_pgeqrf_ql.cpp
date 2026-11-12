@@ -298,7 +298,7 @@ void call_ql(const ddla::DdlaHandle_t& handle, const CaseGeom& g,
 {
     auto go = [&](auto backend_tag) {
         constexpr DdlaBackend B = decltype(backend_tag)::value;
-        ddla::pgeqlf<B, T>(handle, g.m, g.n, d_A, desc, tau, info);
+        ddla::pgeqlf<T>(handle, g.m, g.n, d_A, desc, tau, info);
     };
 #if DDLA_HAS_GPU
     if (ddlaGetBackend(handle) == DdlaBackend::CPU) go(std::integral_constant<DdlaBackend, DdlaBackend::CPU>{});
@@ -646,8 +646,8 @@ void check_factorization_entries(const ddla::DdlaHandle_t& handle)
             return run_call<T>(handle, h_A, ntau, [&](T* dA, T* tau, int& info) {
                 on_backend(handle, [&](auto bt) {
                     constexpr DdlaBackend B = decltype(bt)::value;
-                    if (ql) ddla::pgeqlf<B, T>(handle, m, n, dA, desc, tau, info);
-                    else ddla::pgeqrf<B, T>(handle, m, n, dA, desc, tau, info);
+                    if (ql) ddla::pgeqlf<T>(handle, m, n, dA, desc, tau, info);
+                    else ddla::pgeqrf<T>(handle, m, n, dA, desc, tau, info);
                 });
             });
         };

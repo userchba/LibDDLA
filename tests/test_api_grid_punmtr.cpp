@@ -1,3 +1,4 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 #include "api_grid_test_common.h"
 #include "workspace_test_common.h"
 #include "ddla_stream.h"
@@ -84,7 +85,7 @@ template<DdlaBackend B,class T>void exercise(DdlaHandle_t h,char side,char uplo,
         require_close(h,"punmtr readonly V/T including poison",std::memcmp(after_v.data(),v.data(),v.size()*sizeof(T))||
             std::memcmp(after_t.data(),t.data(),t.size()*sizeof(T))?1:0,0);
     };
-    punmtr<B,T>(h,side,uplo,trans,m,n,k,V.ptr,ldv,Tmat.ptr,ldt,C.ptr,dc);check_ddla_sync(h);verify();
+    punmtr<T>(h,side,uplo,trans,m,n,k,V.ptr,ldv,Tmat.ptr,ldt,C.ptr,dc);check_ddla_sync(h);verify();
 
     detail::punmtr_check<T>(h,B,side,uplo,trans,m,n,k,V.ptr,ldv,Tmat.ptr,ldt,C.ptr,dc);
     const int active_k=(!m||!n)?0:k;
@@ -130,7 +131,7 @@ template<DdlaBackend B>void rejections(DdlaHandle_t h) {
     DeviceBuffer<double> buffer(h,512);int pr=h->nprows_,pc=h->npcols_;
     const int nr=num_loc(7,3,h->myprow_,0,pr),nc=num_loc(5,3,h->mypcol_,0,pc);
     auto reject=[&](char side,char uplo,char trans,int m,int n,int k,int ldv,int ldt,const double* v,const double* t,double* c) {
-        bool caught=false;try{punmtr<B,double>(h,side,uplo,trans,m,n,k,v,ldv,t,ldt,c,d);}
+        bool caught=false;try{punmtr<double>(h,side,uplo,trans,m,n,k,v,ldv,t,ldt,c,d);}
         catch(const std::exception&){caught=true;}
         require_close(h,"punmtr invalid arguments rejected collectively",caught?0:1,0);
     };
@@ -149,13 +150,13 @@ template<DdlaBackend B>void rejections(DdlaHandle_t h) {
     reject('L','U','N',7,5,2,9,2,x,x+128,nr>0&&nc>0&&h->myid==0?nullptr:x+256);
     if(h->nprocs>1)reject('L','U','N',h->myid==0?0:7,5,2,9,2,x,x+128,x+256);
     // Identity calls permit all data pointers and unused V/T strides to be zero.
-    punmtr<B,double>(h,'l','u','n',7,5,0,nullptr,0,nullptr,0,nullptr,d);
+    punmtr<double>(h,'l','u','n',7,5,0,nullptr,0,nullptr,0,nullptr,d);
 #if DDLA_HAS_GPU
     constexpr auto other=B==DdlaBackend::CPU?DdlaBackend::GPU:DdlaBackend::CPU;
     bool caught=false;
     try{punmtr<other,double>(h,'L','U','N',0,0,0,nullptr,0,nullptr,0,nullptr,d);}
     catch(const std::exception&){caught=true;}
-    require_close(h,"punmtr backend mismatch",caught?0:1,0);
+    require_close(h,"punmtr internal backend mismatch",caught?0:1,0);
 #endif
 }
 template<DdlaBackend B,class T>void cases(DdlaHandle_t h) {
@@ -167,7 +168,7 @@ template<DdlaBackend B,class T>void cases(DdlaHandle_t h) {
         exercise<B,T>(h,'R','L','T',7,9,3);
     else {
         int d[DDLA_DLEN_];DDLA_CHECK(ddlaDescInit(d,h,1,1,1,1,0,0));bool caught=false;
-        try{punmtr<B,T>(h,'L','U','T',1,1,1,nullptr,1,nullptr,1,nullptr,d);}
+        try{punmtr<T>(h,'L','U','T',1,1,1,nullptr,1,nullptr,1,nullptr,d);}
         catch(const std::exception&){caught=true;}
         require_close(h,"punmtr complex transpose rejected",caught?0:1,0);
     }

@@ -50,7 +50,7 @@ void check(DdlaHandle_t h, int n, int nb, int rs, int cs, char uplo)
     for (int repeat = 0; repeat < 2; ++repeat) {
         upload(h, a.ptr, input);
         int info = -1;
-        if (repeat == 0) ppotrf<Backend,T>(h, uplo, n, a.ptr, 1, 1, d, info);
+        if (repeat == 0) ppotrf<T>(h, uplo, n, a.ptr, 1, 1, d, info);
         else cholesky_impl::ppotrf_run<Backend,T>(h, uplo, n, a.ptr, 1, 1, d, info,
             work.data() + guard, bb, host.data() + guard, hb);
         require_close(h, "ppotrf grid INFO", info == 0 ? 0 : 1, 0);
@@ -88,7 +88,7 @@ void check(DdlaHandle_t h, int n, int nb, int rs, int cs, char uplo)
     }
     upload(h, a.ptr, bad);
     int info = 0;
-    ppotrf<Backend,T>(h, uplo, n, a.ptr, 1, 1, d, info);
+    ppotrf<T>(h, uplo, n, a.ptr, 1, 1, d, info);
     require_close(h, "ppotrf global failed pivot", info == n ? 0 : 1, 0);
     if (n == 17) for (char side : {'L', 'R'}) {
         const bool left = side == 'L';
@@ -99,7 +99,7 @@ void check(DdlaHandle_t h, int n, int nb, int rs, int cs, char uplo)
         upload(h, a.ptr, bad);
         upload(h, b.ptr, rhs);
         info = -1;
-        pposv<Backend,T>(h, side, uplo, 'N', n, 2, a.ptr, 1, 1, d, b.ptr, 1, 1, db, info);
+        pposv<T>(h, side, uplo, 'N', n, 2, a.ptr, 1, 1, d, b.ptr, 1, 1, db, info);
         require_close(h, "pposv rejects final nonpositive pivot", info == n ? 0 : 1, 0);
         require_close(h, "pposv leaves RHS unchanged on failed factorization",
             download(h, b.ptr, rhs.size()) == rhs ? 0 : 1, 0);

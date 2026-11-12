@@ -136,14 +136,6 @@ const char* backend_name(const DdlaHandle_t& h)
     return ddlaGetBackend(h) == DdlaBackend::CPU ? "CPU" : "GPU";
 }
 
-#if DDLA_HAS_GPU
-#define DISPATCH(call_cpu, call_gpu) \
-    do { if (ddlaGetBackend(handle) == DdlaBackend::CPU) { call_cpu; } else { call_gpu; } } while (0)
-#elif DDLA_HAS_GPU
-#define DISPATCH(call_cpu, call_gpu) do { call_gpu; } while (0)
-#else
-#define DISPATCH(call_cpu, call_gpu) do { call_cpu; } while (0)
-#endif
 
 template <typename T>
 void call_pgebrd(const DdlaHandle_t& handle, int n, T* d_A, const int* desc,
@@ -151,8 +143,7 @@ void call_pgebrd(const DdlaHandle_t& handle, int n, T* d_A, const int* desc,
                  std::vector<T>& tq, std::vector<T>& tp)
 {
     int info = 0;
-    DISPATCH((pgebrd<DdlaBackend::CPU, T>(handle, n, n, d_A, desc, d.data(), e.data(), tq.data(), tp.data(), info)),
-             (pgebrd<DdlaBackend::GPU, T>(handle, n, n, d_A, desc, d.data(), e.data(), tq.data(), tp.data(), info)));
+    pgebrd<T>(handle, n, n, d_A, desc, d.data(), e.data(), tq.data(), tp.data(), info);
 }
 
 template <typename T>
@@ -160,8 +151,7 @@ int call_pgesvd(const DdlaHandle_t& handle, char job, int n, T* d_A, const int* 
                 typename real_type<T>::type* s, T* d_U, T* d_VT)
 {
     int info = 0;
-    DISPATCH((pgesvd<DdlaBackend::CPU, T>(handle, job, job, n, n, d_A, desc, s, d_U, desc, d_VT, desc, info)),
-             (pgesvd<DdlaBackend::GPU, T>(handle, job, job, n, n, d_A, desc, s, d_U, desc, d_VT, desc, info)));
+    pgesvd<T>(handle, job, job, n, n, d_A, desc, s, d_U, desc, d_VT, desc, info);
     return info;
 }
 
@@ -170,8 +160,7 @@ void call_punmbr(const DdlaHandle_t& handle, char vect, char side, char trans, i
                  const T* d_A, const int* desc, const T* tau, T* d_C)
 {
     int info = 0;
-    DISPATCH((punmbr<DdlaBackend::CPU, T>(handle, vect, side, trans, n, n, n, d_A, desc, tau, d_C, desc, info)),
-             (punmbr<DdlaBackend::GPU, T>(handle, vect, side, trans, n, n, n, d_A, desc, tau, d_C, desc, info)));
+    punmbr<T>(handle, vect, side, trans, n, n, n, d_A, desc, tau, d_C, desc, info);
 }
 
 double median_of(std::vector<double> v)

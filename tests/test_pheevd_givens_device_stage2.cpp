@@ -64,7 +64,7 @@ void check_full(const DdlaHandle_t& h,int n,bool upper,bool alias,int nb=8) {
     require_close(h,"HH full independent residual",std::isfinite(residual)?residual:INFINITY,50);
     require_close(h,"HH full independent orthogonality",std::isfinite(orthogonal)?orthogonal:INFINITY,50);
     upload(h,reference.ptr,input);
-    pheevd_two_stage<DdlaBackend::GPU,T>(h,'N',upper?'U':'L',n,reference.ptr,descA,old.data(),nullptr,nullptr,info);
+    pheevd_two_stage<T>(h,'N',upper?'U':'L',n,reference.ptr,descA,old.data(),nullptr,nullptr,info);
     require_close(h,"HH reference eigenvalues info",info,0);
     upload(h,reference.ptr,input);
     detail::pheevd_givens<DdlaBackend::GPU, T>(h,'N',upper?'U':'L',n,reference.ptr,descA,only.data(),nullptr,nullptr,info);

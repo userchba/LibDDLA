@@ -33,7 +33,7 @@ void check_case(DdlaHandle_t h,char ta,char tb,bool shifted,int mode,bool expect
     Matrix<T> c(h,ic-1+m,jc-1+n,mb,nb,rs,cs,3,true);
     DDLA_CHECK(ddlaSynchronize(h));
     alltoalls=sendrecvs=max_send=0;
-    pgeadd<Backend>(h,ta,tb,m,n,alpha,a.data,ia,ja,a.d,beta,b.data,ib,jb,b.d,c.data,ic,jc,c.d);
+    pgeadd(h,ta,tb,m,n,alpha,a.data,ia,ja,a.d,beta,b.data,ib,jb,b.d,c.data,ic,jc,c.d);
     const int a2a=alltoalls,p2p=sendrecvs,count=max_send;
     int counts[3]={a2a,p2p,count},sums[3]={};
     MPI_Allreduce(counts,sums,2,MPI_INT,MPI_SUM,ddlaGetCommunicator(h));

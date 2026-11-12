@@ -5,7 +5,9 @@ Outputs (next to this script):
   ddla_c_api.cpp  -- extern "C" C-ABI shim over the C++ templates of ddla.h
   ddla.f90        -- Fortran 2008 module `ddla` with bind(C) interfaces
 
-The table covers the public API committed at HEAD 9ccc614.  Scalar types are
+The table covers the scalar signatures below. Computational calls use the
+handle-driven C++ public API; Fortran/Python signatures do not expose backend
+template arguments. Scalar types are
 bound LAPACK-style with a type prefix (ddla_s_/d_/c_/z_ = float/double/
 complex<float>/complex<double>); no generic names (most routines take only
 c_ptr matrix arguments, which cannot distinguish the scalar type in a Fortran
@@ -199,9 +201,9 @@ PROLOGUE = r"""// --------------------------------------------------------------
 //     complex(c_float) / complex(c_double) dummy of the same intent).
 //   * Matrices and vectors are void*: host memory for a CPU handle, device
 //     memory for a GPU handle, exactly as the C++ API documents each argument.
-//   * The backend is taken from the handle at run time (ddlaGetBackend) and
-//     dispatched to the matching template instantiation; requesting a backend
-//     this build does not contain reports DDLA_C_STATUS_BACKEND_UNAVAILABLE.
+//   * Public C++ computational calls select their backend from the handle.
+//     The shim preserves C handle/backend error statuses before calling that
+//     public API; it does not dispatch CPU/GPU template instantiations itself.
 //
 // The MPI communicator of ddla_c_set arrives as the Fortran handle and is
 // converted with MPI_Comm_f2c.
@@ -214,7 +216,6 @@ PROLOGUE = r"""// --------------------------------------------------------------
 #include <cstdlib>
 #include <exception>
 #include <string>
-#include <type_traits>
 
 // Two-field complex scalars; ddla.f90 declares the same layouts as
 // type, bind(C) :: ddla_complex_float / ddla_complex_double.
@@ -233,9 +234,8 @@ void ddla_c_record_error(const char* what)
     catch (...) { g_ddla_c_last_error.clear(); }
 }
 
-// Run one library call on the handle's backend.  body is a template lambda
-// invoked with std::integral_constant<DdlaBackend, ...>. CPU is always available;
-// DDLA_HAS_GPU from ddla_config.h guards the optional GPU branch.
+// Preserve C status codes and catch C++ exceptions around one public call.
+// Backend execution is selected by the public API from the same handle.
 template <typename F>
 int ddla_c_run(void* handle, F&& body)
 {
@@ -243,18 +243,12 @@ int ddla_c_run(void* handle, F&& body)
         return DDLA_C_STATUS_INVALID_HANDLE;
     try {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
-        switch (ddla::ddlaGetBackend(hh)) {
-        case ddla::DdlaBackend::CPU:
-            return body(std::integral_constant<ddla::DdlaBackend, ddla::DdlaBackend::CPU>{});
-        case ddla::DdlaBackend::GPU:
-#if DDLA_HAS_GPU
-            return body(std::integral_constant<ddla::DdlaBackend, ddla::DdlaBackend::GPU>{});
-#else
-            return DDLA_C_STATUS_BACKEND_UNAVAILABLE;
-#endif
-        default:
+        const auto backend = ddla::ddlaGetBackend(hh);
+        if (backend != ddla::DdlaBackend::CPU && backend != ddla::DdlaBackend::GPU)
             return DDLA_C_STATUS_INVALID_VALUE;
-        }
+        if (!ddla::ddlaBackendAvailable(backend))
+            return DDLA_C_STATUS_BACKEND_UNAVAILABLE;
+        return body();
     } catch (const std::exception& e) {
         ddla_c_record_error(e.what());
         return DDLA_C_STATUS_EXCEPTION;
@@ -641,11 +635,10 @@ def gen_cpp():
             lines.append("")
             lines.append("extern \"C\" int %s(%s)" % (cname, params))
             lines.append("{")
-            lines.append("    return ddla_c_run(handle, [&](auto be) -> int {")
-            lines.append("        using BE = decltype(be);")
+            lines.append("    return ddla_c_run(handle, [&]() -> int {")
             lines.append("        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);")
             lines.extend(decls)
-            lines.append("        ddla::%s<BE::value, %s>(%s);" % (name, ST, call_args))
+            lines.append("        ddla::%s<%s>(%s);" % (name, ST, call_args))
             lines.append("        return DDLA_C_STATUS_SUCCESS;")
             lines.append("    });")
             lines.append("}")

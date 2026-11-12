@@ -99,7 +99,7 @@ void brd_case(DdlaHandle_t h,int m,int n)
     DeviceBuffer<T> A(h,original.size()),reference(h,original.size());upload(h,reference.ptr,original);
     std::vector<R> rd(std::max(k,1),R(-13)),re(std::max(k-1,1),R(-13));
     std::vector<T> rq(std::max(k,1),T(-13)),rp(rq),q(rq),p(rq);
-    int info=0;pgebrd<B,T>(h,m,n,reference.ptr,da,rd.data(),re.data(),rq.data(),rp.data(),info);
+    int info=0;pgebrd<T>(h,m,n,reference.ptr,da,rd.data(),re.data(),rq.data(),rp.data(),info);
     const auto expected=download(h,reference.ptr,original.size());
     std::vector<R>d(rd.size(),R(-13)),e(re.size(),R(-13));
     const auto plan=pgebrd_check(h,B,m,n,A.ptr,da,d.data(),e.data(),q.data(),p.data());
@@ -119,7 +119,7 @@ void brd_case(DdlaHandle_t h,int m,int n)
         int dc[DDLA_DLEN_];DDLA_CHECK(ddlaDescInit(dc,h,nq+2,nq+3,4,4,0,vect=='P'?0:h->npcols_-1));dc[DDLA_LLD_]+=2;
         auto input=make_local<T>(h,dc,[](int i,int j){return i==j?T(1):T(0);});
         DeviceBuffer<T>C(h,input.size()),Cr(h,input.size());upload(h,Cr.ptr,input);
-        punmbr<B,T>(h,vect,vect=='Q'?'L':'R',trans,nq,nq,reflector_k,A.ptr,da,tau,Cr.ptr,dc,info);
+        punmbr<T>(h,vect,vect=='Q'?'L':'R',trans,nq,nq,reflector_k,A.ptr,da,tau,Cr.ptr,dc,info);
         const auto expect=download(h,Cr.ptr,input.size());
         const auto cp=punmbr_check(h,B,std::is_same<T,R>::value,vect,vect=='Q'?'L':'R',trans,nq,nq,reflector_k,A.ptr,da,tau,C.ptr,dc);
         std::size_t cb=0,ch=0;local_query(h,[&]{punmbr_workspace_size<T>(h,cp,&cb,&ch);});GuardedScratch cw(h,cb,ch);
@@ -171,12 +171,12 @@ void hermitian_case(DdlaHandle_t h,int n,char uplo)
     if(!n)return;
     constexpr int nbw=2;const int steps=(n-1)/nbw;
     DeviceBuffer<T>tmat(h,std::size_t(nbw)*nbw*std::max(steps,1));int info=0;
-    phe2hb<B,T>(h,n,A.ptr,da,nbw,tmat.ptr,info);
+    phe2hb<T>(h,n,A.ptr,da,nbw,tmat.ptr,info);
     int dz[DDLA_DLEN_];DDLA_CHECK(ddlaDescInit(dz,h,n+2,n+3,4,4,0,h->npcols_-1));dz[DDLA_LLD_]+=2;
     const auto identity=make_local<T>(h,dz,[&](int i,int j){return i<n&&j<n?T(i==j):guard;});
     DeviceBuffer<T>Z(h,identity.size()),Zr(h,identity.size());
     for(char trans:{'N','C'}) {
-        upload(h,Zr.ptr,identity);punmtr_he2hb<B,T>(h,trans,n,nbw,A.ptr,da,tmat.ptr,Zr.ptr,dz,info);
+        upload(h,Zr.ptr,identity);punmtr_he2hb<T>(h,trans,n,nbw,A.ptr,da,tmat.ptr,Zr.ptr,dz,info);
         const auto expect=download(h,Zr.ptr,identity.size());
         const auto up=punmtr_he2hb_check(h,B,trans,n,nbw,A.ptr,da,tmat.ptr,Z.ptr,dz);
         std::size_t ub=0;local_query(h,[&]{punmtr_he2hb_workspace_size<T>(h,up,&ub);});GuardedScratch uw(h,ub,0);

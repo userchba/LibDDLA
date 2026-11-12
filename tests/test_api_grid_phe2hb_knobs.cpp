@@ -155,7 +155,7 @@ void check_phe2hb_ignores_knobs(const ddla::DdlaHandle_t& handle)
             try {
                 on_backend(handle, [&](auto bt) {
                     constexpr DdlaBackend B = decltype(bt)::value;
-                    ddla::phe2hb<B, T>(handle, n, d_A.ptr, desc, nbw, d_tmat.ptr, info);
+                    ddla::phe2hb<T>(handle, n, d_A.ptr, desc, nbw, d_tmat.ptr, info);
                 });
             } catch (const std::exception&) { r.threw = true; }
             check_ddla_sync(handle);

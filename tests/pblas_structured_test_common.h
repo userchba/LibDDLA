@@ -72,15 +72,15 @@ void invoke(DdlaHandle_t h,Operation op,char side,char uplo,char trans,int m,int
             T alpha,const T* a,const int* da,const T* b,const int* db,T beta,T* c,const int* dc) {
     using R=typename real_type<T>::type;
     switch(op) {
-        case Operation::Symm:psymm<Backend,T>(h,side,uplo,m,n,alpha,a,da,b,db,beta,c,dc);break;
-        case Operation::Syrk:psyrk<Backend,T>(h,uplo,trans,n,k,alpha,a,da,beta,c,dc);break;
-        case Operation::Syr2k:psyr2k<Backend,T>(h,uplo,trans,n,k,alpha,a,da,b,db,beta,c,dc);break;
+        case Operation::Symm:psymm<T>(h,side,uplo,m,n,alpha,a,da,b,db,beta,c,dc);break;
+        case Operation::Syrk:psyrk<T>(h,uplo,trans,n,k,alpha,a,da,beta,c,dc);break;
+        case Operation::Syr2k:psyr2k<T>(h,uplo,trans,n,k,alpha,a,da,b,db,beta,c,dc);break;
         case Operation::Herk:
-            if constexpr(!std::is_arithmetic_v<T>) pherk<Backend,T>(h,uplo,trans,n,k,R(alpha.real()),a,da,R(beta.real()),c,dc);
+            if constexpr(!std::is_arithmetic_v<T>) pherk<T>(h,uplo,trans,n,k,R(alpha.real()),a,da,R(beta.real()),c,dc);
             else throw std::runtime_error("HERK requires complex type");
             break;
         case Operation::Her2k:
-            if constexpr(!std::is_arithmetic_v<T>) pher2k<Backend,T>(h,uplo,trans,n,k,alpha,a,da,b,db,R(beta.real()),c,dc);
+            if constexpr(!std::is_arithmetic_v<T>) pher2k<T>(h,uplo,trans,n,k,alpha,a,da,b,db,R(beta.real()),c,dc);
             else throw std::runtime_error("HER2K requires complex type");
             break;
     }

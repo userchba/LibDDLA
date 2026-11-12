@@ -31,7 +31,7 @@ bool test_case(DdlaHandle_t h,int n,int k,char ta,char tb,char u,T beta) {
     DDLA_CHECK(ddlaMemcpy(h,a.data(),ha.data(),ha.size()*sizeof(T)));DDLA_CHECK(ddlaMemcpy(h,b.data(),hb.data(),hb.size()*sizeof(T)));
     const T alpha=value<T>(.75,.125);
     DDLA_CHECK(ddlaMemcpy(h,reference.data(),seed.data(),seed.size()*sizeof(T)));
-    gemm<B,T>(h,ta,tb,n,n,k,alpha,a.data(),lda,b.data(),ldb,beta,reference.data(),ldc);
+    gemm<T>(h,ta,tb,n,n,k,alpha,a.data(),lda,b.data(),ldb,beta,reference.data(),ldc);
     std::vector<T> expected(seed.size()),actual(seed.size());DDLA_CHECK(ddlaMemcpy(h,expected.data(),reference.data(),expected.size()*sizeof(T)));DDLA_CHECK(ddlaSynchronize(h));
     double scale=1;for(int j=0;j<n;++j)for(int i=0;i<n;++i)if(u=='U'?i<=j:i>=j)scale=std::max(scale,double(std::abs(expected[i+std::size_t(j)*ldc])));
     auto check=[&] {
@@ -51,7 +51,7 @@ bool test_case(DdlaHandle_t h,int n,int k,char ta,char tb,char u,T beta) {
         blas_impl::gemmt_run<B,T>(h,u,ta,tb,n,k,alpha,a.data(),lda,b.data(),ldb,beta,c.data(),ldc,work.data()+256,bytes);check();
     }
     DDLA_CHECK(ddlaMemcpy(h,c.data(),seed.data(),seed.size()*sizeof(T)));
-    gemmt<B,T>(h,u,ta,tb,n,k,alpha,a.data(),lda,b.data(),ldb,beta,c.data(),ldc);check();
+    gemmt<T>(h,u,ta,tb,n,k,alpha,a.data(),lda,b.data(),ldb,beta,c.data(),ldc);check();
     std::array<char,256> first,last;DDLA_CHECK(ddlaMemcpy(h,first.data(),work.data(),256));DDLA_CHECK(ddlaMemcpy(h,last.data(),work.data()+256+bytes,256));
     std::vector<T> aa(ha.size()),bb(hb.size());DDLA_CHECK(ddlaMemcpy(h,aa.data(),a.data(),aa.size()*sizeof(T)));DDLA_CHECK(ddlaMemcpy(h,bb.data(),b.data(),bb.size()*sizeof(T)));DDLA_CHECK(ddlaSynchronize(h));
     if(first!=guard||last!=guard)throw std::runtime_error("GEMMT workspace bounds");

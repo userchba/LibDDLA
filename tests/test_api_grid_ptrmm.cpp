@@ -1,3 +1,4 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 #include "api_grid_test_common.h"
 #include <cstring>
 #include <limits>
@@ -72,7 +73,7 @@ void check_case(DdlaHandle_t h, char side, char uplo, char trans, char diag,
     const char t = mode==2 ? char(std::tolower(trans)) : trans;
     const char d = mode==2 ? char(std::tolower(diag)) : diag;
     const bool empty = m==0 || n==0;
-    ptrmm<Backend,T>(h,s,u,t,d,m,n,alpha,alpha==T(0) || empty ? nullptr : a.data.data(),a.d,
+    ptrmm<T>(h,s,u,t,d,m,n,alpha,alpha==T(0) || empty ? nullptr : a.data.data(),a.d,
                     empty ? nullptr : b.data.data(),b.d);
     auto out=b.download(), aa=a.download();
     int bad=std::memcmp(aa.data(),a.host.data(),aa.size()*sizeof(T))!=0;
@@ -134,7 +135,7 @@ void invalid_cases(DdlaHandle_t h) {
     std::copy(a,a+DDLA_DLEN_,b);
     auto reject=[&](char s,char u,char t,char d,int m,int n) {
         bool caught=false;
-        try { ptrmm<Backend,double>(h,s,u,t,d,m,n,0.,nullptr,a,nullptr,b); }
+        try { ptrmm<double>(h,s,u,t,d,m,n,0.,nullptr,a,nullptr,b); }
         catch(const std::invalid_argument&) { caught=true; }
         if (!caught) throw std::runtime_error("ptrmm invalid argument not rejected");
     };
@@ -148,7 +149,7 @@ void invalid_cases(DdlaHandle_t h) {
     reject('L','U','N','N',2,2); reject('R','U','N','N',2,2);
     DDLA_CHECK(ddlaDescInit(a,h,12,12,4,3,0,0)); reject('L','U','N','N',2,2);
     bool caught=false;
-    try { ptrmm<Backend,double>(nullptr,'L','U','N','N',0,0,0.,nullptr,a,nullptr,b); }
+    try { ptrmm<double>(nullptr,'L','U','N','N',0,0,0.,nullptr,a,nullptr,b); }
     catch(const std::runtime_error&) { caught=true; }
     if (!caught) throw std::runtime_error("ptrmm null handle not rejected");
 #if DDLA_HAS_GPU
@@ -156,7 +157,7 @@ void invalid_cases(DdlaHandle_t h) {
     constexpr auto Wrong = Backend==DdlaBackend::CPU ? DdlaBackend::GPU : DdlaBackend::CPU;
     try { ptrmm<Wrong,double>(h,'L','U','N','N',0,0,0.,nullptr,a,nullptr,b); }
     catch(const std::runtime_error&) { caught=true; }
-    if (!caught) throw std::runtime_error("ptrmm backend mismatch not rejected");
+    if (!caught) throw std::runtime_error("ptrmm internal backend mismatch not rejected");
 #endif
 }
 

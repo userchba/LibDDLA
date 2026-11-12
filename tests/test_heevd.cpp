@@ -43,8 +43,8 @@ template<DdlaBackend B,class T>void cases(DdlaHandle_t h) {
                 lapack_impl::heevd_run<B,T>(h,job,uplo,n,a.ptr,ld,values.ptr+1,work.data(),lwork,
                     real_work.data(),lrwork,int_work.data(),liwork,status.ptr+1,padding.data());
                 ddlaSynchronize(h);
-            } else if constexpr(std::is_same_v<T,R>)syevd<B,T>(h,job,uplo,n,n?a.ptr:nullptr,ld,n?values.ptr+1:nullptr,status.ptr+1);
-            else heevd<B,T>(h,job,uplo,n,n?a.ptr:nullptr,ld,n?values.ptr+1:nullptr,status.ptr+1);
+            } else if constexpr(std::is_same_v<T,R>)syevd<T>(h,job,uplo,n,n?a.ptr:nullptr,ld,n?values.ptr+1:nullptr,status.ptr+1);
+            else heevd<T>(h,job,uplo,n,n?a.ptr:nullptr,ld,n?values.ptr+1:nullptr,status.ptr+1);
         };
         for(bool borrowed:{false,true}) {
             upload(h,a.ptr,initial);upload(h,values.ptr,w0);upload(h,status.ptr,info0);call(borrowed);

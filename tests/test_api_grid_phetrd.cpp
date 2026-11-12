@@ -1,3 +1,4 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 #include "api_grid_test_common.h"
 #include "workspace_test_common.h"
 #include "ddla_stream.h"
@@ -77,7 +78,7 @@ template<DdlaBackend B,class T>void application(DdlaHandle_t h,char side,char up
         require_close(h,"stored punmtr independent dense Q",error,100*std::max(1,nq)*std::numeric_limits<R>::epsilon());
         require_close(h,"stored punmtr output parent/padding",bad,0);
     };
-    punmtr<B,T>(h,side,uplo,trans,m,n,A,da,tau,C.ptr,dc);check_ddla_sync(h);verify();
+    punmtr<T>(h,side,uplo,trans,m,n,A,da,tau,C.ptr,dc);check_ddla_sync(h);verify();
     if(!raw)return;
     const auto p=spectral_impl::punmtr_trd_check<T>(h,B,side,uplo,trans,m,n,A,da,tau,C.ptr,dc);
     std::size_t bytes=0;workspace_test::Scope query(true);spectral_impl::punmtr_trd_workspace_size<T>(h,p,&bytes);
@@ -99,7 +100,7 @@ template<DdlaBackend B,class T>void reduction(DdlaHandle_t h,int n,int nb,char u
     DeviceBuffer<T>A(h,input.size()),Tau(h,std::size_t(std::max(0,n-1))+2);
     std::vector<T> tau_before(Tau.count,sentinel);upload(h,Tau.ptr,tau_before);upload(h,A.ptr,input);
     std::vector<R>d(std::size_t(n)+2,R(-731)),e(std::size_t(std::max(0,n-1))+2,R(-733));int info=-1;
-    phetrd<B,T>(h,uplo,n,n?A.ptr:nullptr,da,n?d.data()+1:nullptr,n>1?e.data()+1:nullptr,n>1?Tau.ptr+1:nullptr,info);
+    phetrd<T>(h,uplo,n,n?A.ptr:nullptr,da,n?d.data()+1:nullptr,n>1?e.data()+1:nullptr,n>1?Tau.ptr+1:nullptr,info);
     require_close(h,"phetrd info",info,0);check_ddla_sync(h);
     auto after=download(h,A.ptr,input.size()),tau_guarded=download(h,Tau.ptr,Tau.count);
     require_close(h,"phetrd scalar guards",d.front()!=R(-731)||d.back()!=R(-731)||e.front()!=R(-733)||e.back()!=R(-733)||
@@ -155,14 +156,14 @@ template<DdlaBackend B>void invalid(DdlaHandle_t h){
     int da[DDLA_DLEN_],dc[DDLA_DLEN_];ddlaDescInit(da,h,11,11,3,3,0,0);ddlaDescInit(dc,h,11,11,3,3,0,0);
     DeviceBuffer<double>A(h,512),Tau(h,20),C(h,512);std::vector<double>d(11),e(10);int info=0;
     auto rejected=[&](auto&& f){bool caught=false;try{f();}catch(const std::exception&){caught=true;}require_close(h,"tridiagonal API invalid metadata rejected collectively",caught?0:1,0);};
-    rejected([&]{phetrd<B,double>(h,'X',9,A.ptr,da,d.data(),e.data(),Tau.ptr,info);});
-    rejected([&]{phetrd<B,double>(h,'U',-1,A.ptr,da,d.data(),e.data(),Tau.ptr,info);});
-    rejected([&]{phetrd<B,double>(h,'U',12,A.ptr,da,d.data(),e.data(),Tau.ptr,info);});
-    rejected([&]{phetrd<B,double>(h,'U',9,!h->myid?nullptr:A.ptr,da,d.data(),e.data(),Tau.ptr,info);});
-    rejected([&]{phetrd<B,double>(h,'U',9,A.ptr,da,!h->myid?nullptr:d.data(),e.data(),Tau.ptr,info);});
-    rejected([&]{phetrd<B,double>(h,'U',9,A.ptr,da,d.data(),!h->myid?nullptr:e.data(),Tau.ptr,info);});
-    rejected([&]{phetrd<B,double>(h,'U',9,A.ptr,da,d.data(),e.data(),!h->myid?nullptr:Tau.ptr,info);});
-    auto apply=[&](char side,char uplo,char trans,int m,int n,const double* a,const double* tau,double* c,const int* desc){punmtr<B,double>(h,side,uplo,trans,m,n,a,da,tau,c,desc);};
+    rejected([&]{phetrd<double>(h,'X',9,A.ptr,da,d.data(),e.data(),Tau.ptr,info);});
+    rejected([&]{phetrd<double>(h,'U',-1,A.ptr,da,d.data(),e.data(),Tau.ptr,info);});
+    rejected([&]{phetrd<double>(h,'U',12,A.ptr,da,d.data(),e.data(),Tau.ptr,info);});
+    rejected([&]{phetrd<double>(h,'U',9,!h->myid?nullptr:A.ptr,da,d.data(),e.data(),Tau.ptr,info);});
+    rejected([&]{phetrd<double>(h,'U',9,A.ptr,da,!h->myid?nullptr:d.data(),e.data(),Tau.ptr,info);});
+    rejected([&]{phetrd<double>(h,'U',9,A.ptr,da,d.data(),!h->myid?nullptr:e.data(),Tau.ptr,info);});
+    rejected([&]{phetrd<double>(h,'U',9,A.ptr,da,d.data(),e.data(),!h->myid?nullptr:Tau.ptr,info);});
+    auto apply=[&](char side,char uplo,char trans,int m,int n,const double* a,const double* tau,double* c,const int* desc){punmtr<double>(h,side,uplo,trans,m,n,a,da,tau,c,desc);};
     rejected([&]{apply('X','U','N',9,7,A.ptr,Tau.ptr,C.ptr,dc);});
     rejected([&]{apply('L','X','N',9,7,A.ptr,Tau.ptr,C.ptr,dc);});
     rejected([&]{apply('L','U','X',9,7,A.ptr,Tau.ptr,C.ptr,dc);});
@@ -172,15 +173,15 @@ template<DdlaBackend B>void invalid(DdlaHandle_t h){
     int bad[DDLA_DLEN_];std::copy_n(dc,DDLA_DLEN_,bad);bad[DDLA_MB_]=2;
     rejected([&]{apply('L','U','N',9,7,A.ptr,Tau.ptr,C.ptr,bad);});
     if(h->nprocs>1){
-        rejected([&]{phetrd<B,double>(h,'U',!h->myid?0:9,A.ptr,da,d.data(),e.data(),Tau.ptr,info);});
+        rejected([&]{phetrd<double>(h,'U',!h->myid?0:9,A.ptr,da,d.data(),e.data(),Tau.ptr,info);});
         rejected([&]{apply('L','U','N',!h->myid?0:9,7,A.ptr,Tau.ptr,C.ptr,dc);});
-        rejected([&]{if(!h->myid)punmtr<B,double>(h,'L','U','N',0,0,0,nullptr,0,nullptr,0,nullptr,dc);
-            else punmtr<B,double>(h,'L','U','N',0,0,nullptr,da,nullptr,nullptr,dc);});
+        rejected([&]{if(!h->myid)punmtr<double>(h,'L','U','N',0,0,0,nullptr,0,nullptr,0,nullptr,dc);
+            else punmtr<double>(h,'L','U','N',0,0,nullptr,da,nullptr,nullptr,dc);});
     }
-    punmtr<B,double>(h,'L','U','N',0,7,nullptr,da,nullptr,nullptr,dc);
-    punmtr<B,double>(h,'R','L','C',7,0,nullptr,da,nullptr,nullptr,dc);
+    punmtr<double>(h,'L','U','N',0,7,nullptr,da,nullptr,nullptr,dc);
+    punmtr<double>(h,'R','L','C',7,0,nullptr,da,nullptr,nullptr,dc);
     DeviceBuffer<std::complex<double>>Z(h,128);
-    rejected([&]{punmtr<B,std::complex<double>>(h,'L','U','T',0,0,nullptr,da,nullptr,Z.ptr,dc);});
+    rejected([&]{punmtr<std::complex<double>>(h,'L','U','T',0,0,nullptr,da,nullptr,Z.ptr,dc);});
 #if DDLA_HAS_GPU
     constexpr auto other=B==DdlaBackend::CPU?DdlaBackend::GPU:DdlaBackend::CPU;
     rejected([&]{phetrd<other,double>(h,'U',0,nullptr,da,nullptr,nullptr,nullptr,info);});

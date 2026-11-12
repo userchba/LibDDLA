@@ -53,14 +53,14 @@ void matrix_case(DdlaHandle_t h,bool local,bool structured,char side,char ua,cha
     auto public_call=[&] {
         if(structured) {
             if(local) {
-                if(uc=='F')hemm<Backend,R>(h,side,ua,m,n,alpha,ap,a.d[DDLA_LLD_],bp,b.d[DDLA_LLD_],beta,c.data.data(),c.d[DDLA_LLD_]);
-                else hemmt<Backend,R>(h,side,ua,uc,n,alpha,ap,a.d[DDLA_LLD_],bp,b.d[DDLA_LLD_],beta,c.data.data(),c.d[DDLA_LLD_]);
+                if(uc=='F')hemm<R>(h,side,ua,m,n,alpha,ap,a.d[DDLA_LLD_],bp,b.d[DDLA_LLD_],beta,c.data.data(),c.d[DDLA_LLD_]);
+                else hemmt<R>(h,side,ua,uc,n,alpha,ap,a.d[DDLA_LLD_],bp,b.d[DDLA_LLD_],beta,c.data.data(),c.d[DDLA_LLD_]);
             } else {
-                if(uc=='F')phemm<Backend,R>(h,side,ua,m,n,alpha,ap,a.d,bp,b.d,beta,c.data.data(),c.d);
-                else phemmt<Backend,R>(h,side,ua,uc,n,alpha,ap,a.d,bp,b.d,beta,c.data.data(),c.d);
+                if(uc=='F')phemm<R>(h,side,ua,m,n,alpha,ap,a.d,bp,b.d,beta,c.data.data(),c.d);
+                else phemmt<R>(h,side,ua,uc,n,alpha,ap,a.d,bp,b.d,beta,c.data.data(),c.d);
             }
-        } else if(local)gemmt<Backend,R>(h,uc,ta,tb,n,k,alpha,ap,a.d[DDLA_LLD_],bp,b.d[DDLA_LLD_],beta,c.data.data(),c.d[DDLA_LLD_]);
-        else pgemmt<Backend,R>(h,uc,ta,tb,n,k,alpha,ap,a.d,bp,b.d,beta,c.data.data(),c.d);
+        } else if(local)gemmt<R>(h,uc,ta,tb,n,k,alpha,ap,a.d[DDLA_LLD_],bp,b.d[DDLA_LLD_],beta,c.data.data(),c.d[DDLA_LLD_]);
+        else pgemmt<R>(h,uc,ta,tb,n,k,alpha,ap,a.d,bp,b.d,beta,c.data.data(),c.d);
     };
     Wide dot[2][2]={};
     if(alpha!=T(0)) {
@@ -156,22 +156,22 @@ template <DdlaBackend Backend> void invalid_cases(DdlaHandle_t h,bool local) {
     auto reject=[&](auto call) {bool caught=false;try{call();}catch(const std::exception&){caught=true;}require(h,caught,"mixed invalid argument was accepted");};
     const double* no_real=nullptr;const T* no_complex=nullptr;
     if(local) {
-        gemmt<Backend,double>(h,'U','N','N',7,0,T(0),no_real,7,no_complex,7,T(1),nullptr,7);
-        hemm<Backend,double>(h,'L','U',7,7,T(0),no_real,7,no_complex,7,T(1),nullptr,7);
-        hemmt<Backend,double>(h,'L','U','L',7,T(0),no_real,7,no_complex,7,T(1),nullptr,7);
-        gemmBatched<Backend,double>(h,'N','N',7,7,7,T(0),static_cast<const double* const*>(nullptr),7,static_cast<const T* const*>(nullptr),7,T(1),nullptr,7,3);
-        reject([&]{gemmt<Backend,double>(h,'U','N','N',7,7,T(1),reinterpret_cast<const double*>(c.data.data()),7,b.data.data(),7,T(0),c.data.data(),7);});
-        reject([&]{hemm<Backend,double>(h,'L','U',7,-1,T(1),a.data.data(),7,b.data.data(),7,T(0),c.data.data(),7);});
-        reject([&]{hemmt<Backend,double>(h,'L','U','F',7,T(1),a.data.data(),7,b.data.data(),7,T(0),c.data.data(),7);});
-        reject([&]{gemmBatched<Backend,double>(h,'N','N',7,7,7,T(0),static_cast<const double* const*>(nullptr),7,static_cast<const T* const*>(nullptr),7,T(1),nullptr,7,-1);});
+        gemmt<double>(h,'U','N','N',7,0,T(0),no_real,7,no_complex,7,T(1),nullptr,7);
+        hemm<double>(h,'L','U',7,7,T(0),no_real,7,no_complex,7,T(1),nullptr,7);
+        hemmt<double>(h,'L','U','L',7,T(0),no_real,7,no_complex,7,T(1),nullptr,7);
+        gemmBatched<double>(h,'N','N',7,7,7,T(0),static_cast<const double* const*>(nullptr),7,static_cast<const T* const*>(nullptr),7,T(1),nullptr,7,3);
+        reject([&]{gemmt<double>(h,'U','N','N',7,7,T(1),reinterpret_cast<const double*>(c.data.data()),7,b.data.data(),7,T(0),c.data.data(),7);});
+        reject([&]{hemm<double>(h,'L','U',7,-1,T(1),a.data.data(),7,b.data.data(),7,T(0),c.data.data(),7);});
+        reject([&]{hemmt<double>(h,'L','U','F',7,T(1),a.data.data(),7,b.data.data(),7,T(0),c.data.data(),7);});
+        reject([&]{gemmBatched<double>(h,'N','N',7,7,7,T(0),static_cast<const double* const*>(nullptr),7,static_cast<const T* const*>(nullptr),7,T(1),nullptr,7,-1);});
     } else {
-        pgemmt<Backend,double>(h,'U','N','N',7,0,T(0),no_real,a.d,no_complex,b.d,T(1),nullptr,c.d);
-        phemm<Backend,double>(h,'R','L',7,7,T(0),no_real,a.d,no_complex,b.d,T(1),nullptr,c.d);
-        phemmt<Backend,double>(h,'L','U','L',7,T(0),no_real,a.d,no_complex,b.d,T(1),nullptr,c.d);
+        pgemmt<double>(h,'U','N','N',7,0,T(0),no_real,a.d,no_complex,b.d,T(1),nullptr,c.d);
+        phemm<double>(h,'R','L',7,7,T(0),no_real,a.d,no_complex,b.d,T(1),nullptr,c.d);
+        phemmt<double>(h,'L','U','L',7,T(0),no_real,a.d,no_complex,b.d,T(1),nullptr,c.d);
         int rank;MPI_Comm_rank(ddlaGetCommunicator(h),&rank);
-        reject([&]{pgemmt<Backend,double>(h,rank==0?'?':'U','N','N',7,7,T(1),a.data.data(),a.d,b.data.data(),b.d,T(0),c.data.data(),c.d);});
-        reject([&]{phemm<Backend,double>(h,'L','U',7,7,T(1),reinterpret_cast<const double*>(c.data.data()),c.d,b.data.data(),b.d,T(0),c.data.data(),c.d);});
-        reject([&]{phemmt<Backend,double>(h,'L','U','F',7,T(1),a.data.data(),a.d,b.data.data(),b.d,T(0),c.data.data(),c.d);});
+        reject([&]{pgemmt<double>(h,rank==0?'?':'U','N','N',7,7,T(1),a.data.data(),a.d,b.data.data(),b.d,T(0),c.data.data(),c.d);});
+        reject([&]{phemm<double>(h,'L','U',7,7,T(1),reinterpret_cast<const double*>(c.data.data()),c.d,b.data.data(),b.d,T(0),c.data.data(),c.d);});
+        reject([&]{phemmt<double>(h,'L','U','F',7,T(1),a.data.data(),a.d,b.data.data(),b.d,T(0),c.data.data(),c.d);});
     }
 }
 // For a square product with enough descriptor blocks, neither prepared

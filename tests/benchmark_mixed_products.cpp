@@ -59,22 +59,22 @@ void run_case(DdlaHandle_t h,const std::string& op,int n,char side,int reps) {
     }
     const T alpha(.75,.125),beta(0);
     auto mixed=[&] {
-        if(op=="gemmt")gemmt<Backend,R>(h,'L','N','N',n,n,alpha,a.data.data(),n,b.data.data(),n,beta,c.data.data(),n);
-        else if(op=="pgemmt")pgemmt<Backend,R>(h,'L','N','N',n,n,alpha,a.data.data(),a.d,b.data.data(),b.d,beta,c.data.data(),c.d);
-        else if(op=="hemm")hemm<Backend,R>(h,side,'L',n,n,alpha,a.data.data(),n,b.data.data(),n,beta,c.data.data(),n);
-        else if(op=="hemmt")hemmt<Backend,R>(h,side,'L','L',n,alpha,a.data.data(),n,b.data.data(),n,beta,c.data.data(),n);
-        else if(op=="phemm")phemm<Backend,R>(h,side,'L',n,n,alpha,a.data.data(),a.d,b.data.data(),b.d,beta,c.data.data(),c.d);
-        else if(op=="phemmt")phemmt<Backend,R>(h,side,'L','L',n,alpha,a.data.data(),a.d,b.data.data(),b.d,beta,c.data.data(),c.d);
-        else gemmBatched<Backend,R>(h,'N','N',n,n,n,alpha,da.data(),n,db.data(),n,beta,dc.data(),n,batch);
+        if(op=="gemmt")gemmt<R>(h,'L','N','N',n,n,alpha,a.data.data(),n,b.data.data(),n,beta,c.data.data(),n);
+        else if(op=="pgemmt")pgemmt<R>(h,'L','N','N',n,n,alpha,a.data.data(),a.d,b.data.data(),b.d,beta,c.data.data(),c.d);
+        else if(op=="hemm")hemm<R>(h,side,'L',n,n,alpha,a.data.data(),n,b.data.data(),n,beta,c.data.data(),n);
+        else if(op=="hemmt")hemmt<R>(h,side,'L','L',n,alpha,a.data.data(),n,b.data.data(),n,beta,c.data.data(),n);
+        else if(op=="phemm")phemm<R>(h,side,'L',n,n,alpha,a.data.data(),a.d,b.data.data(),b.d,beta,c.data.data(),c.d);
+        else if(op=="phemmt")phemmt<R>(h,side,'L','L',n,alpha,a.data.data(),a.d,b.data.data(),b.d,beta,c.data.data(),c.d);
+        else gemmBatched<R>(h,'N','N',n,n,n,alpha,da.data(),n,db.data(),n,beta,dc.data(),n,batch);
     };
     auto complex=[&] {
-        if(op=="gemmt")gemmt<Backend,T>(h,'L','N','N',n,n,alpha,ca,n,cb,n,beta,c.data.data(),n);
-        else if(op=="pgemmt")pgemmt<Backend,T>(h,'L','N','N',n,n,alpha,ca,promoted.d,cb,promoted.d,beta,c.data.data(),c.d);
-        else if(op=="hemm")hemm<Backend,T>(h,side,'L',n,n,alpha,ca,n,cb,n,beta,c.data.data(),n);
-        else if(op=="hemmt")hemmt<Backend,T>(h,side,'L','L',n,alpha,ca,n,cb,n,beta,c.data.data(),n);
-        else if(op=="phemm")phemm<Backend,T>(h,side,'L',n,n,alpha,ca,promoted.d,cb,promoted.d,beta,c.data.data(),c.d);
-        else if(op=="phemmt")phemmt<Backend,T>(h,side,'L','L',n,alpha,ca,promoted.d,cb,promoted.d,beta,c.data.data(),c.d);
-        else gemmBatched<Backend,T>(h,'N','N',n,n,n,alpha,dca.data(),n,dcb.data(),n,beta,dc.data(),n,batch);
+        if(op=="gemmt")gemmt<T>(h,'L','N','N',n,n,alpha,ca,n,cb,n,beta,c.data.data(),n);
+        else if(op=="pgemmt")pgemmt<T>(h,'L','N','N',n,n,alpha,ca,promoted.d,cb,promoted.d,beta,c.data.data(),c.d);
+        else if(op=="hemm")hemm<T>(h,side,'L',n,n,alpha,ca,n,cb,n,beta,c.data.data(),n);
+        else if(op=="hemmt")hemmt<T>(h,side,'L','L',n,alpha,ca,n,cb,n,beta,c.data.data(),n);
+        else if(op=="phemm")phemm<T>(h,side,'L',n,n,alpha,ca,promoted.d,cb,promoted.d,beta,c.data.data(),c.d);
+        else if(op=="phemmt")phemmt<T>(h,side,'L','L',n,alpha,ca,promoted.d,cb,promoted.d,beta,c.data.data(),c.d);
+        else gemmBatched<T>(h,'N','N',n,n,n,alpha,dca.data(),n,dcb.data(),n,beta,dc.data(),n,batch);
     };
     std::size_t mixed_bytes=0,complex_bytes=0,host=0;
     if(op=="gemmt"){blas_impl::gemmt_workspace_size<T,TA,TB>(h,'N','N',n,n,&mixed_bytes);blas_impl::gemmt_workspace_size<T>(h,'N','N',n,n,&complex_bytes);}

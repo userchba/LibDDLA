@@ -1,10 +1,10 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 // ---------------------------------------------------------------------------
-// test_backend_solvers: the distributed LU / Cholesky / triangular-solve family and its helpers, called with an EXPLICIT
-// backend on every backend this build contains (CPU, GPU, or both in a dual build) and all four scalar types.
-//
-// The api_grid tests call the routines bare, i.e. with the build's default backend, so in a dual build they only ever
-// reach the GPU.  This test is what proves that a CPU handle takes the CPU arms (host BLAS/LAPACK, MPI communication)
-// of the same sources, and that the backend named in the template must be the handle's.
+// test_backend_solvers exercises handle-driven distributed LU, Cholesky,
+// triangular solves and helpers on every available handle and scalar type.
+// Public calls follow the supplied handle even when it differs from the
+// handle-initialization default. Explicit wrong-Backend calls below are
+// private implementation checks through backend_api.h.
 // ---------------------------------------------------------------------------
 #include "api_grid_test_common.h"
 #include "LU/lu_internal.h"
@@ -106,28 +106,28 @@ void check_lu(const DdlaHandle_t& h, int n, int nb, int nrhs, bool all_variants)
                 fresh(dA, dB);
                 std::vector<int> ipiv(ddla_test::m_loc(h, descA) + 1, 0);
                 int info = -1;
-                ddla::pgetrf<B>(h, n, n, dA.ptr, 1, 1, descA, ipiv.data(), info);
+                ddla::pgetrf(h, n, n, dA.ptr, 1, 1, descA, ipiv.data(), info);
                 if (info != 0) MPI_Abort(ddlaGetCommunicator(h), 1);
-                ddla::pgetrs<B>(h, c.side, c.trans, n, nrhs, dA.ptr, descA, ipiv.data(), dB.ptr, descB);
+                ddla::pgetrs(h, c.side, c.trans, n, nrhs, dA.ptr, descA, ipiv.data(), dB.ptr, descB);
                 check_x<T>(h, descB, dB.ptr, h_B.size(), tag_of(B, "pgetrf+pgetrs", ty, what), tol);
             }
             {   // pgesv
                 DeviceBuffer<T> dA(h, h_A.size()), dB(h, h_B.size());
                 fresh(dA, dB);
-                ddla::pgesv<B>(h, c.side, c.trans, n, nrhs, dA.ptr, descA, dB.ptr, descB);
+                ddla::pgesv(h, c.side, c.trans, n, nrhs, dA.ptr, descA, dB.ptr, descB);
                 check_x<T>(h, descB, dB.ptr, h_B.size(), tag_of(B, "pgesv", ty, what), tol);
             }
             if (!pivoting) {   // pgetrf_nopiv + pgetrs_nopiv / pgesv_nopiv (a pivoting matrix would need row swaps)
                 DeviceBuffer<T> dA(h, h_A.size()), dB(h, h_B.size());
                 fresh(dA, dB);
                 int info = -1;
-                ddla::pgetrf_nopiv<B>(h, n, n, dA.ptr, descA, info);
+                ddla::pgetrf_nopiv(h, n, n, dA.ptr, descA, info);
                 if (info != 0) MPI_Abort(ddlaGetCommunicator(h), 1);
-                ddla::pgetrs_nopiv<B>(h, c.side, c.trans, n, nrhs, dA.ptr, descA, dB.ptr, descB);
+                ddla::pgetrs_nopiv(h, c.side, c.trans, n, nrhs, dA.ptr, descA, dB.ptr, descB);
                 check_x<T>(h, descB, dB.ptr, h_B.size(), tag_of(B, "pgetrf_nopiv+pgetrs_nopiv", ty, what), tol);
 
                 fresh(dA, dB);
-                ddla::pgesv_nopiv<B>(h, c.side, c.trans, n, nrhs, dA.ptr, descA, dB.ptr, descB);
+                ddla::pgesv_nopiv(h, c.side, c.trans, n, nrhs, dA.ptr, descA, dB.ptr, descB);
                 check_x<T>(h, descB, dB.ptr, h_B.size(), tag_of(B, "pgesv_nopiv", ty, what), tol);
             }
             {   // block pivoting: pgetrf_bpiv + pgetrs_bpiv, and the driver
@@ -135,13 +135,13 @@ void check_lu(const DdlaHandle_t& h, int n, int nb, int nrhs, bool all_variants)
                 fresh(dA, dB);
                 DeviceBuffer<int> d_ipiv(h, ddla_test::m_loc(h, descA) + 1);
                 int info = -1;
-                ddla::pgetrf_bpiv<B>(h, n, n, dA.ptr, descA, d_ipiv.ptr, info);
+                ddla::pgetrf_bpiv(h, n, n, dA.ptr, descA, d_ipiv.ptr, info);
                 if (info != 0) MPI_Abort(ddlaGetCommunicator(h), 1);
-                ddla::pgetrs_bpiv<B>(h, c.side, c.trans, n, nrhs, dA.ptr, descA, d_ipiv.ptr, dB.ptr, descB);
+                ddla::pgetrs_bpiv(h, c.side, c.trans, n, nrhs, dA.ptr, descA, d_ipiv.ptr, dB.ptr, descB);
                 check_x<T>(h, descB, dB.ptr, h_B.size(), tag_of(B, "pgetrf_bpiv+pgetrs_bpiv", ty, what), tol);
 
                 fresh(dA, dB);
-                ddla::pgesv_bpiv<B>(h, c.side, c.trans, n, nrhs, dA.ptr, descA, dB.ptr, descB);
+                ddla::pgesv_bpiv(h, c.side, c.trans, n, nrhs, dA.ptr, descA, dB.ptr, descB);
                 check_x<T>(h, descB, dB.ptr, h_B.size(), tag_of(B, "pgesv_bpiv", ty, what), tol);
             }
         }
@@ -163,7 +163,7 @@ void check_lu_info(const DdlaHandle_t& h, int n, int nb)
         check_ddla_sync(h);
         std::vector<int> ipiv(ddla_test::m_loc(h, descA) + 1, -1);
         int info = -1;
-        ddla::pgetrf<B>(h, n, n, dA.ptr, 1, 1, descA, ipiv.data(), info);
+        ddla::pgetrf(h, n, n, dA.ptr, 1, 1, descA, ipiv.data(), info);
         require_close(h, tag_of(B, "pgetrf", ty, "singular info"), std::abs(info - (zero_at + 1)), 0.0);
     }
     {
@@ -171,7 +171,7 @@ void check_lu_info(const DdlaHandle_t& h, int n, int nb)
         upload(h, dA.ptr, h_A);
         check_ddla_sync(h);
         int info = -1;
-        ddla::pgetrf_nopiv<B>(h, n, n, dA.ptr, descA, info);
+        ddla::pgetrf_nopiv(h, n, n, dA.ptr, descA, info);
         require_close(h, tag_of(B, "pgetrf_nopiv", ty, "zero pivot info"), std::abs(info - (zero_at + 1)), 0.0);
     }
 }
@@ -201,9 +201,9 @@ void check_cholesky(const DdlaHandle_t& h, int n, int nb, int nrhs)
             upload(h, dB.ptr, h_B);
             check_ddla_sync(h);
             int info = -1;
-            ddla::ppotrf<B>(h, uplo, n, dA.ptr, 1, 1, descA, info);
+            ddla::ppotrf(h, uplo, n, dA.ptr, 1, 1, descA, info);
             if (info != 0) MPI_Abort(ddlaGetCommunicator(h), 1);
-            ddla::ppotrs<B>(h, side, uplo, 'N', n, nrhs, dA.ptr, descA, dB.ptr, descB);
+            ddla::ppotrs(h, side, uplo, 'N', n, nrhs, dA.ptr, descA, dB.ptr, descB);
             check_x<T>(h, descB, dB.ptr, h_B.size(),
                        tag_of(B, "ppotrf+ppotrs", ty, std::string(1, side) + "," + uplo), tol);
 
@@ -212,7 +212,7 @@ void check_cholesky(const DdlaHandle_t& h, int n, int nb, int nrhs)
             upload(h, dB.ptr, h_B);
             check_ddla_sync(h);
             info = -1;
-            ddla::pposv<B>(h, side, uplo, 'N', n, nrhs, dA.ptr, 1, 1, descA, dB.ptr, 1, 1, descB, info);
+            ddla::pposv(h, side, uplo, 'N', n, nrhs, dA.ptr, 1, 1, descA, dB.ptr, 1, 1, descB, info);
             if (info != 0) MPI_Abort(ddlaGetCommunicator(h), 1);
             check_x<T>(h, descB, dB.ptr, h_B.size(),
                        tag_of(B, "pposv", ty, std::string(1, side) + "," + uplo), tol);
@@ -227,7 +227,7 @@ void check_cholesky(const DdlaHandle_t& h, int n, int nb, int nrhs)
         upload(h, dT.ptr, h_t);
         check_ddla_sync(h);
         int info = -1;
-        ddla::ppotrf<B>(h, 'L', 1, dT.ptr, 1, 1, tiny, info);
+        ddla::ppotrf(h, 'L', 1, dT.ptr, 1, 1, tiny, info);
         require_close(h, tag_of(B, "ppotrf", ty, "n=1 status"), std::abs(info), 0.0);
         auto out = download(h, dT.ptr, h_t.size());
         require_close(h, tag_of(B, "ppotrf", ty, "n=1 factor"),
@@ -239,7 +239,7 @@ void check_cholesky(const DdlaHandle_t& h, int n, int nb, int nrhs)
         upload(h, dN.ptr, h_n);
         check_ddla_sync(h);
         int info = -1;
-        ddla::ppotrf<B>(h, 'L', n, dN.ptr, 1, 1, descA, info);
+        ddla::ppotrf(h, 'L', n, dN.ptr, 1, 1, descA, info);
         require_close(h, tag_of(B, "ppotrf", ty, "non-PD info"), std::abs(info - 1), 0.0);
     }
 
@@ -253,14 +253,14 @@ void check_cholesky(const DdlaHandle_t& h, int n, int nb, int nrhs)
         upload(h, dB.ptr, h_B);
         check_ddla_sync(h);
         int info = -1;
-        ddla::ppotrf_bottom_right<B>(h, uplo, n, dA.ptr, descA, info);
+        ddla::ppotrf_bottom_right(h, uplo, n, dA.ptr, descA, info);
         if (info != 0) MPI_Abort(ddlaGetCommunicator(h), 1);
         if (uplo == 'U') {   // U y = b, U^H x = y
-            ddla::ptrtrs<B>(h, 'L', 'U', 'N', 'N', n, nrhs, dA.ptr, descA, dB.ptr, descB);
-            ddla::ptrtrs<B>(h, 'L', 'U', 'C', 'N', n, nrhs, dA.ptr, descA, dB.ptr, descB);
+            ddla::ptrtrs(h, 'L', 'U', 'N', 'N', n, nrhs, dA.ptr, descA, dB.ptr, descB);
+            ddla::ptrtrs(h, 'L', 'U', 'C', 'N', n, nrhs, dA.ptr, descA, dB.ptr, descB);
         } else {             // L^H y = b, L x = y
-            ddla::ptrtrs<B>(h, 'L', 'L', 'C', 'N', n, nrhs, dA.ptr, descA, dB.ptr, descB);
-            ddla::ptrtrs<B>(h, 'L', 'L', 'N', 'N', n, nrhs, dA.ptr, descA, dB.ptr, descB);
+            ddla::ptrtrs(h, 'L', 'L', 'C', 'N', n, nrhs, dA.ptr, descA, dB.ptr, descB);
+            ddla::ptrtrs(h, 'L', 'L', 'N', 'N', n, nrhs, dA.ptr, descA, dB.ptr, descB);
         }
         check_x<T>(h, descB, dB.ptr, h_B.size(),
                    tag_of(B, "ppotrf_bottom_right", ty, std::string(1, uplo)), tol);
@@ -307,7 +307,7 @@ void check_ptrtrs(const DdlaHandle_t& h, int n, int nb, int nrhs)
                     upload(h, dA.ptr, h_A);
                     upload(h, dB.ptr, h_B);
                     check_ddla_sync(h);
-                    ddla::ptrtrs<B>(h, side, uplo, trans, diag, b_rows, b_cols, dA.ptr, descA, dB.ptr, descB);
+                    ddla::ptrtrs(h, side, uplo, trans, diag, b_rows, b_cols, dA.ptr, descA, dB.ptr, descB);
                     check_x<T>(h, descB, dB.ptr, h_B.size(),
                                tag_of(B, "ptrtrs", ty, std::string(1, side) + "," + uplo + "," + trans + "," + diag),
                                2 * tolerance<T>());
@@ -341,7 +341,7 @@ void check_helpers(const DdlaHandle_t& h, const Shape& base)
         upload(h, bB.ptr, hB);
         upload(h, bC.ptr, hC);
         check_ddla_sync(h);
-        ddla::pgeadd<B>(h, ta, tb, m, n, alpha, bA.ptr, 1, 1, dA, beta, bB.ptr, 1, 1, dB, bC.ptr, 1, 1, dC);
+        ddla::pgeadd(h, ta, tb, m, n, alpha, bA.ptr, 1, 1, dA, beta, bB.ptr, 1, 1, dB, bC.ptr, 1, 1, dC);
         auto out = download(h, bC.ptr, hC.size());
         const double err = local_max_error<T>(h, dC, out, [&](int i, int j) {
             return alpha * to_T<T>(op_value(ta, a_rows, a_cols, i, j, general_value, 4))
@@ -364,7 +364,7 @@ void check_helpers(const DdlaHandle_t& h, const Shape& base)
         DeviceBuffer<T> dAm(h, hA.size());
         upload(h, dAm.ptr, hA);
         check_ddla_sync(h);
-        ddla::pdam<B>(h, alpha, dAm.ptr, desc);
+        ddla::pdam(h, alpha, dAm.ptr, desc);
         auto out = download(h, dAm.ptr, hA.size());
         require_close(h, tag_of(B, "pdam", ty),
                       local_max_error<T>(h, desc, out, [&](int i, int j) { return i == j ? alpha : T(0); }), tol);
@@ -382,7 +382,7 @@ void check_helpers(const DdlaHandle_t& h, const Shape& base)
         upload(h, bA.ptr, hA);
         upload(h, bAT.ptr, hAT);
         check_ddla_sync(h);
-        ddla::pgeadd<B>(h, conj ? 'C' : 'T', 'N', n, m, T(1), bA.ptr, 1, 1, dA,
+        ddla::pgeadd(h, conj ? 'C' : 'T', 'N', n, m, T(1), bA.ptr, 1, 1, dA,
                         T(0), bAT.ptr, 1, 1, dAT, bAT.ptr, 1, 1, dAT);
         auto out = download(h, bAT.ptr, hAT.size());
         const double err = local_max_error<T>(h, dAT, out, [&](int i, int j) {
@@ -408,7 +408,7 @@ void check_long_rows(const DdlaHandle_t& h)
     upload(h, dA.ptr, h_A);
     upload(h, dB.ptr, h_B);
     check_ddla_sync(h);
-    ddla::pgesv<B>(h, 'L', 'N', n, nrhs, dA.ptr, descA, dB.ptr, descB);
+    ddla::pgesv(h, 'L', 'N', n, nrhs, dA.ptr, descA, dB.ptr, descB);
     check_x<T>(h, descB, dB.ptr, h_B.size(), tag_of(B, "pgesv", type_name<T>(), "n=640 long pivot rows"),
                tolerance<T>());
 }
@@ -460,7 +460,7 @@ void check_rejected(const DdlaHandle_t& h, const char* name)
     try { ddla::ptrtrs<Wrong>(h, 'L', 'L', 'N', 'N', n, n, d.ptr, desc, d.ptr, desc); } catch (const std::runtime_error&) { threw2 = true; }
     bool threw3 = false;
     try { ddla::pgeadd<Wrong>(h, 'T', 'N', n, n, 1.0, d.ptr, 1, 1, desc, 0.0, d.ptr, 1, 1, desc, d.ptr, 1, 1, desc); } catch (const std::runtime_error&) { threw3 = true; }
-    require_close(h, std::string(name) + " wrong-backend template rejected",
+    require_close(h, std::string(name) + " private wrong-backend implementation rejected",
                   (threw ? 0.0 : 1.0) + (threw2 ? 0.0 : 1.0) + (threw3 ? 0.0 : 1.0), 0.0);
 }
 
@@ -505,30 +505,30 @@ void check_collective_rejection(const DdlaHandle_t& h, const char* label)
     auto both = [&](const char* what, auto&& call) { expect_all_throw(what, call); expect_ok(what, call); };
 
     both("pgeadd", [&](bool bad) {
-        ddla::pgeadd<B>(h, bad ? 'Q' : 'N', 'N', n, n, 1.0, a.ptr, 1, 1, desc, 0.0, b.ptr, 1, 1, desc,
+        ddla::pgeadd(h, bad ? 'Q' : 'N', 'N', n, n, 1.0, a.ptr, 1, 1, desc, 0.0, b.ptr, 1, 1, desc,
                         c.ptr, 1, 1, desc); });
-    both("pdam", [&](bool bad) { ddla::pdam<B>(h, 1.0, a.ptr, desc, bad ? n + 1 : n); });
+    both("pdam", [&](bool bad) { ddla::pdam(h, 1.0, a.ptr, desc, bad ? n + 1 : n); });
     both("pswap", [&](bool bad) {
-        ddla::pswap<B>(h, 4, a.ptr, 1, 1, desc, bad ? 5 : 1, b.ptr, 1, 1, desc, 1); });
+        ddla::pswap(h, 4, a.ptr, 1, 1, desc, bad ? 5 : 1, b.ptr, 1, 1, desc, 1); });
     both("plapiv", [&](bool bad) {
-        ddla::plapiv<B>(h, bad ? 'X' : 'F', 'R', 'C', 1, n, a.ptr, desc, ipiv.data(), desc, nullptr); });
+        ddla::plapiv(h, bad ? 'X' : 'F', 'R', 'C', 1, n, a.ptr, desc, ipiv.data(), desc, nullptr); });
     both("ptrtrs", [&](bool bad) {
-        ddla::ptrtrs<B>(h, bad ? 'X' : 'L', 'L', 'N', 'N', 1, 1, a.ptr, desc, b.ptr, desc); });
+        ddla::ptrtrs(h, bad ? 'X' : 'L', 'L', 'N', 'N', 1, 1, a.ptr, desc, b.ptr, desc); });
     both("ptrmm", [&](bool bad) {
-        ddla::ptrmm<B>(h, bad ? 'X' : 'L', 'L', 'N', 'N', 1, 1, 1.0, a.ptr, desc, b.ptr, desc); });
+        ddla::ptrmm(h, bad ? 'X' : 'L', 'L', 'N', 'N', 1, 1, 1.0, a.ptr, desc, b.ptr, desc); });
     both("pgemm", [&](bool bad) {
-        ddla::pgemm<B>(h, bad ? 'Q' : 'N', 'N', 1, 1, 1, 1.0, a.ptr, desc, b.ptr, desc, 0.0, c.ptr, desc); });
+        ddla::pgemm(h, bad ? 'Q' : 'N', 'N', 1, 1, 1, 1.0, a.ptr, desc, b.ptr, desc, 0.0, c.ptr, desc); });
     both("pgeqrf", [&](bool bad) {
         int info = 0;
-        ddla::pgeqrf<B>(h, bad ? -1 : 1, 1, a.ptr, desc, tau.data(), info); });
+        ddla::pgeqrf(h, bad ? -1 : 1, 1, a.ptr, desc, tau.data(), info); });
     both("pgeqlf", [&](bool bad) {
         int info = 0;
-        ddla::pgeqlf<B>(h, bad ? -1 : 1, 1, a.ptr, desc, tau.data(), info); });
+        ddla::pgeqlf(h, bad ? -1 : 1, 1, a.ptr, desc, tau.data(), info); });
     if (ddlaGetSize(h) > 1) {
         both("mixed QR/QL entries", [&](bool bad) {
             int info = 0;
-            if (bad) ddla::pgeqlf<B>(h, 1, 1, a.ptr, desc, tau.data(), info);
-            else ddla::pgeqrf<B>(h, 1, 1, a.ptr, desc, tau.data(), info);
+            if (bad) ddla::pgeqlf(h, 1, 1, a.ptr, desc, tau.data(), info);
+            else ddla::pgeqrf(h, 1, 1, a.ptr, desc, tau.data(), info);
         });
     }
 }

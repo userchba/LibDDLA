@@ -177,7 +177,7 @@ void check_padded_pheevd(const ddla::DdlaHandle_t& h, char uplo, int n, int nb, 
     upload(h, Z.ptr, std::vector<T>(Z.count, sentinel));
     std::vector<rt> w(n, std::numeric_limits<rt>::quiet_NaN());
     int info = -1;
-    ddla::pheevd<B, T>(h, 'V', uplo, n, A.ptr, descA, w.data(), Z.ptr, descZ, info);
+    ddla::pheevd<T>(h, 'V', uplo, n, A.ptr, descA, w.data(), Z.ptr, descZ, info);
     check_ddla_sync(h);
     const std::string tag = std::string("pheevd padded ") + type_name<T>() + " " + uplo +
                             " n=" + std::to_string(n) + " nb=" + std::to_string(nb)+
@@ -231,9 +231,9 @@ void check_padded_pheevd(const ddla::DdlaHandle_t& h, char uplo, int n, int nb, 
     }
     finite_metric(h, tag + " independent residual", std::sqrt(residual2) / (n * std::sqrt(norm2) * eps), 50);
     finite_metric(h, tag + " independent orthogonality", ortho / (n * eps), 50);
-    // Existing helpers instantiate the compiled default BLAS backend. The
-    // independent host checks above also cover explicit CPU in a dual build.
-    if constexpr (B == ddla::default_backend_v) if(!shifted_columns) {
+    // The helper BLAS calls select this handle as well. Keep the independent
+    // host checks above and exercise both validation paths on either backend.
+    if(!shifted_columns) {
         upload(h, A.ptr, original);
         finite_metric(h, tag + " helper residual", eig_test::residual_metric(h, A.ptr, descA, Z.ptr, descZ, w.data(), n), 50);
         finite_metric(h, tag + " helper orthogonality", eig_test::orthogonality_metric(h, Z.ptr, descZ, n), 50);
@@ -282,7 +282,7 @@ void check_aliased_pheevd(const ddla::DdlaHandle_t& h,char uplo,int n,int nb,int
     T* A=buffer.ptr;T* Z=buffer.ptr+offset;
     std::vector<R> w(n,std::numeric_limits<R>::quiet_NaN());
     int info=-1;
-    ddla::pheevd<B,T>(h,'V',uplo,n,A,descA,w.data(),Z,descZ,info);
+    ddla::pheevd<T>(h,'V',uplo,n,A,descA,w.data(),Z,descZ,info);
     check_ddla_sync(h);
     const auto after=download(h,buffer.ptr,total);
     const std::string tag=std::string("pheevd alias ")+type_name<T>()+" "+uplo+" n="+std::to_string(n)+" mode="+std::to_string(mode);
@@ -336,9 +336,9 @@ void check_row_layout_rejections(const ddla::DdlaHandle_t& h)
         ddlaDescInit(da,h,n,n,amb,anb,ar,ac);ddlaDescInit(dz,h,n,n,zmb,zmb,zr,0);
         try {
             if(driver)
-                ddla::pheevd<B,T>(h,'V','U',n,static_cast<T*>(nullptr),da,static_cast<R*>(nullptr),static_cast<T*>(nullptr),dz,info);
+                ddla::pheevd<T>(h,'V','U',n,static_cast<T*>(nullptr),da,static_cast<R*>(nullptr),static_cast<T*>(nullptr),dz,info);
             else
-                ddla::punmtr_he2hb<B,T>(h,'C',n,1,static_cast<const T*>(nullptr),da,static_cast<const T*>(nullptr),static_cast<T*>(nullptr),dz,info);
+                ddla::punmtr_he2hb<T>(h,'C',n,1,static_cast<const T*>(nullptr),da,static_cast<const T*>(nullptr),static_cast<T*>(nullptr),dz,info);
         } catch(const std::exception&) {caught=1;}
         int sum=0;MPI_Allreduce(&caught,&sum,1,MPI_INT,MPI_SUM,ddlaGetCommunicator(h));
         require_close(h,std::string(label)+(driver?" driver":" standalone"),std::abs(sum-P),0);
@@ -383,7 +383,7 @@ void check_standalone_column_layout(const ddla::DdlaHandle_t& h)
     DeviceBuffer<T> A(h,a.size()),Z(h,z.size()),Tmat(h,t.size());upload(h,A.ptr,a);upload(h,Tmat.ptr,t);
     for(char trans:{'N','C'}) {
         upload(h,Z.ptr,z);int info=-1;
-        ddla::punmtr_he2hb<B,T>(h,trans,n,nbw,A.ptr,da,Tmat.ptr,Z.ptr,dz,info);check_ddla_sync(h);
+        ddla::punmtr_he2hb<T>(h,trans,n,nbw,A.ptr,da,Tmat.ptr,Z.ptr,dz,info);check_ddla_sync(h);
         const auto after=download(h,Z.ptr,z.size()),a_after=download(h,A.ptr,a.size());
         double bad=0,padding=0,error=0,scale=1;
         for(int c=0;c<zc;++c) for(int r=0;r<dz[ddla::DDLA_LLD_];++r) {

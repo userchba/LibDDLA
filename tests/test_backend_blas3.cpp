@@ -1,3 +1,4 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 // ---------------------------------------------------------------------------
 // Backend-templated coverage for the BLAS-3 families that had NO test before
 // the wrapper unification: trsm, syrk, trmm and gemmBatched.
@@ -332,7 +333,7 @@ int check_trsm(const DdlaHandle_t& handle, char side, char uplo, char trans, cha
     bool ok = upload(handle, sc.tri, a_up, sc.tri_n) &&
               upload(handle, sc.b, b_up, sc.b_n);
     if (ok) {
-        trsm<Backend, T>(handle, side, uplo, trans, diag, m, nn, alpha,
+        trsm<T>(handle, side, uplo, trans, diag, m, nn, alpha,
                          sc.tri, kLd, sc.b, kLd);
         ok = ddlaSynchronize(handle) == ddlaStatus_t::DDLA_STATUS_SUCCESS;
     }
@@ -397,7 +398,7 @@ int check_syrk(const DdlaHandle_t& handle, char uplo, char trans, Scratch<T>& sc
 
     bool ok = upload(handle, sc.tri, a, sc.tri_n) && upload(handle, sc.c, c_seed, sc.c_n);
     if (ok) {
-        syrk<Backend, T>(handle, uplo, trans, kN, k, alpha, sc.tri, lda, beta, sc.c, kLd);
+        syrk<T>(handle, uplo, trans, kN, k, alpha, sc.tri, lda, beta, sc.c, kLd);
         ok = ddlaSynchronize(handle) == ddlaStatus_t::DDLA_STATUS_SUCCESS;
     }
     std::vector<T> got(sc.c_n);
@@ -447,7 +448,7 @@ int check_trmm(const DdlaHandle_t& handle, char side, char uplo, char trans, cha
     std::copy(a.begin(), a.end(), a_up.begin());
     bool ok = upload(handle, sc.tri, a_up, sc.tri_n) && upload(handle, sc.b, b_up, sc.b_n);
     if (ok) {
-        trmm<Backend, T>(handle, side, uplo, trans, diag, m, nn, alpha,
+        trmm<T>(handle, side, uplo, trans, diag, m, nn, alpha,
                          zero_alpha ? nullptr : sc.tri, kLd, sc.b, kLd);
         ok = ddlaSynchronize(handle) == ddlaStatus_t::DDLA_STATUS_SUCCESS;
     }
@@ -467,24 +468,24 @@ int check_trmm(const DdlaHandle_t& handle, char side, char uplo, char trans, cha
 template <DdlaBackend Backend, typename T>
 int check_trmm_edges(const DdlaHandle_t& h)
 {
-    trmm<Backend,T>(h,'l','u','n','n',0,2,T(1),nullptr,1,nullptr,1);
-    trmm<Backend,T>(h,'L','U','N','N',3,0,T(1),nullptr,3,nullptr,3);
+    trmm<T>(h,'l','u','n','n',0,2,T(1),nullptr,1,nullptr,1);
+    trmm<T>(h,'L','U','N','N',3,0,T(1),nullptr,3,nullptr,3);
     T x(1);int failures = 0;
     auto reject = [&](auto call) {
         bool caught = false;
         try { call(); } catch (const std::exception&) { caught = true; }
         if (!caught) ++failures;
     };
-    reject([&] { trmm<Backend,T>(h,'X','U','N','N',1,1,T(1),&x,1,&x,1); });
-    reject([&] { trmm<Backend,T>(h,'L','X','N','N',1,1,T(1),&x,1,&x,1); });
-    reject([&] { trmm<Backend,T>(h,'L','U','X','N',1,1,T(1),&x,1,&x,1); });
-    reject([&] { trmm<Backend,T>(h,'L','U','N','X',1,1,T(1),&x,1,&x,1); });
-    reject([&] { trmm<Backend,T>(h,'L','U','N','N',-1,1,T(1),&x,1,&x,1); });
-    reject([&] { trmm<Backend,T>(h,'L','U','N','N',2,1,T(1),&x,1,&x,2); });
-    reject([&] { trmm<Backend,T>(h,'L','U','N','N',2,1,T(1),&x,2,&x,1); });
-    reject([&] { trmm<Backend,T>(h,'L','U','N','N',1,1,T(1),nullptr,1,&x,1); });
-    reject([&] { trmm<Backend,T>(h,'L','U','N','N',1,1,T(1),&x,1,nullptr,1); });
-    reject([&] { trmm<Backend,T>(nullptr,'L','U','N','N',0,0,T(1),nullptr,1,nullptr,1); });
+    reject([&] { trmm<T>(h,'X','U','N','N',1,1,T(1),&x,1,&x,1); });
+    reject([&] { trmm<T>(h,'L','X','N','N',1,1,T(1),&x,1,&x,1); });
+    reject([&] { trmm<T>(h,'L','U','X','N',1,1,T(1),&x,1,&x,1); });
+    reject([&] { trmm<T>(h,'L','U','N','X',1,1,T(1),&x,1,&x,1); });
+    reject([&] { trmm<T>(h,'L','U','N','N',-1,1,T(1),&x,1,&x,1); });
+    reject([&] { trmm<T>(h,'L','U','N','N',2,1,T(1),&x,1,&x,2); });
+    reject([&] { trmm<T>(h,'L','U','N','N',2,1,T(1),&x,2,&x,1); });
+    reject([&] { trmm<T>(h,'L','U','N','N',1,1,T(1),nullptr,1,&x,1); });
+    reject([&] { trmm<T>(h,'L','U','N','N',1,1,T(1),&x,1,nullptr,1); });
+    reject([&] { trmm<T>(nullptr,'L','U','N','N',0,0,T(1),nullptr,1,nullptr,1); });
     return failures;
 }
 
@@ -566,7 +567,7 @@ int check_gemmBatched_standalone(const DdlaHandle_t& handle)
         C_ptr = const_cast<T* const*>(d_cptr);
     }
     if (ok) {
-        gemmBatched<Backend, T>(handle, 'N', 'N', m, n, k, alpha,
+        gemmBatched<T>(handle, 'N', 'N', m, n, k, alpha,
                                 A_ptr, lda, B_ptr, ldb, beta, C_ptr, ldc, batch);
         ok = ddlaSynchronize(handle) == ddlaStatus_t::DDLA_STATUS_SUCCESS;
     }
@@ -666,7 +667,7 @@ int check_gemmBatched_threads()
                     pb[p] = &B[p * bsz];
                     pc[p] = &out[w][p * csz];
                 }
-                gemmBatched<DdlaBackend::CPU, T>(hs[w], op.ta, op.tb, m, n, k, alpha, pa.data(), lda,
+                gemmBatched<T>(hs[w], op.ta, op.tb, m, n, k, alpha, pa.data(), lda,
                                                  pb.data(), ldb, beta, pc.data(), ldc, batch);
                 if (!close_enough<T>(out[w], ref)) fail(w == 0 ? "1-thread result vs reference" : "4-thread result vs reference", op.ta, op.tb, batch);
             }
@@ -688,7 +689,7 @@ int check_gemmBatched_threads()
         std::vector<const T*> pa(batch, a.data()), pb(batch, b.data());
         std::vector<T*> pc(batch);
         for (int p = 0; p < batch; ++p) pc[p] = &c[p * m * n];
-        gemmBatched<DdlaBackend::CPU, T>(h4, 'N', 'N', m, n, k, alpha, pa.data(), m, pb.data(), k, beta, pc.data(), m, batch);
+        gemmBatched<T>(h4, 'N', 'N', m, n, k, alpha, pa.data(), m, pb.data(), k, beta, pc.data(), m, batch);
         if (detail::ScopedBlasThreads::current() != before) fail("BLAS thread count not restored after gemmBatched", '-', '-', batch);
         {
             detail::ScopedBlasThreads pinned(1);
@@ -789,7 +790,7 @@ int run_backend()
 }
 
 #if DDLA_HAS_GPU
-// A backend mismatch and a null handle must both be rejected, per family.
+// A internal backend mismatch and a null handle must both be rejected, per family.
 int check_rejections()
 {
     DdlaHandle_t cpu = nullptr;
@@ -822,7 +823,7 @@ int check_rejections()
                                                          const_cast<double**>(arr), 1, 1); },
                      "does not match");
     }
-    expect_throw([&] { trsm<DdlaBackend::CPU>(nullptr, 'L', 'U', 'N', 'N', 1, 1, x,
+    expect_throw([&] { trsm(nullptr, 'L', 'U', 'N', 'N', 1, 1, x,
                                               &x, 1, &x, 1); }, "null handle");
     ddlaDestroy(cpu);
     ddlaDestroy(gpu);

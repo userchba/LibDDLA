@@ -28,6 +28,8 @@ void check_pzgetrf(int n, const DdlaHandle_t& ddla_handle)
     int myid = ddla_test::mypcol(ddla_handle) + ddla_test::myprow(ddla_handle)*ddla_test::npcols(ddla_handle);
     printf("myid:%d, m_loc:%d, n_loc:%d, mb:%d, nb:%d, m:%d, n:%d\n", myid, ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), matrix_desc[DDLA_MB_], matrix_desc[DDLA_NB_], matrix_desc[DDLA_M_], matrix_desc[DDLA_N_]);
     bool verbose = false;
+    DdlaHandle_t host_io = nullptr;
+    if (verbose) DDLA_CHECK(ddlaInit(host_io, DdlaBackend::CPU));
 
     std::complex<double> *d_A, *d_A_copy;
     int *d_ipiv;
@@ -70,7 +72,7 @@ void check_pzgetrf(int n, const DdlaHandle_t& ddla_handle)
         std::string filename = "before_trf_myid_";
         filename += std::to_string(myid);
         filename += ".txt";
-        write_matrix<DdlaBackend::CPU>(a.data(), ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), filename.c_str());
+        write_matrix(host_io,a.data(), ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), filename.c_str());
     }
     DDLA_CHECK(ddlaSynchronize(ddla_handle));
     MPI_Barrier(MPI_COMM_WORLD);
@@ -96,7 +98,7 @@ void check_pzgetrf(int n, const DdlaHandle_t& ddla_handle)
         std::string filename = "identity_myid_";
         filename += std::to_string(myid);
         filename += ".txt";
-        write_matrix<DdlaBackend::CPU>(a.data(), ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), filename.c_str());
+        write_matrix(host_io,a.data(), ddla_test::m_loc(ddla_handle, matrix_desc), ddla_test::n_loc(ddla_handle, matrix_desc), filename.c_str());
     }
     {
         std::vector<std::complex<double>> a(ddla_test::m_loc(ddla_handle, matrix_desc)*ddla_test::n_loc(ddla_handle, matrix_desc));
@@ -133,6 +135,7 @@ void check_pzgetrf(int n, const DdlaHandle_t& ddla_handle)
     DDLA_CHECK(ddlaFree(ddla_handle, d_A));
     DDLA_CHECK(ddlaFree(ddla_handle, d_A_copy));
     DDLA_CHECK(ddlaSynchronize(ddla_handle));
+    if (host_io) DDLA_CHECK(ddlaDestroy(host_io));
 }
 int main(int argc, char* argv[]) {  
     ddla_test_mpi_init(&argc, &argv);

@@ -16,6 +16,7 @@
 
 #include <ddla/ddla_config.h>
 #include <ddla/ddla_handle_t.h>
+#include "backend_api.h"
 #include <complex>
 
 #define DDLA_FOR_EACH_TYPE(M) \

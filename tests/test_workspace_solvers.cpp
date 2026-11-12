@@ -249,7 +249,7 @@ template<DdlaBackend B,class T>void band_case(DdlaHandle_t h,int n,int upper_til
         if(n) {
             int dz[DDLA_DLEN_];DDLA_CHECK(ddlaDescInit(dz,h,n,n,nb,nb,0,0));
             auto identity=make_local<T>(h,dz,[](int i,int j){return T(i==j);});DeviceBuffer<T>Z(h,identity.size());upload(h,Z.ptr,identity);
-            punmtr_he2hb<B,T>(h,'N',n,nbw,A.ptr,desc,factors.ptr+8,Z.ptr,dz,info);
+            punmtr_he2hb<T>(h,'N',n,nbw,A.ptr,desc,factors.ptr+8,Z.ptr,dz,info);
             const auto reduced=gather_square(h,a,desc,n),Q=gather_square(h,download(h,Z.ptr,identity.size()),dz,n);
             std::vector<T> band(std::size_t(n)*n,T(0)),tmp(band),reconstructed(band);
             for(int j=0;j<n;++j)for(int i=std::max(0,j-nbw);i<=j;++i) {

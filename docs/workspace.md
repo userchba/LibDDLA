@@ -2,8 +2,12 @@
 
 These private interfaces let a composite algorithm validate once, allocate
 scratch once, and reuse it through a panel loop. Public BLAS/LAPACK and
-distributed entry points keep their existing signatures and arrange temporary
-storage internally. Private declarations can change between releases.
+distributed entry points keep their operation arguments and arrange temporary
+storage internally. Public computational templates take scalar types only and
+select the backend from the handle. The backend template arguments below
+belong to private execution interfaces, where the enclosing algorithm has
+already selected a backend; they are not public-call syntax. Private
+declarations can change between releases.
 
 ## Check, size and run
 

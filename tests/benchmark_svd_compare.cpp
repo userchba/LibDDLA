@@ -258,9 +258,9 @@ void run(const DdlaHandle_t& h,int pr,int pc,int m,int n,int nb,int reps,const s
         DDLA_CHECK(ddlaSynchronize(h));MPI_CHECK(MPI_Barrier(comm));pool_peak(h,true);
         const double begin=MPI_Wtime();int info=0;
         if(mode=="ddla"){
-            if(cpu)pgesvd<DdlaBackend::CPU,T>(h,'V','V',m,n,a.data(),da,s.data(),u.data(),du,vt.data(),dv,info);
+            if(cpu)pgesvd<T>(h,'V','V',m,n,a.data(),da,s.data(),u.data(),du,vt.data(),dv,info);
 #if DDLA_HAS_GPU
-            if(!cpu)pgesvd<DdlaBackend::GPU,T>(h,'V','V',m,n,a.data(),da,s.data(),u.data(),du,vt.data(),dv,info);
+            if(!cpu)pgesvd<T>(h,'V','V',m,n,a.data(),da,s.data(),u.data(),du,vt.data(),dv,info);
 #endif
         }else if(mode=="lapack")lapack(m,n,a.data(),da[DDLA_LLD_],s.data(),u.data(),du[DDLA_LLD_],vt.data(),dv[DDLA_LLD_],ref_workspace,info);
 #if defined(DDLA_BENCH_SCALAPACK)

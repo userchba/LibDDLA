@@ -79,7 +79,7 @@ void run_case(const ddla::DdlaHandle_t& handle, int n, int nb, int nbw, const st
     DeviceBuffer<T> d_ref_t(handle,static_cast<std::size_t>(nbw)*nbw*std::max(nsteps,1));
     const std::vector<T> ref_poison(static_cast<std::size_t>(nbw)*nbw*std::max(nsteps,1),T(7));
     upload(handle,d_ref_t.ptr,ref_poison);
-    int ref_info=0;ddla::phe2hb<DdlaBackend::CPU,T>(handle,n,d_ref.ptr,desc,nbw,d_ref_t.ptr,ref_info);
+    int ref_info=0;ddla::phe2hb<T>(handle,n,d_ref.ptr,desc,nbw,d_ref_t.ptr,ref_info);
     const auto Aref=gather_full<T>(handle,d_ref.ptr,desc,n);
     const auto Tref=download<T>(handle,d_ref_t.ptr,ref_poison.size());
     const bool expected=(nsteps*nbw)>tile;
@@ -192,7 +192,7 @@ void run_case(const ddla::DdlaHandle_t& handle, int n, int nb, int nbw, const st
         upload(handle, d_Z.ptr, h_I);
         check_ddla_sync(handle);
         int info5 = 0;
-        ddla::punmtr_he2hb<DdlaBackend::CPU>(handle, trans, n, nbw, d_A.ptr, desc, d_tmat.ptr,
+        ddla::punmtr_he2hb(handle, trans, n, nbw, d_A.ptr, desc, d_tmat.ptr,
                            d_Z.ptr, descZ, info5);
         check_ddla_sync(handle);
         if (info5 != 0) {

@@ -232,16 +232,16 @@ void benchmark_case(DdlaHandle_t h,const Options& o,const Layout& l,const Case& 
     poison_output<T>(h,l,output.data());
     const auto candidate=[&] {
         if(distributed) {
-            if(c.symmetric) pgemmt<Backend,T>(h,c.a,'N','N',o.n,o.n,T(1),a.data(),l.d,b.data(),l.d,T(0),output.data(),l.d);
-            else ptrtrm<Backend,T>(h,c.a,'N',c.b,'N',o.n,T(1),a.data(),l.d,b.data(),l.d,T(0),output.data(),l.d);
+            if(c.symmetric) pgemmt<T>(h,c.a,'N','N',o.n,o.n,T(1),a.data(),l.d,b.data(),l.d,T(0),output.data(),l.d);
+            else ptrtrm<T>(h,c.a,'N',c.b,'N',o.n,T(1),a.data(),l.d,b.data(),l.d,T(0),output.data(),l.d);
         } else {
-            if(c.symmetric) gemmt<Backend,T>(h,c.a,'N','N',o.n,o.n,T(1),a.data(),l.ld,b.data(),l.ld,T(0),output.data(),l.ld);
-            else trtrm<Backend,T>(h,c.a,'N',c.b,'N',o.n,T(1),a.data(),l.ld,b.data(),l.ld,T(0),output.data(),l.ld);
+            if(c.symmetric) gemmt<T>(h,c.a,'N','N',o.n,o.n,T(1),a.data(),l.ld,b.data(),l.ld,T(0),output.data(),l.ld);
+            else trtrm<T>(h,c.a,'N',c.b,'N',o.n,T(1),a.data(),l.ld,b.data(),l.ld,T(0),output.data(),l.ld);
         }
     };
     const auto baseline=[&] {
-        if(distributed) pgemm<Backend,T>(h,'N','N',o.n,o.n,o.n,T(1),a.data(),l.d,b.data(),l.d,T(0),output.data(),l.d);
-        else gemm<Backend,T>(h,'N','N',o.n,o.n,o.n,T(1),a.data(),l.ld,b.data(),l.ld,T(0),output.data(),l.ld);
+        if(distributed) pgemm<T>(h,'N','N',o.n,o.n,o.n,T(1),a.data(),l.d,b.data(),l.d,T(0),output.data(),l.d);
+        else gemm<T>(h,'N','N',o.n,o.n,o.n,T(1),a.data(),l.ld,b.data(),l.ld,T(0),output.data(),l.ld);
     };
     const auto points=sample_positions(l);Errors errors;
     baseline();DDLA_CHECK(ddlaSynchronize(h));

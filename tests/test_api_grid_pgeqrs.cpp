@@ -66,7 +66,7 @@ void run_case(DdlaHandle_t h, int m, int n, int nrhs, int nb, bool shifted)
     upload(h, a.data(), ah);
     std::vector<T> tau(std::size_t(ddla_test::n_loc(h, da)) + 3, guard);
     int info = -1;
-    pgeqrf<Backend, T>(h, m, n, a.data(), da, tau.data(), info);
+    pgeqrf<T>(h, m, n, a.data(), da, tau.data(), info);
     require_close(h, "QR status", info == 0 ? 0 : 1, 0);
     const auto factored = download(h, a.data(), ah.size());
     const auto saved_tau = tau;
@@ -84,7 +84,7 @@ void run_case(DdlaHandle_t h, int m, int n, int nrhs, int nb, bool shifted)
                 bh[i + std::size_t(j) * db[DDLA_LLD_]] = value;
             }
         upload(h, b.data(), bh);
-        pgeqrs<Backend, T>(h, m, n, nrhs, a.data(), da, tau.data(), b.data(), db, info);
+        pgeqrs<T>(h, m, n, nrhs, a.data(), da, tau.data(), b.data(), db, info);
         const auto got = download(h, b.data(), bh.size());
         double error = 0, tail_norm = 0, expected_norm = 0;
         for (std::size_t offset = 0; offset < got.size(); ++offset) {
@@ -117,20 +117,20 @@ void run_case(DdlaHandle_t h, int m, int n, int nrhs, int nb, bool shifted)
         try { invoke(); } catch (const std::exception&) { threw = true; }
         require_close(h, name, threw ? 0 : 1, 0);
     };
-    rejects([&] { pgeqrs<Backend, T>(h, n - 1, n, nrhs, a.data(), da, tau.data(), b.data(), db, info); }, "reject underdetermined dimensions");
-    rejects([&] { pgeqrs<Backend, T>(h, m, n, -1, a.data(), da, tau.data(), b.data(), db, info); }, "reject negative nrhs");
-    rejects([&] { pgeqrs<Backend, T>(h, m, n, nrhs, a.data(), da, tau.data(), a.data(), da, info); }, "reject overlapping A and B");
-    rejects([&] { pgeqrs<Backend, T>(h, m, n, nrhs, a.data(), da,
+    rejects([&] { pgeqrs<T>(h, n - 1, n, nrhs, a.data(), da, tau.data(), b.data(), db, info); }, "reject underdetermined dimensions");
+    rejects([&] { pgeqrs<T>(h, m, n, -1, a.data(), da, tau.data(), b.data(), db, info); }, "reject negative nrhs");
+    rejects([&] { pgeqrs<T>(h, m, n, nrhs, a.data(), da, tau.data(), a.data(), da, info); }, "reject overlapping A and B");
+    rejects([&] { pgeqrs<T>(h, m, n, nrhs, a.data(), da,
                  ddlaGetRank(h) == 0 ? nullptr : tau.data(), b.data(), db, info); }, "reject a rank-local null tau");
     if (ddlaGetSize(h) > 1)
-        rejects([&] { pgeqrs<Backend, T>(h, m, n, ddlaGetRank(h) == 0 ? 0 : nrhs,
+        rejects([&] { pgeqrs<T>(h, m, n, ddlaGetRank(h) == 0 ? 0 : nrhs,
                      a.data(), da, tau.data(), b.data(), db, info); }, "reject inconsistent metadata before quick return");
     int bad[9];
     std::copy(db, db + 9, bad);
     bad[DDLA_MB_] = nb + 1;
-    rejects([&] { pgeqrs<Backend, T>(h, m, n, nrhs, a.data(), da, tau.data(), b.data(), bad, info); }, "reject incompatible row distribution");
+    rejects([&] { pgeqrs<T>(h, m, n, nrhs, a.data(), da, tau.data(), b.data(), bad, info); }, "reject incompatible row distribution");
     for (const auto dimensions : {std::array<int, 3>{m, n, 0}, {m, 0, nrhs}, {0, 0, 0}}) {
-        pgeqrs<Backend, T>(h, dimensions[0], dimensions[1], dimensions[2], nullptr, da, nullptr, nullptr, db, info);
+        pgeqrs<T>(h, dimensions[0], dimensions[1], dimensions[2], nullptr, da, nullptr, nullptr, db, info);
         require_close(h, "empty solve status", info == 0 ? 0 : 1, 0);
     }
 }

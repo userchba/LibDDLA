@@ -81,17 +81,17 @@ template<DdlaBackend B,class T>void cases(DdlaHandle_t h,const std::string& file
         clean(run.finish(),false);
         require(buffer.str()==expected<T>(n),"write_matrix run formatting differs");
         require(guards_intact(),"write_matrix staging canary overwritten");
-        write_matrix<B,T>(input.data(),2,n,filename.c_str());
+        write_matrix<T>(h,input.data(),2,n,filename.c_str());
         require(read_file(filename)==expected<T>(n),"checked write_matrix differs from run/reference output");
     }
     std::vector<T> after(initial.size());DDLA_CHECK(ddlaMemcpy(h,after.data(),input.data(),after.size()*sizeof(T)));
     DDLA_CHECK(ddlaSynchronize(h));require(after==initial,"write_matrix modified input");
     const auto saved=read_file(filename);
     workspace_test::Scope invalid;
-    write_matrix<B,T>(nullptr,2,3,filename.c_str());
-    write_matrix<B,T>(input.data(),0,3,filename.c_str());
-    write_matrix<B,T>(input.data(),2,-1,filename.c_str());
-    write_matrix<B,T>(input.data(),2,3,nullptr);
+    write_matrix<T>(h,nullptr,2,3,filename.c_str());
+    write_matrix<T>(h,input.data(),0,3,filename.c_str());
+    write_matrix<T>(h,input.data(),2,-1,filename.c_str());
+    write_matrix<T>(h,input.data(),2,3,nullptr);
     clean(invalid.finish(),true);
     require(read_file(filename)==saved,"write_matrix invalid input changed an existing file");
     require(!matrix_io_impl::write_matrix_check<T>(nullptr,2,3,filename.c_str()),"write_matrix null input accepted");

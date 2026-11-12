@@ -304,7 +304,7 @@ int main(int argc, char** argv)
         /* Warmup runs */
         for (int w = 0; w < warmup; ++w) {
             copy_local(h_C_work.data(), h_C0.data(), loc_m_c, loc_n_c, lld_c);
-            pgemm<DdlaBackend::CPU>(handle, 
+            pgemm(handle,
                 Nchar, Nchar, n, n, n, alpha,
                 h_A.data(), descA,
                 h_B.data(), descB,
@@ -328,7 +328,7 @@ int main(int argc, char** argv)
                 copy_local(h_C_work.data(), h_C0.data(), loc_m_c, loc_n_c, lld_c);
                 MPI_Barrier(MPI_COMM_WORLD);
                 t0 = MPI_Wtime();
-                pgemm<DdlaBackend::CPU>(handle, 
+                pgemm(handle,
                     Nchar, Nchar, n, n, n, alpha,
                     h_A.data(), descA,
                     h_B.data(), descB,
@@ -371,7 +371,7 @@ int main(int argc, char** argv)
                 copy_local(h_C_work.data(), h_C0.data(), loc_m_c, loc_n_c, lld_c);
                 MPI_Barrier(MPI_COMM_WORLD);
                 t0 = MPI_Wtime();
-                pgemm<DdlaBackend::CPU>(handle, 
+                pgemm(handle,
                     Nchar, Nchar, n, n, n, alpha,
                     h_A.data(), descA,
                     h_B.data(), descB,
@@ -406,7 +406,7 @@ int main(int argc, char** argv)
         /* ---- Correctness: fresh runs --------------------------------- */
         copy_local(h_C_work.data(), h_C0.data(), loc_m_c, loc_n_c, lld_c);
         /* DDLA */
-        pgemm<DdlaBackend::CPU>(handle, 
+        pgemm(handle,
             Nchar, Nchar, n, n, n, alpha,
             h_A.data(), descA,
             h_B.data(), descB,

@@ -176,8 +176,8 @@ void test(DdlaHandle_t h, DdlaHandle_t cpu, const Trace &trace, int op, int n, i
                     ddlaMemcpy(h, global_b.data(), full_rhs.data(), full_rhs.size() * sizeof(T)));
             }
             DDLA_CHECK(ddlaMemcpy(h, b.data(), rhs.data(), rhs.size() * sizeof(T)));
-            scatter<Backend, T>(h, n, n, a.data(), 1, 1, da, 0, global_a.data(), n);
-            scatter<Backend, T>(h, n, nrhs, b.data(), 1, 1, db, 0, global_b.data(), n);
+            scatter<T>(h, n, n, a.data(), 1, 1, da, 0, global_a.data(), n);
+            scatter<T>(h, n, nrhs, b.data(), 1, 1, db, 0, global_b.data(), n);
         }
         DDLA_CHECK(ddlaMemcpy(h, input.data(), a.data(), input.size() * sizeof(T)));
         DDLA_CHECK(ddlaMemcpy(h, rhs.data(), b.data(), rhs.size() * sizeof(T)));
@@ -201,27 +201,27 @@ void test(DdlaHandle_t h, DdlaHandle_t cpu, const Trace &trace, int op, int n, i
         const auto start = std::chrono::steady_clock::now();
         if (op == 1) {
             if constexpr (H)
-                phetrf<Backend, T>(h, u, n, a.data(), da, piv.data(), info);
+                phetrf<T>(h, u, n, a.data(), da, piv.data(), info);
             else
-                psytrf<Backend, T>(h, u, n, a.data(), da, piv.data(), info);
+                psytrf<T>(h, u, n, a.data(), da, piv.data(), info);
         }
         if (op == 2) {
             if constexpr (H)
-                phetrf_nopiv<Backend, T>(h, u, n, a.data(), da, info);
+                phetrf_nopiv<T>(h, u, n, a.data(), da, info);
             else
-                psytrf_nopiv<Backend, T>(h, u, n, a.data(), da, info);
+                psytrf_nopiv<T>(h, u, n, a.data(), da, info);
         }
         if (op == 3) {
             if constexpr (H)
-                phetrs<Backend, T>(h, u, n, nrhs, a.data(), da, piv.data(), b.data(), db, info);
+                phetrs<T>(h, u, n, nrhs, a.data(), da, piv.data(), b.data(), db, info);
             else
-                psytrs<Backend, T>(h, u, n, nrhs, a.data(), da, piv.data(), b.data(), db, info);
+                psytrs<T>(h, u, n, nrhs, a.data(), da, piv.data(), b.data(), db, info);
         }
         if (op == 4) {
             if constexpr (H)
-                phetrs_nopiv<Backend, T>(h, u, n, nrhs, a.data(), da, b.data(), db, info);
+                phetrs_nopiv<T>(h, u, n, nrhs, a.data(), da, b.data(), db, info);
             else
-                psytrs_nopiv<Backend, T>(h, u, n, nrhs, a.data(), da, b.data(), db, info);
+                psytrs_nopiv<T>(h, u, n, nrhs, a.data(), da, b.data(), db, info);
         }
         DDLA_CHECK(ddlaSynchronize(h));
         double elapsed =
@@ -317,7 +317,7 @@ void test(DdlaHandle_t h, DdlaHandle_t cpu, const Trace &trace, int op, int n, i
     else if (n && !info)
     {
         vector<T> global(h, h->myid ? 0 : std::size_t(n) * n);
-        gather<Backend, T>(h, n, n, a.data(), 1, 1, da, 0, global.data(), n);
+        gather<T>(h, n, n, a.data(), 1, 1, da, 0, global.data(), n);
         if (!h->myid)
         {
             std::vector<T> dense(std::size_t(n) * n), right(n);
@@ -408,16 +408,16 @@ template <DdlaBackend B> void invalid_calls(DdlaHandle_t h)
         if (total != h->nprocs)
             throw std::runtime_error("Invalid call did not fail on every rank");
     };
-    rejects([&] { phetrs<B, T>(h, 'L', 17, 3, a.data(), da, piv.data(), b.data(), db, info); });
+    rejects([&] { phetrs<T>(h, 'L', 17, 3, a.data(), da, piv.data(), b.data(), db, info); });
     const char *setting = std::getenv("DDLA_LDLT_PANEL");
     const bool existed = setting != nullptr;
     const std::string previous = setting ? setting : "";
     setenv("DDLA_LDLT_PANEL", "invalid", 1);
-    rejects([&] { phetrf<B, T>(h, 'L', 17, a.data(), da, piv.data(), info); });
+    rejects([&] { phetrf<T>(h, 'L', 17, a.data(), da, piv.data(), info); });
     if (h->nprocs > 1)
     {
         setenv("DDLA_LDLT_PANEL", h->myid ? "inplace" : "gather", 1);
-        rejects([&] { phetrf<B, T>(h, 'L', 17, a.data(), da, piv.data(), info); }, true);
+        rejects([&] { phetrf<T>(h, 'L', 17, a.data(), da, piv.data(), info); }, true);
     }
     if (existed)
         setenv("DDLA_LDLT_PANEL", previous.c_str(), 1);

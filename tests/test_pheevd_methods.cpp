@@ -19,7 +19,7 @@ template<DdlaBackend B,class T>void methods(DdlaHandle_t h) {
         if(gi<n&&gj<n)input[i+std::size_t(j)*d[DDLA_LLD_]]=entry<T>(gi,gj);
     }
     DeviceBuffer<T>A(h,input.size()),Z(h,input.size());std::vector<R> reference(n),w(n),only(n);int info=-1;
-    upload(h,A.ptr,input);pheevd_two_stage<B,T>(h,'N','U',n,A.ptr,d,reference.data(),nullptr,nullptr,info);
+    upload(h,A.ptr,input);pheevd_two_stage<T>(h,'N','U',n,A.ptr,d,reference.data(),nullptr,nullptr,info);
     require_close(h,"common methods reference info",info,0);
     auto topology=spectral_impl::phb2st_topology_prepare(h);
     for(char method:{'G','H'})for(DdlaBackend reduction:{DdlaBackend::CPU,DdlaBackend::GPU}) {

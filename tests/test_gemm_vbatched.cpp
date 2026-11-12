@@ -1,3 +1,4 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 #include "ddla_connector.h"
 #include <ddla/ddla_handle_t.h>
 #include <ddla/ddla.h>
@@ -509,7 +510,7 @@ double run_large_segment_case(const ddla::DdlaHandle_t& handle)
     DeviceArray<int> d_ones(handle, std::vector<int>(batch, 1));
     const std::vector<int> segments{batch};
     const double alpha1 = 1.0, beta1 = 0.5;
-    ddla::gemmVbatched2s<ddla::DdlaBackend::GPU, double>(
+    ddla::gemmVbatched2s<double>(
         handle, 'N', 'N', d_ones.data(), d_ones.data(), d_ones.data(),
         1.0, const_cast<const double* const*>(d_a0.data()), d_ones.data(),
         const_cast<const double* const*>(d_b0.data()), d_ones.data(),
@@ -583,11 +584,11 @@ double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
     }
 
     // An empty batch is a no-op whatever the pointers are.
-    ddla::gemmVbatched<ddla::DdlaBackend::GPU, T>(
+    ddla::gemmVbatched<T>(
         handle, 'N', 'N',
         nullptr, nullptr, nullptr, T{}, nullptr, nullptr,
         nullptr, nullptr, T{}, nullptr, nullptr, 0);
-    ddla::gemmVbatched2s<ddla::DdlaBackend::GPU, T>(
+    ddla::gemmVbatched2s<T>(
         handle, 'N', 'N',
         nullptr, nullptr, nullptr, T{}, nullptr, nullptr,
         nullptr, nullptr, T{}, nullptr, nullptr,
@@ -603,7 +604,7 @@ double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
         return false;
     };
     if (!rejects([&] {
-            ddla::gemmVbatched<ddla::DdlaBackend::GPU, T>(
+            ddla::gemmVbatched<T>(
                 nullptr, 'N', 'N', nullptr, nullptr, nullptr, T{}, nullptr, nullptr,
                 nullptr, nullptr, T{}, nullptr, nullptr, 0);
         }))
@@ -618,7 +619,7 @@ double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
                 nullptr, nullptr, T{}, nullptr, nullptr, 0);
         });
         const bool cpu_backend = rejects([&] {
-            ddla::gemmVbatched<ddla::DdlaBackend::CPU, T>(
+            ddla::gemmVbatched<T>(
                 cpu, 'N', 'N', nullptr, nullptr, nullptr, T{}, nullptr, nullptr,
                 nullptr, nullptr, T{}, nullptr, nullptr, 0);
         });

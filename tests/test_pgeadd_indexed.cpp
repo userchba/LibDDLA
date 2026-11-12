@@ -41,7 +41,7 @@ void check_case(DdlaHandle_t h,char ta,char tb,int m,int n,int mode,int alias,bo
         int gi=indxl2g(i,mb,c.r,c.d[DDLA_RSRC_],pr),gj=indxl2g(j,nb,c.c,c.d[DDLA_CSRC_],pc);
         c.host[i+std::size_t(j)*c.d[DDLA_LLD_]]=value<T>(gi,gj,3);
     } c.reset(); }
-    pgeadd<Backend>(h,ta,tb,m,n,alpha,av,ai,aj,da,beta,bv,bi,bj,db,c.data,ic,jc,c.d);
+    pgeadd(h,ta,tb,m,n,alpha,av,ai,aj,da,beta,bv,bi,bj,db,c.data,ic,jc,c.d);
     auto out=c.download(),aa=a.download(),bb=b.download();
     double error=0;int bad=0,any=0;
     for(std::size_t ix=0;ix<out.size();++ix) {
@@ -118,7 +118,7 @@ void scalar_cases(DdlaHandle_t h,int& cases) {
     int d[DDLA_DLEN_];DDLA_CHECK(ddlaDescInit(d,h,48,48,4,3,0,0));
     auto rejected=[&](char ta,char tb,const int* da,int ai,int aj,const int* db,int bi,int bj,int ci,int cj,int m=2) {
         bool caught=false;
-        try { pgeadd<Backend,T>(h,ta,tb,m,2,T(0),nullptr,ai,aj,da,T(0),nullptr,bi,bj,db,nullptr,ci,cj,d); }
+        try { pgeadd<T>(h,ta,tb,m,2,T(0),nullptr,ai,aj,da,T(0),nullptr,bi,bj,db,nullptr,ci,cj,d); }
         catch(const std::invalid_argument&){caught=true;}
         if(!caught)throw std::runtime_error("pgeadd failed to reject an invalid descriptor, flag or region");
     };

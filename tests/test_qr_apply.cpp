@@ -157,9 +157,9 @@ void test(DdlaHandle_t h, bool distributed, int order, int k, int qcols) {
     int info = -1;
     if (k) {
         if (distributed)
-            pgeqrf<B, T>(h, order, k, A.ptr, da, tau.data(), info);
+            pgeqrf<T>(h, order, k, A.ptr, da, tau.data(), info);
         else {
-            geqrf<B, T>(h, 'U', order, k, A.ptr, lda, dtau.ptr);
+            geqrf<T>(h, 'U', order, k, A.ptr, lda, dtau.ptr);
             tau = download(h, dtau.ptr, k);
         }
     }
@@ -173,7 +173,7 @@ void test(DdlaHandle_t h, bool distributed, int order, int k, int qcols) {
                       h->row_comm);
         if (k) {
             DeviceBuffer<T> root(h, h->myid == 0 ? full_a.size() : 1);
-            gather<B, T>(h, order, k, A.ptr, 1, 1, da, 0, root.ptr, order);
+            gather<T>(h, order, k, A.ptr, 1, 1, da, 0, root.ptr, order);
             if (!h->myid)
                 full_a = download(h, root.ptr, full_a.size());
             MPI_Bcast(full_a.data(), int(full_a.size()), ddla::detail::mpi_datatype<T>(), 0,
@@ -221,9 +221,9 @@ void test(DdlaHandle_t h, bool distributed, int order, int k, int qcols) {
             const char tr = std::is_arithmetic_v<T> && trans == 'C' ? 'T' : trans;
             reference(side, tr, m, n, k, full_a.data(), order, full_tau.data(), expected.data(), m);
             if (distributed)
-                pormqr<B, T>(h, side, trans, m, n, k, A.ptr, da, tau.data(), C.ptr, dc, info);
+                pormqr<T>(h, side, trans, m, n, k, A.ptr, da, tau.data(), C.ptr, dc, info);
             else
-                ormqr<B, T>(h, side, trans, m, n, k, A.ptr, lda, dtau.ptr, C.ptr, ldc, info);
+                ormqr<T>(h, side, trans, m, n, k, A.ptr, lda, dtau.ptr, C.ptr, ldc, info);
             require_close(h, "QR apply info", info, 0);
             auto got = download(h, C.ptr, c.size());
             double error = 0;
@@ -258,9 +258,9 @@ void test(DdlaHandle_t h, bool distributed, int order, int k, int qcols) {
             expected[i + std::size_t(j) * order] = full_a[i + std::size_t(j) * order];
     reference_q(order, qcols, k, expected.data(), order, full_tau.data());
     if (distributed)
-        porgqr<B, T>(h, order, qcols, k, A.ptr, da, tau.data(), info);
+        porgqr<T>(h, order, qcols, k, A.ptr, da, tau.data(), info);
     else
-        orgqr<B, T>(h, order, qcols, k, A.ptr, lda, dtau.ptr, info);
+        orgqr<T>(h, order, qcols, k, A.ptr, lda, dtau.ptr, info);
     require_close(h, "ORGQR info", info, 0);
     auto got = download(h, A.ptr, a.size());
     double error = 0;
@@ -288,20 +288,20 @@ template <DdlaBackend B, class T> void cases(DdlaHandle_t h) {
         test<B, T>(h, distributed, 3, 0, 2);
     }
     int info = -1;
-    ormqr<B, T>(h, 'L', 'N', 0, 3, 0, nullptr, 1, nullptr, nullptr, 1, info);
+    ormqr<T>(h, 'L', 'N', 0, 3, 0, nullptr, 1, nullptr, nullptr, 1, info);
     require_close(h, "empty apply", info, 0);
-    orgqr<B, T>(h, 0, 0, 0, nullptr, 1, nullptr, info);
+    orgqr<T>(h, 0, 0, 0, nullptr, 1, nullptr, info);
     require_close(h, "empty generate", info, 0);
     bool caught = false;
     try {
-        ormqr<B, T>(h, 'X', 'N', 0, 0, 0, nullptr, 1, nullptr, nullptr, 1, info);
+        ormqr<T>(h, 'X', 'N', 0, 0, 0, nullptr, 1, nullptr, nullptr, 1, info);
     } catch (const std::invalid_argument &) {
         caught = true;
     }
     require_close(h, "invalid side", caught ? 0 : 1, 0);
     caught = false;
     try {
-        ormqr<B, T>(h, 'L', 'N', 1, INT_MAX, 1, nullptr, 1, nullptr, nullptr, 1, info);
+        ormqr<T>(h, 'L', 'N', 1, INT_MAX, 1, nullptr, 1, nullptr, nullptr, 1, info);
     } catch (const std::overflow_error &) {
         caught = true;
     }

@@ -48,8 +48,8 @@ void bench(DdlaHandle_t h, int n, char uplo)
     }
     Buffer<T> da(h,count), db(h,count), dc(h,count), dg(h,count);
     da.put(a); db.put(b);
-    auto tri = [&] { trtrm<Backend,T>(h,uplo,'N',uplo,'N',n,T(1),da.p,ld,db.p,ld,T(0),dc.p,ld); };
-    auto dense = [&] { gemm<Backend,T>(h,'N','N',n,n,n,T(1),da.p,ld,db.p,ld,T(0),dg.p,ld); };
+    auto tri = [&] { trtrm<T>(h,uplo,'N',uplo,'N',n,T(1),da.p,ld,db.p,ld,T(0),dc.p,ld); };
+    auto dense = [&] { gemm<T>(h,'N','N',n,n,n,T(1),da.p,ld,db.p,ld,T(0),dg.p,ld); };
     for (int warm=0; warm<3; ++warm) { tri(); dense(); }
     const auto got=dc.get(), ref=dg.get();
     long double e2=0, r2=0;

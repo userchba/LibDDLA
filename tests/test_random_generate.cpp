@@ -1,3 +1,4 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 #include <cassert>
 #include <cmath>
 #include <complex>
@@ -103,7 +104,7 @@ bool test_type(int64_t count, const DdlaHandle_t& handle, const char* type_name)
     DDLA_CHECK(ddlaMemcpy(handle, d_data, sentinel.data(), bytes));
     DDLA_CHECK(ddlaSynchronize(handle));
 
-    random_generate<Backend>(handle, d_data, count);
+    random_generate(handle, d_data, count);
 
     std::vector<T> h_data(count);
     DDLA_CHECK(ddlaMemcpy(handle, h_data.data(), d_data, bytes));
@@ -134,17 +135,17 @@ template <DdlaBackend Backend>
 bool test_zero_length(const DdlaHandle_t& handle)
 {
     // Zero-length, null pointer -- a safe no-op.
-    random_generate<Backend>(handle, static_cast<std::complex<double>*>(nullptr), int64_t(0));
+    random_generate(handle, static_cast<std::complex<double>*>(nullptr), int64_t(0));
 
     // Zero-length, non-null dummy pointer -- also a safe no-op.
     std::complex<double> dummy(-3.0, -4.0);
-    random_generate<Backend>(handle, &dummy, int64_t(0));
+    random_generate(handle, &dummy, int64_t(0));
     return dummy == std::complex<double>(-3.0, -4.0);
 }
 
 //
 // Argument checks: null handle, null data for a nonzero count, and (when the other backend's handle is at hand) a
-// backend mismatch.
+// internal backend mismatch.
 //
 
 template <DdlaBackend Backend>
@@ -163,8 +164,8 @@ bool test_rejections(const DdlaHandle_t& handle, const DdlaHandle_t& other)
         }
     };
     double x[4] = {0, 0, 0, 0};
-    expect_throw([&] { random_generate<Backend>(nullptr, x, int64_t(4)); }, "null handle");
-    expect_throw([&] { random_generate<Backend>(handle, static_cast<double*>(nullptr), int64_t(4)); }, "null data");
+    expect_throw([&] { random_generate(nullptr, x, int64_t(4)); }, "null handle");
+    expect_throw([&] { random_generate(handle, static_cast<double*>(nullptr), int64_t(4)); }, "null data");
     if (other != nullptr)
         expect_throw([&] { random_generate<Backend>(other, x, int64_t(4)); }, "does not match");
     return ok;

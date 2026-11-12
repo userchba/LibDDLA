@@ -1,10 +1,9 @@
 #ifndef DDLA_WRITE_MATRIX_H
 #define DDLA_WRITE_MATRIX_H
 
-// Public <ddla/ddla.h> must be included before any redeclaration: it
-// owns the public default arguments (Backend = default_backend_v), and
-// hipcc/clang rejects redeclarations that introduce defaults later.
-#include <ddla/ddla.h>
+// Public scalar declarations and private backend overloads share one
+// declaration boundary; this header and all workspace helpers stay private.
+#include "backend_api.h"
 #include "ddla_connector.h"
 #include <ddla/ddla_handle_t.h>
 #include "plan_util.h"

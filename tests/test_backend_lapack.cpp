@@ -1,3 +1,4 @@
+#include "backend_api.h" // Internal-only wrong-backend implementation checks.
 // ---------------------------------------------------------------------------
 // Backend-templated coverage of ddla::getrf, ddla::potrf, ddla::laswp, ddla::geqrf and ddla::larft -- the LAPACK-level wrappers that
 // used to be raw cuSOLVER / hipSOLVER helpers in private headers (getrf.h, potrf.h, laswp.h) and now have a CPU arm
@@ -21,7 +22,7 @@
 //          in double precision, the triangle shape (exact zeros in the other triangle, tau on the diagonal), the
 //          implied entries of V (garbage planted in the diagonal and the unreferenced triangle) never read and V
 //          bitwise unchanged, padded V and T untouched, k up to 300 (beyond one kernel block);
-//   all    empty problems (info = 0) and the argument checks (null handle, backend mismatch, bad flag, null
+//   all    empty problems (info = 0) and the argument checks (null handle, internal backend mismatch, bad flag, null
 //          pointers, leading dimension, negative sizes).
 // Every pointer lives where the handle's backend does (host memory on a CPU handle, device memory on a GPU
 // handle), `ipiv` and `info` included.  The reference arithmetic is written out by hand, not taken from the library.
@@ -200,7 +201,7 @@ int check_getrf(const DdlaHandle_t& h, int m, int n, int pad, int zero_col, std:
     dpiv.up(std::vector<int>(static_cast<std::size_t>(k), -1));
     dinfo.up(std::vector<int>(1, -77));
 
-    getrf<Backend, T>(h, m, n, dA.p, lda, dpiv.p, dinfo.p);
+    getrf<T>(h, m, n, dA.p, lda, dpiv.p, dinfo.p);
     ddlaSynchronize(h);
 
     std::vector<T> F;
@@ -289,7 +290,7 @@ int check_potrf(const DdlaHandle_t& h, char uplo, int n, int pad, int bad_k, std
     Buf<int> dinfo(h, 1);
     dA.up(A0);
     dinfo.up(std::vector<int>(1, -77));
-    potrf<Backend, T>(h, uplo, n, dA.p, lda, dinfo.p);
+    potrf<T>(h, uplo, n, dA.p, lda, dinfo.p);
     ddlaSynchronize(h);
     std::vector<T> F;
     std::vector<int> info;
@@ -375,7 +376,7 @@ int check_laswp(const DdlaHandle_t& h, int m, int n, int pad, int k1, int k2, in
     Buf<int> dpiv(h, ipiv.size());
     dA.up(A0);
     dpiv.up(ipiv);
-    laswp<Backend, T>(h, n, dA.p, lda, k1, k2, dpiv.p, incx);
+    laswp<T>(h, n, dA.p, lda, k1, k2, dpiv.p, incx);
     ddlaSynchronize(h);
     std::vector<T> got;
     dA.down(got);
@@ -391,7 +392,7 @@ int check_laswp(const DdlaHandle_t& h, int m, int n, int pad, int k1, int k2, in
 
     // incx and -incx are inverse permutations: applying both restores the matrix.
     if (incx == 1) {
-        laswp<Backend, T>(h, n, dA.p, lda, k1, k2, dpiv.p, -1);
+        laswp<T>(h, n, dA.p, lda, k1, k2, dpiv.p, -1);
         ddlaSynchronize(h);
         dA.down(got);
         for (std::size_t i = 0; i < got.size(); ++i)
@@ -538,7 +539,7 @@ int check_geqrf(const DdlaHandle_t& h, char uplo, int m, int n, int pad, std::ui
     Buf<T> dA(h, A0.size()), dtau(h, static_cast<std::size_t>(k));
     dA.up(A0);
     dtau.up(std::vector<T>(static_cast<std::size_t>(k), guard_value<T>()));
-    geqrf<Backend, T>(h, uplo, m, n, dA.p, lda, dtau.p);
+    geqrf<T>(h, uplo, m, n, dA.p, lda, dtau.p);
     ddlaSynchronize(h);
     std::vector<T> F, tau;
     dA.down(F);
@@ -622,7 +623,7 @@ int check_geqrf_special(const DdlaHandle_t& h, char uplo, int kind)
     Buf<T> dA(h, A0.size()), dtau(h, static_cast<std::size_t>(k));
     dA.up(A0);
     dtau.up(std::vector<T>(static_cast<std::size_t>(k), guard_value<T>()));
-    geqrf<Backend, T>(h, uplo, m, n, dA.p, m, dtau.p);
+    geqrf<T>(h, uplo, m, n, dA.p, m, dtau.p);
     ddlaSynchronize(h);
     std::vector<T> F, tau;
     dA.down(F);
@@ -727,7 +728,7 @@ int check_larft(const DdlaHandle_t& h, char direct, int n, int k, int padv, int 
     dV.up(V0);
     dtau.up(tau);
     dT.up(T0);
-    larft<Backend, T>(h, direct, 'C', n, k, dV.p, ldv, dtau.p, dT.p, ldt);
+    larft<T>(h, direct, 'C', n, k, dV.p, ldv, dtau.p, dT.p, ldt);
     ddlaSynchronize(h);
     std::vector<T> V1, Tc;
     dV.down(V1);
@@ -892,13 +893,13 @@ int check_empty(const DdlaHandle_t& h)
             ++failures;
         }
     };
-    info_after("getrf m=0", [&] { getrf<Backend, T>(h, 0, 3, dA.p, 1, dpiv.p, dinfo.p); });
-    info_after("getrf n=0", [&] { getrf<Backend, T>(h, 3, 0, dA.p, 3, dpiv.p, dinfo.p); });
-    info_after("potrf n=0", [&] { potrf<Backend, T>(h, 'L', 0, dA.p, 1, dinfo.p); });
+    info_after("getrf m=0", [&] { getrf<T>(h, 0, 3, dA.p, 1, dpiv.p, dinfo.p); });
+    info_after("getrf n=0", [&] { getrf<T>(h, 3, 0, dA.p, 3, dpiv.p, dinfo.p); });
+    info_after("potrf n=0", [&] { potrf<T>(h, 'L', 0, dA.p, 1, dinfo.p); });
     // geqrf: nothing to factor, null pointers allowed.
     try {
-        geqrf<Backend, T>(h, 'U', 0, 3, static_cast<T*>(nullptr), 1, static_cast<T*>(nullptr));
-        geqrf<Backend, T>(h, 'L', 3, 0, static_cast<T*>(nullptr), 3, static_cast<T*>(nullptr));
+        geqrf<T>(h, 'U', 0, 3, static_cast<T*>(nullptr), 1, static_cast<T*>(nullptr));
+        geqrf<T>(h, 'L', 3, 0, static_cast<T*>(nullptr), 3, static_cast<T*>(nullptr));
     } catch (const std::exception& e) {
         report("geqrf empty", e.what());
         ++failures;
@@ -907,16 +908,16 @@ int check_empty(const DdlaHandle_t& h)
     try {
         detail::reflector_build_T<Backend, T>(h, 0, nullptr, nullptr, nullptr, 1, false);
         detail::reflector_build_T<Backend, T>(h, 0, nullptr, nullptr, nullptr, 1, true);
-        larft<Backend, T>(h, 'F', 'C', 5, 0, static_cast<T*>(nullptr), 5, static_cast<const T*>(nullptr), static_cast<T*>(nullptr), 1);
-        larft<Backend, T>(h, 'B', 'C', 0, 0, static_cast<T*>(nullptr), 1, static_cast<const T*>(nullptr), static_cast<T*>(nullptr), 1);
+        larft<T>(h, 'F', 'C', 5, 0, static_cast<T*>(nullptr), 5, static_cast<const T*>(nullptr), static_cast<T*>(nullptr), 1);
+        larft<T>(h, 'B', 'C', 0, 0, static_cast<T*>(nullptr), 1, static_cast<const T*>(nullptr), static_cast<T*>(nullptr), 1);
     } catch (const std::exception& e) {
         report("larft empty", e.what());
         ++failures;
     }
     // laswp: nothing to do, nothing to touch (k1 > k2, n = 0), null pointers allowed.
     try {
-        laswp<Backend, T>(h, 4, static_cast<T*>(nullptr), 4, 3, 2, nullptr, 1);
-        laswp<Backend, T>(h, 0, static_cast<T*>(nullptr), 4, 1, 4, nullptr, 1);
+        laswp<T>(h, 4, static_cast<T*>(nullptr), 4, 3, 2, nullptr, 1);
+        laswp<T>(h, 0, static_cast<T*>(nullptr), 4, 1, 4, nullptr, 1);
     } catch (const std::exception& e) {
         report("laswp empty", e.what());
         ++failures;
@@ -1020,52 +1021,52 @@ int check_rejections(const DdlaHandle_t& h, const DdlaHandle_t& other)
         }
     };
     // getrf
-    expect_throw([&] { getrf<Backend, double>(nullptr, 2, 2, x, 2, ip, &info); }, "null handle");
-    expect_throw([&] { getrf<Backend, double>(h, -1, 2, x, 2, ip, &info); }, "negative");
-    expect_throw([&] { getrf<Backend, double>(h, 2, 2, x, 2, ip, nullptr); }, "null info");
-    expect_throw([&] { getrf<Backend, double>(h, 2, 2, nullptr, 2, ip, &info); }, "null A");
-    expect_throw([&] { getrf<Backend, double>(h, 2, 2, x, 2, nullptr, &info); }, "null ipiv");
-    expect_throw([&] { getrf<Backend, double>(h, 4, 2, x, 3, ip, &info); }, "lda too small");
+    expect_throw([&] { getrf<double>(nullptr, 2, 2, x, 2, ip, &info); }, "null handle");
+    expect_throw([&] { getrf<double>(h, -1, 2, x, 2, ip, &info); }, "negative");
+    expect_throw([&] { getrf<double>(h, 2, 2, x, 2, ip, nullptr); }, "null info");
+    expect_throw([&] { getrf<double>(h, 2, 2, nullptr, 2, ip, &info); }, "null A");
+    expect_throw([&] { getrf<double>(h, 2, 2, x, 2, nullptr, &info); }, "null ipiv");
+    expect_throw([&] { getrf<double>(h, 4, 2, x, 3, ip, &info); }, "lda too small");
     // potrf
-    expect_throw([&] { potrf<Backend, double>(nullptr, 'L', 2, x, 2, &info); }, "null handle");
-    expect_throw([&] { potrf<Backend, double>(h, 'X', 2, x, 2, &info); }, "invalid uplo");
-    expect_throw([&] { potrf<Backend, double>(h, 'L', -1, x, 2, &info); }, "negative");
-    expect_throw([&] { potrf<Backend, double>(h, 'L', 2, x, 2, nullptr); }, "null info");
-    expect_throw([&] { potrf<Backend, double>(h, 'L', 2, nullptr, 2, &info); }, "null A");
-    expect_throw([&] { potrf<Backend, double>(h, 'U', 4, x, 3, &info); }, "lda too small");
+    expect_throw([&] { potrf<double>(nullptr, 'L', 2, x, 2, &info); }, "null handle");
+    expect_throw([&] { potrf<double>(h, 'X', 2, x, 2, &info); }, "invalid uplo");
+    expect_throw([&] { potrf<double>(h, 'L', -1, x, 2, &info); }, "negative");
+    expect_throw([&] { potrf<double>(h, 'L', 2, x, 2, nullptr); }, "null info");
+    expect_throw([&] { potrf<double>(h, 'L', 2, nullptr, 2, &info); }, "null A");
+    expect_throw([&] { potrf<double>(h, 'U', 4, x, 3, &info); }, "lda too small");
     // geqrf
-    expect_throw([&] { geqrf<Backend, double>(nullptr, 'U', 2, 2, x, 2, x + 8); }, "null handle");
-    expect_throw([&] { geqrf<Backend, double>(h, 'X', 2, 2, x, 2, x + 8); }, "uplo must be");
-    expect_throw([&] { geqrf<Backend, double>(h, 'U', -1, 2, x, 2, x + 8); }, "negative");
-    expect_throw([&] { geqrf<Backend, double>(h, 'L', 2, -1, x, 2, x + 8); }, "negative");
-    expect_throw([&] { geqrf<Backend, double>(h, 'U', 2, 2, nullptr, 2, x + 8); }, "null A");
-    expect_throw([&] { geqrf<Backend, double>(h, 'L', 2, 2, x, 2, nullptr); }, "null tau");
-    expect_throw([&] { geqrf<Backend, double>(h, 'U', 4, 2, x, 3, x + 8); }, "lda too small");
+    expect_throw([&] { geqrf<double>(nullptr, 'U', 2, 2, x, 2, x + 8); }, "null handle");
+    expect_throw([&] { geqrf<double>(h, 'X', 2, 2, x, 2, x + 8); }, "uplo must be");
+    expect_throw([&] { geqrf<double>(h, 'U', -1, 2, x, 2, x + 8); }, "negative");
+    expect_throw([&] { geqrf<double>(h, 'L', 2, -1, x, 2, x + 8); }, "negative");
+    expect_throw([&] { geqrf<double>(h, 'U', 2, 2, nullptr, 2, x + 8); }, "null A");
+    expect_throw([&] { geqrf<double>(h, 'L', 2, 2, x, 2, nullptr); }, "null tau");
+    expect_throw([&] { geqrf<double>(h, 'U', 4, 2, x, 3, x + 8); }, "lda too small");
     // larft
     const double* const ctau = x + 40;
-    expect_throw([&] { larft<Backend, double>(nullptr, 'F', 'C', 4, 2, x, 4, ctau, x + 48, 2); }, "null handle");
-    expect_throw([&] { larft<Backend, double>(h, 'X', 'C', 4, 2, x, 4, ctau, x + 48, 2); }, "direct must be");
-    expect_throw([&] { larft<Backend, double>(h, 'F', 'R', 4, 2, x, 4, ctau, x + 48, 2); }, "storev = 'C'");
-    expect_throw([&] { larft<Backend, double>(h, 'F', 'C', -1, 2, x, 4, ctau, x + 48, 2); }, "negative");
-    expect_throw([&] { larft<Backend, double>(h, 'B', 'C', 4, -1, x, 4, ctau, x + 48, 2); }, "negative");
-    expect_throw([&] { larft<Backend, double>(h, 'F', 'C', 2, 3, x, 4, ctau, x + 48, 3); }, "k must not exceed n");
-    expect_throw([&] { larft<Backend, double>(h, 'F', 'C', 4, 2, nullptr, 4, ctau, x + 48, 2); }, "null V");
-    expect_throw([&] { larft<Backend, double>(h, 'F', 'C', 4, 2, x, 4, nullptr, x + 48, 2); }, "null tau");
-    expect_throw([&] { larft<Backend, double>(h, 'B', 'C', 4, 2, x, 4, ctau, nullptr, 2); }, "null T");
-    expect_throw([&] { larft<Backend, double>(h, 'F', 'C', 4, 2, x, 3, ctau, x + 48, 2); }, "ldv too small");
-    expect_throw([&] { larft<Backend, double>(h, 'F', 'C', 4, 2, x, 4, ctau, x + 48, 1); }, "ldt too small");
+    expect_throw([&] { larft<double>(nullptr, 'F', 'C', 4, 2, x, 4, ctau, x + 48, 2); }, "null handle");
+    expect_throw([&] { larft<double>(h, 'X', 'C', 4, 2, x, 4, ctau, x + 48, 2); }, "direct must be");
+    expect_throw([&] { larft<double>(h, 'F', 'R', 4, 2, x, 4, ctau, x + 48, 2); }, "storev = 'C'");
+    expect_throw([&] { larft<double>(h, 'F', 'C', -1, 2, x, 4, ctau, x + 48, 2); }, "negative");
+    expect_throw([&] { larft<double>(h, 'B', 'C', 4, -1, x, 4, ctau, x + 48, 2); }, "negative");
+    expect_throw([&] { larft<double>(h, 'F', 'C', 2, 3, x, 4, ctau, x + 48, 3); }, "k must not exceed n");
+    expect_throw([&] { larft<double>(h, 'F', 'C', 4, 2, nullptr, 4, ctau, x + 48, 2); }, "null V");
+    expect_throw([&] { larft<double>(h, 'F', 'C', 4, 2, x, 4, nullptr, x + 48, 2); }, "null tau");
+    expect_throw([&] { larft<double>(h, 'B', 'C', 4, 2, x, 4, ctau, nullptr, 2); }, "null T");
+    expect_throw([&] { larft<double>(h, 'F', 'C', 4, 2, x, 3, ctau, x + 48, 2); }, "ldv too small");
+    expect_throw([&] { larft<double>(h, 'F', 'C', 4, 2, x, 4, ctau, x + 48, 1); }, "ldt too small");
     // laswp
-    expect_throw([&] { laswp<Backend, double>(nullptr, 2, x, 4, 1, 2, ip, 1); }, "null handle");
-    expect_throw([&] { laswp<Backend, double>(h, 2, x, 4, 0, 2, ip, 1); }, "k1 must be");
-    expect_throw([&] { laswp<Backend, double>(h, 2, x, 4, 1, 2, ip, 0); }, "incx must be nonzero");
-    expect_throw([&] { laswp<Backend, double>(h, 2, nullptr, 4, 1, 2, ip, 1); }, "null A");
-    expect_throw([&] { laswp<Backend, double>(h, 2, x, 4, 1, 2, nullptr, 1); }, "null ipiv");
-    expect_throw([&] { laswp<Backend, double>(h, 2, x, 3, 1, 4, ip, 1); }, "lda too small");
+    expect_throw([&] { laswp<double>(nullptr, 2, x, 4, 1, 2, ip, 1); }, "null handle");
+    expect_throw([&] { laswp<double>(h, 2, x, 4, 0, 2, ip, 1); }, "k1 must be");
+    expect_throw([&] { laswp<double>(h, 2, x, 4, 1, 2, ip, 0); }, "incx must be nonzero");
+    expect_throw([&] { laswp<double>(h, 2, nullptr, 4, 1, 2, ip, 1); }, "null A");
+    expect_throw([&] { laswp<double>(h, 2, x, 4, 1, 2, nullptr, 1); }, "null ipiv");
+    expect_throw([&] { laswp<double>(h, 2, x, 3, 1, 4, ip, 1); }, "lda too small");
     // swap
-    expect_throw([&] { swap<Backend, double>(nullptr, 2, x, 1, x + 8, 1); }, "null handle");
-    expect_throw([&] { swap<Backend, double>(h, 2, nullptr, 1, x + 8, 1); }, "null x or y");
-    expect_throw([&] { swap<Backend, double>(h, 2, x, 0, x + 8, 1); }, "nonzero");
-    expect_throw([&] { swap<Backend, double>(h, 2, x, 1, x + 8, 0); }, "nonzero");
+    expect_throw([&] { swap<double>(nullptr, 2, x, 1, x + 8, 1); }, "null handle");
+    expect_throw([&] { swap<double>(h, 2, nullptr, 1, x + 8, 1); }, "null x or y");
+    expect_throw([&] { swap<double>(h, 2, x, 0, x + 8, 1); }, "nonzero");
+    expect_throw([&] { swap<double>(h, 2, x, 1, x + 8, 0); }, "nonzero");
     if (other != nullptr) {
         expect_throw([&] { getrf<Backend, double>(other, 2, 2, x, 2, ip, &info); }, "does not match");
         expect_throw([&] { potrf<Backend, double>(other, 'L', 2, x, 2, &info); }, "does not match");
