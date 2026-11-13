@@ -723,6 +723,13 @@ void heevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
 
 
 
+template<DdlaBackend Backend,typename T>
+void hegvd(const DdlaHandle_t& handle,char jobz,char uplo,int n,T* A,int lda,T* B,int ldb,typename real_type<T>::type* w,int* info);
+template<DdlaBackend Backend,typename T>
+void sygvd(const DdlaHandle_t& handle,char jobz,char uplo,int n,T* A,int lda,T* B,int ldb,T* w,int* info);
+template<DdlaBackend Backend,typename T>
+void phegvd(const DdlaHandle_t& handle,char jobz,char uplo,int n,int nev,T* A,const int* descA,T* B,const int* descB,typename real_type<T>::type* w,T* Z,const int* descZ,int& info);
+
 template <DdlaBackend Backend, typename T>
 void pheevd(
     const DdlaHandle_t& handle,

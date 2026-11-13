@@ -1,6 +1,6 @@
 {
-  "public_backend_overloads": 136,
-  "public_concrete_specializations": 498,
+  "public_backend_overloads": 139,
+  "public_concrete_specializations": 506,
   "pstedc": "already handle-only, unchanged",
   "type_policy_sources": {
     "dgmm": "src/BLAS/dgmm.cpp TYPES",
@@ -12,7 +12,9 @@
     "pherk": "src/PBLAS/pherk.cpp INSTANTIATE_TYPES",
     "pher2k": "src/PBLAS/pher2k.cpp INSTANTIATE_TYPES",
     "mixed_alpha": "src/BLAS/scal.cpp,scalBatched.cpp; src/PBLAS/pscal.cpp",
-    "mixed_R": "matching explicit float/double definitions in source family"
+    "mixed_R": "matching explicit float/double definitions in source family",
+    "sygvd": "src/Eigensolver/hegvd.cpp LOCAL",
+    "hegvd": "src/Eigensolver/hegvd.cpp LOCAL"
   },
   "overloads": [
     {
@@ -2143,6 +2145,50 @@
       ],
       "public_signature": "void porgqr( const DdlaHandle_t& h, int m, int n, int k, T* A, const int* descA, const T* tau, int& info)",
       "private_signature": "void porgqr( const DdlaHandle_t& h, int m, int n, int k, T* A, const int* descA, const T* tau, int& info)",
+      "supported_scalar_arguments": [
+        "float",
+        "double",
+        "std::complex<float>",
+        "std::complex<double>"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 136,
+      "name": "hegvd",
+      "scalar_parameters": [
+        "T"
+      ],
+      "public_signature": "void hegvd(const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, int lda, T* B, int ldb, typename real_type<T>::type* w, int* info)",
+      "private_signature": "void hegvd(const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, int lda, T* B, int ldb, typename real_type<T>::type* w, int* info)",
+      "supported_scalar_arguments": [
+        "std::complex<float>",
+        "std::complex<double>"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 137,
+      "name": "sygvd",
+      "scalar_parameters": [
+        "T"
+      ],
+      "public_signature": "void sygvd(const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, int lda, T* B, int ldb, T* w, int* info)",
+      "private_signature": "void sygvd(const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, int lda, T* B, int ldb, T* w, int* info)",
+      "supported_scalar_arguments": [
+        "float",
+        "double"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 138,
+      "name": "phegvd",
+      "scalar_parameters": [
+        "T"
+      ],
+      "public_signature": "void phegvd(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, T* B, const int* descB, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)",
+      "private_signature": "void phegvd(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, T* B, const int* descB, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)",
       "supported_scalar_arguments": [
         "float",
         "double",

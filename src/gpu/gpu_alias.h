@@ -60,6 +60,7 @@ constexpr auto GPUBLAS_STATUS_SUCCESS = DDLA_GPU_BLAS_CONST(STATUS_SUCCESS);
 // ---- solver ------------------------------------------------------------------------------------
 using gpusolverHandle_t = DDLA_GPU_SOLVER(Handle_t);
 using gpusolverStatus_t = DDLA_GPU_SOLVER_BASE(Status_t);
+constexpr auto GPUSOLVER_EIG_TYPE_1 = DDLA_GPU_SOLVER_CONST(EIG_TYPE_1);
 using gpusolverEigMode_t = DDLA_GPU_SOLVER_BASE(EigMode_t);
 constexpr auto GPUSOLVER_EIG_MODE_VECTOR = DDLA_GPU_SOLVER_CONST(EIG_MODE_VECTOR);
 constexpr auto GPUSOLVER_EIG_MODE_NOVECTOR = DDLA_GPU_SOLVER_CONST(EIG_MODE_NOVECTOR);
@@ -258,6 +259,15 @@ constexpr auto gpucclSum = ncclSum;
 #define gpusolverDsyevd_bufferSize DDLA_GPU_SOLVER(Dsyevd_bufferSize)
 #define gpusolverCheevd_bufferSize DDLA_GPU_SOLVER(Cheevd_bufferSize)
 #define gpusolverZheevd_bufferSize DDLA_GPU_SOLVER(Zheevd_bufferSize)
+
+#define gpusolverSsygvd DDLA_GPU_SOLVER(Ssygvd)
+#define gpusolverSsygvd_bufferSize DDLA_GPU_SOLVER(Ssygvd_bufferSize)
+#define gpusolverDsygvd DDLA_GPU_SOLVER(Dsygvd)
+#define gpusolverDsygvd_bufferSize DDLA_GPU_SOLVER(Dsygvd_bufferSize)
+#define gpusolverChegvd DDLA_GPU_SOLVER(Chegvd)
+#define gpusolverChegvd_bufferSize DDLA_GPU_SOLVER(Chegvd_bufferSize)
+#define gpusolverZhegvd DDLA_GPU_SOLVER(Zhegvd)
+#define gpusolverZhegvd_bufferSize DDLA_GPU_SOLVER(Zhegvd_bufferSize)
 
 #define gpusolverSgesvd DDLA_GPU_SOLVER(Sgesvd)
 #define gpusolverDgesvd DDLA_GPU_SOLVER(Dgesvd)

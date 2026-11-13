@@ -2271,6 +2271,43 @@ template <typename T>
 void heevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
            T* A, int lda, typename real_type<T>::type* w, int* info);
 
+/**
+ * @brief Local generalized Hermitian-definite solve A X = B X diag(w).
+ *
+ * B must be positive definite. UPLO selects the stored triangle of A/B;
+ * A is destroyed (replaced by B-orthonormal eigenvectors for jobz='V'),
+ * and B is replaced by its Cholesky factor. A/B must not overlap.
+ * w and info live in the handle's backend, as for heevd/syevd. Parent
+ * columns and leading-dimension padding are preserved. No MPI collective.
+ * info=0 succeeds; 1..n denotes eigensolver failure; n+i means B's
+ * leading minor i is not positive definite. Only A X = B X Lambda is supported.
+ */
+template<typename T>
+void hegvd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
+           T* A, int lda, T* B, int ldb, typename real_type<T>::type* w, int* info);
+// Real symmetric-definite counterpart (float/double).
+template<typename T>
+void sygvd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
+           T* A, int lda, T* B, int ldb, T* w, int* info);
+
+/**
+ * @brief Distributed generalized Hermitian-definite solve A Z = B Z diag(w).
+ *
+ * Returns all n ascending host eigenvalues and, for V, the lowest nev
+ * B-orthonormal eigenvectors. 0<=nev<=n; nev=0 ignores Z/descZ.
+ * A/B need matching square source-zero blocks; Z follows pheevd's output
+ * restrictions and covers n-by-nev. Only UPLO of A/B is read. A is destroyed;
+ * B is overwritten by its Cholesky factor. A and Z may alias; B must be
+ * disjoint from A and active Z. Outside the leading active blocks is preserved.
+ * Every matrix-sized intermediate stays distributed; no root gather.
+ * info is a host reference; n+i reports B's non-positive leading minor i.
+ * Backend, arguments and rank-inconsistent metadata errors throw collectively.
+ */
+template<typename T>
+void phegvd(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev,
+            T* A, const int* descA, T* B, const int* descB,
+            typename real_type<T>::type* w, T* Z, const int* descZ, int& info);
+
 // Hermitian eigensolver interfaces; shared by CPU and GPU backends.
 // The eigensolvers below follow ELPA: return all n ascending eigenvalues and
 // the eigenvectors for the lowest nev eigenvalues (0 <= nev <= n). For V,

@@ -1812,6 +1812,44 @@ void heevd(
 template void heevd<std::complex<float>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, std::complex<float>* A, int lda, typename real_type<std::complex<float>>::type* w, int* info);
 template void heevd<std::complex<double>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, std::complex<double>* A, int lda, typename real_type<std::complex<double>>::type* w, int* info);
 
+template<typename T>
+void hegvd(const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, int lda, T* B, int ldb, typename real_type<T>::type* w, int* info)
+{
+#if DDLA_HAS_GPU
+    if(handle && handle->backend==DdlaBackend::GPU)
+        return hegvd<DdlaBackend::GPU,T>(handle, jobz, uplo, n, A, lda, B, ldb, w, info);
+#endif
+    return hegvd<DdlaBackend::CPU,T>(handle, jobz, uplo, n, A, lda, B, ldb, w, info);
+}
+template void hegvd<std::complex<float>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, std::complex<float>* A, int lda, std::complex<float>* B, int ldb, typename real_type<std::complex<float>>::type* w, int* info);
+template void hegvd<std::complex<double>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, std::complex<double>* A, int lda, std::complex<double>* B, int ldb, typename real_type<std::complex<double>>::type* w, int* info);
+
+template<typename T>
+void sygvd(const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, int lda, T* B, int ldb, T* w, int* info)
+{
+#if DDLA_HAS_GPU
+    if(handle && handle->backend==DdlaBackend::GPU)
+        return sygvd<DdlaBackend::GPU,T>(handle, jobz, uplo, n, A, lda, B, ldb, w, info);
+#endif
+    return sygvd<DdlaBackend::CPU,T>(handle, jobz, uplo, n, A, lda, B, ldb, w, info);
+}
+template void sygvd<float>(const DdlaHandle_t& handle, char jobz, char uplo, int n, float* A, int lda, float* B, int ldb, float* w, int* info);
+template void sygvd<double>(const DdlaHandle_t& handle, char jobz, char uplo, int n, double* A, int lda, double* B, int ldb, double* w, int* info);
+
+template<typename T>
+void phegvd(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, T* B, const int* descB, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)
+{
+#if DDLA_HAS_GPU
+    if(handle && handle->backend==DdlaBackend::GPU)
+        return phegvd<DdlaBackend::GPU,T>(handle, jobz, uplo, n, nev, A, descA, B, descB, w, Z, descZ, info);
+#endif
+    return phegvd<DdlaBackend::CPU,T>(handle, jobz, uplo, n, nev, A, descA, B, descB, w, Z, descZ, info);
+}
+template void phegvd<float>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, float* A, const int* descA, float* B, const int* descB, typename real_type<float>::type* w, float* Z, const int* descZ, int& info);
+template void phegvd<double>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, double* A, const int* descA, double* B, const int* descB, typename real_type<double>::type* w, double* Z, const int* descZ, int& info);
+template void phegvd<std::complex<float>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, std::complex<float>* A, const int* descA, std::complex<float>* B, const int* descB, typename real_type<std::complex<float>>::type* w, std::complex<float>* Z, const int* descZ, int& info);
+template void phegvd<std::complex<double>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, std::complex<double>* A, const int* descA, std::complex<double>* B, const int* descB, typename real_type<std::complex<double>>::type* w, std::complex<double>* Z, const int* descZ, int& info);
+
 template <typename T>
 void pheevd(
     const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)
