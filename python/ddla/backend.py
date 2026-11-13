@@ -5,8 +5,10 @@ from typing import Optional, Tuple
 from ._c_api import (
     lib, check_status,
     STATUS_SUCCESS, BACKEND_CPU, BACKEND_GPU,
+    COMMUNICATION_MPI, COMMUNICATION_HOST_STAGED_MPI, COMMUNICATION_CCL,
     ddla_c_init_backend, ddla_c_set, ddla_c_destroy,
     ddla_c_backend_available, ddla_c_get_backend,
+    ddla_c_set_communication, ddla_c_get_communication, ddla_c_communication_available,
     ddla_c_grid_dims, ddla_c_grid_coords, ddla_c_rank, ddla_c_size,
     ddla_c_descinit, ddla_c_numloc, ddla_c_malloc, ddla_c_free,
     ddla_c_memcpy, ddla_c_memcpy2d, ddla_c_memset, ddla_c_synchronize
@@ -16,6 +18,11 @@ from .layout import ProcessorLayout
 class Backend(enum.IntEnum):
     CPU = BACKEND_CPU
     GPU = BACKEND_GPU
+
+class Communication(enum.IntEnum):
+    MPI = COMMUNICATION_MPI
+    HOST_STAGED_MPI = COMMUNICATION_HOST_STAGED_MPI
+    CCL = COMMUNICATION_CCL
 
 class Handle:
     """Manages the LibDDLA handle lifecycle, process grid, backend execution, and device streams."""
@@ -60,6 +67,29 @@ class Handle:
     @staticmethod
     def is_backend_available(backend: Backend) -> bool:
         return bool(ddla_c_backend_available(int(backend)))
+
+    @property
+    def communication(self) -> Communication:
+        """Current per-handle transport; this query is local."""
+        value = ctypes.c_int()
+        st = ddla_c_get_communication(self._handle, ctypes.byref(value))
+        check_status(st, "ddla_c_get_communication")
+        return Communication(value.value)
+
+    def is_communication_available(self, communication: Communication) -> bool:
+        """Query a handle capability; GPU-aware MPI support is not probed."""
+        return bool(ddla_c_communication_available(self._handle, int(communication)))
+
+    def set_communication(self, communication: Communication):
+        """Collectively switch transport on this configured handle.
+
+        All communicator ranks must call with the same mode, outside an active
+        communication group. Rejection preserves the previous mode. Pass the
+        integer to the core unchanged so it can reject invalid/mismatched modes
+        collectively rather than stranding peers in a local Python check.
+        """
+        st = ddla_c_set_communication(self._handle, int(communication))
+        check_status(st, "ddla_c_set_communication")
 
     @property
     def grid_dims(self) -> Tuple[int, int]:

@@ -44,6 +44,10 @@ public:
     // -- backend identity (set during ddlaInit) -----------------------------
     // Placeholder until ddlaInit overwrites it; never consulted before that.
     DdlaBackend backend = DdlaBackend::CPU;
+    DdlaCommunication communication = DdlaCommunication::MPI;
+    // Internal groups may be rank-local. Transport changes are forbidden until
+    // they close; a handle is never used concurrently by application threads.
+    int communication_group_depth = 0;
 
     // -- host threading ----------------------------------------------------
     // Host-loop and eigensolver budget, frozen collectively by ddlaSet for
@@ -86,6 +90,7 @@ public:
     void init(MPI_Comm comm_group, char major);
     void init(int nprows, int npcols, MPI_Comm comm_group, char major);
     void clean();
+    void set_communication_resources(DdlaCommunication mode);
     ~DdlaStream();
     void check_memory();
     void rank_to_rc(int rank, int& row, int& col) const

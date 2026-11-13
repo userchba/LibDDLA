@@ -25,7 +25,7 @@ selection per handle at runtime. All functions live in the `ddla` namespace.
   Only the variable-size batched GEMMs
   (`gemmVbatched`, `gemmVbatched2s`) need `DDLA_USE_CUDA` or `DDLA_USE_HIP`
   in a CPU+GPU build.
-  `DDLA_USE_CCL` and `DDLA_USE_GPU_CPU_TUNNEL` are not supported with a
+  `DDLA_USE_CCL` is not supported with a
   CPU-only build, since there is no GPU backend to communicate with.
 - **Supported scalar types** are `float`, `double`, `std::complex<float>`, and
   `std::complex<double>`. The distributed Cholesky family (`ppotrf` /
@@ -331,31 +331,64 @@ and rebuild native bindings together with their Fortran/Python consumers.
 | `DDLA_USE_OPENMP`         | ON      | OpenMP threads for the host kernels of the CPU eigensolver (`src/Eigensolver/eig_cpu_kernels.cpp`, compiled with the host compiler in every build); OFF or no OpenMP: serial, same results |
 | `DDLA_LAPACK_LIBRARY`     | (empty) | Host LAPACK for all source builds; otherwise use `DDLA_CPU_BLAS_LIBRARY`, the `OPENBLAS` environment path, or LAPACK discovery |
 | `DDLA_USE_DEBUG`          | OFF     | Enable `DDLA_USE_DEBUG` preprocessor macro |
-| `DDLA_USE_CCL`            | OFF     | Use NCCL (CUDA) or RCCL (HIP) for device collectives (GPU backend required) |
-| `DDLA_USE_GPU_CPU_TUNNEL` | OFF     | Route communication through host staging buffers (D2H → MPI → H2D) (GPU backend required) |
+| `DDLA_USE_CCL`            | OFF     | Build/link NCCL (CUDA) or RCCL (HIP), making CCL available for GPU handles |
 | `DDLA_ENABLE_FORTRAN`    | OFF     | Build `ddla_c`, the `ddla_fortran` library and Fortran module `ddla`; requires a Fortran compiler |
 | `DDLA_ENABLE_PYTHON`     | OFF     | Build `ddla_c` and stage the Python package; requires a Python 3 interpreter |
 
-When both `DDLA_USE_CCL` and `DDLA_USE_GPU_CPU_TUNNEL` are enabled, the
-GPU-CPU tunnel path takes precedence for communication.  NCCL/RCCL libraries
-are still linked, and CMake emits a warning noting that CCL will not be used.
+Host-staged MPI is available in every GPU build; it needs no build option.
 
 ## Communication modes
 
-The library selects one of three communication paths at compile time:
+Each handle stores a `DdlaCommunication` policy independently of its CPU/GPU
+backend. CPU handles use `MPI`. GPU handles support `MPI` and `HostStagedMPI`,
+plus `CCL` when built with NCCL/RCCL. GPU handles initially use `CCL` when
+compiled in, otherwise `MPI`, preserving the previous default when no staging
+option was specified. Select `HostStagedMPI` with the handle setter when MPI
+does not support device buffers.
 
-| Path                             | Preprocessor                     | Behaviour |
-|----------------------------------|----------------------------------|-----------|
-| NCCL / RCCL                      | `DDLA_USE_CCL`                   | Direct device collectives on GPU-resident buffers |
-| GPU-CPU tunnel                   | `DDLA_USE_GPU_CPU_TUNNEL`        | D2H copy → MPI collective → H2D copy |
-| Synchronized MPI on device ptrs  | *(neither)*                      | `deviceStreamSynchronize` then GPU-aware MPI on device pointers |
+| Policy | GPU behaviour |
+|---|---|
+| `DdlaCommunication::MPI` | Synchronize the handle stream, then pass device buffers to MPI |
+| `DdlaCommunication::HostStagedMPI` | Copy device data to host staging buffers, communicate with MPI, then copy results back |
+| `DdlaCommunication::CCL` | NCCL/RCCL device communication, using communicators for the handle's grid |
 
-All ranks must execute collectives in the same order regardless of the chosen
-path.
+GPU `MPI` requires a compatible GPU-aware MPI installation and environment.
+`ddlaCommunicationAvailable` reports library/handle capability; it does not
+probe device-pointer support, connectivity or performance. Select host-staged
+MPI if that support has not been established. CPU handles reject the two GPU
+policies. No rebuild or new handle is needed to switch supported GPU modes:
 
-All three paths are implemented once in `src/comm_traits.h` (`commSend`,
-`commRecv`, `commBcast`, `commAlltoallv`), selected by the same
-`DDLA_USE_CCL` / `DDLA_USE_GPU_CPU_TUNNEL` macros.
+```cpp
+// After ddlaInit and ddlaSet, every rank in this handle's communicator calls:
+if (ddla::ddlaCommunicationAvailable(handle, ddla::DdlaCommunication::HostStagedMPI)) {
+    ddla::DDLA_CHECK(ddla::ddlaSetCommunication(
+        handle, ddla::DdlaCommunication::HostStagedMPI));
+}
+auto current = ddla::ddlaGetCommunication(handle);
+```
+
+Before `ddlaSet`, the setter only stores a valid policy locally. After grid
+setup, switching is collective over the handle communicator: all ranks must
+call in the same order with the same requested mode, outside an active
+communication group and without concurrent operations on that handle. The
+setter completes pending handle work before changing transport resources.
+Invalid/mismatched requests and active groups report `INVALID_VALUE`;
+unavailable modes report `BACKEND_UNAVAILABLE`. Rejection preserves the old
+policy. Choose the transport before querying/preparing transport-dependent
+private workspaces and resources; repeat that preparation after a change.
+The selected policy persists across repeated `ddlaSet` grid reconfiguration.
+Changing away from CCL drains the handle queues and destroys its CCL
+communicators; switching back recreates them. Host-staging buffers retain
+their high-water allocation for reuse. Repeating the same mode still validates
+collectively but does not recreate resources. Different handles can retain
+different policies in the same library.
+
+The existing `src/comm_traits.h` primitives dispatch from the handle policy.
+The C/Fortran interfaces expose `ddla_set_communication`,
+`ddla_get_communication` and `ddla_communication_available` (C symbols have
+`ddla_c_` prefixes). The getter returns a status and writes the mode through
+an integer output. Python exposes `Communication`, `handle.communication`,
+`handle.set_communication(mode)` and `handle.is_communication_available(mode)`.
 
 ## Data model and lifecycle
 
@@ -609,6 +642,7 @@ the host. Pitches and copy sizes are in bytes.
 | `DdlaHandle_t` | Opaque handle type (`DdlaStream*`) |
 | `ddlaInit` | Allocate a handle and select its backend |
 | `ddlaSet` | Configure the grid (auto `'R'` or explicit `nprows`×`npcols`) and create backend resources |
+| `ddlaSetCommunication` / `ddlaGetCommunication` / `ddlaCommunicationAvailable` | Set/query a handle's transport and query its supported modes; switching after grid setup is collective |
 | `ddlaGetBackend` / `ddlaBackendAvailable` | Query the handle's backend / compiled backend availability |
 | `ddlaDestroy` | Tear down handle (idempotent) |
 | `ddlaGetStream` | Return the default device stream from a handle (CPU: `nullptr`) |

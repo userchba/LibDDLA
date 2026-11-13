@@ -46,7 +46,8 @@ public:
     }
 };
 // The solve on the caller's scratch; times (may be null) receives the phase timings.
-// No validation, no allocation.
+// GPU entry checks the frozen transport before touching matrix or scratch.
+// No allocation.
 template<DdlaBackend B,class T>
 void one_stage_run(const DdlaHandle_t&,const OneStagePlan&,OneStageResources&,T* a,
     typename real_type<T>::type* eval,T* z,int& info,detail::OneStageTimes* times,

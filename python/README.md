@@ -112,3 +112,31 @@ native C library from the same source revision, since the native Cholesky
 argument lists changed as well.
 
 `Handle` requires an explicit `backend=Backend.CPU` or `backend=Backend.GPU`; omitting it or passing `None` is rejected.
+
+## Per-handle communication
+
+`handle.communication` reports the current `ddla.Communication` value. CPU
+handles support `MPI`; GPU handles support `MPI` and `HOST_STAGED_MPI`, plus
+`CCL` if the native library includes NCCL/RCCL. The initial GPU policy is
+CCL when built, otherwise MPI. Host staging is always selectable at runtime. Communication is independent of the matrix backend.
+
+```python
+# All ranks using this GPU handle call the setter together after construction.
+if handle.is_communication_available(ddla.Communication.HOST_STAGED_MPI):
+    handle.set_communication(ddla.Communication.HOST_STAGED_MPI)
+print(handle.communication)
+```
+
+The setter is collective on the handle's communicator. Use identical modes
+and call order on every rank, between operations, outside communication groups
+and without concurrent use of the handle. Invalid/mismatched/unavailable
+requests raise the mapped DDLA exception and preserve the previous policy.
+The choice persists across grid reconfiguration. Queries are local. On GPU,
+`MPI` means device pointers are sent to MPI:
+availability does not probe GPU-aware MPI support or guarantee its performance.
+Use host staging when device-pointer MPI support has not been verified.
+
+The Python communication tests default to CPU coverage. Set
+`DDLA_TEST_GPU_COMMUNICATION=1` only in an allocation with one assigned GPU per
+rank to enable the GPU setter/getter test; it switches policies without probing
+GPU-aware MPI with device traffic.

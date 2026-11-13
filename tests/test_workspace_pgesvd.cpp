@@ -33,14 +33,12 @@ public:
     }
 };
 template<class S>bool no_allocation(const S& s){return !s.ddla_alloc&&!s.ddla_free&&!s.pinned_alloc&&!s.raw_gpu_alloc&&!s.host_new&&!s.vendor_query&&!s.resource_setup;}
-// A tunnel build stages GPU messages in the handle's host buffers, which grow
+// Host-staged MPI copies GPU messages in the handle's host buffers, which grow
 // on first use (comm_traits.h): there the first run of a case may allocate.
-template<DdlaBackend B,class S>bool run_allocates_nothing(const S& s,int pass)
+template<DdlaBackend B,class S>bool run_allocates_nothing(DdlaHandle_t h,const S& s,int pass)
 {
-#if defined(DDLA_USE_GPU_CPU_TUNNEL)
-    if(B==DdlaBackend::GPU&&pass==0)return true;
-#endif
-    (void)pass;return no_allocation(s);
+    if(B==DdlaBackend::GPU && ddlaGetCommunication(h)==DdlaCommunication::HostStagedMPI && pass==0)return true;
+    return no_allocation(s);
 }
 template<class F>void query(DdlaHandle_t h,F&& function) {
     MPI_Barrier(h->comm);bool pure=true;
@@ -103,7 +101,7 @@ template<DdlaBackend B,class T>void svd_case(DdlaHandle_t h,int m,int n,char ju,
         pgesvd_run<B,T>(h,p,team?&*team:nullptr,A.ptr,values.data(),wantu?U.ptr:nullptr,wantv?V.ptr:nullptr,info,
             scratch.backend(),backend_bytes,scratch.host(),host_bytes);
         const auto counts=scope.finish();
-        require_close(h,"pgesvd raw allocation/query/resource count",run_allocates_nothing<B>(counts,repeat)?0:1,0);
+        require_close(h,"pgesvd raw allocation/query/resource count",run_allocates_nothing<B>(h,counts,repeat)?0:1,0);
         require_close(h,"pgesvd info",info?1:0,0);
         auto a=download(h,A.ptr,original.size()),u=download(h,U.ptr,initial_u.size()),v=download(h,V.ptr,initial_v.size());
         require_close(h,"pgesvd input parent/padding",padding(h,a,original,da,m,n)?0:1,0);

@@ -18,6 +18,9 @@ inline std::size_t triangle_offset(bool lower,int ld,int r,int c) {
 } namespace spectral_impl {
 struct HetrdPlan {
     DdlaBackend backend{};
+    // Native CCL needs an additional padded status word. Recheck/requery after
+    // changing transport; a run rejects a stale plan before touching scratch.
+    DdlaCommunication communication = DdlaCommunication::MPI;
     char uplo='U';bool stored_only=true;
     int n=0,pr=1,pc=1,mr=0,mc=0;
     std::array<int,DDLA_DLEN_> a{};
@@ -38,7 +41,8 @@ public:
     void begin_reduction();void end_reduction();void cancel_reduction() noexcept;
 };
 // tau: n-1 backend entries; de: contiguous replicated host [d(n)|e(n)].
-// Scratch contains only reduction temporaries; no allocation/check/query/setup.
+// Scratch contains only reduction temporaries; no allocation/query/setup.
+// GPU entry checks the frozen transport collectively before touching scratch.
 template<DdlaBackend B,class T>void phetrd_run(const DdlaHandle_t&,const HetrdPlan&,HetrdResources&,
     T* A,T* tau,typename real_type<T>::type* de,int& info,void*,std::size_t,void*,std::size_t);
 static_assert(std::is_trivially_copyable<HetrdPlan>::value,"phetrd plan owns no resources");

@@ -160,11 +160,20 @@ Cancellation must stop workers and retire uploads before the caller reuses
 storage. Changing shape, descriptors, backend, process topology or frozen
 policy requires new sizing and preparation.
 
-The GPU-to-CPU tunnel communication path uses the handle's reusable host
-staging vectors. They can grow on demand on a cold handle; this is distinct
+The runtime `HostStagedMPI` communication path uses the handle's reusable host
+staging vectors, regardless of its build-time default. They can grow on demand on a cold handle; this is distinct
 from caller-owned numerical scratch. Each tunnel wrapper completes its staged
 communication before reusing these buffers. Do not infer cold-path allocation
 freedom from allocation tests of the direct GPU collective path.
+
+Select communication with `ddlaSetCommunication` between top-level operations,
+before checking/sizing/preparing the next transport-dependent algorithm. After
+changing mode, re-query/reprepare any private plan or resource whose geometry,
+scratch or communication schedule depends on that mode. A switch after
+`ddlaSet` is collective, drains pending handle work and must not run inside an
+active communication group. It does not change the handle's matrix backend,
+process grid or descriptor distribution. Capability queries do not establish
+that the installed MPI accepts device pointers.
 
 ## Validation
 

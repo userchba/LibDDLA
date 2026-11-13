@@ -29,7 +29,7 @@ namespace ddla {
 // pointer-typed MPI handles (Open MPI), not with int handles (MPICH ABI).
 // sbuf == rbuf is an in-place reduction; MPI spells that MPI_IN_PLACE, since
 // aliased send/receive buffers are erroneous (Open MPI: MPI_ERR_ARG).
-// The raw NCCL/RCCL and host-staged GPU_CPU_TUNNEL send/recv/bcast/allreduce
+// The raw NCCL/RCCL and host-staged send/recv/bcast/allreduce
 // primitives are inlined directly in the comm* wrappers below (no separate
 // ccl* helper functions remain -- formerly include/ddla/ddla_comm.h).
 // ---------------------------------------------------------------------------
@@ -53,8 +53,8 @@ inline int typed_allreduce(const T* sendbuff, T* recvbuff, int count, MPI_Op op,
 } // namespace detail
 
 // In GPU-enabled builds a single TU can instantiate both
-// the CCL and the CPU path of commAllReduce; there cclOp is ncclRedOp_t and
-// must be translated before it reaches MPI.
+// the CCL and MPI paths of commAllReduce; there cclOp is ncclRedOp_t and
+// must be translated before it reaches host or direct-device MPI.
 inline MPI_Op to_mpi_op(MPI_Op op) { return op; }
 
 #ifdef DDLA_USE_CCL
@@ -88,57 +88,42 @@ struct CommTraits<DdlaBackend::CPU> {
             default:             return h->comm;
         }
     }
-    static void group_start(const DdlaHandle_t&) {}
-    static void group_end  (const DdlaHandle_t&) {}
+    static void group_start(const DdlaHandle_t& h) { ++h->communication_group_depth; }
+    static void group_end(const DdlaHandle_t& h) {
+        if (h->communication_group_depth <= 0)
+            throw std::runtime_error("ddla: communication group is not active");
+        --h->communication_group_depth;
+    }
 };
 
 #if DDLA_HAS_GPU
-// Only *defined* in a TU that actually compiled in a GPU vendor.
 template <>
-struct CommTraits<DdlaBackend::GPU> {
-#if defined(DDLA_USE_GPU_CPU_TUNNEL)
-    // Tunnel wins if both DDLA_USE_CCL and DDLA_USE_GPU_CPU_TUNNEL are set
-    // (including grouped panel broadcasts).
-    using comm_t = MPI_Comm;
-    static comm_t comm(const DdlaHandle_t& h, CommScope s) {
-        switch (s) {
-            case CommScope::Row: return h->row_comm;
-            case CommScope::Col: return h->col_comm;
-            default:             return h->comm;
+struct CommTraits<DdlaBackend::GPU> : CommTraits<DdlaBackend::CPU> {
+#ifdef DDLA_USE_CCL
+    static gpucclComm_t ccl_comm(const DdlaHandle_t& h, CommScope scope) {
+        switch (scope) {
+        case CommScope::Row: return static_cast<gpucclComm_t>(h->nccl_row_comm);
+        case CommScope::Col: return static_cast<gpucclComm_t>(h->nccl_col_comm);
+        default: return static_cast<gpucclComm_t>(h->nccl_comm);
         }
     }
-    static void group_start(const DdlaHandle_t&) {}
-    static void group_end  (const DdlaHandle_t&) {}
-#elif defined(DDLA_USE_CCL)
-    using comm_t = gpucclComm_t;
-    static comm_t comm(const DdlaHandle_t& h, CommScope s) {
-        switch (s) {
-            case CommScope::Row: return static_cast<gpucclComm_t>(h->nccl_row_comm);
-            case CommScope::Col: return static_cast<gpucclComm_t>(h->nccl_col_comm);
-            default:             return static_cast<gpucclComm_t>(h->nccl_comm);
-        }
-    }
-    static void group_start(const DdlaHandle_t&) { CCL_CHECK(gpucclGroupStart()); }
-    static void group_end  (const DdlaHandle_t&) { CCL_CHECK(gpucclGroupEnd());   }
-#else
-    // "Dead" configuration: GPU vendor compiled in, but neither DDLA_USE_CCL
-    // nor DDLA_USE_GPU_CPU_TUNNEL set. Preserves today's direct-MPI-on-
-    // device-pointer behavior verbatim (the inlined `#else` branches of the
-    // comm* wrappers below) -- unsupported/untested, but unchanged from
-    // before this refactor, so no regression.
-    using comm_t = MPI_Comm;
-    static comm_t comm(const DdlaHandle_t& h, CommScope s) {
-        switch (s) {
-            case CommScope::Row: return h->row_comm;
-            case CommScope::Col: return h->col_comm;
-            default:             return h->comm;
-        }
-    }
-    static void group_start(const DdlaHandle_t&) {}
-    static void group_end  (const DdlaHandle_t&) {}
 #endif
+    static void group_start(const DdlaHandle_t& h) {
+#ifdef DDLA_USE_CCL
+        if (h->communication == DdlaCommunication::CCL) CCL_CHECK(gpucclGroupStart());
+#endif
+        ++h->communication_group_depth;
+    }
+    static void group_end(const DdlaHandle_t& h) {
+        if (h->communication_group_depth <= 0)
+            throw std::runtime_error("ddla: communication group is not active");
+        --h->communication_group_depth;
+#ifdef DDLA_USE_CCL
+        if (h->communication == DdlaCommunication::CCL) CCL_CHECK(gpucclGroupEnd());
+#endif
+    }
 };
-#endif // DDLA_HAS_GPU
+#endif
 
 // ---------------------------------------------------------------------------
 // comm* function templates. Backend defaults to detail::local_backend_v (the
@@ -147,12 +132,9 @@ struct CommTraits<DdlaBackend::GPU> {
 // `commBcast(h, CommScope::Row, buf, count, root)`, exactly like they already
 // call `ddlaMalloc(...)` bracket-free today.
 //
-// Non-tunnel GPU calls select, by the very same macro that picked
-// CommTraits<GPU>::comm_t's type above, between the inlined NCCL/RCCL
-// implementation (DDLA_USE_CCL) and the "dead config" direct-MPI-on-device-
-// pointer implementation (neither CCL nor tunnel) -- comm_traits.h does not
-// need to distinguish those two cases itself beyond the #if/#elif/#else
-// branches below.
+// GPU wrappers select the handle transport. Only CCL capability is compiled
+// conditionally; direct and host-staged MPI are available in every GPU build.
+// MPI groups are scheduling no-ops: use commSendrecv for symmetric exchanges.
 //
 // The tunnel case stages through handle-owned host scratch buffers (see
 // DdlaStream::host_buffers). Each wrapper requests the exact message counts
@@ -187,23 +169,27 @@ inline void commBcast(const DdlaHandle_t& h, CommScope scope, T* buf, std::size_
     if constexpr (Backend == DdlaBackend::CPU) {
         commBcast<Backend>(h, scope, buf, static_cast<int>(count), detail::mpi_datatype<T>(), root);
     } else {
-#if defined(DDLA_USE_GPU_CPU_TUNNEL)
-        T* host = h->host_buffers<T>(count)[0];
-        const auto comm = CommTraits<Backend>::comm(h, scope);
-        int rank;
-        MPI_CHECK(MPI_Comm_rank(comm, &rank));
-        // Receive buffers need not contain initialized values before Bcast.
-        if (rank == root) DDLA_CHECK(ddlaMemcpy(h, host, buf, count * sizeof(T)));
-        DDLA_CHECK(ddlaSynchronize(h));
-        MPI_CHECK(MPI_Bcast(host, (int)count, detail::mpi_datatype<T>(), root, comm));
-        DDLA_CHECK(ddlaMemcpy(h, buf, host, count * sizeof(T)));
-        DDLA_CHECK(ddlaSynchronize(h));
-#elif defined(DDLA_USE_CCL)
-        CCL_CHECK(gpucclBcast(buf, count * sizeof(T), gpucclInt8, root, CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
-#else
-        DDLA_CHECK(ddlaSynchronize(h));
-        MPI_CHECK(MPI_Bcast(buf, (int)count, detail::mpi_datatype<T>(), root, CommTraits<Backend>::comm(h, scope)));
+        if (h->communication == DdlaCommunication::HostStagedMPI) {
+            T* host = h->host_buffers<T>(count)[0];
+            const auto comm = CommTraits<Backend>::comm(h, scope);
+            int rank;
+            MPI_CHECK(MPI_Comm_rank(comm, &rank));
+            // Receive buffers need not contain initialized values before Bcast.
+            if (rank == root) DDLA_CHECK(ddlaMemcpy(h, host, buf, count * sizeof(T)));
+            DDLA_CHECK(ddlaSynchronize(h));
+            MPI_CHECK(MPI_Bcast(host, (int)count, detail::mpi_datatype<T>(), root, comm));
+            DDLA_CHECK(ddlaMemcpy(h, buf, host, count * sizeof(T)));
+            DDLA_CHECK(ddlaSynchronize(h));
+        }
+#ifdef DDLA_USE_CCL
+        else if (h->communication == DdlaCommunication::CCL) {
+            CCL_CHECK(gpucclBcast(buf, count * sizeof(T), gpucclInt8, root, CommTraits<Backend>::ccl_comm(h, scope), static_cast<gpuStream_t>(h->stream)));
+        }
 #endif
+        else {
+            DDLA_CHECK(ddlaSynchronize(h));
+            MPI_CHECK(MPI_Bcast(buf, (int)count, detail::mpi_datatype<T>(), root, CommTraits<Backend>::comm(h, scope)));
+        }
     }
 }
 
@@ -214,17 +200,21 @@ inline void commSend(const DdlaHandle_t& h, CommScope scope, const T* buf, std::
         MPI_CHECK(MPI_Send(buf, (int)count, detail::mpi_datatype<T>(), peer, 0,
                            CommTraits<Backend>::comm(h, scope)));
     } else {
-#if defined(DDLA_USE_GPU_CPU_TUNNEL)
-        T* host = h->host_buffers<T>(count)[0];
-        DDLA_CHECK(ddlaMemcpy(h, host, buf, count * sizeof(T)));
-        DDLA_CHECK(ddlaSynchronize(h));
-        MPI_CHECK(MPI_Send(host, (int)count, detail::mpi_datatype<T>(), peer, 0, CommTraits<Backend>::comm(h, scope)));
-#elif defined(DDLA_USE_CCL)
-        CCL_CHECK(gpucclSend(buf, count * sizeof(T), gpucclInt8, peer, CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
-#else
-        DDLA_CHECK(ddlaSynchronize(h));
-        MPI_CHECK(MPI_Send(buf, (int)count, detail::mpi_datatype<T>(), peer, 0, CommTraits<Backend>::comm(h, scope)));
+        if (h->communication == DdlaCommunication::HostStagedMPI) {
+            T* host = h->host_buffers<T>(count)[0];
+            DDLA_CHECK(ddlaMemcpy(h, host, buf, count * sizeof(T)));
+            DDLA_CHECK(ddlaSynchronize(h));
+            MPI_CHECK(MPI_Send(host, (int)count, detail::mpi_datatype<T>(), peer, 0, CommTraits<Backend>::comm(h, scope)));
+        }
+#ifdef DDLA_USE_CCL
+        else if (h->communication == DdlaCommunication::CCL) {
+            CCL_CHECK(gpucclSend(buf, count * sizeof(T), gpucclInt8, peer, CommTraits<Backend>::ccl_comm(h, scope), static_cast<gpuStream_t>(h->stream)));
+        }
 #endif
+        else {
+            DDLA_CHECK(ddlaSynchronize(h));
+            MPI_CHECK(MPI_Send(buf, (int)count, detail::mpi_datatype<T>(), peer, 0, CommTraits<Backend>::comm(h, scope)));
+        }
     }
 }
 
@@ -235,18 +225,22 @@ inline void commRecv(const DdlaHandle_t& h, CommScope scope, T* buf, std::size_t
         MPI_CHECK(MPI_Recv(buf, (int)count, detail::mpi_datatype<T>(), peer, 0,
                            CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
     } else {
-#if defined(DDLA_USE_GPU_CPU_TUNNEL)
-        T* host = h->host_buffers<T>(count)[0];
-        DDLA_CHECK(ddlaSynchronize(h));
-        MPI_CHECK(MPI_Recv(host, (int)count, detail::mpi_datatype<T>(), peer, 0, CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
-        DDLA_CHECK(ddlaMemcpy(h, buf, host, count * sizeof(T)));
-        DDLA_CHECK(ddlaSynchronize(h));
-#elif defined(DDLA_USE_CCL)
-        CCL_CHECK(gpucclRecv(buf, count * sizeof(T), gpucclInt8, peer, CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
-#else
-        DDLA_CHECK(ddlaSynchronize(h));
-        MPI_CHECK(MPI_Recv(buf, (int)count, detail::mpi_datatype<T>(), peer, 0, CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
+        if (h->communication == DdlaCommunication::HostStagedMPI) {
+            T* host = h->host_buffers<T>(count)[0];
+            DDLA_CHECK(ddlaSynchronize(h));
+            MPI_CHECK(MPI_Recv(host, (int)count, detail::mpi_datatype<T>(), peer, 0, CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
+            DDLA_CHECK(ddlaMemcpy(h, buf, host, count * sizeof(T)));
+            DDLA_CHECK(ddlaSynchronize(h));
+        }
+#ifdef DDLA_USE_CCL
+        else if (h->communication == DdlaCommunication::CCL) {
+            CCL_CHECK(gpucclRecv(buf, count * sizeof(T), gpucclInt8, peer, CommTraits<Backend>::ccl_comm(h, scope), static_cast<gpuStream_t>(h->stream)));
+        }
 #endif
+        else {
+            DDLA_CHECK(ddlaSynchronize(h));
+            MPI_CHECK(MPI_Recv(buf, (int)count, detail::mpi_datatype<T>(), peer, 0, CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
+        }
     }
 }
 
@@ -261,26 +255,30 @@ inline void commSendrecv(const DdlaHandle_t& h, CommScope scope,
                                rbuf, (int)rcount, detail::mpi_datatype<T>(), source, 0,
                                CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
     } else {
-#if defined(DDLA_USE_GPU_CPU_TUNNEL)
-        auto [hs, hr] = h->host_buffers<T>(scount, rcount);
-        if (scount) DDLA_CHECK(ddlaMemcpy(h, hs, sbuf, scount * sizeof(T)));
-        DDLA_CHECK(ddlaSynchronize(h));
-        MPI_CHECK(MPI_Sendrecv(hs, (int)scount, detail::mpi_datatype<T>(), dest, 0,
-                               hr, (int)rcount, detail::mpi_datatype<T>(), source, 0,
-                               CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
-        if (rcount) DDLA_CHECK(ddlaMemcpy(h, rbuf, hr, rcount * sizeof(T)));
-        DDLA_CHECK(ddlaSynchronize(h));
-#elif defined(DDLA_USE_CCL)
-        CommTraits<Backend>::group_start(h);
-        if (scount) commSend<Backend>(h, scope, sbuf, scount, dest);
-        if (rcount) commRecv<Backend>(h, scope, rbuf, rcount, source);
-        CommTraits<Backend>::group_end(h);
-#else
-        DDLA_CHECK(ddlaSynchronize(h));
-        MPI_CHECK(MPI_Sendrecv(sbuf, (int)scount, detail::mpi_datatype<T>(), dest, 0,
-                               rbuf, (int)rcount, detail::mpi_datatype<T>(), source, 0,
-                               CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
+        if (h->communication == DdlaCommunication::HostStagedMPI) {
+            auto [hs, hr] = h->host_buffers<T>(scount, rcount);
+            if (scount) DDLA_CHECK(ddlaMemcpy(h, hs, sbuf, scount * sizeof(T)));
+            DDLA_CHECK(ddlaSynchronize(h));
+            MPI_CHECK(MPI_Sendrecv(hs, (int)scount, detail::mpi_datatype<T>(), dest, 0,
+                                   hr, (int)rcount, detail::mpi_datatype<T>(), source, 0,
+                                   CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
+            if (rcount) DDLA_CHECK(ddlaMemcpy(h, rbuf, hr, rcount * sizeof(T)));
+            DDLA_CHECK(ddlaSynchronize(h));
+        }
+#ifdef DDLA_USE_CCL
+        else if (h->communication == DdlaCommunication::CCL) {
+            CommTraits<Backend>::group_start(h);
+            if (scount) commSend<Backend>(h, scope, sbuf, scount, dest);
+            if (rcount) commRecv<Backend>(h, scope, rbuf, rcount, source);
+            CommTraits<Backend>::group_end(h);
+        }
 #endif
+        else {
+            DDLA_CHECK(ddlaSynchronize(h));
+            MPI_CHECK(MPI_Sendrecv(sbuf, (int)scount, detail::mpi_datatype<T>(), dest, 0,
+                                   rbuf, (int)rcount, detail::mpi_datatype<T>(), source, 0,
+                                   CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
+        }
     }
 }
 
@@ -295,26 +293,30 @@ inline void commSendrecv(const DdlaHandle_t& h, CommScope scope, const T* sbuf, 
                                rbuf, (int)count, detail::mpi_datatype<T>(), peer, 0,
                                CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
     } else {
-#if defined(DDLA_USE_GPU_CPU_TUNNEL)
-        auto [hs, hr] = h->host_buffers<T>(count, count);
-        DDLA_CHECK(ddlaMemcpy(h, hs, sbuf, count * sizeof(T)));
-        DDLA_CHECK(ddlaSynchronize(h));
-        MPI_CHECK(MPI_Sendrecv(hs, (int)count, detail::mpi_datatype<T>(), peer, 0,
-                               hr, (int)count, detail::mpi_datatype<T>(), peer, 0,
-                               CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
-        DDLA_CHECK(ddlaMemcpy(h, rbuf, hr, count * sizeof(T)));
-        DDLA_CHECK(ddlaSynchronize(h));
-#elif defined(DDLA_USE_CCL)
-        CommTraits<Backend>::group_start(h);
-        commSend<Backend>(h, scope, sbuf, count, peer);
-        commRecv<Backend>(h, scope, rbuf, count, peer);
-        CommTraits<Backend>::group_end(h);
-#else
-        DDLA_CHECK(ddlaSynchronize(h));
-        MPI_CHECK(MPI_Sendrecv(sbuf, (int)count, detail::mpi_datatype<T>(), peer, 0,
-                               rbuf, (int)count, detail::mpi_datatype<T>(), peer, 0,
-                               CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
+        if (h->communication == DdlaCommunication::HostStagedMPI) {
+            auto [hs, hr] = h->host_buffers<T>(count, count);
+            DDLA_CHECK(ddlaMemcpy(h, hs, sbuf, count * sizeof(T)));
+            DDLA_CHECK(ddlaSynchronize(h));
+            MPI_CHECK(MPI_Sendrecv(hs, (int)count, detail::mpi_datatype<T>(), peer, 0,
+                                   hr, (int)count, detail::mpi_datatype<T>(), peer, 0,
+                                   CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
+            DDLA_CHECK(ddlaMemcpy(h, rbuf, hr, count * sizeof(T)));
+            DDLA_CHECK(ddlaSynchronize(h));
+        }
+#ifdef DDLA_USE_CCL
+        else if (h->communication == DdlaCommunication::CCL) {
+            CommTraits<Backend>::group_start(h);
+            commSend<Backend>(h, scope, sbuf, count, peer);
+            commRecv<Backend>(h, scope, rbuf, count, peer);
+            CommTraits<Backend>::group_end(h);
+        }
 #endif
+        else {
+            DDLA_CHECK(ddlaSynchronize(h));
+            MPI_CHECK(MPI_Sendrecv(sbuf, (int)count, detail::mpi_datatype<T>(), peer, 0,
+                                   rbuf, (int)count, detail::mpi_datatype<T>(), peer, 0,
+                                   CommTraits<Backend>::comm(h, scope), MPI_STATUS_IGNORE));
+        }
     }
 }
 
@@ -326,30 +328,33 @@ inline void commAllReduce(const DdlaHandle_t& h, CommScope scope,
         MPI_CHECK(detail::typed_allreduce(sbuf, rbuf, count, to_mpi_op(op),
                                           CommTraits<Backend>::comm(h, scope)));
     } else {
-#if defined(DDLA_USE_GPU_CPU_TUNNEL)
-        auto [hs, hr] = h->host_buffers<T>(count, count);
-        DDLA_CHECK(ddlaMemcpy(h, hs, sbuf, count * sizeof(T)));
-        // MPI_Allreduce overwrites hr; no copy of the undefined output is needed.
-        DDLA_CHECK(ddlaSynchronize(h));
-        // In TUNNEL+CCL builds cclOp is ncclRedOp_t and must be translated
-        // before it reaches MPI (identity for MPI_Op-only builds).
-        MPI_CHECK(detail::typed_allreduce(hs, hr, count, to_mpi_op(op), CommTraits<Backend>::comm(h, scope)));
-        DDLA_CHECK(ddlaMemcpy(h, rbuf, hr, count * sizeof(T)));
-        DDLA_CHECK(ddlaSynchronize(h));
-#elif defined(DDLA_USE_CCL)
-        if constexpr (std::is_same_v<T, float>) {
-            CCL_CHECK(gpucclAllReduce(sbuf, rbuf, count, gpucclFloat32, op, CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
-        } else if constexpr (std::is_same_v<T, std::complex<float>>) {
-            CCL_CHECK(gpucclAllReduce(sbuf, rbuf, count * 2, gpucclFloat32, op, CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
-        } else if constexpr (std::is_same_v<T, double>) {
-            CCL_CHECK(gpucclAllReduce(sbuf, rbuf, count, gpucclFloat64, op, CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
-        } else {
-            CCL_CHECK(gpucclAllReduce(sbuf, rbuf, count * 2, gpucclFloat64, op, CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
+        if (h->communication == DdlaCommunication::HostStagedMPI) {
+            auto [hs, hr] = h->host_buffers<T>(count, count);
+            DDLA_CHECK(ddlaMemcpy(h, hs, sbuf, count * sizeof(T)));
+            // MPI_Allreduce overwrites hr; no copy of the undefined output is needed.
+            DDLA_CHECK(ddlaSynchronize(h));
+            // Translate a compiled CCL operation before passing it to MPI.
+            MPI_CHECK(detail::typed_allreduce(hs, hr, count, to_mpi_op(op), CommTraits<Backend>::comm(h, scope)));
+            DDLA_CHECK(ddlaMemcpy(h, rbuf, hr, count * sizeof(T)));
+            DDLA_CHECK(ddlaSynchronize(h));
         }
-#else
-        DDLA_CHECK(ddlaSynchronize(h));
-        MPI_CHECK(detail::typed_allreduce(sbuf, rbuf, count, op, CommTraits<Backend>::comm(h, scope)));
+#ifdef DDLA_USE_CCL
+        else if (h->communication == DdlaCommunication::CCL) {
+            if constexpr (std::is_same_v<T, float>) {
+                CCL_CHECK(gpucclAllReduce(sbuf, rbuf, count, gpucclFloat32, op, CommTraits<Backend>::ccl_comm(h, scope), static_cast<gpuStream_t>(h->stream)));
+            } else if constexpr (std::is_same_v<T, std::complex<float>>) {
+                CCL_CHECK(gpucclAllReduce(sbuf, rbuf, count * 2, gpucclFloat32, op, CommTraits<Backend>::ccl_comm(h, scope), static_cast<gpuStream_t>(h->stream)));
+            } else if constexpr (std::is_same_v<T, double>) {
+                CCL_CHECK(gpucclAllReduce(sbuf, rbuf, count, gpucclFloat64, op, CommTraits<Backend>::ccl_comm(h, scope), static_cast<gpuStream_t>(h->stream)));
+            } else {
+                CCL_CHECK(gpucclAllReduce(sbuf, rbuf, count * 2, gpucclFloat64, op, CommTraits<Backend>::ccl_comm(h, scope), static_cast<gpuStream_t>(h->stream)));
+            }
+        }
 #endif
+        else {
+            DDLA_CHECK(ddlaSynchronize(h));
+            MPI_CHECK(detail::typed_allreduce(sbuf, rbuf, count, to_mpi_op(op), CommTraits<Backend>::comm(h, scope)));
+        }
     }
 }
 
@@ -373,28 +378,32 @@ inline void commReduceSum(const DdlaHandle_t& h, CommScope scope,
                                   detail::mpi_datatype<T>(), MPI_SUM, root,
                                   CommTraits<Backend>::comm(h, scope)));
         } else {
-#if defined(DDLA_USE_GPU_CPU_TUNNEL)
-            auto [hs, hr] = h->host_buffers<T>(len, len);
-            DDLA_CHECK(ddlaMemcpy(h, hs, sbuf + off, sizeof(T) * len));
-            DDLA_CHECK(ddlaSynchronize(h));
-            MPI_CHECK(::MPI_Reduce(hs, hr, len, detail::mpi_datatype<T>(), MPI_SUM,
-                                  root, CommTraits<Backend>::comm(h, scope)));
-            if (rank == root) {
-                DDLA_CHECK(ddlaMemcpy(h, rbuf + off, hr, sizeof(T) * len));
+            if (h->communication == DdlaCommunication::HostStagedMPI) {
+                auto [hs, hr] = h->host_buffers<T>(len, len);
+                DDLA_CHECK(ddlaMemcpy(h, hs, sbuf + off, sizeof(T) * len));
                 DDLA_CHECK(ddlaSynchronize(h));
+                MPI_CHECK(::MPI_Reduce(hs, hr, len, detail::mpi_datatype<T>(), MPI_SUM,
+                                      root, CommTraits<Backend>::comm(h, scope)));
+                if (rank == root) {
+                    DDLA_CHECK(ddlaMemcpy(h, rbuf + off, hr, sizeof(T) * len));
+                    DDLA_CHECK(ddlaSynchronize(h));
+                }
             }
-#elif defined(DDLA_USE_CCL)
-            constexpr bool single = std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>;
-            constexpr int components = std::is_same_v<T, float> || std::is_same_v<T, double> ? 1 : 2;
-            CCL_CHECK(gpucclReduce(sbuf + off, rbuf + off, std::size_t(len) * components,
-                                  single ? gpucclFloat32 : gpucclFloat64, gpucclSum,
-                                  root, CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
-#else
-            DDLA_CHECK(ddlaSynchronize(h));
-            MPI_CHECK(::MPI_Reduce(in_place ? MPI_IN_PLACE : sbuf + off, rbuf + off, len,
-                                  detail::mpi_datatype<T>(), MPI_SUM, root,
-                                  CommTraits<Backend>::comm(h, scope)));
+#ifdef DDLA_USE_CCL
+            else if (h->communication == DdlaCommunication::CCL) {
+                constexpr bool single = std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>;
+                constexpr int components = std::is_same_v<T, float> || std::is_same_v<T, double> ? 1 : 2;
+                CCL_CHECK(gpucclReduce(sbuf + off, rbuf + off, std::size_t(len) * components,
+                                      single ? gpucclFloat32 : gpucclFloat64, gpucclSum,
+                                      root, CommTraits<Backend>::ccl_comm(h, scope), static_cast<gpuStream_t>(h->stream)));
+            }
 #endif
+            else {
+                DDLA_CHECK(ddlaSynchronize(h));
+                MPI_CHECK(::MPI_Reduce(in_place ? MPI_IN_PLACE : sbuf + off, rbuf + off, len,
+                                      detail::mpi_datatype<T>(), MPI_SUM, root,
+                                      CommTraits<Backend>::comm(h, scope)));
+            }
         }
         off += len;
     }
@@ -410,24 +419,33 @@ inline void commAlltoallv(const DdlaHandle_t& h, CommScope scope, int nprocs,
                                 recvbuf, recvcounts, rdispls, detail::mpi_datatype<T>(),
                                 CommTraits<Backend>::comm(h, scope)));
     } else {
-#if defined(DDLA_USE_CCL) && !defined(DDLA_USE_GPU_CPU_TUNNEL)
-        // One message per peer, aggregating every block destined for/arriving
-        // from that peer -- correct because send_blocks/recv_blocks are laid
-        // out contiguously per peer (matches the sort-by-peer-rank ordering
-        // callers already use to build sendcounts/sdispls/recvcounts/rdispls).
-        CommTraits<Backend>::group_start(h);
-        for (int p = 0; p < nprocs; ++p) {
-            if (sendcounts[p] > 0)
-                CCL_CHECK(gpucclSend(sendbuf + sdispls[p], sendcounts[p] * sizeof(T), gpucclInt8, p,
-                                     CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
-            if (recvcounts[p] > 0)
-                CCL_CHECK(gpucclRecv(recvbuf + rdispls[p], recvcounts[p] * sizeof(T), gpucclInt8, p,
-                                     CommTraits<Backend>::comm(h, scope), static_cast<gpuStream_t>(h->stream)));
+#ifdef DDLA_USE_CCL
+        if (h->communication == DdlaCommunication::CCL) {
+            // One message per peer, aggregating every block destined for/arriving
+            // from that peer -- correct because send_blocks/recv_blocks are laid
+            // out contiguously per peer (matches the sort-by-peer-rank ordering
+            // callers already use to build sendcounts/sdispls/recvcounts/rdispls).
+            CommTraits<Backend>::group_start(h);
+            for (int p = 0; p < nprocs; ++p) {
+                if (sendcounts[p] > 0)
+                    CCL_CHECK(gpucclSend(sendbuf + sdispls[p], sendcounts[p] * sizeof(T), gpucclInt8, p,
+                                         CommTraits<Backend>::ccl_comm(h, scope), static_cast<gpuStream_t>(h->stream)));
+                if (recvcounts[p] > 0)
+                    CCL_CHECK(gpucclRecv(recvbuf + rdispls[p], recvcounts[p] * sizeof(T), gpucclInt8, p,
+                                         CommTraits<Backend>::ccl_comm(h, scope), static_cast<gpuStream_t>(h->stream)));
+            }
+            CommTraits<Backend>::group_end(h);
+            return;
         }
-        CommTraits<Backend>::group_end(h);
-#else
-        // Tunnel (and "dead config" without CCL): host-staged single
-        // MPI_Alltoallv collective.
+#endif
+        if (h->communication == DdlaCommunication::MPI) {
+            DDLA_CHECK(ddlaSynchronize(h));
+            MPI_CHECK(MPI_Alltoallv(sendbuf, sendcounts, sdispls, detail::mpi_datatype<T>(),
+                                   recvbuf, recvcounts, rdispls, detail::mpi_datatype<T>(),
+                                   CommTraits<Backend>::comm(h, scope)));
+            return;
+        }
+
         int send_total = nprocs > 0 ? sdispls[nprocs - 1] + sendcounts[nprocs - 1] : 0;
         int recv_total = nprocs > 0 ? rdispls[nprocs - 1] + recvcounts[nprocs - 1] : 0;
         auto [h_send, h_recv] = h->host_buffers<T>(static_cast<std::size_t>(send_total), static_cast<std::size_t>(recv_total));
@@ -442,7 +460,7 @@ inline void commAlltoallv(const DdlaHandle_t& h, CommScope scope, int nprocs,
             DDLA_CHECK(ddlaMemcpy(h, recvbuf, h_recv, sizeof(T) * recv_total));
             DDLA_CHECK(ddlaSynchronize(h));
         }
-#endif
+
     }
 }
 

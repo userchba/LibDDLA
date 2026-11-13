@@ -25,8 +25,8 @@ program test_fortran_api
   implicit none
   include 'mpif.h'
 
-  type(c_ptr) :: h
-  integer(c_int) :: st, be
+  type(c_ptr) :: h, communication_cpu
+  integer(c_int) :: st, be, communication_mode, communication_request
   integer(c_int) :: desca(9), descb(9), descx(9), descm(9)
   integer :: provided
   integer :: ierr, me, nproc
@@ -59,11 +59,51 @@ program test_fortran_api
   zmone = ddla_complex_double(-1.0_c_double, 0.0_c_double)
   one = 1.0_c_double; zero = 0.0_c_double; mone = -1.0_c_double
 
+  ! Communication controls use a CPU handle even in a dual-backend test.
+  st = ddla_init_backend(communication_cpu, DDLA_BACKEND_CPU)
+  call ddla_check(st, 'communication CPU init')
+  st = ddla_get_communication(communication_cpu, communication_mode)
+  call ddla_check(st, 'communication pregrid get')
+  if (communication_mode /= DDLA_COMMUNICATION_MPI) nfail = nfail + 1
+  st = ddla_set_communication(communication_cpu, DDLA_COMMUNICATION_MPI)
+  call ddla_check(st, 'communication pregrid set')
+  st = ddla_set(communication_cpu, int(MPI_COMM_WORLD, c_int), 0, 0, 'R')
+  call ddla_check(st, 'communication CPU grid')
+  if (ddla_communication_available(communication_cpu, DDLA_COMMUNICATION_MPI) /= 1) nfail = nfail + 1
+  if (ddla_communication_available(communication_cpu, DDLA_COMMUNICATION_HOST_STAGED_MPI) /= 0) nfail = nfail + 1
+  if (ddla_communication_available(communication_cpu, DDLA_COMMUNICATION_CCL) /= 0) nfail = nfail + 1
+  if (ddla_communication_available(c_null_ptr, DDLA_COMMUNICATION_MPI) /= 0) nfail = nfail + 1
+  st = ddla_get_communication(c_null_ptr, communication_mode)
+  if (st /= DDLA_STATUS_INVALID_HANDLE) nfail = nfail + 1
+  st = ddla_set_communication(communication_cpu, DDLA_COMMUNICATION_MPI)
+  call ddla_check(st, 'communication same-mode set')
+  st = ddla_set_communication(communication_cpu, DDLA_COMMUNICATION_CCL)
+  if (st /= DDLA_STATUS_BACKEND_UNAVAILABLE) nfail = nfail + 1
+  st = ddla_set_communication(communication_cpu, 17_c_int)
+  if (st /= DDLA_STATUS_INVALID_VALUE) nfail = nfail + 1
+  communication_request = DDLA_COMMUNICATION_MPI
+  if (me == 0) communication_request = -17_c_int
+  st = ddla_set_communication(communication_cpu, communication_request)
+  if (st /= DDLA_STATUS_INVALID_VALUE) nfail = nfail + 1
+  st = ddla_get_communication(communication_cpu, communication_mode)
+  call ddla_check(st, 'communication post-rejection get')
+  if (communication_mode /= DDLA_COMMUNICATION_MPI) nfail = nfail + 1
+  st = ddla_destroy(communication_cpu)
+  call ddla_check(st, 'communication CPU destroy')
+
   ! ---- 1. lifecycle + grid + descriptor -----------------------------------
   be = DDLA_BACKEND_CPU
   if (ddla_backend_available(DDLA_BACKEND_GPU) /= 0) be = DDLA_BACKEND_GPU
   st = ddla_init_backend(h, be)
   call ddla_check(st, 'ddla_init_backend')
+  ! Capability does not certify device-pointer MPI. Use staging in a GPU
+  ! build without CCL; the test never assumes the MPI library is GPU-aware.
+  if (be == DDLA_BACKEND_GPU) then
+     if (ddla_communication_available(h, DDLA_COMMUNICATION_CCL) == 0) then
+        st = ddla_set_communication(h, DDLA_COMMUNICATION_HOST_STAGED_MPI)
+        call ddla_check(st, 'GPU communication staging')
+     end if
+  end if
   st = ddla_set(h, int(MPI_COMM_WORLD, c_int), 0, 0, 'R')
   call ddla_check(st, 'ddla_set')
   st = ddla_grid_dims(h, nprow, npcol)

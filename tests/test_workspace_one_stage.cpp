@@ -104,10 +104,8 @@ void exercise(DdlaHandle_t h,char uplo,char job,int n,bool alias=false,bool tigh
         spectral_impl::one_stage_run<B,T>(h,p,resources,a.ptr,eigenvalues.data(),job=='V'?target:nullptr,info,nullptr,
             owner.backend(),backend_bytes,owner.host(),host_bytes);
         const auto snapshot=scope.finish();
-        bool allow_host_growth=false;
-#if defined(DDLA_USE_GPU_CPU_TUNNEL)
-        allow_host_growth=B==DdlaBackend::GPU && pass==0;
-#endif
+        const bool allow_host_growth=B==DdlaBackend::GPU &&
+            ddlaGetCommunication(h)==DdlaCommunication::HostStagedMPI && pass==0;
         require_close(h,"one-stage run reuses algorithm scratch and warm communication storage",no_scratch(snapshot,allow_host_growth)?0:1,0);
         require_close(h,"one-stage info",info,0);check_ddla_sync(h);owner.verify();
         const auto result=download(h,job=='V'?target:a.ptr,job=='V'?local_size(h,target_desc):before.size());

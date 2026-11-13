@@ -4,7 +4,7 @@
 #include <ddla/ddla_handle_t.h>
 #include <ddla/ddla_vector.h>
 #include <mpi.h>
-#if defined(DDLA_USE_CPU) || defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP) || defined(DDLA_USE_CCL) || defined(DDLA_USE_GPU_CPU_TUNNEL)
+#if defined(DDLA_USE_CPU) || defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP) || defined(DDLA_USE_CCL)
 #error "public client inherited private backend definitions"
 #endif
 #include <algorithm>

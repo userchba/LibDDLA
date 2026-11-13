@@ -129,6 +129,39 @@ int ddla_c_set(void* handle, int f_comm, int nprows, int npcols, char major)
     catch (...) { ddla_c_record_error("unknown C++ exception in ddla_c_set"); return DDLA_C_STATUS_EXCEPTION; }
 }
 
+// Do not validate mode here: after ddlaSet the core setter must agree on
+// invalid, unsupported or mismatched requests collectively before returning.
+int ddla_c_set_communication(void* handle, int communication)
+{
+    try {
+        return static_cast<int>(ddla::ddlaSetCommunication(
+            static_cast<ddla::DdlaHandle_t>(handle),
+            static_cast<ddla::DdlaCommunication>(communication)));
+    } catch (const std::exception& e) { ddla_c_record_error(e.what()); return DDLA_C_STATUS_EXCEPTION; }
+    catch (...) { ddla_c_record_error("unknown C++ exception in ddla_c_set_communication"); return DDLA_C_STATUS_EXCEPTION; }
+}
+
+int ddla_c_get_communication(void* handle, int* communication)
+{
+    if (handle == nullptr) return DDLA_C_STATUS_INVALID_HANDLE;
+    if (communication == nullptr) return DDLA_C_STATUS_INVALID_VALUE;
+    try {
+        *communication = static_cast<int>(ddla::ddlaGetCommunication(
+            static_cast<ddla::DdlaHandle_t>(handle)));
+        return DDLA_C_STATUS_SUCCESS;
+    } catch (const std::exception& e) { ddla_c_record_error(e.what()); return DDLA_C_STATUS_EXCEPTION; }
+    catch (...) { ddla_c_record_error("unknown C++ exception in ddla_c_get_communication"); return DDLA_C_STATUS_EXCEPTION; }
+}
+
+int ddla_c_communication_available(void* handle, int communication)
+{
+    try {
+        return ddla::ddlaCommunicationAvailable(static_cast<ddla::DdlaHandle_t>(handle),
+            static_cast<ddla::DdlaCommunication>(communication)) ? 1 : 0;
+    } catch (const std::exception& e) { ddla_c_record_error(e.what()); return 0; }
+    catch (...) { ddla_c_record_error("unknown C++ exception in ddla_c_communication_available"); return 0; }
+}
+
 int ddla_c_destroy(void** handle)
 {
     try {

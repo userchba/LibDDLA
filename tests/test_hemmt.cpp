@@ -114,13 +114,10 @@ void run_case(DdlaHandle_t h,bool local,char side,char ua,char uc,int n,int nb,i
             if(local)blas_impl::hemmt_run<Backend,T>(h,side,ua,uc,n,alpha,a.data.data(),a.d[DDLA_LLD_],b.data.data(),b.d[DDLA_LLD_],beta,c.data.data(),c.d[DDLA_LLD_],work.data()+256,bytes,hermitian_structure);
             else phemm_impl::phemm_run<Backend,T>(h,side,ua,n,n,alpha,a.data.data(),a.d,b.data.data(),b.d,beta,c.data.data(),c.d,hermitian_structure,work.data()+256,bytes,host.data()+256,host_bytes,uc);
             const auto stats=scope.finish();
-            bool cold_tunnel=false;
-#if defined(DDLA_USE_GPU_CPU_TUNNEL)
-            // The existing communication cache grows on its first larger transfer.
-            // Validate that result too, then require allocation-free reuse twice.
-            cold_tunnel=Backend==DdlaBackend::GPU && !local && repeat==0;
-#endif
-            agree(h,stats.ddla_alloc||stats.ddla_free||(!cold_tunnel&&stats.host_new)||stats.pinned_alloc||stats.raw_gpu_alloc||stats.vendor_query||stats.resource_setup,std::string(test_name)+" run allocated scratch or queried resources");
+            // The communication cache may grow on its first staged transfer.
+            const bool cold_staging=Backend==DdlaBackend::GPU && !local && repeat==0 &&
+                ddlaGetCommunication(h)==DdlaCommunication::HostStagedMPI;
+            agree(h,stats.ddla_alloc||stats.ddla_free||(!cold_staging&&stats.host_new)||stats.pinned_alloc||stats.raw_gpu_alloc||stats.vendor_query||stats.resource_setup,std::string(test_name)+" run allocated scratch or queried resources");
         } else {
             const auto flag=[&](char x){return mode==1?char(std::tolower(static_cast<unsigned char>(x))):x;};
             if(local)local_product<Backend,T>(h,flag(side),flag(ua),flag(uc),n,alpha,n&&alpha!=T(0)?a.data.data():nullptr,a.d[DDLA_LLD_],n&&alpha!=T(0)?b.data.data():nullptr,b.d[DDLA_LLD_],beta,n?c.data.data():nullptr,c.d[DDLA_LLD_]);

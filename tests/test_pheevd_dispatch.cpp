@@ -88,10 +88,10 @@ template<DdlaBackend B,class T>void test(DdlaHandle_t h,bool device) {
 template<DdlaBackend B>void backend(std::pair<int,int> grid) {
     DdlaHandle_t h=nullptr;DDLA_CHECK(ddlaInit(h,B));DDLA_CHECK(ddlaSet(h,MPI_COMM_WORLD,grid.first,grid.second));
     bool device=false;
-#if defined(DDLA_USE_CUDA) && defined(DDLA_USE_CCL) && !defined(DDLA_USE_GPU_CPU_TUNNEL)
+#if defined(DDLA_USE_CUDA) && defined(DDLA_USE_CCL)
     if constexpr(B==DdlaBackend::GPU) {
         int major=0,minor=0;GPU_CHECK(gpuDeviceGetAttribute(&major,gpuDevAttrComputeCapabilityMajor,h->local_device));
-        GPU_CHECK(gpuDeviceGetAttribute(&minor,gpuDevAttrComputeCapabilityMinor,h->local_device));device=major==7&&minor==0;
+        GPU_CHECK(gpuDeviceGetAttribute(&minor,gpuDevAttrComputeCapabilityMinor,h->local_device));device=ddlaGetCommunication(h)==DdlaCommunication::CCL && major==7&&minor==0;
     }
 #endif
     test<B,float>(h,device);test<B,double>(h,device);test<B,std::complex<float>>(h,device);test<B,std::complex<double>>(h,device);

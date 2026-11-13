@@ -37,12 +37,14 @@ module ddla
   private
 
   public :: ddla_init_backend, ddla_set, ddla_destroy, ddla_backend_available, ddla_get_backend, &
-     ddla_grid_dims, ddla_grid_coords, ddla_rank, ddla_size, ddla_descinit, ddla_numloc, &
-     ddla_malloc, ddla_free, ddla_memcpy, ddla_memcpy2d, ddla_memset, ddla_synchronize, &
-     ddla_error_string, ddla_error_text, ddla_check, ddla_complex_float, ddla_complex_double, &
-     DDLA_BACKEND_CPU, DDLA_BACKEND_GPU, DDLA_STATUS_SUCCESS, DDLA_STATUS_INVALID_HANDLE, &
-     DDLA_STATUS_INVALID_VALUE, DDLA_STATUS_ALLOC_FAILED, DDLA_STATUS_BACKEND_UNAVAILABLE, &
-     DDLA_STATUS_INTERNAL_ERROR, DDLA_STATUS_EXCEPTION
+     ddla_set_communication, ddla_get_communication, ddla_communication_available, ddla_grid_dims, &
+     ddla_grid_coords, ddla_rank, ddla_size, ddla_descinit, ddla_numloc, ddla_malloc, ddla_free, &
+     ddla_memcpy, ddla_memcpy2d, ddla_memset, ddla_synchronize, ddla_error_string, ddla_error_text, &
+     ddla_check, ddla_complex_float, ddla_complex_double, DDLA_BACKEND_CPU, DDLA_BACKEND_GPU, &
+     DDLA_COMMUNICATION_MPI, DDLA_COMMUNICATION_HOST_STAGED_MPI, DDLA_COMMUNICATION_CCL, &
+     DDLA_STATUS_SUCCESS, DDLA_STATUS_INVALID_HANDLE, DDLA_STATUS_INVALID_VALUE, &
+     DDLA_STATUS_ALLOC_FAILED, DDLA_STATUS_BACKEND_UNAVAILABLE, DDLA_STATUS_INTERNAL_ERROR, &
+     DDLA_STATUS_EXCEPTION
   public :: ddla_s_ptrtrs, ddla_d_ptrtrs, ddla_c_ptrtrs, ddla_z_ptrtrs, ddla_s_ptrmm, ddla_d_ptrmm, &
      ddla_c_ptrmm, ddla_z_ptrmm, ddla_s_plapiv, ddla_d_plapiv, ddla_c_plapiv, ddla_z_plapiv, &
      ddla_s_pswap, ddla_d_pswap, ddla_c_pswap, ddla_z_pswap, ddla_s_gather, ddla_d_gather, &
@@ -82,6 +84,11 @@ module ddla
   ! Backend ids for ddla_init_backend / ddla_backend_available / ddla_get_backend.
   integer(c_int), parameter :: DDLA_BACKEND_CPU = 0_c_int
   integer(c_int), parameter :: DDLA_BACKEND_GPU = 1_c_int
+
+  ! Per-handle communication ids. MPI on GPU requires a compatible GPU-aware MPI.
+  integer(c_int), parameter :: DDLA_COMMUNICATION_MPI = 0_c_int
+  integer(c_int), parameter :: DDLA_COMMUNICATION_HOST_STAGED_MPI = 1_c_int
+  integer(c_int), parameter :: DDLA_COMMUNICATION_CCL = 2_c_int
 
   ! Status codes returned by every binding (mirror ddlaStatus_t plus one).
   integer(c_int), parameter :: DDLA_STATUS_SUCCESS = 0_c_int
@@ -3472,6 +3479,34 @@ module ddla
       integer(c_int), value :: nprows, npcols
       character(kind=c_char), value :: major
     end function ddla_set
+
+    ! After ddla_set, all ranks call the setter with the same requested mode.
+    function ddla_set_communication(handle, communication) &
+        result(status) bind(C, name="ddla_c_set_communication")
+      import :: c_int, c_ptr
+      implicit none
+      integer(c_int) :: status
+      type(c_ptr), value :: handle
+      integer(c_int), value :: communication
+    end function ddla_set_communication
+
+    function ddla_get_communication(handle, communication) &
+        result(status) bind(C, name="ddla_c_get_communication")
+      import :: c_int, c_ptr
+      implicit none
+      integer(c_int) :: status
+      type(c_ptr), value :: handle
+      integer(c_int), intent(out) :: communication
+    end function ddla_get_communication
+
+    function ddla_communication_available(handle, communication) &
+        result(avail) bind(C, name="ddla_c_communication_available")
+      import :: c_int, c_ptr
+      implicit none
+      integer(c_int) :: avail
+      type(c_ptr), value :: handle
+      integer(c_int), value :: communication
+    end function ddla_communication_available
 
     function ddla_destroy(handle) &
         result(status) bind(C, name="ddla_c_destroy")

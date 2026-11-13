@@ -21,6 +21,11 @@ STATUS_EXCEPTION = 6
 BACKEND_CPU = 0
 BACKEND_GPU = 1
 
+# Per-handle communication ids
+COMMUNICATION_MPI = 0
+COMMUNICATION_HOST_STAGED_MPI = 1
+COMMUNICATION_CCL = 2
+
 # ScaLAPACK descriptor constants
 DTYPE_ = 0
 CTXT_ = 1
@@ -162,6 +167,18 @@ ddla_c_init_backend.argtypes = [ctypes.c_void_p, ctypes.c_int]
 ddla_c_set = lib.ddla_c_set
 ddla_c_set.restype = ctypes.c_int
 ddla_c_set.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_char]
+
+ddla_c_set_communication = lib.ddla_c_set_communication
+ddla_c_set_communication.restype = ctypes.c_int
+ddla_c_set_communication.argtypes = [ctypes.c_void_p, ctypes.c_int]
+
+ddla_c_get_communication = lib.ddla_c_get_communication
+ddla_c_get_communication.restype = ctypes.c_int
+ddla_c_get_communication.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)]
+
+ddla_c_communication_available = lib.ddla_c_communication_available
+ddla_c_communication_available.restype = ctypes.c_int
+ddla_c_communication_available.argtypes = [ctypes.c_void_p, ctypes.c_int]
 
 ddla_c_destroy = lib.ddla_c_destroy
 ddla_c_destroy.restype = ctypes.c_int

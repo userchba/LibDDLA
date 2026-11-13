@@ -41,12 +41,9 @@ void check_case(DdlaHandle_t h,char ta,char tb,bool shifted,int mode,bool expect
     const int trans=(ta!='N' && alpha!=T(0))+(tb!='N' && beta!=T(0));
     // Square grids exchange a pre-added co-located pair as one message.
     const int messages=co && trans==2 ? 1 : trans;
-    constexpr bool mpi=Backend==DdlaBackend::CPU
-#ifdef DDLA_USE_GPU_CPU_TUNNEL
-        || Backend==DdlaBackend::GPU
-#endif
-        ;
-    if constexpr(mpi) {
+    const bool mpi=Backend==DdlaBackend::CPU ||
+        ddlaGetCommunication(h)!=DdlaCommunication::CCL;
+    if(mpi) {
         const bool blocks=expect_block || pr!=pc;
         if(sums[0]!=(blocks?trans*pr*pc:0) || p2p>(blocks?0:messages) ||
            (!blocks && pr>1 && trans && (!sums[1] || sums[2]<16384)))

@@ -60,8 +60,11 @@ void pheevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
             descA[DDLA_RSRC_] == 0 && descA[DDLA_CSRC_] == 0 &&
             detail::pheevd_one_stage_shape<Backend,T>(jobz,n,descA[DDLA_MB_],
                 handle->nprows_,handle->npcols_,handle->major);
-#if !defined(DDLA_USE_CUDA) || !defined(DDLA_USE_CCL) || defined(DDLA_USE_GPU_CPU_TUNNEL)
+#if !defined(DDLA_USE_CUDA) || !defined(DDLA_USE_CCL)
         if constexpr (Backend == DdlaBackend::GPU) automatic_shape = false;
+#else
+        if constexpr (Backend == DdlaBackend::GPU)
+            automatic_shape = automatic_shape && handle->communication == DdlaCommunication::CCL;
 #endif
         // Shape metadata is global; worker budgets, tuning options and devices
         // may differ locally. An ineligible rank requests the conservative route.
@@ -77,7 +80,7 @@ void pheevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
                              threads == detail::pheevd_method_cpu_threads;
             } else {
                 prefer_one = handle->host_threads == 1 && threads == 1;
-#if defined(DDLA_USE_CUDA) && defined(DDLA_USE_CCL) && !defined(DDLA_USE_GPU_CPU_TUNNEL)
+#if defined(DDLA_USE_CUDA) && defined(DDLA_USE_CCL)
                 if (prefer_one) {
                     int major = 0, minor = 0;
                     GPU_CHECK(gpuDeviceGetAttribute(&major, gpuDevAttrComputeCapabilityMajor, handle->local_device));
