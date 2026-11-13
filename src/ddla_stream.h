@@ -2,6 +2,7 @@
 #define DDLA_STREAM_H
 
 #include <ddla/ddla_handle_t.h>
+#include "communicator.h"
 #include <mpi.h>
 #include <array>
 #include <cstddef>
@@ -12,7 +13,8 @@
 namespace ddla {
 
 // One layout for every backend and communication mode. Only ddla_stream.cpp
-// creates/destroys native resources; CPU handles leave every opaque slot null.
+// manages compute resources; communicator.cpp manages CCL resources. CPU
+// handles leave every opaque slot null.
 class DdlaStream {
 public:
     // -- per-handle device selection (replaces static local_device) ---------
@@ -39,12 +41,17 @@ public:
     void* solverH = nullptr;
     void* blasH   = nullptr;
 
+    // Pack these small flags together before the aligned backend/strategy
+    // fields, retaining the handle's previous size on the supported ABI.
     char major = 'R';
+    bool initialized = false;
+    bool destroyed   = false;
 
     // -- backend identity (set during ddlaInit) -----------------------------
     // Placeholder until ddlaInit overwrites it; never consulted before that.
     DdlaBackend backend = DdlaBackend::CPU;
-    DdlaCommunication communication = DdlaCommunication::MPI;
+    const Communicator* communicator = Communicator::get(DdlaBackend::CPU, DdlaCommunication::MPI);
+    DdlaCommunication communication() const noexcept { return communicator->mode(); }
     // Internal groups may be rank-local. Transport changes are forbidden until
     // they close; a handle is never used concurrently by application threads.
     int communication_group_depth = 0;
@@ -54,10 +61,6 @@ public:
     // this communicator, affinity and environment. Reconfigure the handle
     // to adopt changed bindings or overrides. Checked plans copy this value.
     int host_threads = 1;
-
-    // -- lifecycle guards ---------------------------------------------------
-    bool initialized = false;
-    bool destroyed   = false;
 
     // Blocking tunnel communication reuses these two per-handle host buffers.
     // Send and receive storage must be disjoint for sendrecv/all-to-all/reduce.
@@ -90,7 +93,7 @@ public:
     void init(MPI_Comm comm_group, char major);
     void init(int nprows, int npcols, MPI_Comm comm_group, char major);
     void clean();
-    void set_communication_resources(DdlaCommunication mode);
+    void select_communication(DdlaCommunication mode);
     ~DdlaStream();
     void check_memory();
     void rank_to_rc(int rank, int& row, int& col) const
@@ -108,6 +111,28 @@ public:
 private:
     std::vector<std::byte> host_buffers_[2];
 };
+
+// These topology/group operations need the completed handle layout.
+inline MPI_Comm Communicator::mpi_comm(const DdlaHandle_t& h, CommScope scope) noexcept
+{
+    switch (scope) {
+    case CommScope::Row: return h->row_comm;
+    case CommScope::Col: return h->col_comm;
+    default: return h->comm;
+    }
+}
+
+inline void Communicator::group_start(const DdlaHandle_t& h) const
+{
+    ++h->communication_group_depth;
+}
+
+inline void Communicator::group_end(const DdlaHandle_t& h) const
+{
+    if (h->communication_group_depth <= 0)
+        throw std::runtime_error("ddla: communication group is not active");
+    --h->communication_group_depth;
+}
 
 } // namespace ddla
 

@@ -34,20 +34,13 @@ bool ddlaBackendAvailable(DdlaBackend backend)
 
 bool ddlaCommunicationAvailable(const DdlaHandle_t& handle, DdlaCommunication mode)
 {
-    if (!handle) return false;
-    if (mode == DdlaCommunication::MPI) return true;
-    if (handle->backend != DdlaBackend::GPU) return false;
-    if (mode == DdlaCommunication::HostStagedMPI) return true;
-#if DDLA_HAS_GPU && defined(DDLA_USE_CCL)
-    if (mode == DdlaCommunication::CCL) return true;
-#endif
-    return false;
+    return handle && Communicator::get(handle->backend, mode) != nullptr;
 }
 
 DdlaCommunication ddlaGetCommunication(const DdlaHandle_t& handle)
 {
     if (!handle) throw std::runtime_error("ddlaGetCommunication: handle is null");
-    return handle->communication;
+    return handle->communication();
 }
 
 // Validate on every rank before acting on any local rejection. Normalizing an
@@ -74,9 +67,9 @@ ddlaStatus_t ddlaSetCommunication(const DdlaHandle_t& handle, DdlaCommunication 
     if (!handle) return ddlaStatus_t::DDLA_STATUS_INVALID_HANDLE;
     const auto status = validate_communication(handle, mode, handle->comm);
     if (status != ddlaStatus_t::DDLA_STATUS_SUCCESS) return status;
-    if (mode == handle->communication) return ddlaStatus_t::DDLA_STATUS_SUCCESS;
+    if (mode == handle->communication()) return ddlaStatus_t::DDLA_STATUS_SUCCESS;
     if (!handle->initialized) {
-        handle->communication = mode;
+        handle->select_communication(mode);
         return ddlaStatus_t::DDLA_STATUS_SUCCESS;
     }
     // The transition, unlike ordinary communication calls, is collective and
@@ -90,8 +83,7 @@ ddlaStatus_t ddlaSetCommunication(const DdlaHandle_t& handle, DdlaCommunication 
     } catch (...) { failed = 1; }
     MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &failed, 1, MPI_INT, MPI_MAX, handle->comm));
     if (failed) return ddlaStatus_t::DDLA_STATUS_INTERNAL_ERROR;
-    handle->set_communication_resources(mode);
-    handle->communication = mode;
+    handle->select_communication(mode);
     return ddlaStatus_t::DDLA_STATUS_SUCCESS;
 }
 
@@ -110,11 +102,11 @@ ddlaStatus_t ddlaInit(DdlaHandle_t& handle, DdlaBackend requested_backend)
     // pass uninitialized pointer variables; reading them is UB).
     handle = new DdlaStream();
     handle->backend = requested_backend;
-    if (requested_backend == DdlaBackend::GPU) {
+    DdlaCommunication mode = DdlaCommunication::MPI;
 #if defined(DDLA_USE_CCL)
-        handle->communication = DdlaCommunication::CCL;
+    if (requested_backend == DdlaBackend::GPU) mode = DdlaCommunication::CCL;
 #endif
-    }
+    handle->select_communication(mode);
     return ddlaStatus_t::DDLA_STATUS_SUCCESS;
 }
 
@@ -165,7 +157,7 @@ ddlaStatus_t ddlaSet(DdlaHandle_t handle, const MPI_Comm& comm, char major)
     }
 
     resolve_and_validate_backend(handle, comm);
-    DDLA_CHECK(validate_communication(handle, handle->communication, comm));
+    DDLA_CHECK(validate_communication(handle, handle->communication(), comm));
 
     // CPU handles must not execute GPU device setup
     handle->init(comm, major);
@@ -182,7 +174,7 @@ ddlaStatus_t ddlaSet(DdlaHandle_t handle, const MPI_Comm& comm,
     }
 
     resolve_and_validate_backend(handle, comm);
-    DDLA_CHECK(validate_communication(handle, handle->communication, comm));
+    DDLA_CHECK(validate_communication(handle, handle->communication(), comm));
 
     handle->init(nprows, npcols, comm, major);
     handle->host_threads = detail::host_thread_budget(handle->comm, handle->node_ranks);

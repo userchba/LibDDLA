@@ -65,6 +65,7 @@ target_sources(ddla_lib PRIVATE
     matrix_transfer_kernels.cpp
     ddla_handle_t.cpp
     ddla_stream.cpp
+    communicator.cpp
     ddla_desc.cpp
     reflector_build_T.cpp
     punmtr.cpp

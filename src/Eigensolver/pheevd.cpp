@@ -64,7 +64,7 @@ void pheevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
         if constexpr (Backend == DdlaBackend::GPU) automatic_shape = false;
 #else
         if constexpr (Backend == DdlaBackend::GPU)
-            automatic_shape = automatic_shape && handle->communication == DdlaCommunication::CCL;
+            automatic_shape = automatic_shape && handle->communication() == DdlaCommunication::CCL;
 #endif
         // Shape metadata is global; worker budgets, tuning options and devices
         // may differ locally. An ineligible rank requests the conservative route.

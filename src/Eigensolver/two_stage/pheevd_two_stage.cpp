@@ -132,7 +132,7 @@ PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, ch
             if ((n && !eigenvalues) || (active(da) && !A) || (job == 'V' && active(dz) && !Z))
                 throw std::invalid_argument("pheevd: missing active input/output");
 #if defined(DDLA_USE_CUDA) && defined(DDLA_USE_CCL)
-            if (backend == DdlaBackend::GPU && h->communication == DdlaCommunication::CCL && method == 'A' && job == 'V' &&
+            if (backend == DdlaBackend::GPU && h->communication() == DdlaCommunication::CCL && method == 'A' && job == 'V' &&
                 da[DDLA_MB_] == 64 && n >= 4096)
             {
                 int major = 0, minor = 0;
@@ -187,7 +187,7 @@ PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, ch
     int automatic = backend == DdlaBackend::CPU && method == 'A' && !legacy_requested &&
                     topology.groups() == 1 &&
                     detail::pheevd_cpu_householder_shape(n, p.nb, p.band, h->nprows_, h->npcols_, p.workers);
-    if (backend == DdlaBackend::GPU && h->communication == DdlaCommunication::CCL && method == 'A')
+    if (backend == DdlaBackend::GPU && h->communication() == DdlaCommunication::CCL && method == 'A')
     {
         const char* requested_band = std::getenv("DDLA_EIG_NBW");
         automatic = detail::pheevd_gpu_householder_band<T>(

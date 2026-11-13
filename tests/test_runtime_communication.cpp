@@ -18,6 +18,8 @@ void require(DdlaHandle_t h,bool good,const char* label) {
 }
 void expect_status(DdlaHandle_t h,Status got,Status want,const char* label) { require(h,got==want,label); }
 void resources(DdlaHandle_t h) {
+    require(h,h->communicator==Communicator::get(h->backend,ddlaGetCommunication(h)) &&
+        h->communicator->mode()==ddlaGetCommunication(h),"selected strategy owns transport identity");
     const bool ccl=h->backend==DdlaBackend::GPU&&ddlaGetCommunication(h)==Mode::CCL;
     require(h,ccl?(h->nccl_comm&&h->nccl_row_comm&&h->nccl_col_comm):
         (!h->nccl_comm&&!h->nccl_row_comm&&!h->nccl_col_comm),"CCL slots follow selected mode");
@@ -285,8 +287,14 @@ template<DdlaBackend B>void run(MPI_Comm comm,int pr,int pc,bool device_mpi) {
                 "same-mode setter retains CCL resources");
             resources(h);
             if(cycle==0) {
-                commGroupStart<B>(h);const auto grouped_status=ddlaSetCommunication(h,mode);commGroupEnd<B>(h);
-                expect_status(h,grouped_status,Status::DDLA_STATUS_INVALID_VALUE,"active group rejects setter in each transport");
+                commGroupStart<B>(h);
+                commGroupStart<B>(h);
+                const auto grouped_status=ddlaSetCommunication(h,mode);
+                commGroupEnd<B>(h);
+                const auto still_grouped=ddlaSetCommunication(h,mode);
+                commGroupEnd<B>(h);
+                expect_status(h,grouped_status,Status::DDLA_STATUS_INVALID_VALUE,"nested group rejects setter in each transport");
+                expect_status(h,still_grouped,Status::DDLA_STATUS_INVALID_VALUE,"outer group remains active");
             }
             require(h,ddlaGetCommunication(other)==Mode::MPI,"another handle keeps its transport");
             comm_test::messages<DdlaBackend::CPU,double>(other,CommScope::Grid,37);

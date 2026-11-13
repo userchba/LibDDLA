@@ -73,7 +73,7 @@ OneStagePlan one_stage_check(const DdlaHandle_t& h, DdlaBackend backend, char jo
             throw std::invalid_argument("pheevd_one_stage: missing eigenvalues");
         OneStagePlan result;
         result.backend = backend;
-        result.communication = h->communication;
+        result.communication = h->communication();
         result.job = job;
         result.uplo = uplo;
         result.stored_only = false;
@@ -139,7 +139,7 @@ template <class T>
 void one_stage_workspace_size(const DdlaHandle_t& h, const OneStagePlan& p, std::size_t* backend_bytes,
                               std::size_t* host_bytes) {
     using R = typename real_type<T>::type;
-    if (p.backend == DdlaBackend::GPU && p.communication != h->communication)
+    if (p.backend == DdlaBackend::GPU && p.communication != h->communication())
         throw std::invalid_argument("pheevd_one_stage: communication changed; check and query a new plan");
     *backend_bytes = *host_bytes = 0;
     if (!p.n)
@@ -189,7 +189,7 @@ void one_stage_run(const DdlaHandle_t& h, const OneStagePlan& p, OneStageResourc
                    void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes) {
     if constexpr (B == DdlaBackend::GPU)
         detail::agree_check(h, "pheevd_one_stage transport", [&](detail::Agree&) {
-            if (p.communication != h->communication)
+            if (p.communication != h->communication())
                 throw std::invalid_argument("pheevd_one_stage: communication changed; check and query a new plan");
         });
     try {
