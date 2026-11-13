@@ -721,13 +721,14 @@ DDLA_FOR_EACH_TYPE(DDLA_HOST_ACCUM_INSTANTIATE)
 template<class T>Hb2stFinishHostPlan hb2st_finish_host_geometry(const DdlaHandle_t& h,int n,int ldy,
     const int* desc,int threads,int panel_columns,int contraction_columns,bool phases)
 {
-    Hb2stFinishHostPlan p;p.n=n;p.ldy=ldy;p.npr=h->nprows_;p.npc=h->npcols_;p.mypr=h->myprow_;p.mypc=h->mypcol_;
+    Hb2stFinishHostPlan p;p.n=n;p.nev=std::min(n,desc[DDLA_N_]);p.ldy=ldy;p.npr=h->nprows_;p.npc=h->npcols_;p.mypr=h->myprow_;p.mypc=h->mypcol_;
     p.rank=h->myid;p.P=p.npr*p.npc;p.major=h->major;p.threads=std::max(1,threads);p.phases=phases;
     std::copy_n(desc,DDLA_DLEN_,p.descriptor.data());const RowShare rows(n,p.P);p.nrl=rows.count(p.rank);p.maxcnt=rows.count(0);
     const auto kcap=std::max(std::size_t(1),(std::size_t(64)<<20)/(std::size_t(std::max(p.maxcnt,1))*sizeof(T)));
     p.kp=static_cast<int>(std::min(std::size_t(std::max(1,contraction_columns)),std::min(std::size_t(std::max(p.maxcnt,1)),kcap)));
     p.panel=panel_columns>0?std::min(n,panel_columns):hb2st_finish_panel_width(n,p.npr,p.npc,desc[DDLA_MB_],desc[DDLA_NB_],
-        sizeof(T),sizeof(typename real_type<T>::type),true,p.kp);return p;
+        sizeof(T),sizeof(typename real_type<T>::type),true,p.kp);
+    p.panel=std::max(1,std::min(p.panel,p.nev));return p;
 }
 template<class T>Hb2stFinishHostPlan hb2st_finish_host_check(const DdlaHandle_t& h,int n,
     const typename real_type<T>::type* Y,int ldy,const T* phases,std::size_t phase_count,T* Z,const int* desc,int threads,int panel_columns)
@@ -784,8 +785,8 @@ template<class T>void hb2st_finish_host_run(const DdlaHandle_t& h,const Hb2stFin
         gather_host_bytes=padded_bytes<matrix_impl::Block<rt>>(P-1);gather_host=w;w+=gather_host_bytes;}
     assert(w-static_cast<char*>(backend_work)<=static_cast<std::ptrdiff_t>(backend_bytes));(void)backend_bytes;
     const MPI_Datatype dt_rt = mpi_datatype<rt>(), dt = mpi_datatype<T>();
-    for (int j0 = 0; j0 < n; j0 += pw) {
-        const int width = std::min(pw, n - j0);
+    for (int j0 = 0; j0 < p.nev; j0 += pw) {
+        const int width = std::min(pw, p.nev - j0);
         T* W = direct ? Z + static_cast<std::size_t>(j0) * lld : work;
         const int ldw = direct ? lld : std::max(nrl, 1);
         bool first = true;

@@ -2237,6 +2237,16 @@ void heevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
            T* A, int lda, typename real_type<T>::type* w, int* info);
 
 // Hermitian eigensolver interfaces; shared by CPU and GPU backends.
+// The eigensolvers below follow ELPA: return all n ascending eigenvalues and
+// the eigenvectors for the lowest nev eigenvalues (0 <= nev <= n). For V,
+// descZ needs at least n rows and nev columns. Only that leading block is
+// written; larger parent columns and leading-dimension padding are preserved,
+// except where Z overlaps A, whose active n-by-n block is destroyed.
+// nev=0 is eigenvalues-only and ignores Z/descZ. For N, nev is validated but
+// no eigenvectors are returned. nev is required; use nev=n for all vectors.
+// The reductions and tridiagonal D&C still compute the full spectrum; only
+// redistribution and back-transforms are restricted to the requested vectors.
+
 template <typename T>
 struct hb2st_rot {
     int j0;
@@ -2261,10 +2271,12 @@ struct hb2st_rot {
  * Both methods read only UPLO, destroy A, and keep A/Z distributed; w is a
  * host array on every rank. See the explicit entries for method requirements.
  */
+
+
 template <typename T>
 void pheevd(
     const DdlaHandle_t& handle,
-    char jobz, char uplo, int n,
+    char jobz, char uplo, int n, int nev,
     T* A, const int* descA,
     typename real_type<T>::type* w,
     T* Z, const int* descZ,
@@ -2287,8 +2299,10 @@ void pheevd(
  * Eigenvalues-only, other devices/grids/thread budgets and float types retain
  * their existing GPU policy. Both algorithms keep quadratic storage distributed.
  */
+
+
 template <typename T>
-void pheevd_two_stage(const DdlaHandle_t& handle, char jobz, char uplo, int n,
+void pheevd_two_stage(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev,
     T* A, const int* descA, typename real_type<T>::type* w,
     T* Z, const int* descZ, int& info);
 
@@ -2312,8 +2326,10 @@ void pheevd_two_stage(const DdlaHandle_t& handle, char jobz, char uplo, int n,
  * restored on return; discarded cache entries are not restored. Coordinate
  * concurrent changes to this vendor process-wide setting.
  */
+
+
 template <typename T>
-void pheevd_one_stage(const DdlaHandle_t& handle, char jobz, char uplo, int n,
+void pheevd_one_stage(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev,
     T* A, const int* descA, typename real_type<T>::type* w,
     T* Z, const int* descZ, int& info);
 

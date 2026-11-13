@@ -1769,54 +1769,54 @@ template void heevd<std::complex<double>>(const DdlaHandle_t& handle, char jobz,
 
 template <typename T>
 void pheevd(
-    const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)
+    const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)
 {
 #if DDLA_HAS_GPU
     if (handle && handle->backend == DdlaBackend::GPU)
-        return pheevd<DdlaBackend::GPU, T>(handle, jobz, uplo, n, A, descA, w, Z, descZ, info);
+        return pheevd<DdlaBackend::GPU, T>(handle, jobz, uplo, n, nev, A, descA, w, Z, descZ, info);
 #endif
-    return pheevd<DdlaBackend::CPU, T>(handle, jobz, uplo, n, A, descA, w, Z, descZ, info);
+    return pheevd<DdlaBackend::CPU, T>(handle, jobz, uplo, n, nev, A, descA, w, Z, descZ, info);
 }
 
 
-template void pheevd<float>(const DdlaHandle_t& handle, char jobz, char uplo, int n, float* A, const int* descA, typename real_type<float>::type* w, float* Z, const int* descZ, int& info);
-template void pheevd<double>(const DdlaHandle_t& handle, char jobz, char uplo, int n, double* A, const int* descA, typename real_type<double>::type* w, double* Z, const int* descZ, int& info);
-template void pheevd<std::complex<float>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, std::complex<float>* A, const int* descA, typename real_type<std::complex<float>>::type* w, std::complex<float>* Z, const int* descZ, int& info);
-template void pheevd<std::complex<double>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, std::complex<double>* A, const int* descA, typename real_type<std::complex<double>>::type* w, std::complex<double>* Z, const int* descZ, int& info);
+template void pheevd<float>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, float* A, const int* descA, typename real_type<float>::type* w, float* Z, const int* descZ, int& info);
+template void pheevd<double>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, double* A, const int* descA, typename real_type<double>::type* w, double* Z, const int* descZ, int& info);
+template void pheevd<std::complex<float>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, std::complex<float>* A, const int* descA, typename real_type<std::complex<float>>::type* w, std::complex<float>* Z, const int* descZ, int& info);
+template void pheevd<std::complex<double>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, std::complex<double>* A, const int* descA, typename real_type<std::complex<double>>::type* w, std::complex<double>* Z, const int* descZ, int& info);
 
 template <typename T>
 void pheevd_two_stage(
-    const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)
+    const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)
 {
 #if DDLA_HAS_GPU
     if (handle && handle->backend == DdlaBackend::GPU)
-        return pheevd_two_stage<DdlaBackend::GPU, T>(handle, jobz, uplo, n, A, descA, w, Z, descZ, info);
+        return pheevd_two_stage<DdlaBackend::GPU, T>(handle, jobz, uplo, n, nev, A, descA, w, Z, descZ, info);
 #endif
-    return pheevd_two_stage<DdlaBackend::CPU, T>(handle, jobz, uplo, n, A, descA, w, Z, descZ, info);
+    return pheevd_two_stage<DdlaBackend::CPU, T>(handle, jobz, uplo, n, nev, A, descA, w, Z, descZ, info);
 }
 
 
-template void pheevd_two_stage<float>(const DdlaHandle_t& handle, char jobz, char uplo, int n, float* A, const int* descA, typename real_type<float>::type* w, float* Z, const int* descZ, int& info);
-template void pheevd_two_stage<double>(const DdlaHandle_t& handle, char jobz, char uplo, int n, double* A, const int* descA, typename real_type<double>::type* w, double* Z, const int* descZ, int& info);
-template void pheevd_two_stage<std::complex<float>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, std::complex<float>* A, const int* descA, typename real_type<std::complex<float>>::type* w, std::complex<float>* Z, const int* descZ, int& info);
-template void pheevd_two_stage<std::complex<double>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, std::complex<double>* A, const int* descA, typename real_type<std::complex<double>>::type* w, std::complex<double>* Z, const int* descZ, int& info);
+template void pheevd_two_stage<float>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, float* A, const int* descA, typename real_type<float>::type* w, float* Z, const int* descZ, int& info);
+template void pheevd_two_stage<double>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, double* A, const int* descA, typename real_type<double>::type* w, double* Z, const int* descZ, int& info);
+template void pheevd_two_stage<std::complex<float>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, std::complex<float>* A, const int* descA, typename real_type<std::complex<float>>::type* w, std::complex<float>* Z, const int* descZ, int& info);
+template void pheevd_two_stage<std::complex<double>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, std::complex<double>* A, const int* descA, typename real_type<std::complex<double>>::type* w, std::complex<double>* Z, const int* descZ, int& info);
 
 template <typename T>
 void pheevd_one_stage(
-    const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)
+    const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)
 {
 #if DDLA_HAS_GPU
     if (handle && handle->backend == DdlaBackend::GPU)
-        return pheevd_one_stage<DdlaBackend::GPU, T>(handle, jobz, uplo, n, A, descA, w, Z, descZ, info);
+        return pheevd_one_stage<DdlaBackend::GPU, T>(handle, jobz, uplo, n, nev, A, descA, w, Z, descZ, info);
 #endif
-    return pheevd_one_stage<DdlaBackend::CPU, T>(handle, jobz, uplo, n, A, descA, w, Z, descZ, info);
+    return pheevd_one_stage<DdlaBackend::CPU, T>(handle, jobz, uplo, n, nev, A, descA, w, Z, descZ, info);
 }
 
 
-template void pheevd_one_stage<float>(const DdlaHandle_t& handle, char jobz, char uplo, int n, float* A, const int* descA, typename real_type<float>::type* w, float* Z, const int* descZ, int& info);
-template void pheevd_one_stage<double>(const DdlaHandle_t& handle, char jobz, char uplo, int n, double* A, const int* descA, typename real_type<double>::type* w, double* Z, const int* descZ, int& info);
-template void pheevd_one_stage<std::complex<float>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, std::complex<float>* A, const int* descA, typename real_type<std::complex<float>>::type* w, std::complex<float>* Z, const int* descZ, int& info);
-template void pheevd_one_stage<std::complex<double>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, std::complex<double>* A, const int* descA, typename real_type<std::complex<double>>::type* w, std::complex<double>* Z, const int* descZ, int& info);
+template void pheevd_one_stage<float>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, float* A, const int* descA, typename real_type<float>::type* w, float* Z, const int* descZ, int& info);
+template void pheevd_one_stage<double>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, double* A, const int* descA, typename real_type<double>::type* w, double* Z, const int* descZ, int& info);
+template void pheevd_one_stage<std::complex<float>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, std::complex<float>* A, const int* descA, typename real_type<std::complex<float>>::type* w, std::complex<float>* Z, const int* descZ, int& info);
+template void pheevd_one_stage<std::complex<double>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, std::complex<double>* A, const int* descA, typename real_type<std::complex<double>>::type* w, std::complex<double>* Z, const int* descZ, int& info);
 
 template <typename T>
 void gemmt(

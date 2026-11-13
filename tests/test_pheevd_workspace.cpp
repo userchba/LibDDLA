@@ -178,7 +178,7 @@ void check_padded_pheevd(const ddla::DdlaHandle_t& h, char uplo, int n, int nb, 
     upload(h, Z.ptr, std::vector<T>(Z.count, sentinel));
     std::vector<rt> w(n, std::numeric_limits<rt>::quiet_NaN());
     int info = -1;
-    ddla::pheevd<T>(h, 'V', uplo, n, A.ptr, descA, w.data(), Z.ptr, descZ, info);
+    ddla::pheevd<T>(h, 'V', uplo, n,n, A.ptr, descA, w.data(), Z.ptr, descZ, info);
     check_ddla_sync(h);
     const std::string tag = std::string("pheevd padded ") + type_name<T>() + " " + uplo +
                             " n=" + std::to_string(n) + " nb=" + std::to_string(nb)+
@@ -283,7 +283,7 @@ void check_aliased_pheevd(const ddla::DdlaHandle_t& h,char uplo,int n,int nb,int
     T* A=buffer.ptr;T* Z=buffer.ptr+offset;
     std::vector<R> w(n,std::numeric_limits<R>::quiet_NaN());
     int info=-1;
-    ddla::pheevd<T>(h,'V',uplo,n,A,descA,w.data(),Z,descZ,info);
+    ddla::pheevd<T>(h,'V',uplo,n,n,A,descA,w.data(),Z,descZ,info);
     check_ddla_sync(h);
     const auto after=download(h,buffer.ptr,total);
     const std::string tag=std::string("pheevd alias ")+type_name<T>()+" "+uplo+" n="+std::to_string(n)+" mode="+std::to_string(mode);
@@ -337,7 +337,7 @@ void check_row_layout_rejections(const ddla::DdlaHandle_t& h)
         ddlaDescInit(da,h,n,n,amb,anb,ar,ac);ddlaDescInit(dz,h,n,n,zmb,zmb,zr,0);
         try {
             if(driver)
-                ddla::pheevd<T>(h,'V','U',n,static_cast<T*>(nullptr),da,static_cast<R*>(nullptr),static_cast<T*>(nullptr),dz,info);
+                ddla::pheevd<T>(h,'V','U',n,n,static_cast<T*>(nullptr),da,static_cast<R*>(nullptr),static_cast<T*>(nullptr),dz,info);
             else
                 ddla::punmtr_he2hb<T>(h,'C',n,1,static_cast<const T*>(nullptr),da,static_cast<const T*>(nullptr),static_cast<T*>(nullptr),dz,info);
         } catch(const std::exception&) {caught=1;}

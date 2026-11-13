@@ -43,7 +43,7 @@ void check_full(const DdlaHandle_t& h,int n,bool upper,bool alias,int method) {
     DeviceBuffer<T>A(h,input.size()),Z(h,std::max<std::size_t>(1,local_size(h,descZ))),reference(h,input.size());
     upload(h,A.ptr,input);upload(h,Z.ptr,std::vector<T>(Z.count,sentinel));upload(h,reference.ptr,input);
     std::vector<R>w(n),old(n),only(n);int info=-1;
-    detail::pheevd_householder_stage4<DdlaBackend::CPU, T>(h,'V',upper?'U':'L',n,A.ptr,descA,w.data(),alias?A.ptr:Z.ptr,descZ,info,method);
+    detail::pheevd_householder_stage4<DdlaBackend::CPU, T>(h,'V',upper?'U':'L',n,n,A.ptr,descA,w.data(),alias?A.ptr:Z.ptr,descZ,info,method);
     require_close(h,"HH private full driver info",info,0);
     T* output=alias?A.ptr:Z.ptr;
     const auto after=download(h,output,alias?input.size():Z.count);
@@ -61,10 +61,10 @@ void check_full(const DdlaHandle_t& h,int n,bool upper,bool alias,int method) {
     require_close(h,"HH full independent residual",std::isfinite(residual)?residual:INFINITY,50);
     require_close(h,"HH full independent orthogonality",std::isfinite(orthogonal)?orthogonal:INFINITY,50);
     upload(h,reference.ptr,input);
-    pheevd<T>(h,'N',upper?'U':'L',n,reference.ptr,descA,old.data(),nullptr,nullptr,info);
+    pheevd<T>(h,'N',upper?'U':'L',n,n,reference.ptr,descA,old.data(),nullptr,nullptr,info);
     require_close(h,"HH reference eigenvalues info",info,0);
     upload(h,reference.ptr,input);
-    detail::pheevd_householder_stage4<DdlaBackend::CPU, T>(h,'N',upper?'U':'L',n,reference.ptr,descA,only.data(),nullptr,nullptr,info,method);
+    detail::pheevd_householder_stage4<DdlaBackend::CPU, T>(h,'N',upper?'U':'L',n,n,reference.ptr,descA,only.data(),nullptr,nullptr,info,method);
     require_close(h,"HH eigenvalues-only info",info,0);
     double error=0,norm=0;
     for(int j=0;j<n;++j) {
@@ -83,14 +83,14 @@ void check_policy(const DdlaHandle_t& h) {
     for(int method:{-1,6,127}) {
         upload(h,A.ptr,input);int info=-1;bool caught=false;
         const int choice=ddlaGetRank(h)==ddlaGetSize(h)-1?method:1;
-        try {detail::pheevd_householder_stage4<DdlaBackend::CPU, double>(h,'N','U',n,A.ptr,desc,w.data(),nullptr,nullptr,info,choice);}
+        try {detail::pheevd_householder_stage4<DdlaBackend::CPU, double>(h,'N','U',n,n,A.ptr,desc,w.data(),nullptr,nullptr,info,choice);}
         catch(const std::exception&){caught=true;}
         require_close(h,"full driver one-rank invalid stage4 rejects collectively",!caught,0);
     }
     if(ddlaGetSize(h)>1) {
         upload(h,A.ptr,input);int info=-1;bool caught=false;
         const int choice=ddlaGetRank(h)==0?0:1;
-        try {detail::pheevd_householder_stage4<DdlaBackend::CPU, double>(h,'N','U',n,A.ptr,desc,w.data(),nullptr,nullptr,info,choice);}
+        try {detail::pheevd_householder_stage4<DdlaBackend::CPU, double>(h,'N','U',n,n,A.ptr,desc,w.data(),nullptr,nullptr,info,choice);}
         catch(const std::exception&){caught=true;}
         require_close(h,"full driver mismatched valid stage4 rejects collectively",!caught,0);
     }

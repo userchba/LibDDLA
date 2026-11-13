@@ -16,14 +16,15 @@ namespace ddla { namespace spectral_impl {
 // All geometry, collective policy and alias decisions are frozen by check.
 // Descriptors retain their rank-local LLD; only shared fields are agreed.
 struct OneStagePlan : HetrdPlan {
-    char job='N';bool backup=false;
+    char job='N';bool backup=false;int nev=0;
     std::array<int,DDLA_DLEN_> z{},saved{},tridiagonal_vectors{};
     std::size_t output_scratch=0;
     HermitianPlan complete{};
     PstedcVectorPlan vectors{};PstedcPlan values{};
 };
 template<class T> OneStagePlan one_stage_check(const DdlaHandle_t&,DdlaBackend,char,char,int,
-    const T*,const int*,const typename real_type<T>::type*,const T*,const int*);
+    const T*,const int*,const typename real_type<T>::type*,const T*,const int*,int nev);
+
 
 // The scratch of one_stage_run on this rank (none for n == 0).  Backend, in carving
 // order: the reflector scalars tau (n - 1), the copy of the reflectors when Z overlaps A,

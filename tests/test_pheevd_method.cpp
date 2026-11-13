@@ -56,14 +56,14 @@ template<class T> void solve(const ddla::DdlaHandle_t& h, const Environment& met
     // Explicit entries must ignore the selector, including an invalid value.
     method.set("invalid-for-explicit-entry");
     upload(h, a.ptr, input);
-    if (one) ddla::pheevd_one_stage(h, 'N', uplo, n, a.ptr, da, direct.data(), static_cast<T*>(nullptr), nullptr, info);
-    else ddla::pheevd_two_stage(h, 'N', uplo, n, a.ptr, da, direct.data(), static_cast<T*>(nullptr), nullptr, info);
+    if (one) ddla::pheevd_one_stage(h, 'N', uplo, n,n, a.ptr, da, direct.data(), static_cast<T*>(nullptr), nullptr, info);
+    else ddla::pheevd_two_stage(h, 'N', uplo, n,n, a.ptr, da, direct.data(), static_cast<T*>(nullptr), nullptr, info);
     require_close(h, "explicit method info", info, 0);
     if (automatic < 0) method.set(one ? "one_stage" : "two_stage");
     else method.set(automatic == 0 ? nullptr : automatic == 1 ? "" : "auto");
     upload(h, a.ptr, input); upload(h, z.ptr, output);
     T* vectors = alias ? a.ptr : z.ptr;
-    ddla::pheevd(h, 'V', uplo, n, a.ptr, da, w.data(), vectors, dz, info);
+    ddla::pheevd(h, 'V', uplo, n,n, a.ptr, da, w.data(), vectors, dz, info);
     require_close(h, "selected method V info", info, 0);
     if (n) {
         require_close(h, "selected method residual", eig_test::residual_metric<T>(h, reference.ptr, da, vectors, dz, w.data(), n), 50);
@@ -85,7 +85,7 @@ template<class T> void solve(const ddla::DdlaHandle_t& h, const Environment& met
     if(bad)std::cout<<"PHEEVD_GUARD_FAILURE n="<<n<<" scalar_bytes="<<sizeof(T)<<" uplo="<<uplo<<" alias="<<alias<<" automatic="<<automatic<<std::endl;
     require_close(h, "selected method finite vectors and parent/LLD guards", bad, 0);
     upload(h, a.ptr, input);
-    ddla::pheevd(h, 'N', uplo, n, a.ptr, da, values.data(), static_cast<T*>(nullptr), nullptr, info);
+    ddla::pheevd(h, 'N', uplo, n,n, a.ptr, da, values.data(), static_cast<T*>(nullptr), nullptr, info);
     require_close(h, "selected method N info", info, 0);
     double error = 0;
     for (int i = 0; i < n; ++i) {
@@ -105,7 +105,7 @@ void selection(const ddla::DdlaHandle_t& h, const Environment& method, const Env
     auto invoke = [&](int n, bool reject) {
         upload(h, a.ptr, input);
         bool caught = false;
-        try { ddla::pheevd(h, 'N', 'U', n, a.ptr, d, w.data(), static_cast<double*>(nullptr), nullptr, info); }
+        try { ddla::pheevd(h, 'N', 'U', n,n, a.ptr, d, w.data(), static_cast<double*>(nullptr), nullptr, info); }
         catch (const std::exception&) { caught = true; }
         require_close(h, "selector expected rejection", caught == reject ? 0 : 1, 0);
         if (reject) {
@@ -155,7 +155,7 @@ template<class T> void overlap_local(const ddla::DdlaHandle_t& h, const Environm
         upload(h,reference.ptr,full);
         std::vector<R> w(n+2,R(9876));int info=-1;
         method.set("auto");T* z=a.ptr+shift;
-        ddla::pheevd(h,'V',uplo,n,a.ptr,da,w.data()+1,z,dz,info);
+        ddla::pheevd(h,'V',uplo,n,n,a.ptr,da,w.data()+1,z,dz,info);
         require_close(h,"local overlapping output info",info,0);
         require_close(h,"local overlapping output residual",eig_test::residual_metric<T>(h,reference.ptr,da,z,dz,w.data()+1,n),50);
         require_close(h,"local overlapping output orthogonality",eig_test::orthogonality_metric<T>(h,z,dz,n),50);

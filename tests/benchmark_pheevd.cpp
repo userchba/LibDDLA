@@ -88,7 +88,7 @@ void run(const ddla::DdlaHandle_t& handle, int n, int nb, bool check, int reps, 
         fill(false);
         MPI_Barrier(MPI_COMM_WORLD);
         const double t0 = MPI_Wtime();
-        ddla::pheevd(handle, 'V', uplo, n, d_A.ptr, descA, w.data(), d_Z.ptr, descZ, info);
+        ddla::pheevd(handle, 'V', uplo, n,n, d_A.ptr, descA, w.data(), d_Z.ptr, descZ, info);
         check_ddla_sync(handle);
         double dt = MPI_Wtime() - t0, dmax = 0.0;
         MPI_Allreduce(&dt, &dmax, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);

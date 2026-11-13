@@ -45,15 +45,16 @@ public:
 template<class T>
 std::size_t output_scratch_elements(const DdlaHandle_t& handle, int n,
                                    const T* A, const int* descA,
-                                   T* Z, const int* descZ)
+                                   T* Z, const int* descZ, int nev = -1)
 {
     using rt = typename real_type<T>::type;
-    if (!Z || descZ[DDLA_M_] != n || descZ[DDLA_N_] != n) return 0;
+    if (nev < 0) nev = n;
+    if (!Z || descZ[DDLA_M_] != n || descZ[DDLA_N_] != nev) return 0;
     int pr=0, pc=0, mr=0, mc=0;
     ddlaGetGridDims(handle,pr,pc);
     ddlaGetGridCoords(handle,mr,mc);
     const int zr=num_loc(n,descZ[DDLA_MB_],mr,descZ[DDLA_RSRC_],pr);
-    const int zc=num_loc(n,descZ[DDLA_NB_],mc,descZ[DDLA_CSRC_],pc);
+    const int zc=num_loc(nev,descZ[DDLA_NB_],mc,descZ[DDLA_CSRC_],pc);
     if (zr<=0 || zc<=0 || descZ[DDLA_LLD_]!=zr) return 0;
     const std::size_t limit=std::numeric_limits<std::size_t>::max()/sizeof(T);
     if (static_cast<std::size_t>(zr)>limit/static_cast<std::size_t>(zc)) return 0;
@@ -81,18 +82,18 @@ template<class T>inline std::size_t reflector_active_span(int rows,int columns,i
     return (gaps*std::size_t(ld)+std::size_t(rows))*sizeof(T);
 }
 template<class T>PheevdReflectorBackupPlan pheevd_reflector_backup_check(const DdlaHandle_t& h,int n,
-    const T* A,const int* da,const T* Z,const int* dz,char triangle='A')
+    const T* A,const int* da,const T* Z,const int* dz,char triangle='A',int nev=-1)
 {
-    PheevdReflectorBackupPlan p;p.n=n;p.triangle=triangle;if(!dz||n<=0)return p;
+    PheevdReflectorBackupPlan p;p.n=n;p.triangle=triangle;if(nev<0)nev=n;if(!dz||n<=0||!nev)return p;
     if(!h)throw std::invalid_argument("pheevd: reflector backup requires a handle");
     int overlap=0;
     detail::agree_local(h,"pheevd: reflector backup",[&]{
         check_desc(da,h);check_desc(dz,h);
-        if(n>da[DDLA_M_]||n>da[DDLA_N_]||n>dz[DDLA_M_]||n>dz[DDLA_N_])throw std::invalid_argument("pheevd: reflector backup order exceeds descriptor");
+        if(n>da[DDLA_M_]||n>da[DDLA_N_]||n>dz[DDLA_M_]||nev>dz[DDLA_N_])throw std::invalid_argument("pheevd: reflector backup order exceeds descriptor");
         ddlaGetGridDims(h,p.npr,p.npc);ddlaGetGridCoords(h,p.pr,p.pc);
         p.rows=num_loc(n,da[DDLA_MB_],p.pr,da[DDLA_RSRC_],p.npr);p.columns=num_loc(n,da[DDLA_NB_],p.pc,da[DDLA_CSRC_],p.npc);p.source_ld=da[DDLA_LLD_];
         const auto ab=reflector_active_span<T>(p.rows,p.columns,p.source_ld);
-        const auto zb=reflector_active_span<T>(num_loc(n,dz[DDLA_MB_],p.pr,dz[DDLA_RSRC_],p.npr),num_loc(n,dz[DDLA_NB_],p.pc,dz[DDLA_CSRC_],p.npc),dz[DDLA_LLD_]);
+        const auto zb=reflector_active_span<T>(num_loc(n,dz[DDLA_MB_],p.pr,dz[DDLA_RSRC_],p.npr),num_loc(nev,dz[DDLA_NB_],p.pc,dz[DDLA_CSRC_],p.npc),dz[DDLA_LLD_]);
         if((ab&&!A)||(zb&&!Z))throw std::invalid_argument("pheevd: null active matrix");
         overlap=memory_overlaps(A,ab,Z,zb);
         std::copy(da,da+DDLA_DLEN_,p.saved.begin());p.saved[DDLA_M_]=p.saved[DDLA_N_]=n;p.saved[DDLA_LLD_]=std::max(p.rows,1);

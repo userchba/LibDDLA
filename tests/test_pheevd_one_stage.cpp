@@ -45,7 +45,7 @@ template<class T>void run(const ddla::DdlaHandle_t& h,int n,int nb,char uplo,int
         }
         require_close(h,"full-method input padding unchanged",changed,0);
     };
-    ddla::pheevd_one_stage(h,'V',uplo,n,a.ptr,da,w.data(),alias?a.ptr:z.ptr,alias?da:dz,info);
+    ddla::pheevd_one_stage(h,'V',uplo,n,n,a.ptr,da,w.data(),alias?a.ptr:z.ptr,alias?da:dz,info);
     require_close(h,"one-stage info",info,0);
     check_ddla_sync(h);
     if(!alias)check_input();
@@ -67,7 +67,7 @@ template<class T>void run(const ddla::DdlaHandle_t& h,int n,int nb,char uplo,int
     }
     if(n)require_close(h,"one-stage orthogonality",eig_test::orthogonality_metric<T>(h,z.ptr,dz,n),50);
     upload(h,a.ptr,input);
-    ddla::pheevd_one_stage(h,'N',uplo,n,a.ptr,da,wn.data(),static_cast<T*>(nullptr),nullptr,info);
+    ddla::pheevd_one_stage(h,'N',uplo,n,n,a.ptr,da,wn.data(),static_cast<T*>(nullptr),nullptr,info);
     check_ddla_sync(h);check_input();
     double error=0;
     for(int i=0;i<n;++i) {
@@ -101,7 +101,7 @@ void body(const ddla::DdlaHandle_t& h,const Shape&) {
         int d[ddla::DDLA_DLEN_];ddlaDescInit(d,h,1,1,1,1,0,0);
         DeviceBuffer<double>a(h,std::max<std::size_t>(1,local_size(h,d)));double w=0;int info=0;bool caught=false;
         try {
-            ddla::pheevd_one_stage(h,'N',rank==0?'U':'L',1,a.ptr,d,&w,static_cast<double*>(nullptr),nullptr,info);
+            ddla::pheevd_one_stage(h,'N',rank==0?'U':'L',1,1,a.ptr,d,&w,static_cast<double*>(nullptr),nullptr,info);
         }catch(const std::invalid_argument&){caught=true;}
         require_close(h,"input triangle mismatch rejected collectively",caught?0:1,0);
     }

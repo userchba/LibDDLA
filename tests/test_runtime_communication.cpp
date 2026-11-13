@@ -76,8 +76,8 @@ struct Math {
         for(int method:{1,2}) {
             api_grid_test::upload(h,a.data(),input);api_grid_test::upload(h,c.data(),ch);
             int info=-1;
-            if(method==1)pheevd_one_stage<Complex>(h,'V','U',n,a.data(),d,w.data(),c.data(),d,info);
-            else pheevd_two_stage<Complex>(h,'V','U',n,a.data(),d,w.data(),c.data(),d,info);
+            if(method==1)pheevd_one_stage<Complex>(h,'V','U',n,n,a.data(),d,w.data(),c.data(),d,info);
+            else pheevd_two_stage<Complex>(h,'V','U',n,n,a.data(),d,w.data(),c.data(),d,info);
             require(h,info==0,"transport eigensolver INFO");
             bool sorted=true;for(int i=0;i<n;++i)sorted=sorted&&std::isfinite(w[i])&&(!i||w[i]>=w[i-1]);
             require(h,sorted,"transport eigensolver sorted finite eigenvalues");

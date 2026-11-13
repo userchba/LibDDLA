@@ -15,7 +15,7 @@ namespace ddla { namespace detail {
 // column interval; its context is borrowed until the synchronous run returns.
 struct Hb2stFinishHostPlan {
     Eig2dInputPlan input_2d{};
-    int n=0,ldy=1,npr=1,npc=1,mypr=0,mypc=0,rank=0,P=1,nrl=0,maxcnt=0;
+    int n=0,nev=0,ldy=1,npr=1,npc=1,mypr=0,mypc=0,rank=0,P=1,nrl=0,maxcnt=0;
     int threads=1,kp=1,panel=1;char major='C';bool phases=false;
     std::array<int,DDLA_DLEN_> descriptor{};
 };

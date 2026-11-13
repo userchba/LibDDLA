@@ -31,7 +31,7 @@ struct Hb2stReplayGpuWorkspace {
 // only to run.
 struct Hb2stReplayGpuPlan {
     Eig2dInputPlan input_2d{};
-    int n=0,kd=1,P=1,rank=0,npr=1,npc=1,pr=0,pc=0,nr=0,nc=0,clo=0;
+    int n=0,nev=0,kd=1,P=1,rank=0,npr=1,npc=1,pr=0,pc=0,nr=0,nc=0,clo=0;
     int mb=1,nb=1,rsrc=0,csrc=0,lld=1,ldy=1,outrows=0,outcols=0;
     int main_columns=0,spill_columns=0,stride=1,width=1,rcmax=1,record_capacity=0;
     long long total=0;

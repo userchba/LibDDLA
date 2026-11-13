@@ -86,8 +86,9 @@ template <class T>
 PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, char uplo, int n, T *A,
                         const int *da, typename real_type<T>::type *eigenvalues, T *Z, const int *dz,
                         const Phb2stTopology &topology, char method, const int *stage4,
-                        DdlaBackend reduction_backend)
+                        DdlaBackend reduction_backend, int nev)
 {
+    if (job == 'V' && nev == 0) job = 'N';
     using R = typename real_type<T>::type;
     bool tuned_device = false;
     auto p = detail::agree_check(
@@ -98,41 +99,41 @@ PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, ch
             PheevdPlan p;
             if (!h || ddlaGetBackend(h) != backend || h->comm == MPI_COMM_NULL || h->nprocs < 1 ||
                 h->nprows_ < 1 || h->npcols_ < 1 ||
-                static_cast<long long>(h->nprows_) * h->npcols_ != h->nprocs || n < 0 ||
+                static_cast<long long>(h->nprows_) * h->npcols_ != h->nprocs || n < 0 || nev < 0 || nev > n ||
                 (job != 'N' && job != 'V') || (uplo != 'U' && uplo != 'L') ||
                 (method != 'A' && method != 'G' && method != 'H') ||
                 (reduction_backend != DdlaBackend::CPU && reduction_backend != DdlaBackend::GPU) ||
                 (backend == DdlaBackend::CPU && reduction_backend != DdlaBackend::CPU) ||
                 (method == 'H' && backend==DdlaBackend::GPU && stage4 && (*stage4<0 || *stage4>1)))
                 throw std::invalid_argument("pheevd: invalid handle/backend/order/options");
-            const auto descriptor = [&](const int *d)
+            const auto descriptor = [&](const int *d, int columns)
             {
                 if (!d || d[DDLA_MB_] < 1 || d[DDLA_NB_] < 1 || d[DDLA_MB_] > INT_MAX / h->nprows_ ||
                     d[DDLA_NB_] > INT_MAX / h->npcols_)
                     throw std::invalid_argument("pheevd: descriptor arithmetic exceeds int");
                 check_desc(d, h);
-                if (n > d[DDLA_M_] || n > d[DDLA_N_])
+                if (n > d[DDLA_M_] || columns > d[DDLA_N_])
                     throw std::invalid_argument("pheevd: order exceeds descriptor");
             };
-            descriptor(da);
+            descriptor(da, n);
             if (da[DDLA_MB_] != da[DDLA_NB_] || da[DDLA_RSRC_] != 0 || da[DDLA_CSRC_] != 0)
                 throw std::invalid_argument("pheevd: square source-zero A blocks required");
             if (job == 'V')
             {
-                descriptor(dz);
+                descriptor(dz, nev);
                 if (dz[DDLA_MB_] != dz[DDLA_NB_] || dz[DDLA_MB_] != da[DDLA_MB_] ||
                     dz[DDLA_RSRC_] != da[DDLA_RSRC_])
                     throw std::invalid_argument("pheevd: output row distribution must match A");
             }
-            const auto active = [&](const int *d)
+            const auto active = [&](const int *d, int columns)
             {
                 return num_loc(n, d[DDLA_MB_], h->myprow_, d[DDLA_RSRC_], h->nprows_) > 0 &&
-                       num_loc(n, d[DDLA_NB_], h->mypcol_, d[DDLA_CSRC_], h->npcols_) > 0;
+                       num_loc(columns, d[DDLA_NB_], h->mypcol_, d[DDLA_CSRC_], h->npcols_) > 0;
             };
-            if ((n && !eigenvalues) || (active(da) && !A) || (job == 'V' && active(dz) && !Z))
+            if ((n && !eigenvalues) || (active(da,n) && !A) || (job == 'V' && active(dz,nev) && !Z))
                 throw std::invalid_argument("pheevd: missing active input/output");
 #if defined(DDLA_USE_CUDA) && defined(DDLA_USE_CCL)
-            if (backend == DdlaBackend::GPU && h->communication() == DdlaCommunication::CCL && method == 'A' && job == 'V' &&
+            if (backend == DdlaBackend::GPU && ddlaGetCommunication(h) == DdlaCommunication::CCL && method == 'A' && job == 'V' &&
                 da[DDLA_MB_] == 64 && n >= 4096)
             {
                 int major = 0, minor = 0;
@@ -146,10 +147,12 @@ PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, ch
             p.job = job;
             p.uplo = uplo;
             p.n = n;
+            p.nev = nev;
             p.nb = da[DDLA_NB_];
             p.profile = eig_profile_enabled();
             std::copy_n(da, DDLA_DLEN_, p.source.data());
             std::copy_n(job == 'V' ? dz : da, DDLA_DLEN_, p.destination.data());
+            if (job == 'V') { p.destination[DDLA_M_] = n; p.destination[DDLA_N_] = nev; }
             if (n)
             {
                 const auto parameters =
@@ -159,7 +162,7 @@ PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, ch
             }
             return p;
         });
-    int signature[27] = {3150,
+    int signature[28] = {3150,
                          int(backend),
                          int(job),
                          int(uplo),
@@ -174,6 +177,7 @@ PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, ch
     detail::descriptor_signature(signature + 12, p.source.data());
     detail::descriptor_signature(signature + 19, p.destination.data());
     signature[26] = int(reduction_backend);
+    signature[27] = nev;
     detail::agree_signature(h, "pheevd", signature);
     if (!n)
         return p;
@@ -185,9 +189,11 @@ PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, ch
     if (const char *e = std::getenv("DDLA_EIG_CHASE_TEAM_THREADS"))
         legacy_requested = legacy_requested || *e != '\0';
     int automatic = backend == DdlaBackend::CPU && method == 'A' && !legacy_requested &&
+                    (job != 'V' || nev == n) &&
                     topology.groups() == 1 &&
                     detail::pheevd_cpu_householder_shape(n, p.nb, p.band, h->nprows_, h->npcols_, p.workers);
-    if (backend == DdlaBackend::GPU && h->communication() == DdlaCommunication::CCL && method == 'A')
+    if (backend == DdlaBackend::GPU && ddlaGetCommunication(h) == DdlaCommunication::CCL && method == 'A' &&
+        (job != 'V' || nev == n))
     {
         const char* requested_band = std::getenv("DDLA_EIG_NBW");
         automatic = detail::pheevd_gpu_householder_band<T>(
@@ -207,7 +213,7 @@ PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, ch
     }
     const bool householder = method == 'H' || p.automatic_householder;
     p.complete = pherm_complete_check(h, backend, uplo, n, A, da);
-    p.output_scratch = job == 'V' ? detail::output_scratch_elements(h, n, A, da, Z, dz) : 0;
+    p.output_scratch = job == 'V' ? detail::output_scratch_elements(h, n, A, da, Z, dz, nev) : 0;
     bool inplace = false;
     int upper = 0;
     if (householder)
@@ -309,7 +315,7 @@ PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, ch
                                            ? p.chase.local.record_capacity : 1;
         }
     }
-    p.backup = detail::pheevd_reflector_backup_check<T>(h, n, A, da, Z, job == 'V' ? dz : nullptr);
+    p.backup = detail::pheevd_reflector_backup_check<T>(h, n, A, da, Z, job == 'V' ? dz : nullptr, 'A', nev);
     detail::pheevd_reflector_backup_workspace_size<T>(p.backup, &p.backup_bytes);
     if (p.engine == PheevdEngine::AccumHost)
     {
@@ -323,6 +329,7 @@ PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, ch
         p.values = pstedc_values_policy<R>(h, n);
         return p;
     }
+    dz = p.destination.data();
     const detail::RowShare rows(n, h->nprocs);
     p.ldy = std::max(1, rows.count(h->myid));
     p.vectors = pstedc_policy<R>(h, n);
@@ -735,7 +742,7 @@ void pheevd_run(const DdlaHandle_t &h, const PheevdPlan &p, PheevdResources<T> &
 #define DDLA_PHEEVD_PHASES(T, R)                                                                             \
     template PheevdPlan pheevd_check<T>(const DdlaHandle_t &, DdlaBackend, char, char, int, T *,             \
                                         const int *, R *, T *, const int *, const Phb2stTopology &, char,    \
-                                        const int *, DdlaBackend);                                           \
+                                        const int *, DdlaBackend, int);                                           \
     template void pheevd_workspace_size<T>(const DdlaHandle_t &, const PheevdPlan &, T *, std::size_t *,     \
                                            std::size_t *);                                                   \
     template PheevdResources<T>::PheevdResources(const DdlaHandle_t &, const PheevdPlan &,                   \
@@ -762,7 +769,7 @@ DDLA_PHEEVD_RUN(DdlaBackend::GPU, std::complex<double>, double)
 } // namespace spectral_impl
 
 template <DdlaBackend Backend, typename T>
-static void pheevd_two_stage_impl(const DdlaHandle_t &handle, char jobz, char uplo, int n, T *A,
+static void pheevd_two_stage_impl(const DdlaHandle_t &handle, char jobz, char uplo, int n, int nev, T *A,
                                   const int *descA, typename real_type<T>::type *w, T *Z, const int *descZ,
                                   int &info, char method, const int *private_stage4 = nullptr,
                                   DdlaBackend reduction_backend = DdlaBackend::CPU)
@@ -777,6 +784,8 @@ static void pheevd_two_stage_impl(const DdlaHandle_t &handle, char jobz, char up
                                 handle->npcols_ < 1 ||
                                 static_cast<long long>(handle->nprows_) * handle->npcols_ != handle->nprocs)
                                 throw std::invalid_argument("pheevd: initialized process grid required");
+                            if (nev < 0 || nev > n)
+                                throw std::invalid_argument("pheevd: nev must be between zero and n");
                         });
     // The public-call baseline precedes topology, scratch and resource
     // preparation. Reusable raw callers provide their own prepared context.
@@ -800,7 +809,7 @@ static void pheevd_two_stage_impl(const DdlaHandle_t &handle, char jobz, char up
     try
     {
         plan = spectral_impl::pheevd_check<T>(handle, Backend, jobz, uplo, n, A, descA, w, Z, descZ,
-                                              *topology, method, private_stage4, reduction_backend);
+                                              *topology, method, private_stage4, reduction_backend, nev);
     }
     catch (...)
     {
@@ -865,56 +874,52 @@ static void pheevd_two_stage_impl(const DdlaHandle_t &handle, char jobz, char up
 }
 
 template <DdlaBackend Backend, typename T>
-void pheevd_two_stage(const DdlaHandle_t &handle, char jobz, char uplo, int n, T *A, const int *descA,
+void pheevd_two_stage(const DdlaHandle_t &handle, char jobz, char uplo, int n, int nev, T *A, const int *descA,
                       typename real_type<T>::type *w, T *Z, const int *descZ, int &info)
 {
-    pheevd_two_stage_impl<Backend, T>(handle, jobz, uplo, n, A, descA, w, Z, descZ, info, 'A');
+    pheevd_two_stage_impl<Backend, T>(handle, jobz, uplo, n, nev, A, descA, w, Z, descZ, info, 'A');
 }
+
+#define INST_NEV(B,T) template void pheevd_two_stage<B,T>(const DdlaHandle_t&,char,char,int,int, \
+    T*,const int*,typename real_type<T>::type*,T*,const int*,int&)
+DDLA_FOR_EACH_BACKEND_TYPE(INST_NEV)
+#undef INST_NEV
 
 namespace detail
 {
 template<DdlaBackend Backend, class T>
-void pheevd_givens(const DdlaHandle_t& h, char job, char uplo, int n, T* A, const int* da,
+void pheevd_givens(const DdlaHandle_t& h, char job, char uplo, int n, int nev, T* A, const int* da,
                   typename real_type<T>::type* w, T* Z, const int* dz, int& info,
                   DdlaBackend reduction_backend)
 {
-    pheevd_two_stage_impl<Backend, T>(h, job, uplo, n, A, da, w, Z, dz, info,
+    pheevd_two_stage_impl<Backend, T>(h, job, uplo, n, nev, A, da, w, Z, dz, info,
                                      'G', nullptr, reduction_backend);
 }
 template<DdlaBackend Backend, class T>
-void pheevd_householder(const DdlaHandle_t& h, char job, char uplo, int n, T* A, const int* da,
+void pheevd_householder(const DdlaHandle_t& h, char job, char uplo, int n, int nev, T* A, const int* da,
                        typename real_type<T>::type* w, T* Z, const int* dz, int& info,
                        DdlaBackend reduction_backend)
 {
-    pheevd_two_stage_impl<Backend, T>(h, job, uplo, n, A, da, w, Z, dz, info,
+    pheevd_two_stage_impl<Backend, T>(h, job, uplo, n, nev, A, da, w, Z, dz, info,
                                      'H', nullptr, reduction_backend);
 }
 template<DdlaBackend Backend, class T>
-void pheevd_householder_stage4(const DdlaHandle_t& h, char job, char uplo, int n, T* A, const int* da,
+void pheevd_householder_stage4(const DdlaHandle_t& h, char job, char uplo, int n, int nev, T* A, const int* da,
                               typename real_type<T>::type* w, T* Z, const int* dz, int& info,
                               int stage4, DdlaBackend reduction_backend)
 {
-    pheevd_two_stage_impl<Backend, T>(h, job, uplo, n, A, da, w, Z, dz, info,
+    pheevd_two_stage_impl<Backend, T>(h, job, uplo, n, nev, A, da, w, Z, dz, info,
                                      'H', &stage4, reduction_backend);
 }
 #define INSTANTIATE_METHODS(B, T) \
-    template void pheevd_givens<B, T>(const DdlaHandle_t&, char, char, int, T*, const int*, \
+    template void pheevd_givens<B, T>(const DdlaHandle_t&, char, char, int, int, T*, const int*, \
         real_type<T>::type*, T*, const int*, int&, DdlaBackend); \
-    template void pheevd_householder<B, T>(const DdlaHandle_t&, char, char, int, T*, const int*, \
+    template void pheevd_householder<B, T>(const DdlaHandle_t&, char, char, int, int, T*, const int*, \
         real_type<T>::type*, T*, const int*, int&, DdlaBackend); \
-    template void pheevd_householder_stage4<B, T>(const DdlaHandle_t&, char, char, int, T*, const int*, \
+    template void pheevd_householder_stage4<B, T>(const DdlaHandle_t&, char, char, int, int, T*, const int*, \
         real_type<T>::type*, T*, const int*, int&, int, DdlaBackend)
 DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_METHODS)
 #undef INSTANTIATE_METHODS
 } // namespace detail
-
-#define INSTANTIATE_PHEEVD_TWO_STAGE(BACKEND, TYPE)                                                          \
-    template void pheevd_two_stage<BACKEND, TYPE>(const DdlaHandle_t &, char, char, int, TYPE *,             \
-                                                  const int *, typename real_type<TYPE>::type *, TYPE *,     \
-                                                  const int *, int &)
-
-DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PHEEVD_TWO_STAGE)
-
-#undef INSTANTIATE_PHEEVD_TWO_STAGE
 
 } // namespace ddla

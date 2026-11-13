@@ -63,7 +63,7 @@ template<class T>void checked_policy(DdlaHandle_t h,int n,const char* band,char 
     // The alias is valid; this test checks metadata without executing the solve.
     DeviceBuffer<T> A(h,local_size(h,d));std::vector<R>w(std::max(1,n));
     auto topology=spectral_impl::phb2st_topology_prepare(h);
-    auto p=spectral_impl::pheevd_check<T>(h,DdlaBackend::GPU,job,'U',n,A.ptr,d,w.data(),A.ptr,d,*topology);
+    auto p=spectral_impl::pheevd_check<T>(h,DdlaBackend::GPU,job,'U',n,A.ptr,d,w.data(),A.ptr,d,*topology,'A',nullptr,DdlaBackend::CPU,n);
     int pr=0,pc=0;ddlaGetGridDims(h,pr,pc);
     bool tuned=false;
 #if defined(DDLA_USE_CUDA) && defined(DDLA_USE_CCL)
@@ -80,13 +80,13 @@ template<class T>void checked_policy(DdlaHandle_t h,int n,const char* band,char 
     require_close(h,"automatic policy checked band/method/placement",
         hh==(expected!=0)&&p.band==(expected?expected:initial)&&
         (!hh||gpu==(detail::pheevd_gpu_householder_reduction(n)==DdlaBackend::GPU))?0:1,0);
-    auto forced=spectral_impl::pheevd_check<T>(h,DdlaBackend::GPU,job,'U',n,A.ptr,d,w.data(),A.ptr,d,*topology,'G');
+    auto forced=spectral_impl::pheevd_check<T>(h,DdlaBackend::GPU,job,'U',n,A.ptr,d,w.data(),A.ptr,d,*topology,'G',nullptr,DdlaBackend::CPU,n);
     require_close(h,"explicit Givens retains requested band and host reduction",
         !forced.automatic_householder&&forced.engine==spectral_impl::PheevdEngine::ReplayGpu&&
         !forced.chase.device_chase&&forced.band==initial?0:1,0);
     // A legacy request on one rank must disable the automatic choice everywhere.
     if(ddlaGetRank(h)==0)setenv("DDLA_EIG_CHASE_TEAM_THREADS","1",1);
-    auto legacy=spectral_impl::pheevd_check<T>(h,DdlaBackend::GPU,job,'U',n,A.ptr,d,w.data(),A.ptr,d,*topology);
+    auto legacy=spectral_impl::pheevd_check<T>(h,DdlaBackend::GPU,job,'U',n,A.ptr,d,w.data(),A.ptr,d,*topology,'A',nullptr,DdlaBackend::CPU,n);
     require_close(h,"automatic policy respects collective legacy fallback",
         !legacy.automatic_householder&&legacy.engine==spectral_impl::PheevdEngine::ReplayGpu&&legacy.band==initial?0:1,0);
     unsetenv("DDLA_EIG_CHASE_TEAM_THREADS");topology->release();

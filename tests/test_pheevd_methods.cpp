@@ -19,19 +19,19 @@ template<DdlaBackend B,class T>void methods(DdlaHandle_t h) {
         if(gi<n&&gj<n)input[i+std::size_t(j)*d[DDLA_LLD_]]=entry<T>(gi,gj);
     }
     DeviceBuffer<T>A(h,input.size()),Z(h,input.size());std::vector<R> reference(n),w(n),only(n);int info=-1;
-    upload(h,A.ptr,input);pheevd_two_stage<T>(h,'N','U',n,A.ptr,d,reference.data(),nullptr,nullptr,info);
+    upload(h,A.ptr,input);pheevd_two_stage<T>(h,'N','U',n,n,A.ptr,d,reference.data(),nullptr,nullptr,info);
     require_close(h,"common methods reference info",info,0);
     auto topology=spectral_impl::phb2st_topology_prepare(h);
     for(char method:{'G','H'})for(DdlaBackend reduction:{DdlaBackend::CPU,DdlaBackend::GPU}) {
         if(B==DdlaBackend::CPU&&reduction==DdlaBackend::GPU)continue;
-        const auto plan=spectral_impl::pheevd_check<T>(h,B,'V','U',n,A.ptr,d,w.data(),Z.ptr,d,*topology,method,nullptr,reduction);
+        const auto plan=spectral_impl::pheevd_check<T>(h,B,'V','U',n,A.ptr,d,w.data(),Z.ptr,d,*topology,method,nullptr,reduction,n);
         bool native=method=='H'?plan.householder.options.stage2==detail::Hb2stHouseholderCpuOptions::Stage2::Gpu:plan.chase.device_chase;
         require_close(h,"common method and reduction placement",
             (plan.engine==spectral_impl::PheevdEngine::Householder)==(method=='H')&&
             native==(reduction==DdlaBackend::GPU)&&!plan.automatic_householder?0:1,0);
         upload(h,A.ptr,input);upload(h,Z.ptr,blank);
-        if(method=='G')detail::pheevd_givens<B,T>(h,'V','U',n,A.ptr,d,w.data(),Z.ptr,d,info,reduction);
-        else detail::pheevd_householder<B,T>(h,'V','U',n,A.ptr,d,w.data(),Z.ptr,d,info,reduction);
+        if(method=='G')detail::pheevd_givens<B,T>(h,'V','U',n,n,A.ptr,d,w.data(),Z.ptr,d,info,reduction);
+        else detail::pheevd_householder<B,T>(h,'V','U',n,n,A.ptr,d,w.data(),Z.ptr,d,info,reduction);
         require_close(h,"common method vectors info",info,0);
         const auto output=download(h,Z.ptr,input.size());bool pad=true;
         for(int j=0;j<ddla_test::n_loc(h,d);++j)for(int i=0;i<d[DDLA_LLD_];++i) {
@@ -45,8 +45,8 @@ template<DdlaBackend B,class T>void methods(DdlaHandle_t h) {
         require_close(h,"common method residual",std::isfinite(residual)?residual:INFINITY,50);
         require_close(h,"common method orthogonality",std::isfinite(orth)?orth:INFINITY,50);
         upload(h,A.ptr,input);
-        if(method=='G')detail::pheevd_givens<B,T>(h,'N','L',n,A.ptr,d,only.data(),nullptr,nullptr,info,reduction);
-        else detail::pheevd_householder<B,T>(h,'N','L',n,A.ptr,d,only.data(),nullptr,nullptr,info,reduction);
+        if(method=='G')detail::pheevd_givens<B,T>(h,'N','L',n,n,A.ptr,d,only.data(),nullptr,nullptr,info,reduction);
+        else detail::pheevd_householder<B,T>(h,'N','L',n,n,A.ptr,d,only.data(),nullptr,nullptr,info,reduction);
         require_close(h,"common method values info",info,0);double error=0,norm=0;
         for(int j=0;j<n;++j) {
             if(!std::isfinite(w[j])||!std::isfinite(only[j])||!std::isfinite(reference[j])||(j&&w[j]<w[j-1]))error=INFINITY;
@@ -59,14 +59,14 @@ template<DdlaBackend B,class T>void methods(DdlaHandle_t h) {
 }
 template<DdlaBackend B>void selectors(DdlaHandle_t h) {
     int d[DDLA_DLEN_];ddlaDescInit(d,h,0,0,8,8,0,0);int info=-1;
-    detail::pheevd_givens<B,double>(h,'N','U',0,nullptr,d,nullptr,nullptr,nullptr,info);
+    detail::pheevd_givens<B,double>(h,'N','U',0,0,nullptr,d,nullptr,nullptr,nullptr,info);
     require_close(h,"common Givens empty call",info,0);
-    detail::pheevd_householder<B,double>(h,'N','U',0,nullptr,d,nullptr,nullptr,nullptr,info);
+    detail::pheevd_householder<B,double>(h,'N','U',0,0,nullptr,d,nullptr,nullptr,nullptr,info);
     require_close(h,"common Householder empty call",info,0);
     auto topology=spectral_impl::phb2st_topology_prepare(h);
     auto rejected=[&](char method,DdlaBackend reduction) {
         bool caught=false;
-        try{(void)spectral_impl::pheevd_check<double>(h,B,'N','U',0,nullptr,d,nullptr,nullptr,nullptr,*topology,method,nullptr,reduction);}
+        try{(void)spectral_impl::pheevd_check<double>(h,B,'N','U',0,nullptr,d,nullptr,nullptr,nullptr,*topology,method,nullptr,reduction,0);}
         catch(const std::exception&){caught=true;}
         require_close(h,"common method selector rejected collectively",caught?0:1,0);
     };
@@ -79,8 +79,8 @@ template<DdlaBackend B>void selectors(DdlaHandle_t h) {
     if constexpr(B==DdlaBackend::CPU) {
         unsetenv("DDLA_EIG_CPU_ACCUM");unsetenv("DDLA_EIG_CHASE_TEAM_THREADS");setenv("DDLA_EIG_NBW","64",1);
         constexpr int n=2048;ddlaDescInit(d,h,n,n,64,64,0,0);DeviceBuffer<double>A(h,local_size(h,d));std::vector<double>w(n);
-        auto automatic=spectral_impl::pheevd_check<double>(h,B,'N','U',n,A.ptr,d,w.data(),nullptr,nullptr,*topology);
-        auto givens=spectral_impl::pheevd_check<double>(h,B,'N','U',n,A.ptr,d,w.data(),nullptr,nullptr,*topology,'G');
+        auto automatic=spectral_impl::pheevd_check<double>(h,B,'N','U',n,A.ptr,d,w.data(),nullptr,nullptr,*topology,'A',nullptr,DdlaBackend::CPU,n);
+        auto givens=spectral_impl::pheevd_check<double>(h,B,'N','U',n,A.ptr,d,w.data(),nullptr,nullptr,*topology,'G',nullptr,DdlaBackend::CPU,n);
         require_close(h,"explicit Givens bypasses automatic Householder",
             automatic.automatic_householder&&!givens.automatic_householder&&givens.engine!=spectral_impl::PheevdEngine::Householder?0:1,0);
         unsetenv("DDLA_EIG_NBW");

@@ -1681,8 +1681,8 @@
       "scalar_parameters": [
         "T"
       ],
-      "public_signature": "void pheevd( const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)",
-      "private_signature": "void pheevd( const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)",
+      "public_signature": "void pheevd( const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)",
+      "private_signature": "void pheevd( const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)",
       "supported_scalar_arguments": [
         "float",
         "double",
@@ -1697,8 +1697,8 @@
       "scalar_parameters": [
         "T"
       ],
-      "public_signature": "void pheevd_two_stage( const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)",
-      "private_signature": "void pheevd_two_stage( const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)",
+      "public_signature": "void pheevd_two_stage( const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)",
+      "private_signature": "void pheevd_two_stage( const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)",
       "supported_scalar_arguments": [
         "float",
         "double",
@@ -1713,8 +1713,8 @@
       "scalar_parameters": [
         "T"
       ],
-      "public_signature": "void pheevd_one_stage( const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)",
-      "private_signature": "void pheevd_one_stage( const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)",
+      "public_signature": "void pheevd_one_stage( const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)",
+      "private_signature": "void pheevd_one_stage( const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)",
       "supported_scalar_arguments": [
         "float",
         "double",
