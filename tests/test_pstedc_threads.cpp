@@ -111,15 +111,18 @@ void run_case(const ddla::DdlaHandle_t& h,bool public_api,const char* kind,int t
     const bool single=std::string(kind)=="singleleaf",unwind=std::string(kind)=="unwind";
     const int n=single?31:32*P*std::max(threads,2)+1;
     EnvGuard leaf("DDLA_EIG_DC_LEAF","64");
+    // A single-rank CPU solve calls LAPACK once with the handle's BLAS
+    // budget. Only the distributed path splits leaves across OpenMP workers.
+    const bool local=P==1;
     int leaves=1,max_leaf=n;
     // A nontrivial multi-rank solve never uses a full-size replicated leaf.
     // The small case has one local leaf per rank on the two-rank test grid.
     const int leaf_limit=P>1&&n>1?std::min(64,n/2+n%2):64;
-    while(max_leaf>leaf_limit) {max_leaf=(max_leaf+1)/2;leaves*=2;}
+    while(!local && max_leaf>leaf_limit) {max_leaf=(max_leaf+1)/2;leaves*=2;}
     const int local_leaves=rank<leaves?(leaves-1-rank)/P+1:0;
-    const bool parallel=threads>1 && local_leaves>1;
+    const bool parallel=!local && threads>1 && local_leaves>1;
     const int expected_calls=unwind && !parallel?std::min(local_leaves,1):local_leaves;
-    const int expected_blas=parallel?1:blas;
+    const int expected_blas=local?threads:(parallel?1:blas);
     const ddla::detail::RowShare rows(n,P);
     const int nr=rows.count(rank),ld=std::max(nr,1)+3;
     const R sentinel=R(12345);
@@ -159,6 +162,11 @@ void run_case(const ddla::DdlaHandle_t& h,bool public_api,const char* kind,int t
     affinity_before=CPU_COUNT(&before);affinity_after=CPU_COUNT(&after);affinity_equal=CPU_EQUAL(&before,&after);
 #endif
     require(caught==unwind,"unexpected leaf exception outcome");
+    if(calls!=expected_calls) {
+        std::fprintf(stderr,"PSTEDC_THREAD_COVERAGE path=%s type=%s case=%s rank=%d ranks=%d "
+                            "expected=%d observed=%d\n",public_api?"public":"internal",
+                     std::is_same<R,float>::value?"s":"d",kind,rank,P,expected_calls,calls);
+    }
     require(calls==expected_calls,"actual STEDC leaf interposition/coverage failed");
     require(!calls || (bmin==expected_blas && bmax==expected_blas),"wrong BLAS budget inside STEDC");
     require(!calls || (omin==(parallel?threads:1) && omax==(parallel?threads:1)),"wrong OpenMP leaf team");
