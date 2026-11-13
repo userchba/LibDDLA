@@ -1085,3 +1085,25 @@ Local operations need no scratch or communication; GPU work uses the handle
 stream. Distributed operations share the tile-exchange implementation and
 require square descriptor blocks with `RSRC=CSRC=0`. All ranks participate;
 no rank gathers the full matrix.
+
+### Generalized Hermitian-definite eigenproblems
+
+`sygvd` (real) and `hegvd` (complex) solve local `A X = B X Lambda`, with
+positive-definite `B`. Their arguments are `(handle, jobz, uplo, n, A, lda,
+B, ldb, w, info)`. Like `syevd`/`heevd`, GPU `w` and `info` are device arrays.
+The implementation calls OpenBLAS/LAPACK or the selected GPU vendor solver.
+
+`phegvd(handle, jobz, uplo, n, nev, A, descA, B, descB, w, Z, descZ, info)`
+provides the distributed interface for all four scalar types. It returns
+all `n` ascending eigenvalues in replicated host `w` and the lowest `nev`
+eigenvectors, normalized by `Z^H B_original Z = I`. Set `nev=n` for all
+vectors, or `jobz='N'`/`nev=0` for values only. GPU matrices remain on-device.
+
+The driver composes distributed Cholesky, two triangular solves, `pheevd`
+and a triangular eigenvector back-transform. All matrix-sized storage stays
+distributed. `A` is destroyed and `B` becomes its Cholesky factor; the selected
+triangle is sufficient on input. `A` and `Z` may alias, while `B` must be
+disjoint from both active matrices. `A`/`B` need matching square source-zero
+blocks, and `Z` has the existing `pheevd` distribution requirements.
+If the leading minor `i` of `B` is not positive definite, the driver returns
+`info=n+i` without starting the reduction or changing `A`.
