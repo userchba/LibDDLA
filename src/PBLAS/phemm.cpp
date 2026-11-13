@@ -172,7 +172,7 @@ const TB* prepare_panel(const DdlaHandle_t& h, bool left, char uplo, bool hermit
         bool grouped=false;
 #if defined(DDLA_USE_CCL)
         if constexpr (Backend==DdlaBackend::GPU)
-            grouped=h->communication==DdlaCommunication::CCL && da[left ? DDLA_RSRC_ : DDLA_CSRC_]==dc[left ? DDLA_RSRC_ : DDLA_CSRC_]
+            grouped=h->communication()==DdlaCommunication::CCL && da[left ? DDLA_RSRC_ : DDLA_CSRC_]==dc[left ? DDLA_RSRC_ : DDLA_CSRC_]
                 && db[left ? DDLA_CSRC_ : DDLA_RSRC_]==dc[left ? DDLA_CSRC_ : DDLA_RSRC_]
                 && db[left ? DDLA_NB_ : DDLA_MB_]==dc[left ? DDLA_NB_ : DDLA_MB_];
 #endif

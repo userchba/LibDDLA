@@ -269,7 +269,7 @@ void product_panel_run(const DdlaHandle_t& h, bool left, char trans, int n, int 
         // retain their required ordering in the general path below.
         const int source=di[left ? DDLA_RSRC_ : DDLA_CSRC_];
         const int target=dc[left ? DDLA_RSRC_ : DDLA_CSRC_];
-        if (h->communication==DdlaCommunication::CCL && kw>nb && trans=='N' && source==target) {
+        if (h->communication()==DdlaCommunication::CCL && kw>nb && trans=='N' && source==target) {
             commGroupStart<Backend>(h);
             bool active=true;
             try {

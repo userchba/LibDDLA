@@ -107,7 +107,7 @@ template<DdlaBackend B>void lazy_growth(DdlaHandle_t h)
 }
 template<DdlaBackend B,class T>void messages(DdlaHandle_t h,CommScope scope,int count)
 {
-    const MPI_Comm comm=CommTraits<DdlaBackend::CPU>::comm(h,scope);
+    const MPI_Comm comm=Communicator::mpi_comm(h,scope);
     int rank,size;MPI_CHECK(MPI_Comm_rank(comm,&rank));MPI_CHECK(MPI_Comm_size(comm,&size));
     const T guard=T(-937);
     vector<T> send(h,count+3),recv(h,count+3);
@@ -176,6 +176,17 @@ template<DdlaBackend B,class T>void messages(DdlaHandle_t h,CommScope scope,int 
         check(h,!bad,"reduce in-place root value/guard");
     }
     verify(recv,0,[&](std::size_t){return guard;},"reduce non-root output untouched");
+
+    // Allgather is also used by the CCL one-stage reduction. Exercise all
+    // transports with zero counts, every scalar type and guarded output.
+    upload();
+    vector<T> gathered(h,std::size_t(count)*size+3);
+    const std::vector<T> gather_initial(gathered.size(),guard);
+    DDLA_CHECK(ddlaMemcpy(h,gathered.data(),gather_initial.data(),gather_initial.size()*sizeof(T)));
+    commAllGather<B>(h,scope,count?send.data():nullptr,count?gathered.data():nullptr,count);
+    verify(gathered,count*size,[&](std::size_t i){return value<T>(int(i/count),i%count);},
+           "allgather values and guards");
+    verify(send,count,[&](std::size_t i){return value<T>(rank,i);},"allgather immutable send buffer");
 
     std::vector<int> ns(size),nr(size),ds(size),dr(size);
     int st=0,rt=0;

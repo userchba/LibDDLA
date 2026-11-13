@@ -238,7 +238,7 @@ void protected_triangle(DdlaHandle_t h,char side,char u) {
 template <DdlaBackend Backend,typename T>
 void uninitialized_broadcast(DdlaHandle_t h) {
     for(auto scope:{CommScope::Grid,CommScope::Row,CommScope::Col}) {
-        const auto comm=CommTraits<DdlaBackend::CPU>::comm(h,scope);
+        const auto comm=Communicator::mpi_comm(h,scope);
         int rank,size;MPI_Comm_rank(comm,&rank);MPI_Comm_size(comm,&size);
         for(int root:{0,size-1}) {
             ddla::vector<T> buf(h,17);

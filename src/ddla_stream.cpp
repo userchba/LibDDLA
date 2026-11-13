@@ -13,41 +13,6 @@ namespace {
 static_assert(std::is_pointer_v<gpuStream_t>);
 static_assert(std::is_pointer_v<gpublasHandle_t>);
 static_assert(std::is_pointer_v<gpusolverHandle_t>);
-#ifdef DDLA_USE_CCL
-static_assert(std::is_pointer_v<gpucclComm_t>);
-
-bool create_comm(void*& opaque, MPI_Comm group)
-{
-    int rank = 0, size = 0;
-    MPI_CHECK(MPI_Comm_rank(group, &rank));
-    MPI_CHECK(MPI_Comm_size(group, &size));
-    gpucclUniqueId id;
-    int failed = rank == 0 && gpucclGetUniqueId(&id) != gpucclSuccess;
-    MPI_CHECK(MPI_Bcast(&failed, 1, MPI_INT, 0, group));
-    if (failed) return false;
-    MPI_CHECK(MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, group));
-    gpucclComm_t native = nullptr;
-    const auto status = gpucclCommInitRank(&native, size, id, rank);
-    failed = status != gpucclSuccess;
-    MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &failed, 1, MPI_INT, MPI_MAX, group));
-    if (failed) {
-        if (native) (void)gpucclCommAbort(native);
-        return false;
-    }
-    opaque = native;
-    return true;
-}
-
-bool release_comm(void*& opaque, bool abort = false)
-{
-    if (!opaque) return true;
-    const auto native = static_cast<gpucclComm_t>(opaque);
-    const auto status = abort ? gpucclCommAbort(native) : gpucclCommDestroy(native);
-    opaque = nullptr;
-    return status == gpucclSuccess;
-}
-#endif
-
 void create_stream(void*& opaque)
 {
     gpuStream_t native = nullptr;
@@ -98,12 +63,7 @@ void clean_resources(DdlaStream& s)
         if (s.stream) GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(s.stream)));
         if (s.stream_data) GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(s.stream_data)));
         if (s.stream_level) GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(s.stream_level)));
-#ifdef DDLA_USE_CCL
-        bool released = release_comm(s.nccl_comm);
-        released = release_comm(s.nccl_row_comm) && released;
-        released = release_comm(s.nccl_col_comm) && released;
-        if (!released) throw std::runtime_error("ddla: CCL communicator cleanup failed");
-#endif
+        s.communicator->release(&s, false);
         if (s.stream) GPU_CHECK(gpuStreamDestroy(static_cast<gpuStream_t>(s.stream)));
         s.stream = nullptr;
         if (s.stream_data) GPU_CHECK(gpuStreamDestroy(static_cast<gpuStream_t>(s.stream_data)));
@@ -123,37 +83,16 @@ void clean_resources(DdlaStream& s)
 
 } // namespace
 
-void DdlaStream::set_communication_resources(DdlaCommunication mode)
+void DdlaStream::select_communication(DdlaCommunication mode)
 {
-#if DDLA_HAS_GPU && defined(DDLA_USE_CCL)
-    if (backend != DdlaBackend::GPU) return;
-    if (mode == DdlaCommunication::CCL) {
-        if (nccl_comm) return;
-        // Commit only a complete grid/row/column set. Agree globally after
-        // each subgroup setup, so a failed row cannot strand another row in
-        // the subsequent column setup. Vendor fatal errors remain fatal.
-        void* temporary[3] = {};
-        MPI_Comm groups[] = {comm, row_comm, col_comm};
-        for (int i = 0; i < 3; ++i) {
-            int failed = !create_comm(temporary[i], groups[i]);
-            MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &failed, 1, MPI_INT, MPI_MAX, comm));
-            if (failed) {
-                for (auto& resource : temporary) (void)release_comm(resource, true);
-                throw std::runtime_error("ddla: CCL communicator initialization failed");
-            }
-        }
-        nccl_comm = temporary[0]; nccl_row_comm = temporary[1]; nccl_col_comm = temporary[2];
-    } else {
-        if (!nccl_comm && !nccl_row_comm && !nccl_col_comm) return;
-        int failed = !release_comm(nccl_comm);
-        failed = !release_comm(nccl_row_comm) || failed;
-        failed = !release_comm(nccl_col_comm) || failed;
-        MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &failed, 1, MPI_INT, MPI_MAX, comm));
-        if (failed) throw std::runtime_error("ddla: CCL communicator cleanup failed");
+    const auto* next = Communicator::get(backend, mode);
+    if (!next) throw std::invalid_argument("ddla: communication mode unavailable");
+    if (next == communicator) return;
+    if (initialized) {
+        next->initialize(this);
+        communicator->release(this, true);
     }
-#else
-    (void)mode;
-#endif
+    communicator = next;
 }
 
 void* DdlaStream::level_queue()
@@ -240,7 +179,7 @@ void DdlaStream::init(int rows, int cols, MPI_Comm comm_group, char order)
     MPI_CHECK(MPI_Comm_split(comm, mypcol_, myid, &col_comm));
     if (backend == DdlaBackend::CPU) init_resources<DdlaBackend::CPU>(*this);
     else init_resources<DdlaBackend::GPU>(*this);
-    if (communication == DdlaCommunication::CCL) set_communication_resources(communication);
+    communicator->initialize(this);
     initialized = true;
 }
 
