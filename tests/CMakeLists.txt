@@ -307,6 +307,7 @@ if(TARGET test_api_grid_pheevd AND NOT DDLA_HAS_GPU)
         ENVIRONMENT "DDLA_EIG_CPU_ACCUM=0")
 endif()
 # Stage 0 of pheevd, in isolation: full Hermitian matrix from the stored triangle (poisoned opposite triangle).
+add_test_executable(test_matrix_complete)
 add_test_executable(test_api_grid_pherm_complete)
 add_test_executable(test_api_grid_pgeqrf)
 add_test_executable(test_api_grid_pgeqrs)

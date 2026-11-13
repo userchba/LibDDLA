@@ -676,6 +676,13 @@ void punmtr_he2hb(
 );
 
 template <DdlaBackend Backend, typename T>
+void herm_complete(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda);
+template <DdlaBackend Backend, typename T>
+void syrm_complete(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda);
+template <DdlaBackend Backend, typename T>
+void psyrm_complete(const DdlaHandle_t& handle, char uplo, int n, T* A, const int* descA);
+
+template <DdlaBackend Backend, typename T>
 void pherm_complete(
     const DdlaHandle_t& handle,
     char uplo, int n,

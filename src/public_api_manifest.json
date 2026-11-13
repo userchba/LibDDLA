@@ -1,6 +1,6 @@
 {
-  "public_backend_overloads": 133,
-  "public_concrete_specializations": 486,
+  "public_backend_overloads": 136,
+  "public_concrete_specializations": 498,
   "pstedc": "already handle-only, unchanged",
   "type_policy_sources": {
     "dgmm": "src/BLAS/dgmm.cpp TYPES",
@@ -1571,6 +1571,54 @@
     },
     {
       "index": 99,
+      "name": "herm_complete",
+      "scalar_parameters": [
+        "T"
+      ],
+      "public_signature": "void herm_complete( const DdlaHandle_t& handle, char uplo, int n, T* A, int lda)",
+      "private_signature": "void herm_complete( const DdlaHandle_t& handle, char uplo, int n, T* A, int lda)",
+      "supported_scalar_arguments": [
+        "float",
+        "double",
+        "std::complex<float>",
+        "std::complex<double>"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 100,
+      "name": "syrm_complete",
+      "scalar_parameters": [
+        "T"
+      ],
+      "public_signature": "void syrm_complete( const DdlaHandle_t& handle, char uplo, int n, T* A, int lda)",
+      "private_signature": "void syrm_complete( const DdlaHandle_t& handle, char uplo, int n, T* A, int lda)",
+      "supported_scalar_arguments": [
+        "float",
+        "double",
+        "std::complex<float>",
+        "std::complex<double>"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 101,
+      "name": "psyrm_complete",
+      "scalar_parameters": [
+        "T"
+      ],
+      "public_signature": "void psyrm_complete( const DdlaHandle_t& handle, char uplo, int n, T* A, const int* descA)",
+      "private_signature": "void psyrm_complete( const DdlaHandle_t& handle, char uplo, int n, T* A, const int* descA)",
+      "supported_scalar_arguments": [
+        "float",
+        "double",
+        "std::complex<float>",
+        "std::complex<double>"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 102,
       "name": "pherm_complete",
       "scalar_parameters": [
         "T"
@@ -1586,7 +1634,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 100,
+      "index": 103,
       "name": "phetrd",
       "scalar_parameters": [
         "T"
@@ -1602,7 +1650,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 101,
+      "index": 104,
       "name": "punmtr",
       "scalar_parameters": [
         "T"
@@ -1618,7 +1666,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 102,
+      "index": 105,
       "name": "punmtr",
       "scalar_parameters": [
         "T"
@@ -1634,7 +1682,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 103,
+      "index": 106,
       "name": "gemm",
       "scalar_parameters": [
         "R"
@@ -1648,7 +1696,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 104,
+      "index": 107,
       "name": "syevd",
       "scalar_parameters": [
         "T"
@@ -1662,7 +1710,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 105,
+      "index": 108,
       "name": "heevd",
       "scalar_parameters": [
         "T"
@@ -1676,7 +1724,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 106,
+      "index": 109,
       "name": "pheevd",
       "scalar_parameters": [
         "T"
@@ -1692,7 +1740,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 107,
+      "index": 110,
       "name": "pheevd_two_stage",
       "scalar_parameters": [
         "T"
@@ -1708,7 +1756,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 108,
+      "index": 111,
       "name": "pheevd_one_stage",
       "scalar_parameters": [
         "T"
@@ -1724,7 +1772,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 109,
+      "index": 112,
       "name": "gemmt",
       "scalar_parameters": [
         "T"
@@ -1740,7 +1788,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 110,
+      "index": 113,
       "name": "gemmt",
       "scalar_parameters": [
         "R"
@@ -1754,7 +1802,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 111,
+      "index": 114,
       "name": "gemmt",
       "scalar_parameters": [
         "R"
@@ -1768,7 +1816,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 112,
+      "index": 115,
       "name": "ptrtrm",
       "scalar_parameters": [
         "T"
@@ -1784,7 +1832,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 113,
+      "index": 116,
       "name": "sytrf",
       "scalar_parameters": [
         "T"
@@ -1800,7 +1848,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 114,
+      "index": 117,
       "name": "sytrs",
       "scalar_parameters": [
         "T"
@@ -1816,7 +1864,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 115,
+      "index": 118,
       "name": "sytrf_nopiv",
       "scalar_parameters": [
         "T"
@@ -1832,7 +1880,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 116,
+      "index": 119,
       "name": "sytrs_nopiv",
       "scalar_parameters": [
         "T"
@@ -1848,7 +1896,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 117,
+      "index": 120,
       "name": "hetrf",
       "scalar_parameters": [
         "T"
@@ -1864,7 +1912,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 118,
+      "index": 121,
       "name": "hetrs",
       "scalar_parameters": [
         "T"
@@ -1880,7 +1928,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 119,
+      "index": 122,
       "name": "hetrf_nopiv",
       "scalar_parameters": [
         "T"
@@ -1896,7 +1944,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 120,
+      "index": 123,
       "name": "hetrs_nopiv",
       "scalar_parameters": [
         "T"
@@ -1912,7 +1960,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 121,
+      "index": 124,
       "name": "psytrf",
       "scalar_parameters": [
         "T"
@@ -1928,7 +1976,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 122,
+      "index": 125,
       "name": "psytrs",
       "scalar_parameters": [
         "T"
@@ -1944,7 +1992,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 123,
+      "index": 126,
       "name": "psytrf_nopiv",
       "scalar_parameters": [
         "T"
@@ -1960,7 +2008,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 124,
+      "index": 127,
       "name": "psytrs_nopiv",
       "scalar_parameters": [
         "T"
@@ -1976,7 +2024,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 125,
+      "index": 128,
       "name": "phetrf",
       "scalar_parameters": [
         "T"
@@ -1992,7 +2040,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 126,
+      "index": 129,
       "name": "phetrs",
       "scalar_parameters": [
         "T"
@@ -2008,7 +2056,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 127,
+      "index": 130,
       "name": "phetrf_nopiv",
       "scalar_parameters": [
         "T"
@@ -2024,7 +2072,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 128,
+      "index": 131,
       "name": "phetrs_nopiv",
       "scalar_parameters": [
         "T"
@@ -2040,7 +2088,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 129,
+      "index": 132,
       "name": "ormqr",
       "scalar_parameters": [
         "T"
@@ -2056,7 +2104,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 130,
+      "index": 133,
       "name": "pormqr",
       "scalar_parameters": [
         "T"
@@ -2072,7 +2120,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 131,
+      "index": 134,
       "name": "orgqr",
       "scalar_parameters": [
         "T"
@@ -2088,7 +2136,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 132,
+      "index": 135,
       "name": "porgqr",
       "scalar_parameters": [
         "T"

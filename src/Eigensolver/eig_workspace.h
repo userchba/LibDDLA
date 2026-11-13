@@ -61,11 +61,12 @@ struct HermitianBlock {
     int src_ld=1,dst_ld=1,rows=0,cols=0;
 };
 struct HermitianPlan {
-    DdlaBackend backend{};bool upper=true;
+    DdlaBackend backend{};bool upper=true,hermitian=true;
     int n=0,nb=1,lld=1,pr=1,pc=1,mr=0,mc=0,threads=1;
     char major='R';
 };
-HermitianPlan pherm_complete_check(const DdlaHandle_t&,DdlaBackend,char,int,const void*,const int*);
+HermitianPlan pherm_complete_check(const DdlaHandle_t&,DdlaBackend,char,int,const void*,const int*,
+    bool hermitian=true);
 // This rank's block counts and pack lengths (rank-local integer math).
 void pherm_complete_geometry(const HermitianPlan&,std::size_t& pack,std::size_t& local,
     std::size_t& unpack,std::size_t& diag,std::size_t& send_total,std::size_t& recv_total);
