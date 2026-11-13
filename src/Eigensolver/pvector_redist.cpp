@@ -36,7 +36,7 @@ inline int round_block_count(int first, int nblks_tot, int lcm)
 
 namespace detail {
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 
 // Gather, for one round, the blocks global-index i = round_start + s*lcm of
 // all nvc vectors from the row-distributed layout (local start
@@ -78,7 +78,7 @@ __global__ void pv_unpack_round_kernel(
     }
 }
 
-#endif // defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#endif // DDLA_HAS_GPU
 
 } // namespace detail
 
@@ -199,7 +199,7 @@ void ptranspose_vectors_run(const DdlaHandle_t& handle,const VectorRedistPlan& p
         DDLA_CHECK(ddlaMemset(handle, aux, 0, aux_elems * sizeof(T)));
     }
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
     using devT = detail::DeviceScalarT<T>;
     const devT* src_dev = reinterpret_cast<const devT*>(src);
     devT* aux_dev = reinterpret_cast<devT*>(aux);
@@ -234,7 +234,7 @@ void ptranspose_vectors_run(const DdlaHandle_t& handle,const VectorRedistPlan& p
                 }
             }
         } else {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
             if (myprow == ips) {
                 const dim3 grid_pack(static_cast<unsigned>(count * nvc), 1, 1);
                 detail::pv_pack_round_kernel<devT><<<grid_pack, threads, 0, stream>>>(
@@ -262,7 +262,7 @@ void ptranspose_vectors_run(const DdlaHandle_t& handle,const VectorRedistPlan& p
                 }
             }
         } else {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
             const dim3 grid_unpack(static_cast<unsigned>(count * nvc), 1, 1);
             detail::pv_unpack_round_kernel<devT><<<grid_unpack, threads, 0, stream>>>(
                 aux_dev, dst_dev, n, count, nb, nvc, aux_stride, r, lcm, npcols, ld_dst,

@@ -298,7 +298,7 @@ void pgebrd_run(const DdlaHandle_t& handle,const PgebrdPlan& p,T* A,const int*,
     // GPU arm: device-resident reflectors, interleaved buffers.
     // ===================================================================
     if constexpr (Backend != DdlaBackend::CPU) {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 
         const int nprocs = nprows * npcols;
         rt* const d_sigma = detail::take<rt>(w, 1);                                   // sigma, device scalar

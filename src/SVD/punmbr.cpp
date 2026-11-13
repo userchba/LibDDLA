@@ -172,7 +172,7 @@ void punmbr_run(const DdlaHandle_t& handle,const PunmbrPlan& p,const T* A,const 
         auto unit_trapezoid = [&](T* V, int ld, int rows, int jb, int u0, int first,
                                   int blk, int me, int src, int np) {
             if constexpr (Backend == DdlaBackend::GPU) {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
                 detail::qr_build_v<T>(handle, true, 0, V, ld, V, ld, rows, jb,
                                        u0, nq - u0, first, blk, me, src, np);
 #endif

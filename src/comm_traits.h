@@ -92,7 +92,7 @@ struct CommTraits<DdlaBackend::CPU> {
     static void group_end  (const DdlaHandle_t&) {}
 };
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 // Only *defined* in a TU that actually compiled in a GPU vendor.
 template <>
 struct CommTraits<DdlaBackend::GPU> {
@@ -138,7 +138,7 @@ struct CommTraits<DdlaBackend::GPU> {
     static void group_end  (const DdlaHandle_t&) {}
 #endif
 };
-#endif // defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#endif // DDLA_HAS_GPU
 
 // ---------------------------------------------------------------------------
 // comm* function templates. Backend defaults to detail::local_backend_v (the

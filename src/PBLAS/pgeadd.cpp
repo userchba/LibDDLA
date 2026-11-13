@@ -46,7 +46,7 @@ void sort_by_peer(Transfer* v, std::size_t count, Transfer* scratch, int* cursor
     std::copy(scratch,scratch+count,v);
 }
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 // Packing and scattering share this copy/transpose kernel.
 template <typename T> __global__ void copy_blocks(
     const T* src, T* dst, const CopyBlock* blocks, bool transpose, bool conj)
@@ -86,7 +86,7 @@ void copy_batch(DdlaHandle_t h, char op, const T* src, T* dst, const CopyBlock* 
                 T(1),src+b.src,b.lds,T(0),static_cast<const T*>(nullptr),1,dst+b.dst,b.ldd);
         }
     } else {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
         DDLA_CHECK(ddlaMemcpy(h,device_blocks,blocks,count*sizeof(CopyBlock)));
         using DT = detail::DeviceScalarT<T>;
         copy_blocks<DT><<<dim3(count),dim3(16,16),0,static_cast<gpuStream_t>(h->stream)>>>(

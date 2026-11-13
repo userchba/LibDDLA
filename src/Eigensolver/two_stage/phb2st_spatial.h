@@ -70,7 +70,7 @@ template<class Put>void spatial_visit(int rowrank,int colrank,int first,int last
         for(int gi=std::max(0,col-kd);gi<=col;++gi){if((rsrc+gi/nb)%npr!=rowrank)continue;const int li=nb*(gi/(nb*npr))+gi%nb;
             put(col,kd+gi-col,static_cast<std::size_t>(lj)*lld+li);}}
 }
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 template<class T> __global__ void spatial_extract_kernel(const T* A,const std::size_t* index,std::size_t count,T* values) {
     for(std::size_t p=static_cast<std::size_t>(blockIdx.x)*blockDim.x+threadIdx.x;p<count;p+=static_cast<std::size_t>(gridDim.x)*blockDim.x)
         values[p]=A[index[p]];
@@ -109,7 +109,7 @@ void gather_spatial_band(const DdlaHandle_t& handle,int n,int kd,const T* A,cons
     if constexpr(Backend==DdlaBackend::CPU) {
         for(std::size_t p=0;p<count;++p) send[p]=A[indices[p]];
     } else {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
         detail::agree_local(grid.world,"phb2st spatial allocation",[&] {
         if(count) {
             DDLA_CHECK(ddlaMemcpy(handle,device_indices,indices,count*sizeof(std::size_t)));

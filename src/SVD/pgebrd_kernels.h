@@ -32,7 +32,7 @@ constexpr int brd_pad_count()
 }
 } }
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 
 // ---------------------------------------------------------------------------
 // Device kernels of the device-resident pgebrd (schedule: src/pgebrd.cpp).  The
@@ -167,6 +167,6 @@ void brd_panel_payload(const DdlaHandle_t& handle, bool upper, int jb, int c0, i
 } // namespace detail
 } // namespace ddla
 
-#endif // defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#endif // DDLA_HAS_GPU
 
 #endif // DDLA_PGEBRD_KERNELS_H

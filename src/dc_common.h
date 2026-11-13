@@ -70,7 +70,7 @@ inline void agree_or_throw(MPI_Comm comm, int local_err, const char* who, const 
                                  " failed (info=" + std::to_string(err) + ")");
 }
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 
 // Givens rotations on column pairs of an m-row block, in list order (a
 // column may appear in several rotations, so the list is sequential; rows

@@ -12,7 +12,7 @@
 
 namespace ddla {
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 
 /**
  * @brief Device kernel: add alpha to each globally owned diagonal element.
@@ -46,7 +46,7 @@ __global__ void pdam_kernel(const T1 alpha, T2* A,
     A[ilo + jlo * lld] += alpha;
 }
 
-#endif // DDLA_USE_CUDA || DDLA_USE_HIP
+#endif // DDLA_HAS_GPU
 
 namespace pdam_impl {
 
@@ -88,7 +88,7 @@ void pdam_run(const DdlaHandle_t& handle, int n_eff, const T1& alpha, T2* A, con
             A[ilo + static_cast<std::size_t>(jlo) * lld] += alpha;
         }
     } else {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
         const gpuStream_t stream = static_cast<gpuStream_t>(handle->stream);
 
         using deviceT1 = detail::DeviceScalarT<T1>;

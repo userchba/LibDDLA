@@ -64,7 +64,7 @@ public:
         if (!enabled_) return;
         status_=std::fopen("/proc/self/status","r");
         if(status_&&std::setvbuf(status_,status_buffer_.data(),_IOFBF,status_buffer_.size())){std::fclose(status_);status_=nullptr;}
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
         if(gpu_)try{sampler_=std::thread([this]{sample_loop();});}catch(...){if(status_){std::fclose(status_);status_=nullptr;}throw;}
 #endif
         begin_run();
@@ -148,7 +148,7 @@ private:
     // Builds without a GPU backend have nothing to query (gpu_ is never set there).
     std::size_t used_now()
     {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
         std::size_t f = 0, t = 0;
         if (ddlaMemGetInfo(handle_, &f, &t) == ddlaStatus_t::DDLA_STATUS_SUCCESS)
             last_used_.store(t-f,std::memory_order_relaxed);
@@ -157,7 +157,7 @@ private:
     }
     std::atomic<std::size_t> last_used_{0};
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
     void sample_loop()
     {
         // a new thread starts on device 0: select this rank's device first

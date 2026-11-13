@@ -452,7 +452,7 @@ void pbdc_q_chunk(int K, const rt* dsigma, const rt* zh, const int* idxc, int cw
 
 } // namespace
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 namespace {
 constexpr unsigned kThreads = 256;
 
@@ -471,7 +471,7 @@ void launch_givens(const DdlaHandle_t& handle, rt* q, int ldq, int m, const int*
 namespace {
 // Only length-k vectors and bounded panels are replicated. Matrix storage
 // is balanced over the entire communicator.
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 template <typename rt>
 __global__ void pbdc_rows_identity_kernel(rt* u, rt* v, int ld, int rows, int lo)
 {
@@ -509,7 +509,7 @@ void pbdc_rows_gather(const DdlaHandle_t& h, rt* dst, int ldd, const rt* src,
         for (std::size_t j = 0; j < std::size_t(count); ++j)
             std::copy_n(src + std::size_t(perm[j]-1)*lds, rows, dst+j*ldd);
     } else {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
         launch_gather(h, dst, ldd, src, lds, rows, device_perm, count);
 #endif
     }
@@ -681,7 +681,7 @@ struct PbdcRows {
                     }; rotate(ub,ru);rotate(vb,rv);
                 }
             } else {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
                 // Copies and rotations share the handle stream. Host metadata
                 // stays unchanged until the completion fence at the merge end.
                 DDLA_CHECK(ddlaMemcpy(h, gcdev, gc, std::size_t(rotations)*2*sizeof(int)));
@@ -711,7 +711,7 @@ struct PbdcRows {
                     v2[r+std::size_t(mm-1)*ld2]=gr<=middle?-s*x:c*y;}
             }
         } else {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
             if(rv)pbdc_rows_special_kernel<<<(rv+255)/256,256,0,static_cast<gpuStream_t>(h->stream)>>>(u2,v2,ld2,
                           vb,ld,rv,row0,middle,mm-1,c,s,rectangular);
             DDLA_CHECK(ddlaGetLastError(h));
@@ -891,7 +891,7 @@ void pbdsdc_run(const DdlaHandle_t& h,const PbdsdcPlan& p,detail::DcHostTeam& te
     if constexpr (B == DdlaBackend::CPU) {
         for (int r=0;r<rows;++r) U[r+std::size_t(lo+r)*ld]=V[r+std::size_t(lo+r)*ld]=rt(1);
     } else {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
         if(rows)pbdc_rows_identity_kernel<<<(rows+255)/256,256,0,static_cast<gpuStream_t>(h->stream)>>>(U,V,ld,rows,lo);
         DDLA_CHECK(ddlaGetLastError(h));
 #endif

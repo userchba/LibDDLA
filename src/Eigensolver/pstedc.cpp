@@ -509,7 +509,7 @@ class DcRowsStore
 // collectives, so merges of disjoint row ranges overlap in time across ranks.
 // ---------------------------------------------------------------------------
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 
 // S(k, jj) = ((zhat_k / ((dlamda_k - dbase_j) - tau_j)) / nrm_j) for the strip of roots j = j0 + jj
 template <typename rt>
@@ -823,13 +823,13 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
     MPI_Comm comm = handle->comm;
     const int P = policy.ranks, me = policy.rank;
     const MPI_Datatype mt = detail::mpi_datatype<rt>();
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
     gpuStream_t st = nullptr;
     if constexpr (kGpu)
         st = static_cast<gpuStream_t>(handle->stream);
 #endif
     auto sync = [&]() {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
         if constexpr (kGpu)
             DDLA_CHECK(ddlaSynchronize(handle));
 #endif
@@ -897,7 +897,7 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
 
     // block diagonal from the start (host: zeroed by the rank's threads, so the pages spread over its sockets)
     if constexpr (kGpu) {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
         DDLA_CHECK(ddlaMemset(handle, dQ, 0, slab * sizeof(rt)));
 #endif
     } else {
@@ -1044,7 +1044,7 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
             auto get_row = [&](rt* zdst, int row_g, int col0, int count) {
                 const rt* src = dQ + (row_g - lo) + static_cast<std::size_t>(col0) * ld;
                 if constexpr (kGpu) {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
                     DDLA_CHECK(ddlaMemcpy2D(handle, zdst, sizeof(rt), src,
                                             static_cast<std::size_t>(ld) * sizeof(rt), sizeof(rt),
                                             static_cast<std::size_t>(count)));
@@ -1106,7 +1106,7 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
         // the deflation rotations, then Q2 = Qblk(:, PERM) -- on the rows this rank owns
         if (mr > 0) {
             if constexpr (kGpu) {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
                 if (givptr > 0) {
                     DDLA_CHECK(ddlaMemcpy(handle, dGcol, givcol,
                                           2 * static_cast<std::size_t>(givptr) * sizeof(int)));
@@ -1286,7 +1286,7 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
         if (mr > 0) {
             if (K > 2) {
                 if constexpr (kGpu) {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
                     for (int I = 0; I < K; ++I) {
                         up[static_cast<std::size_t>(I)] = zhat[static_cast<std::size_t>(I)];
                         up[static_cast<std::size_t>(K) + I] = dlamda[static_cast<std::size_t>(I)];
@@ -1318,7 +1318,7 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
                 for (int j0 = 0; j0 < K; j0 += Wcap) {
                     const int wj = std::min(Wcap, K - j0);
                     if constexpr (kGpu) {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
                         const long long total = static_cast<long long>(K) * wj;
                         const unsigned blocks =
                             static_cast<unsigned>(std::min<long long>(65535, (total + 255) / 256));
@@ -1371,7 +1371,7 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
                 }
             } else {
                 if constexpr (kGpu) {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
                     DDLA_CHECK(ddlaMemcpy(handle, dS, S2, static_cast<std::size_t>(K) * K * sizeof(rt)));
                     resources.record();
 #endif
@@ -1409,7 +1409,7 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
         w[i] = d[indxq[static_cast<std::size_t>(i)] - 1] * orgnrm;
     if (nrl > 0) {
         if constexpr (kGpu) {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
             DDLA_CHECK(ddlaMemcpy(handle, dPerm, indxq, static_cast<std::size_t>(n) * sizeof(int)));
             launch_gather<rt>(handle, dY, ldy, dQ, ld, nrl, dPerm, n);
 #endif
