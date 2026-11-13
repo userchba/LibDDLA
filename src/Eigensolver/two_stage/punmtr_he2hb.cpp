@@ -64,7 +64,7 @@ UnmtrHe2hbPlan punmtr_he2hb_geometry(
     p.myprow = h->myprow_;
     p.mypcol = h->mypcol_;
     p.nsteps = n ? (n - 1) / nbw : 0;
-    p.zcols = num_loc(n, z[DDLA_NB_], p.mypcol, z[DDLA_CSRC_], p.npcols);
+    p.zcols = num_loc(std::min(n, z[DDLA_N_]), z[DDLA_NB_], p.mypcol, z[DDLA_CSRC_], p.npcols);
     if (p.nsteps) {
         const int last = p.nsteps * nbw;
         const int nc = std::min(n, last + nbw) - last;

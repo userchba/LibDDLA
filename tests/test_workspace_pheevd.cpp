@@ -47,7 +47,7 @@ template<DdlaBackend B,class T>void solver_case(DdlaHandle_t h,spectral_impl::Ph
     std::vector<R>w(std::size_t(n)+8,R(-313));
     setenv("DDLA_EIG_PROFILE",profiling?"1":"0",1);setenv("DDLA_EIG_CPU_ACCUM",engine==1?"1":"0",1);setenv("DDLA_QR_PANEL","gather",1);
     const bool force=engine>=2;const int stage4=engine==3?0:1;
-    const auto p=spectral_impl::pheevd_check<T>(h,B,job,uplo,n,A.ptr,da,w.data()+4,Z,dz,topology,force?'H':'A',force?&stage4:nullptr);
+    const auto p=spectral_impl::pheevd_check<T>(h,B,job,uplo,n,A.ptr,da,w.data()+4,Z,dz,topology,force?'H':'A',force?&stage4:nullptr,DdlaBackend::CPU,n);
     if(n&&job=='V'){
         const detail::RowShare rows(n,h->nprocs);
         bool row_input=true;

@@ -65,17 +65,17 @@ namespace ddla { namespace detail {
 // reduction_backend selects stage2 and defaults to the same backend. GPU
 // matrices with CPU reduction retain the hybrid routes. Public dispatch is unchanged.
 template<DdlaBackend Backend, class T>
-void pheevd_givens(const DdlaHandle_t&, char, char, int, T*, const int*,
+void pheevd_givens(const DdlaHandle_t&, char, char, int, int, T*, const int*,
                   typename real_type<T>::type*, T*, const int*, int&,
                   DdlaBackend reduction_backend = Backend);
 template<DdlaBackend Backend, class T>
-void pheevd_householder(const DdlaHandle_t&, char, char, int, T*, const int*,
+void pheevd_householder(const DdlaHandle_t&, char, char, int, int, T*, const int*,
                        typename real_type<T>::type*, T*, const int*, int&,
                        DdlaBackend reduction_backend = Backend);
 // Private stage4 comparison IDs: CPU WY=0, paired=1, FMA chain=2,
 // FMA independent=3, real group4=4/group6=5; GPU WY=0, short reflectors=1.
 template<DdlaBackend Backend, class T>
-void pheevd_householder_stage4(const DdlaHandle_t&, char, char, int, T*, const int*,
+void pheevd_householder_stage4(const DdlaHandle_t&, char, char, int, int, T*, const int*,
                               typename real_type<T>::type*, T*, const int*, int&, int,
                               DdlaBackend reduction_backend = Backend);
 } }
@@ -95,7 +95,7 @@ struct PheevdPlan
 {
     DdlaBackend backend{};
     char job = 'N', uplo = 'U';
-    int n = 0, nb = 1, band = 1, steps = 0, ldy = 1, workers = 1;
+    int n = 0, nev = 0, nb = 1, band = 1, steps = 0, ldy = 1, workers = 1;
     bool profile = false, automatic_householder = false;
     PheevdEngine engine = PheevdEngine::ReplayCpu;
     std::array<int, DDLA_DLEN_> source{}, destination{};
@@ -121,8 +121,7 @@ struct PheevdPlan
 template <class T>
 PheevdPlan pheevd_check(const DdlaHandle_t &, DdlaBackend, char, char, int, T *, const int *,
                         typename real_type<T>::type *, T *, const int *, const Phb2stTopology &,
-                        char method = 'A', const int *stage4 = nullptr,
-                        DdlaBackend reduction_backend = DdlaBackend::CPU);
+                        char method, const int *stage4, DdlaBackend reduction_backend, int nev);
 // Both buffers begin with 64 bytes of alignment slack (std::vector and malloc'd
 // memory is only 16-byte aligned); the buffers and regions are padded to
 // 256-byte units, so every one starts on a 64-byte boundary.

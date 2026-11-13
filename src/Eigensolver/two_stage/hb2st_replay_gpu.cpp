@@ -207,18 +207,18 @@ template<class T>Hb2stReplayGpuPlan hb2st_replay_gpu_geometry(const DdlaHandle_t
     int ldy,std::size_t phase_count,const int* desc,int panel_columns,int replay_records,bool use_waves,
     bool borrow_main,std::size_t main_elements,const int* columns)
 {
-    Hb2stReplayGpuPlan p;p.n=n;p.kd=kd;p.total=total;p.ldy=ldy;p.use_waves=use_waves;p.borrow_main=borrow_main;p.columns=columns;
+    Hb2stReplayGpuPlan p;p.n=n;p.nev=std::min(n,desc[DDLA_N_]);p.kd=kd;p.total=total;p.ldy=ldy;p.use_waves=use_waves;p.borrow_main=borrow_main;p.columns=columns;
     ddlaGetGridDims(h,p.npr,p.npc);ddlaGetGridCoords(h,p.pr,p.pc);p.P=h->nprocs;p.rank=h->myid;
-    const RowShare split(n,p.P);p.nr=split.count(p.rank);p.clo=!columns?split.lo(p.rank):columns[p.rank];
-    p.nc=!columns?split.count(p.rank):columns[p.rank+1]-p.clo;
+    const RowShare split(n,p.P),vectors(p.nev,p.P);p.nr=split.count(p.rank);p.clo=!columns?vectors.lo(p.rank):columns[p.rank];
+    p.nc=!columns?vectors.count(p.rank):columns[p.rank+1]-p.clo;
     p.mb=desc[DDLA_MB_];p.nb=desc[DDLA_NB_];p.rsrc=desc[DDLA_RSRC_];p.csrc=desc[DDLA_CSRC_];p.lld=desc[DDLA_LLD_];
-    p.outrows=num_loc(n,p.mb,p.pr,p.rsrc,p.npr);p.outcols=num_loc(n,p.nb,p.pc,p.csrc,p.npc);
+    p.outrows=num_loc(n,p.mb,p.pr,p.rsrc,p.npr);p.outcols=num_loc(p.nev,p.nb,p.pc,p.csrc,p.npc);
     p.main_columns=borrow_main&&n>0?static_cast<int>(std::min<std::size_t>(std::max(p.nc,0),main_elements/n)):p.nc;
-    p.spill_columns=p.nc-p.main_columns;p.direct=p.P==1;p.stride=p.direct?p.lld:std::max(p.main_columns,1);
+    p.spill_columns=p.nc-p.main_columns;p.direct=p.P==1&&p.nev==n;p.stride=p.direct?p.lld:std::max(p.main_columns,1);
     using R=typename real_type<T>::type;p.phases=!std::is_same<T,R>::value&&phase_count>0;
     if(!n)return p;
     const std::size_t target=std::size_t(64)<<20;
-    p.width=std::min(n,static_cast<int>(std::max<std::size_t>(1,std::min<std::size_t>(512,target/(4*std::size_t(n)*sizeof(T))))));
+    p.width=std::max(1,std::min(p.nev,static_cast<int>(std::max<std::size_t>(1,std::min<std::size_t>(512,target/(4*std::size_t(n)*sizeof(T)))))));
     if(p.width>=p.nb)p.width=(p.width/p.nb)*p.nb;
     if(panel_columns>0)p.width=std::max(1,std::min(p.width,panel_columns));
     constexpr long long chunk=DistributedHistory<T>::chunk_size;
@@ -352,7 +352,7 @@ void hb2st_replay_gpu_run(const DdlaHandle_t& h,const Hb2stReplayGpuPlan& p,Hb2s
         const int n=p.n,npr=p.npr,npc=p.npc,pr=p.pr,pc=p.pc,P=p.P,rank=p.rank,nr=p.nr,nc=p.nc,clo=p.clo;
         const int mb=p.mb,nb=p.nb,rsrc=p.rsrc,csrc=p.csrc,lld=p.lld,ldy=p.ldy;
         const int outrows=p.outrows,main_columns=p.main_columns,spill_columns=p.spill_columns,stride=p.stride,width=p.width,rcmax=p.rcmax;
-        const bool direct=p.direct,use_waves=p.use_waves,pipeline=p.pipeline;const RowShare split(n,P);
+        const bool direct=p.direct,use_waves=p.use_waves,pipeline=p.pipeline;const RowShare split(n,P),vectors(p.nev,P);
         const bool replay=history.total>0&&nc>0;
         const int wave_size=(std::is_same<T,R>::value ||
             (std::is_same<T,std::complex<double>>::value && p.kd>=16))?16:8;
@@ -388,8 +388,8 @@ void hb2st_replay_gpu_run(const DdlaHandle_t& h,const Hb2stReplayGpuPlan& p,Hb2s
         if(p.householder && p.n>=3 && p.kd>=2){hh_gpu_apply_workspace_size<T>(p.kd,p.nc,p.householder_wy,&hh_bytes);bw+=hh_bytes;}
         assert(bw-static_cast<char*>(backend_work)<=static_cast<std::ptrdiff_t>(backend_bytes));
         assert(hw-static_cast<char*>(host_work)<=static_cast<std::ptrdiff_t>(host_bytes));(void)backend_bytes;(void)host_bytes;
-        auto column_lo=[&](int rank){return !p.columns?split.lo(rank):p.columns[rank];};
-        auto column_hi=[&](int rank){return !p.columns?split.hi(rank):p.columns[rank+1];};
+        auto column_lo=[&](int rank){return !p.columns?vectors.lo(rank):p.columns[rank];};
+        auto column_hi=[&](int rank){return !p.columns?vectors.hi(rank):p.columns[rank+1];};
         if(dph)DDLA_CHECK(ddlaMemcpy(h,dph,phases,std::size_t(n-1)*sizeof(T)));
         auto copy_ints=[&](int* dst,const int* values,std::size_t count) {
             if(count) DDLA_CHECK(ddlaMemcpy(h,dst,values,count*sizeof(int)));
@@ -413,8 +413,8 @@ void hb2st_replay_gpu_run(const DdlaHandle_t& h,const Hb2stReplayGpuPlan& p,Hb2s
             int *sc=panel[0],*sd=panel[1],*rc=panel[2],*rd=panel[3],*beg=panel[4],*rows=panel[5],*lo=panel[6];
             for(int q=0;q<P;++q){rows[q]=split.count(q);lo[q]=split.lo(q);}
             copy_ints(d4,rows,P); copy_ints(d5,lo,P);
-            for(int j0=0;j0<n;j0+=width) {
-                const int end=std::min(n,j0+width);
+            for(int j0=0;j0<p.nev;j0+=width) {
+                const int end=std::min(p.nev,j0+width);
                 const int a=std::max(j0,clo),b=std::min(end,column_hi(rank)),count=std::max(0,b-a);
                 for(int q=0;q<P;++q) {
                     beg[q]=std::max(j0,column_lo(q));
@@ -549,8 +549,8 @@ void hb2st_replay_gpu_run(const DdlaHandle_t& h,const Hb2stReplayGpuPlan& p,Hb2s
             std::exception_ptr failure;
             for(int p=0;p<npr;++p)nrpr[p]=num_loc(n,mb,p,rsrc,npr);
             copy_ints(d4,nrpr,npr);
-            for(int j0=0;j0<n;j0+=width) {
-                const int end=std::min(n,j0+width),a=std::max(j0,clo),b=std::min(end,column_hi(rank));
+            for(int j0=0;j0<p.nev;j0+=width) {
+                const int end=std::min(p.nev,j0+width),a=std::max(j0,clo),b=std::min(end,column_hi(rank));
                 const int count=std::max(0,b-a);
                 int ncolumns=0;
                 failure=nullptr;

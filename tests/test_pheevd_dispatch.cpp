@@ -10,22 +10,22 @@
 #include <cstring>
 using namespace api_grid_test;
 namespace {
-int called=0,calls=0,numbers[3]{};
+int called=0,calls=0,numbers[4]{};
 const void* pointers[6]{};
-template<class T>void record(int method,const DdlaHandle_t& h,char job,char uplo,int n,T* a,const int* da,
+template<class T>void record(int method,const DdlaHandle_t& h,char job,char uplo,int n,int nev,T* a,const int* da,
                             typename real_type<T>::type* w,T* z,const int* dz,int& info) {
-    ++calls;called=method;numbers[0]=job;numbers[1]=uplo;numbers[2]=n;
+    ++calls;called=method;numbers[0]=job;numbers[1]=uplo;numbers[2]=n;numbers[3]=nev;
     pointers[0]=h;pointers[1]=a;pointers[2]=da;pointers[3]=w;pointers[4]=z;pointers[5]=dz;info=17;
 }
 }
 namespace ddla {
 #define STUB(B,T) \
-    template<> void pheevd_one_stage<B,T>(const DdlaHandle_t& h,char job,char uplo,int n,T* a,const int* da,typename real_type<T>::type* w,T* z,const int* dz,int& info) {record(1,h,job,uplo,n,a,da,w,z,dz,info);} \
-    template<> void pheevd_two_stage<B,T>(const DdlaHandle_t& h,char job,char uplo,int n,T* a,const int* da,typename real_type<T>::type* w,T* z,const int* dz,int& info) {record(2,h,job,uplo,n,a,da,w,z,dz,info);}
+    template<> void pheevd_one_stage<B,T>(const DdlaHandle_t& h,char job,char uplo,int n,int nev,T* a,const int* da,typename real_type<T>::type* w,T* z,const int* dz,int& info) {record(1,h,job,uplo,n,nev,a,da,w,z,dz,info);} \
+    template<> void pheevd_two_stage<B,T>(const DdlaHandle_t& h,char job,char uplo,int n,int nev,T* a,const int* da,typename real_type<T>::type* w,T* z,const int* dz,int& info) {record(2,h,job,uplo,n,nev,a,da,w,z,dz,info);}
 DDLA_FOR_EACH_BACKEND_TYPE(STUB)
 #undef STUB
 namespace detail {
-#define LOCAL_STUB(B,T) template<> void pheevd_local<B,T>(const DdlaHandle_t& h,char job,char uplo,int n,T* a,const int* da,typename real_type<T>::type* w,T* z,const int* dz,int& info) {record(3,h,job,uplo,n,a,da,w,z,dz,info);}
+#define LOCAL_STUB(B,T) template<> void pheevd_local<B,T>(const DdlaHandle_t& h,char job,char uplo,int n,int nev,T* a,const int* da,typename real_type<T>::type* w,T* z,const int* dz,int& info) {record(3,h,job,uplo,n,nev,a,da,w,z,dz,info);}
 DDLA_FOR_EACH_BACKEND_TYPE(LOCAL_STUB)
 #undef LOCAL_STUB
 }
@@ -38,16 +38,16 @@ template<DdlaBackend B,class T>void test(DdlaHandle_t h,bool device) {
     detail::ScopedBlasThreads blas(std::max(1,workers));
     h->host_threads=workers;
     T a{},z{};R w{};int d[DDLA_DLEN_];int info=-1;
-    const auto invoke=[&](char job,char uplo,int n,int expected,bool reject=false,int block=64) {
+    const auto invoke=[&](char job,char uplo,int n,int expected,bool reject=false,int block=64,int nev=-1) {
         DDLA_CHECK(ddlaDescInit(d,h,std::max(1,n),std::max(1,n),block,block,0,0));
         T* out=job=='V'?&z:nullptr;const int* dz=job=='V'?d:nullptr;
         calls=called=0;info=-1;bool caught=false;
-        try {pheevd<T>(h,job,uplo,n,&a,d,&w,out,dz,info);}catch(const std::exception&){caught=true;}
+        try {pheevd<T>(h,job,uplo,n,nev<0?n:nev,&a,d,&w,out,dz,info);}catch(const std::exception&){caught=true;}
         require_close(h,"public dispatcher collective rejection",caught==reject?0:1,0);
         if(reject){require_close(h,"rejection before algorithm",calls,0);return;}
         const char* mode=std::getenv("DDLA_EIGEN_METHOD");
         if(h->nprocs==1 && (!mode || !*mode || std::strcmp(mode,"auto")==0)) expected=3;
-        bool same=calls==1&&called==expected&&info==17&&numbers[0]==job&&numbers[1]==uplo&&numbers[2]==n;
+        bool same=calls==1&&called==expected&&info==17&&numbers[0]==job&&numbers[1]==uplo&&numbers[2]==n&&numbers[3]==(nev<0?n:nev);
         const void* wanted[6]={h,&a,d,&w,out,dz};
         for(int i=0;i<6;++i)same=same&&pointers[i]==wanted[i];
         require_close(h,"public dispatcher selected endpoint and forwarded arguments",same?0:1,0);
@@ -82,6 +82,12 @@ template<DdlaBackend B,class T>void test(DdlaHandle_t h,bool device) {
             setenv("DDLA_EIGEN_METHOD",h->myid?"auto":"invalid",1);invoke(job,uplo,n,0,true);
         }
     }
+    unsetenv("DDLA_EIGEN_METHOD");
+    invoke('V','U',8192,2,false,64,5);
+    setenv("DDLA_EIGEN_METHOD","one_stage",1);
+    invoke('V','U',8192,1,false,64,5);
+    setenv("DDLA_EIGEN_METHOD","two_stage",1);
+    invoke('V','U',8192,2,false,64,5);
     h->host_threads=original_workers;h->node_ranks=original_node;
     unsetenv("DDLA_EIGEN_METHOD");
 }

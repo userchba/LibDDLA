@@ -28,9 +28,9 @@ namespace ddla { namespace detail {
 template <DdlaBackend B, class T>
 void pheevd_one_stage_timed(const DdlaHandle_t& h, char job, char uplo, int n, T* a, const int* da,
                      typename real_type<T>::type* eval, T* z, const int* dz, int& info,
-                     OneStageTimes* times) {
+                     OneStageTimes* times, int nev) {
     info = 0;
-    const auto p = spectral_impl::one_stage_check<T>(h, B, job, uplo, n, a, da, eval, z, dz);
+    const auto p = spectral_impl::one_stage_check<T>(h, B, job, uplo, n, a, da, eval, z, dz, nev);
     if (times)
         *times = {};
     if (!n)
@@ -56,12 +56,13 @@ namespace spectral_impl {
 template <class T>
 OneStagePlan one_stage_check(const DdlaHandle_t& h, DdlaBackend backend, char job,
                              char uplo, int n, const T* a, const int* da,
-                             const typename real_type<T>::type* eval, const T* z, const int* dz) {
+                             const typename real_type<T>::type* eval, const T* z, const int* dz, int nev) {
     using R = typename real_type<T>::type;
+    if (job == 'V' && nev == 0) job = 'N';
     auto p = detail::agree_check(h, "pheevd_one_stage", [&](detail::Agree&) {
         if (!h)
             throw std::invalid_argument("pheevd_one_stage: null handle");
-        if (ddlaGetBackend(h) != backend || n < 0 || (job != 'N' && job != 'V') ||
+        if (ddlaGetBackend(h) != backend || n < 0 || nev < 0 || nev > n || (job != 'N' && job != 'V') ||
             (uplo != 'U' && uplo != 'L'))
             throw std::invalid_argument("pheevd_one_stage: invalid arguments");
         check_desc(da, h);
@@ -73,11 +74,12 @@ OneStagePlan one_stage_check(const DdlaHandle_t& h, DdlaBackend backend, char jo
             throw std::invalid_argument("pheevd_one_stage: missing eigenvalues");
         OneStagePlan result;
         result.backend = backend;
-        result.communication = h->communication();
+        result.communication = ddlaGetCommunication(h);
         result.job = job;
         result.uplo = uplo;
         result.stored_only = false;
         result.n = n;
+        result.nev = nev;
         ddlaGetGridDims(h, result.pr, result.pc);
         ddlaGetGridCoords(h, result.mr, result.mc);
         std::copy(da, da + DDLA_DLEN_, result.a.begin());
@@ -87,13 +89,15 @@ OneStagePlan one_stage_check(const DdlaHandle_t& h, DdlaBackend backend, char jo
             throw std::invalid_argument("pheevd_one_stage: missing active input");
         if (job == 'V') {
             check_desc(dz, h);
-            if (dz[DDLA_MB_] != da[DDLA_MB_] || dz[DDLA_RSRC_] != 0 || n > dz[DDLA_M_] || n > dz[DDLA_N_])
+            if (dz[DDLA_MB_] != da[DDLA_MB_] || dz[DDLA_RSRC_] != 0 || n > dz[DDLA_M_] || nev > dz[DDLA_N_])
                 throw std::invalid_argument("pheevd_one_stage: incompatible output rows");
             const int zr = num_loc(n, dz[DDLA_MB_], result.mr, dz[DDLA_RSRC_], result.pr);
-            const int zc = num_loc(n, dz[DDLA_NB_], result.mc, dz[DDLA_CSRC_], result.pc);
+            const int zc = num_loc(nev, dz[DDLA_NB_], result.mc, dz[DDLA_CSRC_], result.pc);
             if (zr > 0 && zc > 0 && !z)
                 throw std::invalid_argument("pheevd_one_stage: missing active output");
             std::copy(dz, dz + DDLA_DLEN_, result.z.begin());
+            result.z[DDLA_M_] = n;
+            result.z[DDLA_N_] = nev;
             const auto span = [](int rows, int cols, int ld) {
                 return rows && cols ? (static_cast<std::size_t>(cols - 1) * ld + rows) * sizeof(T)
                                     : std::size_t(0);
@@ -103,16 +107,15 @@ OneStagePlan one_stage_check(const DdlaHandle_t& h, DdlaBackend backend, char jo
             result.saved = result.a;
             result.saved[DDLA_M_] = result.saved[DDLA_N_] = n;
             result.saved[DDLA_LLD_] = std::max(1, ar);
-            result.output_scratch = detail::output_scratch_elements(h, n, a, da, const_cast<T*>(z), dz);
+            result.output_scratch = detail::output_scratch_elements(h, n, a, da, const_cast<T*>(z), dz, nev);
             result.tridiagonal_vectors = result.z;
-            if constexpr (!std::is_same<T, R>::value)
-                result.tridiagonal_vectors[DDLA_M_] = result.tridiagonal_vectors[DDLA_N_] = n;
             result.tridiagonal_vectors[DDLA_LLD_] =
                 std::is_same<T, R>::value ? dz[DDLA_LLD_] : std::max(1, zr);
         }
         return result;
     });
-    int sig[20] = {n, job, uplo, int(backend), h->nprows_, h->npcols_};
+    int sig[21] = {n, job, uplo, int(backend), h->nprows_, h->npcols_};
+    sig[20] = nev;
     detail::descriptor_signature(sig + 6, da);
     if (job == 'V')
         detail::descriptor_signature(sig + 13, dz);
@@ -139,7 +142,7 @@ template <class T>
 void one_stage_workspace_size(const DdlaHandle_t& h, const OneStagePlan& p, std::size_t* backend_bytes,
                               std::size_t* host_bytes) {
     using R = typename real_type<T>::type;
-    if (p.backend == DdlaBackend::GPU && p.communication != h->communication())
+    if (p.backend == DdlaBackend::GPU && p.communication != ddlaGetCommunication(h))
         throw std::invalid_argument("pheevd_one_stage: communication changed; check and query a new plan");
     *backend_bytes = *host_bytes = 0;
     if (!p.n)
@@ -162,13 +165,13 @@ void one_stage_workspace_size(const DdlaHandle_t& h, const OneStagePlan& p, std:
             std::is_same<T, R>::value
                 ? 0
                 : detail::padded_bytes<R>(static_cast<std::size_t>(p.tridiagonal_vectors[DDLA_LLD_]) *
-                                          num_loc(p.n, p.z[DDLA_NB_], p.mc, p.z[DDLA_CSRC_], p.pc));
+                                          num_loc(p.nev, p.z[DDLA_NB_], p.mc, p.z[DDLA_CSRC_], p.pc));
         const std::size_t rows=detail::padded_bytes<R>(std::size_t(p.vectors.ldy)*p.n);
         pstedc_workspace_size<R>(h, p.vectors, &bytes, &host);
         stage(rows + bytes, host);
         matrix_impl::scatter_rows_workspace_size<R>(h,p.n,&bytes,&host);
         stage(rows + y + bytes,host);
-        const auto apply=punmtr_trd_geometry(h,p.backend,'L','U','N',p.n,p.n,p.a.data(),p.z.data());
+        const auto apply=punmtr_trd_geometry(h,p.backend,'L','U','N',p.n,p.nev,p.a.data(),p.z.data());
         punmtr_trd_workspace_size<T>(h,apply,&bytes);host=0;
         stage(bytes, host);
     } else {
@@ -189,7 +192,7 @@ void one_stage_run(const DdlaHandle_t& h, const OneStagePlan& p, OneStageResourc
                    void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes) {
     if constexpr (B == DdlaBackend::GPU)
         detail::agree_check(h, "pheevd_one_stage transport", [&](detail::Agree&) {
-            if (p.communication != h->communication())
+            if (p.communication != ddlaGetCommunication(h))
                 throw std::invalid_argument("pheevd_one_stage: communication changed; check and query a new plan");
         });
     try {
@@ -272,14 +275,14 @@ void one_stage_run(const DdlaHandle_t& h, const OneStagePlan& p, OneStageResourc
             solve,solve_bytes,phase_host,phase_host_bytes);
         mark(times ? &times->solve : nullptr);
         const int zr = num_loc(n, dz[DDLA_MB_], p.mr, dz[DDLA_RSRC_], p.pr);
-        const int zc = num_loc(n, dz[DDLA_NB_], p.mc, dz[DDLA_CSRC_], p.pc);
+        const int zc = num_loc(p.nev, dz[DDLA_NB_], p.mc, dz[DDLA_CSRC_], p.pc);
         const int ldq = p.tridiagonal_vectors[DDLA_LLD_];
         R* y = nullptr;
         if constexpr (std::is_same<T, R>::value)
             y = z;
         else
             y = detail::take<R>(solve, static_cast<std::size_t>(ldq) * zc);
-        matrix_impl::scatter_rows_run<B,R>(h,n,rows,p.vectors.ldy,false,n,n,y,
+        matrix_impl::scatter_rows_run<B,R>(h,n,rows,p.vectors.ldy,false,n,p.nev,y,
             p.tridiagonal_vectors.data(),solve,
             phase_bytes-std::size_t(solve-static_cast<char*>(phase)),phase_host,phase_host_bytes);
         if constexpr (!std::is_same<T, R>::value) {
@@ -288,7 +291,7 @@ void one_stage_run(const DdlaHandle_t& h, const OneStagePlan& p, OneStageResourc
             DDLA_CHECK(ddlaSynchronize(h));
         }
         mark(times ? &times->redistribution : nullptr);
-        const auto apply=punmtr_trd_geometry(h,B,'L','U','N',n,n,reflector_desc,dz);
+        const auto apply=punmtr_trd_geometry(h,B,'L','U','N',n,p.nev,reflector_desc,dz);
         punmtr_trd_run<B,T>(h,apply,reflectors,tau,z,phase,phase_bytes);
         mark(times ? &times->backtransform : nullptr);
         DDLA_CHECK(ddlaSynchronize(h));
@@ -306,7 +309,7 @@ void one_stage_run(const DdlaHandle_t& h, const OneStagePlan& p, OneStageResourc
 #define INST_ONE_STAGE_CHECK(T)                                                                              \
     template OneStagePlan one_stage_check<T>(const DdlaHandle_t&, DdlaBackend, char, char, int,              \
                                              const T*, const int*, const typename real_type<T>::type*,       \
-                                             const T*, const int*);                                          \
+                                             const T*, const int*, int);                                          \
     template void one_stage_workspace_size<T>(const DdlaHandle_t&, const OneStagePlan&, std::size_t*,        \
                                               std::size_t*)
 DDLA_FOR_EACH_TYPE(INST_ONE_STAGE_CHECK)
@@ -314,21 +317,25 @@ DDLA_FOR_EACH_TYPE(INST_ONE_STAGE_CHECK)
 } // namespace spectral_impl
 
 template <DdlaBackend B, class T>
-void pheevd_one_stage(const DdlaHandle_t& h, char job, char uplo, int n, T* a, const int* da,
+void pheevd_one_stage(const DdlaHandle_t& h, char job, char uplo, int n, int nev, T* a, const int* da,
                       typename real_type<T>::type* eval, T* z, const int* dz, int& info) {
-    detail::pheevd_one_stage_timed<B, T>(h, job, uplo, n, a, da, eval, z, dz, info, nullptr);
+    detail::pheevd_one_stage_timed<B, T>(h, job, uplo, n, a, da, eval, z, dz, info, nullptr,
+                                       nev);
 }
+
+#define INST_NEV(B,T) template void pheevd_one_stage<B,T>(const DdlaHandle_t&,char,char,int,int, \
+    T*,const int*,typename real_type<T>::type*,T*,const int*,int&)
+DDLA_FOR_EACH_BACKEND_TYPE(INST_NEV)
+#undef INST_NEV
 
 #define INST(B, T)                                                                                           \
     template void spectral_impl::one_stage_run<B, T>(                                                        \
         const DdlaHandle_t&, const spectral_impl::OneStagePlan&, spectral_impl::OneStageResources&, T*,      \
         typename real_type<T>::type*, T*, int&, detail::OneStageTimes*, void*, std::size_t, void*,           \
         std::size_t);                                                                                        \
-    template void pheevd_one_stage<B, T>(const DdlaHandle_t&, char, char, int, T*, const int*,               \
-                                         typename real_type<T>::type*, T*, const int*, int&);                \
     template void detail::pheevd_one_stage_timed<B, T>(const DdlaHandle_t&, char, char, int, T*, const int*, \
                                                        typename real_type<T>::type*, T*, const int*, int&,   \
-                                                       detail::OneStageTimes*)
+                                                       detail::OneStageTimes*, int)
 DDLA_FOR_EACH_BACKEND_TYPE(INST)
 #undef INST
 } // namespace ddla

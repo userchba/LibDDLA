@@ -37,7 +37,7 @@ ddla::spectral_impl::PheevdPlan checked_plan(ddla::DdlaHandle_t h,int n,int nb,i
     int d[ddla::DDLA_DLEN_];ddla::ddlaDescInit(d,h,n,n,nb,nb,0,0);
     double a=0,w=0;
     auto topology=ddla::spectral_impl::phb2st_topology_prepare(h);
-    auto plan=ddla::spectral_impl::pheevd_check<double>(h,ddla::DdlaBackend::CPU,'N','U',n,&a,d,&w,nullptr,nullptr,*topology);
+    auto plan=ddla::spectral_impl::pheevd_check<double>(h,ddla::DdlaBackend::CPU,'N','U',n,&a,d,&w,nullptr,nullptr,*topology,'A',nullptr,ddla::DdlaBackend::CPU,n);
     topology->release();
     return plan;
 }

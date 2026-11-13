@@ -714,23 +714,29 @@ template <DdlaBackend Backend, typename T>
 void heevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
            T* A, int lda, typename real_type<T>::type* w, int* info);
 
+
+
 template <DdlaBackend Backend, typename T>
 void pheevd(
     const DdlaHandle_t& handle,
-    char jobz, char uplo, int n,
+    char jobz, char uplo, int n, int nev,
     T* A, const int* descA,
     typename real_type<T>::type* w,
     T* Z, const int* descZ,
     int& info
 );
 
+
+
 template <DdlaBackend Backend, typename T>
-void pheevd_two_stage(const DdlaHandle_t& handle, char jobz, char uplo, int n,
+void pheevd_two_stage(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev,
     T* A, const int* descA, typename real_type<T>::type* w,
     T* Z, const int* descZ, int& info);
 
+
+
 template <DdlaBackend Backend, typename T>
-void pheevd_one_stage(const DdlaHandle_t& handle, char jobz, char uplo, int n,
+void pheevd_one_stage(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev,
     T* A, const int* descA, typename real_type<T>::type* w,
     T* Z, const int* descZ, int& info);
 

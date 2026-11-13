@@ -31,7 +31,7 @@ bool two_stage_options_requested()
 } // namespace
 
 template <DdlaBackend Backend, typename T>
-void pheevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
+void pheevd(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev,
             T* A, const int* descA, typename real_type<T>::type* w,
             T* Z, const int* descZ, int& info)
 {
@@ -47,6 +47,9 @@ void pheevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
             throw std::invalid_argument("pheevd: initialized process grid required");
         if (ddlaGetBackend(handle) != Backend)
             throw std::invalid_argument("pheevd: backend mismatch");
+        if (n < 0 || nev < 0 || nev > n)
+            throw std::invalid_argument("pheevd: nev must be between zero and n");
+        agreement.mode("pheevd nev", nev);
         const char* method = std::getenv("DDLA_EIGEN_METHOD");
         int selected = 0;
         if (method && *method && std::strcmp(method, "auto") != 0) {
@@ -56,7 +59,8 @@ void pheevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
         }
         agreement.mode("DDLA_EIGEN_METHOD", selected);
         agreement.mode("pheevd backend", int(Backend));
-        automatic_shape = !selected && descA && descA[DDLA_MB_] == descA[DDLA_NB_] &&
+        // Existing automatic thresholds were measured for all vectors.
+        automatic_shape = !selected && (jobz != 'V' || nev == n) && descA && descA[DDLA_MB_] == descA[DDLA_NB_] &&
             descA[DDLA_RSRC_] == 0 && descA[DDLA_CSRC_] == 0 &&
             detail::pheevd_one_stage_shape<Backend,T>(jobz,n,descA[DDLA_MB_],
                 handle->nprows_,handle->npcols_,handle->major);
@@ -64,7 +68,7 @@ void pheevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
         if constexpr (Backend == DdlaBackend::GPU) automatic_shape = false;
 #else
         if constexpr (Backend == DdlaBackend::GPU)
-            automatic_shape = automatic_shape && handle->communication() == DdlaCommunication::CCL;
+            automatic_shape = automatic_shape && ddlaGetCommunication(handle) == DdlaCommunication::CCL;
 #endif
         // Shape metadata is global; worker budgets, tuning options and devices
         // may differ locally. An ineligible rank requests the conservative route.
@@ -93,26 +97,21 @@ void pheevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
         return selected;
     });
     if (!mode && handle->nprocs == 1) {
-        detail::pheevd_local<Backend,T>(handle,jobz,uplo,n,A,descA,w,Z,descZ,info);
+        detail::pheevd_local<Backend,T>(handle,jobz,uplo,n,nev,A,descA,w,Z,descZ,info);
         return;
     }
     if (!mode && automatic_shape && handle->nprocs > 1)
         MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &prefer_one, 1, MPI_INT, MPI_MIN, handle->comm));
     const bool one_stage = mode == 1 || (!mode && prefer_one);
     if (one_stage)
-        pheevd_one_stage<Backend, T>(handle, jobz, uplo, n, A, descA, w, Z, descZ, info);
+        pheevd_one_stage<Backend, T>(handle, jobz, uplo, n, nev, A, descA, w, Z, descZ, info);
     else
-        pheevd_two_stage<Backend, T>(handle, jobz, uplo, n, A, descA, w, Z, descZ, info);
+        pheevd_two_stage<Backend, T>(handle, jobz, uplo, n, nev, A, descA, w, Z, descZ, info);
 }
 
-#define INSTANTIATE_PHEEVD(BACKEND, TYPE)                                        \
-    template void pheevd<BACKEND, TYPE>(                                         \
-        const DdlaHandle_t&, char, char, int,               \
-        TYPE*, const int*, typename real_type<TYPE>::type*,                      \
-        TYPE*, const int*, int&)
-
-DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_PHEEVD)
-
-#undef INSTANTIATE_PHEEVD
+#define INST_NEV(B,T) template void pheevd<B,T>(const DdlaHandle_t&,char,char,int,int, \
+    T*,const int*,typename real_type<T>::type*,T*,const int*,int&)
+DDLA_FOR_EACH_BACKEND_TYPE(INST_NEV)
+#undef INST_NEV
 
 } // namespace ddla

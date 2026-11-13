@@ -118,7 +118,7 @@ template<class T>void solve(const ddla::DdlaHandle_t& h,int n,int nb,char uplo,b
         if(rank==0)std::printf("PUBLIC_ROUTING_CALL phase=%s type=%s n=%d grid=%dx%d uplo=%c alias=%d shared_parent=%d maxrank_seconds=%.9f clock=whole_call status=PASS\n",phase,scalar_name<T>(),n,pr,pc,uplo,int(alias),int(shared_parent),maximum);
     };
     int info=-1;
-    invoke("public_V",[&]{pheevd<T>(h,'V',uplo,n,A.ptr,da,w.data()+3,output,dz,info);});
+    invoke("public_V",[&]{pheevd<T>(h,'V',uplo,n,n,A.ptr,da,w.data()+3,output,dz,info);});
     require_close(h,"public V info",info,0);require_close(h,"public V w guards/finite/order",guarded(w)?0:INFINITY,0);
     const auto after_a=download(h,A.ptr,input.size());
     if(shared_parent) {
@@ -137,12 +137,12 @@ template<class T>void solve(const ddla::DdlaHandle_t& h,int n,int nb,char uplo,b
     const double r=residual(h,reference.ptr,da,output,dz,w.data()+3,n),o=orthogonal(h,output,dz,n),norm=eig_test::frobenius_norm(h,reference.ptr,da,n);
     require_close(h,"public independent residual",std::isfinite(r)?r:INFINITY,50);require_close(h,"public independent orthogonality",std::isfinite(o)?o:INFINITY,50);
     upload(h,reference.ptr,input);
-    invoke("public_N",[&]{pheevd<T>(h,'N',uplo,n,reference.ptr,da,wn.data()+3,nullptr,nullptr,info);});
+    invoke("public_N",[&]{pheevd<T>(h,'N',uplo,n,n,reference.ptr,da,wn.data()+3,nullptr,nullptr,info);});
     require_close(h,"public N info",info,0);require_close(h,"public N w guards/finite/order",guarded(wn)?0:INFINITY,0);
     require_close(h,"public N A inactive parent/LLD padding",padding_and_finite(h,da,download(h,reference.ptr,input.size()),n,sentinel,false),0);
     upload(h,reference.ptr,input);
     constexpr int method=std::is_same<T,R>::value?4:3;
-    invoke("private_N",[&]{detail::pheevd_householder_stage4<DdlaBackend::CPU, T>(h,'N',uplo,n,reference.ptr,da,wp.data()+3,nullptr,nullptr,info,method);});
+    invoke("private_N",[&]{detail::pheevd_householder_stage4<DdlaBackend::CPU, T>(h,'N',uplo,n,n,reference.ptr,da,wp.data()+3,nullptr,nullptr,info,method);});
     require_close(h,"private N info",info,0);require_close(h,"private N w guards/finite/order",guarded(wp)?0:INFINITY,0);
     require_close(h,"private N A inactive parent/LLD padding",padding_and_finite(h,da,download(h,reference.ptr,input.size()),n,sentinel,false),0);
     double en=0,ep=0;

@@ -27,21 +27,21 @@ inline std::size_t replay_displacements(const int* counts,int* offsets,int ranks
     replay_count(total);return static_cast<std::size_t>(total);
 }
 struct CpuReplayPlan {
-    int n=0,P=1,me=0,npr=1,npc=1,pr=0,pc=0,mb=1,nb=1,rsrc=0,csrc=0,lld=1;
+    int n=0,nev=0,P=1,me=0,npr=1,npc=1,pr=0,pc=0,mb=1,nb=1,rsrc=0,csrc=0,lld=1;
     int nrl=0,ncs=0,outrows=0,maxcols=0,maxoutcols=0,width=64;char major='R';
     int rank(int r,int c)const noexcept{return major=='R'?r*npc+c:c*npr+r;}
     int column_size(int q)const noexcept{
         const int r=major=='R'?q/npc:q%npr,c=major=='R'?q%npc:q/npr;
-        const long long all=num_loc(n,nb,c,csrc,npc);return int(all*(r+1)/npr-all*r/npr);
+        const long long all=num_loc(nev,nb,c,csrc,npc);return int(all*(r+1)/npr-all*r/npr);
     }
 };
 inline CpuReplayPlan cpu_replay_plan(const DdlaHandle_t& h,int n,const int* d,int panel=64)
 {
-    CpuReplayPlan p;p.n=n;p.npr=h->nprows_;p.npc=h->npcols_;p.pr=h->myprow_;p.pc=h->mypcol_;p.P=h->nprocs;p.me=h->myid;p.major=h->major;
+    CpuReplayPlan p;p.n=n;p.nev=std::min(n,d[DDLA_N_]);p.npr=h->nprows_;p.npc=h->npcols_;p.pr=h->myprow_;p.pc=h->mypcol_;p.P=h->nprocs;p.me=h->myid;p.major=h->major;
     p.mb=d[DDLA_MB_];p.nb=d[DDLA_NB_];p.rsrc=d[DDLA_RSRC_];p.csrc=d[DDLA_CSRC_];p.lld=d[DDLA_LLD_];
     p.nrl=RowShare(n,p.P).count(p.me);p.outrows=num_loc(n,p.mb,p.pr,p.rsrc,p.npr);
     for(int q=0;q<p.P;++q)p.maxcols=std::max(p.maxcols,p.column_size(q));
-    for(int c=0;c<p.npc;++c)p.maxoutcols=std::max(p.maxoutcols,num_loc(n,p.nb,c,p.csrc,p.npc));
+    for(int c=0;c<p.npc;++c)p.maxoutcols=std::max(p.maxoutcols,num_loc(p.nev,p.nb,c,p.csrc,p.npc));
     p.ncs=p.column_size(p.me);p.width=std::max(1,std::min(panel>0?panel:64,std::max(p.maxcols,1)));return p;
 }
 // Bytes cpu_replay_layout takes, in carving order: the column offsets (P + 1)
@@ -80,7 +80,7 @@ inline CpuReplayLayout cpu_replay_layout(const CpuReplayPlan& p,char*& cursor)
     m.osc=take<int>(cursor,p.npr);m.osd=take<int>(cursor,p.npr);m.orc=take<int>(cursor,p.npr);m.ord=take<int>(cursor,p.npr);
     int offset=0;for(int rank=0;rank<p.P;++rank){
         const int row=p.major=='R'?rank/p.npc:rank%p.npr,col=p.major=='R'?rank%p.npc:rank/p.npr;
-        const long long all=num_loc(p.n,p.nb,col,p.csrc,p.npc);const int begin=int(all*row/p.npr),count=p.column_size(rank);
+        const long long all=num_loc(p.nev,p.nb,col,p.csrc,p.npc);const int begin=int(all*row/p.npr),count=p.column_size(rank);
         m.column_offsets[rank]=offset;m.begins[rank]=begin;
         for(int j=0;j<count;++j)m.column_data[offset+j]=indxl2g(begin+j,p.nb,col,p.csrc,p.npc);
         offset+=count;

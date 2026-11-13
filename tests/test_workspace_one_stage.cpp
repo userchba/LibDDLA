@@ -77,7 +77,7 @@ void exercise(DdlaHandle_t h,char uplo,char job,int n,bool alias=false,bool tigh
     std::vector<T> output(local_size(h,dz),sentinel);upload(h,z.ptr,output);
     T* target=alias?a.ptr:z.ptr;const int* target_desc=alias?da:dz;
     const auto p=spectral_impl::one_stage_check<T>(h,B,job,uplo,n,a.ptr,da,eigenvalues.data(),
-        job=='V'?target:nullptr,job=='V'?target_desc:nullptr);
+        job=='V'?target:nullptr,job=='V'?target_desc:nullptr,n);
     if(n&&job=='V'){
         const detail::RowShare rows(n,h->nprocs);
         require_close(h,"one-stage default uses tightly packed row D&C",
@@ -164,7 +164,7 @@ void cache_policy(DdlaHandle_t h)
     if(version<111103||version>=120304)return;
     int d[DDLA_DLEN_];DDLA_CHECK(ddlaDescInit(d,h,1024,1024,32,32,0,0));
     DeviceBuffer<double>a(h,local_size(h,d)),z(h,local_size(h,d));std::array<double,1024>w{};
-    const auto p=spectral_impl::one_stage_check<double>(h,DdlaBackend::GPU,'V','U',1024,a.ptr,d,w.data(),z.ptr,d);
+    const auto p=spectral_impl::one_stage_check<double>(h,DdlaBackend::GPU,'V','U',1024,a.ptr,d,w.data(),z.ptr,d,1024);
     spectral_impl::OneStageResources resources(h,p);
     std::size_t original=0;BLAS_CHECK(gpublasHeuristicsCacheGetCapacity(&original));
     struct Restore {std::size_t capacity;~Restore(){(void)gpublasHeuristicsCacheSetCapacity(capacity);}}restore{original};

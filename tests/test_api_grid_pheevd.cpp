@@ -216,7 +216,7 @@ void check_pheevd(const ddla::DdlaHandle_t& handle, int n, int nblk, bool upper)
 
     std::vector<rt> w(n);
     int info = 0;
-    ddla::pheevd(handle, 'V', uplo, n, d_A.ptr, descA, w.data(),
+    ddla::pheevd(handle, 'V', uplo, n,n, d_A.ptr, descA, w.data(),
                  d_Z.ptr, descZ, info);
     require_close(handle, "pheevd info", info, 0.5);
 
@@ -481,7 +481,7 @@ void check_nbw_env_refused(const ddla::DdlaHandle_t& handle)
         double threw = 0.0;
         int info = 0;
         try {
-            ddla::pheevd_two_stage(handle, 'N', 'U', n, d_A.ptr, desc, w.data(), static_cast<T*>(nullptr), desc, info);
+            ddla::pheevd_two_stage(handle, 'N', 'U', n,n, d_A.ptr, desc, w.data(), static_cast<T*>(nullptr), desc, info);
         } catch (const std::exception&) { threw = 1.0; }
         require_close(handle, std::string("pheevd_two_stage refuses DDLA_EIG_NBW=") + bad, 1.0 - threw, 0.0);
     }
@@ -610,7 +610,7 @@ void check_body_t(const ddla::DdlaHandle_t& handle, const Shape& base)
         }
         upload<T>(handle, d_A.ptr, local);
         int info = 0;
-        ddla::pheevd(handle, 'N', upper ? 'U' : 'L', nn, d_A.ptr, descA, w2.data(),
+        ddla::pheevd(handle, 'N', upper ? 'U' : 'L', nn,nn, d_A.ptr, descA, w2.data(),
                      static_cast<T*>(nullptr), descA, info);
         require_close(handle, "pheevd 'N' info", info, 0.5);
         const std::vector<rt> ref = host_eigh<T>(Ah_full, nn);

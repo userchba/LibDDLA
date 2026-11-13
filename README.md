@@ -1033,3 +1033,36 @@ Panel extraction and redistribution use `pgeadd` followed by row/column
 broadcasts. `pgeadd` accepts independent block sizes, owners, and submatrix
 offsets for N/T/C. Aligned panel copies retain the direct packing path.
 The former public `transport_block` interface has been removed.
+
+### Partial eigenvector output
+
+`pheevd`, `pheevd_one_stage` and `pheevd_two_stage` require `nev` after
+`n`, following ELPA's count-based convention. They return all `n` eigenvalues
+in ascending order and the eigenvectors for the lowest `nev` eigenvalues:
+
+```cpp
+ddla::pheevd<double>(handle, 'V', 'U', n, nev,
+                     A, descA, eigenvalues, Z, descZ, info);
+```
+
+Use `0 <= nev <= n`. For vectors, `descZ` must cover `n` rows and `nev`
+columns with the method's existing block/distribution requirements; an exact
+`n × nev` descriptor or a larger parent descriptor is supported. Only the
+leading output block is written. Padding and remaining parent columns are
+preserved unless they overlap `A`, whose active `n × n` block is destroyed.
+`nev=0` skips vectors and ignores `Z`/`descZ`. `jobz='N'` returns only
+values regardless of the valid `nev` count. Pass `nev=n` for full output.
+The old signatures without `nev` have been removed; downstream callers must
+update their calls and rebuild.
+
+Reduction and the current distributed tridiagonal divide-and-conquer solver
+still compute the full spectrum. Redistribution and both back-transforms
+process only the requested vectors; this is not an eigenvalue-range solver.
+ScaLAPACK's `*syevx/*heevx` expresses the lowest-vector selection using
+`RANGE='I', IL=1, IU=nev`; its all-spectrum `*syevd/*heevd` interface has
+no `nev` argument. LibDDLA retains its own handle/workspace interface.
+
+Automatic thresholds calibrated for full eigenvectors are applied only to
+`nev=n`. Partial-vector multi-rank calls retain the conservative two-stage
+route; an explicit one-stage request remains available. Single-rank automatic
+calls retain the local vendor solver.

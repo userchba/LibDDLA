@@ -5,7 +5,7 @@
 namespace ddla { namespace detail {
 // The single-rank adapter preserves descriptor padding and host eigenvalues.
 template <DdlaBackend B, class T>
-void pheevd_local(const DdlaHandle_t&, char, char, int, T*, const int*,
+void pheevd_local(const DdlaHandle_t&, char, char, int, int, T*, const int*,
                   typename real_type<T>::type*, T*, const int*, int&);
 
 } }
