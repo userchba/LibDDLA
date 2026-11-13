@@ -62,7 +62,8 @@ void map_blocks(const DdlaHandle_t& h, bool scatter, const Block<T>* blocks, int
                 const int* desc, int ia, int ja, int m, int n, T* window, int ldw);
 
 // Convert a real contiguous RowShare(k,P) slab to a block-cyclic output.
-// The k-by-k factor may be transposed; logical m-by-n extensions are zeroed.
+// The k-by-k factor may be transposed, then clipped to the requested m-by-n
+// block; logical extensions beyond the factor are zeroed.
 // Source and active destination spans must be separate. Parent/LLD padding
 // is preserved. Uses two reusable bounded panels, never a replicated factor.
 // Collective over the grid, with local failures agreed before communication.

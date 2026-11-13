@@ -340,13 +340,13 @@ void scatter_rows_check(const DdlaHandle_t& h,int k,const typename real_type<T>:
 {
     ddla::detail::agree_check(h,"scatter_rows",[&](ddla::detail::Agree& agreement) {
         if (!h) throw std::invalid_argument("scatter_rows: null handle");
-        if (ddlaGetBackend(h)!=B || k<0 || m<k || n<k)
+        if (ddlaGetBackend(h)!=B || k<0 || m<0 || n<0)
             throw std::invalid_argument("scatter_rows: incompatible backend or extents");
         check_desc(desc,h);
         if (m>desc[DDLA_M_] || n>desc[DDLA_N_])
             throw std::invalid_argument("scatter_rows: output exceeds descriptor");
         const detail::RowShare share(k,h->nprocs);
-        if (lds<std::max(1,share.count(h->myid)) || (k && share.count(h->myid)>0 && !src))
+        if (lds<std::max(1,share.count(h->myid)) || (k && m && n && share.count(h->myid)>0 && !src))
             throw std::invalid_argument("scatter_rows: missing source rows");
         const int mloc=num_loc(m,desc[DDLA_MB_],h->myprow_,desc[DDLA_RSRC_],h->nprows_);
         const int nloc=num_loc(n,desc[DDLA_NB_],h->mypcol_,desc[DDLA_CSRC_],h->npcols_);
@@ -374,8 +374,9 @@ void scatter_rows_run(const DdlaHandle_t& h,int k,const typename real_type<T>::t
         assert(used<=backend_bytes);
         const int mloc=num_loc(m,desc[DDLA_MB_],h->myprow_,desc[DDLA_RSRC_],h->nprows_);
         const int nloc=num_loc(n,desc[DDLA_NB_],h->mypcol_,desc[DDLA_CSRC_],h->npcols_);
-        const int factor_rows=num_loc(k,desc[DDLA_MB_],h->myprow_,desc[DDLA_RSRC_],h->nprows_);
-        const int factor_cols=num_loc(k,desc[DDLA_NB_],h->mypcol_,desc[DDLA_CSRC_],h->npcols_);
+        const int kept_rows=std::min(k,m),kept_cols=std::min(k,n);
+        const int factor_rows=num_loc(kept_rows,desc[DDLA_MB_],h->myprow_,desc[DDLA_RSRC_],h->nprows_);
+        const int factor_cols=num_loc(kept_cols,desc[DDLA_NB_],h->mypcol_,desc[DDLA_CSRC_],h->npcols_);
         // Operational failure agreement only: all argument checking is complete.
         detail::agree_check(h,"scatter_rows preparation",[&](detail::Agree&) {
             if (mloc>factor_rows && nloc>0)
@@ -383,13 +384,15 @@ void scatter_rows_run(const DdlaHandle_t& h,int k,const typename real_type<T>::t
             if (nloc>factor_cols && factor_rows>0)
                 convert_rows<B,T>(h,nullptr,1,dst+std::size_t(factor_cols)*desc[DDLA_LLD_],
                                   desc[DDLA_LLD_],factor_rows,nloc-factor_cols,false);
-            if (h->nprocs==1)convert_rows<B,T>(h,src,lds,dst,desc[DDLA_LLD_],k,k,transpose);
+            if (h->nprocs==1)convert_rows<B,T>(h,src,lds,dst,desc[DDLA_LLD_],kept_rows,kept_cols,transpose);
         });
         const detail::RowShare share(k,h->nprocs);
-        if (h->nprocs>1) for(int root=0;root<h->nprocs;++root) {
-            for(int first=0;first<share.count(root);first+=panel_rows) {
-                const int rows=std::min(panel_rows,share.count(root)-first);
-                const int nr=transpose?k:rows,nc=transpose?rows:k;
+        if (h->nprocs>1 && kept_rows && kept_cols) for(int root=0;root<h->nprocs;++root) {
+            const int root_rows=std::max(0,std::min(share.count(root),
+                (transpose?kept_cols:kept_rows)-share.lo(root)));
+            for(int first=0;first<root_rows;first+=panel_rows) {
+                const int rows=std::min(panel_rows,root_rows-first);
+                const int nr=transpose?kept_rows:rows,nc=transpose?rows:kept_cols;
                 if constexpr(B==DdlaBackend::CPU) {
                     if(h->myid==root)convert_rows<B,T>(h,src+first,lds,converted,nr,nr,nc,transpose);
                 } else {
