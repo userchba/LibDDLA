@@ -201,10 +201,10 @@ void convert_case(DdlaHandle_t h)
 }
 
 template <DdlaBackend B,typename T>
-void rows_case(DdlaHandle_t h,int k,bool transpose)
+void rows_case(DdlaHandle_t h,int k,bool transpose,int rows=-1,int cols=-1)
 {
     using R=typename real_type<T>::type;
-    const int m=k+3,n=k+2,M=m+2,N=n+3;
+    const int m=rows<0?k+3:rows,n=cols<0?k+2:cols,M=m+2,N=n+3;
     const detail::RowShare share(k,h->nprocs);
     const int ld=std::max(1,share.count(h->myid))+2;
     std::vector<R> source(std::size_t(ld)*k,R(-53));
@@ -338,6 +338,9 @@ template <DdlaBackend B> void run(MPI_Comm comm,int pr,int pc,char major)
     transfer_case<B,T>(h,65547,137,3,4,65539,129,h->nprocs-1); \
     rows_case<B,T>(h,7,false); rows_case<B,T>(h,7,true); \
     rows_case<B,T>(h,1,false); rows_case<B,T>(h,0,true); \
+    rows_case<B,T>(h,7,false,7,3); rows_case<B,T>(h,7,true,7,3); \
+    rows_case<B,T>(h,7,false,3,9); rows_case<B,T>(h,7,true,3,9); \
+    rows_case<B,T>(h,7,false,0,3); rows_case<B,T>(h,7,true,3,0); \
     panel_case<B,T>(h,'R','N'); panel_case<B,T>(h,'C','N'); \
     panel_case<B,T>(h,'R','T'); panel_case<B,T>(h,'C','T')
     CASES(float);CASES(double);CASES(std::complex<float>);CASES(std::complex<double>);
