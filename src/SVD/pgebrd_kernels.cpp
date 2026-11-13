@@ -19,7 +19,7 @@
 
 #include <algorithm>
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 
 namespace ddla {
 namespace detail {
@@ -754,4 +754,4 @@ DDLA_FOR_EACH_TYPE(BRD_INST_FUSED)
 } // namespace detail
 } // namespace ddla
 
-#endif // defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#endif // DDLA_HAS_GPU

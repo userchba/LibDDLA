@@ -11,7 +11,7 @@
 namespace ddla {
 namespace detail {
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 namespace {
 constexpr int kReflectorThreads = 128;
 
@@ -162,7 +162,7 @@ void reflector_build_T(const DdlaHandle_t& handle, int jb, const T* gram,
             }
         }
     } else {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
         const gpuStream_t stream = static_cast<gpuStream_t>(handle->stream);
         using rt = typename real_type<T>::type;
         constexpr bool Cplx = !std::is_same<rt, T>::value;
@@ -211,7 +211,7 @@ void reflector_build_T(const DdlaHandle_t& handle, int jb, const T* gram,
 
 // Host fallback is needed even when the public CPU backend is disabled.
 DDLA_INSTANTIATE_REFLECTOR_BUILD_T_TYPES(DdlaBackend::CPU);
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 DDLA_INSTANTIATE_REFLECTOR_BUILD_T_TYPES(DdlaBackend::GPU);
 #endif
 

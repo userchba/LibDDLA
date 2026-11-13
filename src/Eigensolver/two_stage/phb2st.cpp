@@ -2262,7 +2262,7 @@ public:
 
 } // namespace
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 namespace {
 
 // Fill the device band buffer with the entries of the 2D block-cyclic band
@@ -2411,7 +2411,7 @@ void phb2st_band_run(const DdlaHandle_t& h,const Phb2stBandPlan& p,const T* A,T*
                 }
             }
         } else {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
             DDLA_CHECK(ddlaMemset(h,band,0,elements*sizeof(T)));
             const unsigned blocks=static_cast<unsigned>(std::min(std::size_t(1024),(elements+255)/256));
             band_extract_kernel<T><<<blocks,256,0,static_cast<gpuStream_t>(h->stream)>>>(band,n,nbw,A,lld,nb,myprow,mypcol,npr,npc);

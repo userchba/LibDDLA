@@ -27,7 +27,7 @@
 
 namespace ddla { namespace detail {
 namespace {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 template <class D, class R> __device__ D widen(R v) { return D(v); }
 
 template <class D, class R>
@@ -345,7 +345,7 @@ void hb2st_replay_gpu_run(const DdlaHandle_t& h,const Hb2stReplayGpuPlan& p,Hb2s
 {
     try {
         info=0;if(input_consumed)*input_consumed=false;
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
         using R=typename real_type<T>::type;using D=DeviceScalarT<T>;
         if(!p.n){if(input_consumed)*input_consumed=true;return;}
         uploads.finish(); // Reuse after an exceptional run also retires old slot reads.

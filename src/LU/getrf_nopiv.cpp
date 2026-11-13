@@ -19,7 +19,7 @@
 
 namespace ddla {
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 
 // --------------------------------------------------------------------------
 // Zero-pivot check helpers (device)
@@ -163,7 +163,7 @@ void launch_getf2_nopiv_kernel(const DdlaHandle_t& ddla_handle, int jb, T* d_blo
     DDLA_CHECK(ddlaGetLastError(ddla_handle));
 }
 
-#endif // DDLA_USE_CUDA || DDLA_USE_HIP
+#endif // DDLA_HAS_GPU
 
 // --------------------------------------------------------------------------
 // CPU arm of the diagonal-block factorization: the same column loop as the kernel (zero pivot -> divisor 1, first zero
@@ -254,7 +254,7 @@ void getrf_nopiv_run(const DdlaHandle_t& ddla_handle, int m, int n, T* A, int ld
         }
         else
         {
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
             launch_getf2_nopiv_kernel<T>(ddla_handle, jb, A + j * lda + j, lda, info_buffer, j);
 #endif
         }

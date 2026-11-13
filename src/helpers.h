@@ -1,6 +1,7 @@
 #ifndef DDLA_HELPERS_H
 #define DDLA_HELPERS_H
 
+#include <ddla/ddla_config.h>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
@@ -53,7 +54,7 @@ inline std::complex<R> host_conj(std::complex<R> value, bool conjugate = true) n
 
 } // namespace ddla::detail
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 #include <thrust/complex.h>
 
 namespace ddla::detail {
@@ -97,6 +98,6 @@ __device__ __forceinline__ thrust::complex<R> device_conj(const thrust::complex<
 #endif
 
 } // namespace ddla::detail
-#endif // DDLA_USE_CUDA || DDLA_USE_HIP
+#endif // DDLA_HAS_GPU
 
 #endif // DDLA_HELPERS_H

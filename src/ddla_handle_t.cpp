@@ -144,7 +144,7 @@ void* ddlaGetStream(const DdlaHandle_t& handle)
 {
     if (handle == nullptr) return nullptr;
     if (handle->backend == DdlaBackend::CPU) return nullptr;
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
     return handle->stream;
 #else
     // GPU backend requested but this is a CPU-only build — unreachable
@@ -697,7 +697,7 @@ ddlaStatus_t ddlaSetStream(const DdlaHandle_t& handle, void* stream)
         throw std::runtime_error(
             "ddlaSetStream: setting a stream requires a GPU handle");
     }
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
     handle->stream = stream;
 #endif
     // Re-bind the BLAS/solver handles so subsequent calls honor the new

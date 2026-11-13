@@ -207,7 +207,7 @@ void pherm_exec_cpu(const DdlaHandle_t& handle,const HermPlan& p,bool upper,T* A
 
 // ----- device kernels (GPU backend) -----------------------------------------
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 
 template <typename U>
 __device__ __forceinline__ void pherm_dmake_real(U&) {}
@@ -301,7 +301,7 @@ void pherm_exec_gpu(const DdlaHandle_t& handle,const HermPlan& p,bool upper,T* A
     DDLA_CHECK(ddlaSynchronize(handle));
 }
 
-#endif // DDLA_USE_CUDA || DDLA_USE_HIP
+#endif // DDLA_HAS_GPU
 
 } // namespace
 
@@ -397,7 +397,7 @@ void pherm_complete_run(const DdlaHandle_t& handle,const HermitianPlan& p,T* A,T
     if constexpr(Backend==DdlaBackend::CPU) {
         pherm_exec_cpu<T>(handle,plan,p.upper,A,p.pr*p.pc,p.threads,send,recv);
     } else {
-#if defined(DDLA_USE_CUDA)||defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
         pherm_exec_gpu<T>(handle,plan,p.upper,A,p.pr*p.pc,device,meta,send,recv);
 #endif
     }

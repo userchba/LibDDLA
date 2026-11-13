@@ -10,7 +10,7 @@
 
 namespace ddla::detail {
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 
 namespace {
 
@@ -50,7 +50,7 @@ constexpr int kTileSize = 16;
 
 } // namespace
 
-#endif // DDLA_USE_CUDA || DDLA_USE_HIP
+#endif // DDLA_HAS_GPU
 
 template <DdlaBackend Backend, typename T>
 void reverse_upper_to_lower(
@@ -75,7 +75,7 @@ void reverse_upper_to_lower(
             }
         }
     }else{
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
         const gpuStream_t stream = static_cast<gpuStream_t>(handle->stream);
         using DeviceT = DeviceScalarT<T>;
         static_assert(sizeof(DeviceT) == sizeof(T));
@@ -114,7 +114,7 @@ void reverse_lower_to_upper(
             }
         }
     }else{
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
         const gpuStream_t stream = static_cast<gpuStream_t>(handle->stream);
         using DeviceT = DeviceScalarT<T>;
         static_assert(sizeof(DeviceT) == sizeof(T));

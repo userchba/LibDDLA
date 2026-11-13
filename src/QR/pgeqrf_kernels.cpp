@@ -16,7 +16,7 @@
 
 #include <algorithm>
 
-#if defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#if DDLA_HAS_GPU
 
 namespace ddla {
 namespace detail {
@@ -173,4 +173,4 @@ DDLA_FOR_EACH_TYPE(DDLA_QR_INST_MAP_KERNELS)
 } // namespace detail
 } // namespace ddla
 
-#endif // defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP)
+#endif // DDLA_HAS_GPU

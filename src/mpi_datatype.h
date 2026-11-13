@@ -9,9 +9,10 @@
 // realistic panel size and forgoes MPI's own type checking (F6).
 // ---------------------------------------------------------------------------
 
+#include <ddla/ddla_config.h>
 #include <mpi.h>
 #include <complex>
-#if defined(DDLA_USE_GPU_CPU_TUNNEL) && (defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP))
+#if defined(DDLA_USE_GPU_CPU_TUNNEL) && (DDLA_HAS_GPU)
 #include <thrust/complex.h>
 #endif
 
@@ -27,7 +28,7 @@ template <> inline MPI_Datatype mpi_datatype<double>() { return MPI_DOUBLE; }
 template <> inline MPI_Datatype mpi_datatype<std::complex<float>>() { return MPI_CXX_FLOAT_COMPLEX; }
 template <> inline MPI_Datatype mpi_datatype<std::complex<double>>() { return MPI_CXX_DOUBLE_COMPLEX; }
 
-#if defined(DDLA_USE_GPU_CPU_TUNNEL) && (defined(DDLA_USE_CUDA) || defined(DDLA_USE_HIP))
+#if defined(DDLA_USE_GPU_CPU_TUNNEL) && (DDLA_HAS_GPU)
 // Device packing kernels also produce thrust complex panels. Host staging
 // preserves their two-real layout, so MPI uses the matching complex type.
 template <> inline MPI_Datatype mpi_datatype<thrust::complex<float>>() {

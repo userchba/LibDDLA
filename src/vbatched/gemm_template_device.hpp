@@ -789,7 +789,7 @@ void gemm_template_device_nn(
     T* sB, int sldb,
     T* sC, int sldc )
 {
-#if defined(DDLA_USE_HIP) || defined(DDLA_USE_CUDA)
+#if DDLA_HAS_GPU
     int idx = threadIdx.x;  // thread's m dimension
     int idy = threadIdx.y;  // thread's n dimension
 
@@ -983,7 +983,7 @@ void gemm_template_device_nn(
             }
         }
     }
-#endif /* DDLA_USE_HIP || DDLA_USE_CUDA */
+#endif /* DDLA_HAS_GPU */
 }
 
 
@@ -1002,7 +1002,7 @@ void gemm_template_device_nt(
     T* sB, int sldb,
     T* sC, int sldc )
 {
-#if defined(DDLA_USE_HIP) || defined(DDLA_USE_CUDA)
+#if DDLA_HAS_GPU
     int idx = threadIdx.x;  // thread's m dimension
     int idy = threadIdx.y;  // thread's n dimension
 
@@ -1200,7 +1200,7 @@ void gemm_template_device_nt(
             }
         }
     }
-#endif /* DDLA_USE_HIP || DDLA_USE_CUDA */
+#endif /* DDLA_HAS_GPU */
 }
 
 
@@ -1219,7 +1219,7 @@ void gemm_template_device_tn(
     T* sB, int sldb,
     T* sC, int sldc )
 {
-#if defined(DDLA_USE_HIP) || defined(DDLA_USE_CUDA)
+#if DDLA_HAS_GPU
     int idx = threadIdx.x;  // thread's m dimension
     int idy = threadIdx.y;  // thread's n dimension
 
@@ -1420,7 +1420,7 @@ void gemm_template_device_tn(
             }
         }
     }
-#endif /* DDLA_USE_HIP || DDLA_USE_CUDA */
+#endif /* DDLA_HAS_GPU */
 }
 
 
@@ -1439,7 +1439,7 @@ void gemm_template_device_tt(
     T* sB, int sldb,
     T* sC, int sldc )
 {
-#if defined(DDLA_USE_HIP) || defined(DDLA_USE_CUDA)
+#if DDLA_HAS_GPU
     int idx = threadIdx.x;  // thread's m dimension
     int idy = threadIdx.y;  // thread's n dimension
 
@@ -1641,7 +1641,7 @@ void gemm_template_device_tt(
             }
         }
     }
-#endif /* DDLA_USE_HIP || DDLA_USE_CUDA */
+#endif /* DDLA_HAS_GPU */
 }
 
 #endif //GEMM_TEMPLATE_DEVICE_CUH
