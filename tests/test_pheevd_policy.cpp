@@ -66,11 +66,11 @@ template<class T>void checked_policy(DdlaHandle_t h,int n,const char* band,char 
     auto p=spectral_impl::pheevd_check<T>(h,DdlaBackend::GPU,job,'U',n,A.ptr,d,w.data(),A.ptr,d,*topology);
     int pr=0,pc=0;ddlaGetGridDims(h,pr,pc);
     bool tuned=false;
-#if defined(DDLA_USE_CUDA) && defined(DDLA_USE_CCL) && !defined(DDLA_USE_GPU_CPU_TUNNEL)
+#if defined(DDLA_USE_CUDA) && defined(DDLA_USE_CCL)
     int major=0,minor=0;
     GPU_CHECK(gpuDeviceGetAttribute(&major,gpuDevAttrComputeCapabilityMajor,h->local_device));
     GPU_CHECK(gpuDeviceGetAttribute(&minor,gpuDevAttrComputeCapabilityMinor,h->local_device));
-    tuned=major==7&&minor==0;
+    tuned=ddlaGetCommunication(h)==DdlaCommunication::CCL && major==7&&minor==0;
 #endif
     const int initial=eig_distributed_bandwidth(n,64,band?std::atoi(band):16,ddlaGetSize(h));
     int expected=choice<T>(job,n,64,initial,band!=nullptr,pr,pc,h->major,p.workers,topology->groups()==1,false,tuned);

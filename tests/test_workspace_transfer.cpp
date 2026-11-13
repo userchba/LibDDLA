@@ -19,14 +19,12 @@ template <typename Snapshot> bool no_allocation(const Snapshot& s)
 { return s.ddla_alloc==0 && s.ddla_free==0 && s.pinned_alloc==0 && s.raw_gpu_alloc==0 && s.host_new==0 && s.vendor_query==0; }
 template <typename Snapshot> bool pure_query(const Snapshot& s)
 { return no_allocation(s) && s.copies==0 && s.launches==0 && s.syncs==0 && s.collectives==0 && s.resource_setup==0; }
-// A tunnel build stages GPU messages in the handle's host buffers, which grow
+// Host-staged MPI copies GPU messages in the handle's host buffers, which grow
 // on first use (comm_traits.h): there the first run of a case may allocate.
-template <DdlaBackend B,typename Snapshot> bool run_allocates_nothing(const Snapshot& s,int pass)
+template <DdlaBackend B,typename Snapshot> bool run_allocates_nothing(DdlaHandle_t h,const Snapshot& s,int pass)
 {
-#if defined(DDLA_USE_GPU_CPU_TUNNEL)
-    if(B==DdlaBackend::GPU && pass==0)return true;
-#endif
-    (void)pass;return no_allocation(s);
+    if(B==DdlaBackend::GPU && ddlaGetCommunication(h)==DdlaCommunication::HostStagedMPI && pass==0)return true;
+    return no_allocation(s);
 }
 
 // Exactly the queried bytes of both kinds, surrounded by guards. The same
@@ -93,7 +91,7 @@ void transfer_case(DdlaHandle_t h,int M,int N,int ia,int ja,int m,int n,int root
         matrix_impl::gather_run<B,T>(h,m,n,a.ptr,ia,ja,desc,root,window.ptr,ld,
                                      scratch.backend(),backend_bytes,scratch.host(),host_bytes);
         const auto gather_snapshot=gather_scope.finish();
-        require_close(h,"gather run performs no allocation/query",run_allocates_nothing<B>(gather_snapshot,pass)?0:1,0);
+        require_close(h,"gather run performs no allocation/query",run_allocates_nothing<B>(h,gather_snapshot,pass)?0:1,0);
         check_ddla_sync(h);
         auto expected=host_window;
         if(h->myid==root)for(int j=0;j<n;++j)for(int i=0;i<m;++i)
@@ -106,7 +104,7 @@ void transfer_case(DdlaHandle_t h,int M,int N,int ia,int ja,int m,int n,int root
         matrix_impl::scatter_run<B,T>(h,m,n,a.ptr,ia,ja,desc,root,window.ptr,ld,true,
                                       scratch.backend(),backend_bytes,scratch.host(),host_bytes);
         const auto scatter_snapshot=scatter_scope.finish();
-        require_close(h,"scatter run performs no allocation/query",run_allocates_nothing<B>(scatter_snapshot,pass)?0:1,0);
+        require_close(h,"scatter run performs no allocation/query",run_allocates_nothing<B>(h,scatter_snapshot,pass)?0:1,0);
         check_ddla_sync(h);
         auto expected_a=original;
         for(int j=0;j<ddla_test::n_loc(h,desc);++j)for(int i=0;i<ddla_test::m_loc(h,desc);++i) {
@@ -154,7 +152,7 @@ void panel_case(DdlaHandle_t h,char axis,char op)
         pblas::panel_run<B,T>(h,column_panel,op,m,n,input.ptr,0,0,desc,desc,output.ptr,
                               scratch.backend(),backend_bytes,scratch.host(),host_bytes);
         const auto snapshot=scope.finish();
-        require_close(h,"panel run performs no allocation/query",run_allocates_nothing<B>(snapshot,pass)?0:1,0);
+        require_close(h,"panel run performs no allocation/query",run_allocates_nothing<B>(h,snapshot,pass)?0:1,0);
         check_ddla_sync(h);
         const auto got=download(h,output.ptr,std::size_t(local_rows)*local_cols);
         double err=0;
@@ -238,7 +236,7 @@ void rows_case(DdlaHandle_t h,int k,bool transpose)
         matrix_impl::scatter_rows_run<B,T>(h,k,input.ptr,ld,transpose,m,n,output.ptr,desc,
                                            scratch.backend(),backend_bytes,scratch.host(),host_bytes);
         const auto snapshot=scope.finish();
-        require_close(h,"row-scatter run performs no allocation/query",run_allocates_nothing<B>(snapshot,pass)?0:1,0);
+        require_close(h,"row-scatter run performs no allocation/query",run_allocates_nothing<B>(h,snapshot,pass)?0:1,0);
         auto expected=original;
         for(int j=0;j<ddla_test::n_loc(h,desc);++j)for(int i=0;i<ddla_test::m_loc(h,desc);++i) {
             const int gr=indx_l2g_r(desc,h,i),gc=indx_l2g_c(desc,h,j);
@@ -301,14 +299,14 @@ template <DdlaBackend B> void shared_scratch_case(DdlaHandle_t h)
         matrix_impl::scatter_rows_run<B,T>(h,k,source_rows.ptr,ld,false,m,n,rows.ptr,row_desc,
                                            scratch.backend(),row_backend,scratch.host(),row_host);
         const auto row_snapshot=row_scope.finish();
-        require_close(h,"shared scratch complex row run has no allocation",run_allocates_nothing<B>(row_snapshot,pass)?0:1,0);
+        require_close(h,"shared scratch complex row run has no allocation",run_allocates_nothing<B>(h,row_snapshot,pass)?0:1,0);
         require_close(h,"shared scratch restores complex panels and padding",
             same(download(h,rows.ptr,expected_rows.size()),expected_rows)?0:1,0);
         workspace_test::Scope panel_scope;
         pblas::panel_run<B,float>(h,false,'T',M,2,floats.ptr,0,0,float_desc,float_desc,panel_output.ptr,
                                                scratch.backend(),panel_backend,scratch.host(),panel_host);
         const auto panel_snapshot=panel_scope.finish();
-        require_close(h,"shared scratch float panel has no allocation",run_allocates_nothing<B>(panel_snapshot,pass)?0:1,0);
+        require_close(h,"shared scratch float panel has no allocation",run_allocates_nothing<B>(h,panel_snapshot,pass)?0:1,0);
         check_ddla_sync(h);
         const auto got=download(h,panel_output.ptr,std::size_t(2)*target_length);
         double err=0;
@@ -321,7 +319,7 @@ template <DdlaBackend B> void shared_scratch_case(DdlaHandle_t h)
         matrix_impl::gather_run<B,float>(h,M,N,floats.ptr,1,1,float_desc,0,gathered.ptr,M,
                                          scratch.backend(),gather_backend,scratch.host(),gather_host);
         const auto gather_snapshot=gather_scope.finish();
-        require_close(h,"shared scratch float gather has no allocation",run_allocates_nothing<B>(gather_snapshot,pass)?0:1,0);
+        require_close(h,"shared scratch float gather has no allocation",run_allocates_nothing<B>(h,gather_snapshot,pass)?0:1,0);
         check_ddla_sync(h);
         require_close(h,"shared scratch float gather values",
             same(download(h,gathered.ptr,expected_gather.size()),expected_gather)?0:1,0);

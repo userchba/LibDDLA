@@ -61,16 +61,11 @@ template<class S>bool no_allocation(const S& s)
     return s.ddla_alloc==0&&s.ddla_free==0&&s.pinned_alloc==0&&s.raw_gpu_alloc==0&&
         s.host_new==0&&s.vendor_query==0&&s.resource_setup==0;
 }
-// GPU messages staged in the handle's host buffers (tunnel builds, and the
-// all-to-all of builds without CCL; comm_traits.h) grow them on first use:
+// Host-staged GPU messages grow the handle's communication buffers on first use:
 // there the first run of a case may allocate.
-template<DdlaBackend B>bool may_grow_staging(int pass)
+template<DdlaBackend B>bool may_grow_staging(DdlaHandle_t h,int pass)
 {
-#if defined(DDLA_USE_GPU_CPU_TUNNEL) || !defined(DDLA_USE_CCL)
-    return B==DdlaBackend::GPU&&pass==0;
-#else
-    (void)pass;return false;
-#endif
+    return B==DdlaBackend::GPU && ddlaGetCommunication(h)==DdlaCommunication::HostStagedMPI && pass==0;
 }
 template<class F>void measured_run(DdlaHandle_t h,F&& function,bool may_allocate=false)
 {
@@ -108,7 +103,7 @@ void brd_case(DdlaHandle_t h,int m,int n)
     for(int pass=0;pass<2;++pass) {
         upload(h,A.ptr,original);
         measured_run(h,[&]{pgebrd_run<B,T>(h,plan,A.ptr,da,d.data(),e.data(),q.data(),p.data(),info,work.backend(),bytes);},
-            may_grow_staging<B>(pass));
+            may_grow_staging<B>(h,pass));
         require_close(h,"borrowed pgebrd info",info,0);
         require_close(h,"borrowed pgebrd factors and padding",same(download(h,A.ptr,original.size()),expected)?0:1,0);
         require_close(h,"borrowed pgebrd scalar outputs",same(d,rd)&&same(e,re)&&same(q,rq)&&same(p,rp)?0:1,0);
@@ -125,7 +120,7 @@ void brd_case(DdlaHandle_t h,int m,int n)
         std::size_t cb=0,ch=0;local_query(h,[&]{punmbr_workspace_size<T>(h,cp,&cb,&ch);});GuardedScratch cw(h,cb,ch);
         for(int pass=0;pass<2;++pass) {
             upload(h,C.ptr,input);
-            measured_run(h,[&]{punmbr_run<B,T>(h,cp,A.ptr,da,tau,C.ptr,dc,info,cw.backend(),cb,cw.host(),ch);},may_grow_staging<B>(pass));
+            measured_run(h,[&]{punmbr_run<B,T>(h,cp,A.ptr,da,tau,C.ptr,dc,info,cw.backend(),cb,cw.host(),ch);},may_grow_staging<B>(h,pass));
             require_close(h,"borrowed punmbr result and padding",same(download(h,C.ptr,input.size()),expect)?0:1,0);cw.verify();
         }
     }
@@ -150,7 +145,7 @@ void hermitian_case(DdlaHandle_t h,int n,char uplo)
     for(int pass=0;pass<2;++pass) {
         upload(h,A.ptr,original);
         measured_run(h,[&]{pherm_complete_run<B,T>(h,p,A.ptr,nullptr,0,work.backend(),bytes,work.host(),host_bytes);},
-            may_grow_staging<B>(pass));
+            may_grow_staging<B>(h,pass));
         require_close(h,"borrowed Hermitian completion exact values and padding",same(download(h,A.ptr,original.size()),expected)?0:1,0);work.verify();
     }
     if(n) {
@@ -182,7 +177,7 @@ void hermitian_case(DdlaHandle_t h,int n,char uplo)
         std::size_t ub=0;local_query(h,[&]{punmtr_he2hb_workspace_size<T>(h,up,&ub);});GuardedScratch uw(h,ub,0);
         for(int pass=0;pass<2;++pass) {
             upload(h,Z.ptr,identity);
-            measured_run(h,[&]{punmtr_he2hb_run<B,T>(h,up,A.ptr,da,tmat.ptr,Z.ptr,dz,info,uw.backend(),ub);},may_grow_staging<B>(pass));
+            measured_run(h,[&]{punmtr_he2hb_run<B,T>(h,up,A.ptr,da,tmat.ptr,Z.ptr,dz,info,uw.backend(),ub);},may_grow_staging<B>(h,pass));
             require_close(h,"borrowed band back-transform and padding",same(download(h,Z.ptr,identity.size()),expect)?0:1,0);uw.verify();
         }
     }
@@ -211,7 +206,7 @@ void vector_case(DdlaHandle_t h,int n,bool reverse,bool padded=true)
     const auto p=ptranspose_vectors_check(h,B,n,nvc,nb,ls,ld,false,reverse,src.ptr,dst.ptr);
     std::size_t bytes=0;local_query(h,[&]{ptranspose_vectors_workspace_size<T>(h,n,nvc,nb,&bytes);});GuardedScratch work(h,bytes,0);
     for(int pass=0;pass<2;++pass){upload(h,dst.ptr,initial);
-        measured_run(h,[&]{ptranspose_vectors_run<B,T>(h,p,src.ptr,dst.ptr,work.backend(),bytes);},may_grow_staging<B>(pass));
+        measured_run(h,[&]{ptranspose_vectors_run<B,T>(h,p,src.ptr,dst.ptr,work.backend(),bytes);},may_grow_staging<B>(h,pass));
         require_close(h,"borrowed vector transpose exact values and padding",same(download(h,dst.ptr,initial.size()),expected)?0:1,0);work.verify();}
     if(!reverse) {
         const auto rp=ptranspose_vectors_check(h,B,n,nvc,nb,ls,ld,true,false,src.ptr,dst.ptr);
@@ -221,7 +216,7 @@ void vector_case(DdlaHandle_t h,int n,bool reverse,bool padded=true)
             sum_expected[i+std::size_t(j)*ld]+=T(h->npcols_)*vector_value(indxl2g(i,nb,sc,0,spc),j);
         for(int pass=0;pass<2;++pass) {
             upload(h,dst.ptr,initial);
-            measured_run(h,[&]{preduce_add_vectors_run<B,T>(h,rp,src.ptr,dst.ptr,rw.backend(),rb);},may_grow_staging<B>(pass));
+            measured_run(h,[&]{preduce_add_vectors_run<B,T>(h,rp,src.ptr,dst.ptr,rw.backend(),rb);},may_grow_staging<B>(h,pass));
             require_close(h,"borrowed vector reduce-add with rank-varying strides and NaN source padding",
                 same(download(h,dst.ptr,initial.size()),sum_expected)?0:1,0);rw.verify();
             require_close(h,"borrowed vector reduce-add preserves source including padding",

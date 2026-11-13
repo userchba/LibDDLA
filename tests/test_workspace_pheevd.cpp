@@ -81,10 +81,8 @@ template<DdlaBackend B,class T>void solver_case(DdlaHandle_t h,spectral_impl::Ph
             return (uplo=='U'?i<=j:i>=j)?matrix<T>(i,j,repeat):poison;});
         upload(h,A.ptr,original);if(!alias)upload(h,Z,initialZ);std::fill(w.begin(),w.end(),R(-313));int info=-1;
         workspace_test::Scope scope;spectral_impl::pheevd_run<B,T>(h,p,resources,A.ptr,w.data()+4,Z,info,arena.backend(),backend_bytes,arena.host(),host_bytes);const auto t=scope.finish();
-        bool allow_host_growth=false;
-#if defined(DDLA_USE_GPU_CPU_TUNNEL)
-        allow_host_growth=B==DdlaBackend::GPU && repeat==0;
-#endif
+        const bool allow_host_growth=B==DdlaBackend::GPU &&
+            ddlaGetCommunication(h)==DdlaCommunication::HostStagedMPI && repeat==0;
         require_close(h,"pheevd raw repeat reuses algorithm scratch and warm communication storage",no_alloc(t,allow_host_growth)&&!t.vendor_query?0:1,0);require_close(h,"pheevd raw info",info?1:0,0);
         bool sorted=true,guarded=true;for(int i=0;i<n;++i)sorted=sorted&&std::isfinite(w[4+i])&&(i==0||w[3+i]<=w[4+i]);
         for(int i=0;i<4;++i)guarded=guarded&&w[i]==R(-313)&&w[std::size_t(n)+4+i]==R(-313);

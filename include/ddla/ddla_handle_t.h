@@ -18,6 +18,13 @@ enum class DdlaBackend {
     GPU   ///< GPU (CUDA or HIP, depending on build configuration)
 };
 
+/// Communication selected by each handle, independently of its compute backend.
+enum class DdlaCommunication {
+    MPI = 0,           ///< Host MPI on CPU; device buffers require GPU-aware MPI on GPU.
+    HostStagedMPI = 1, ///< GPU copies through reusable host buffers around blocking MPI.
+    CCL = 2            ///< NCCL/RCCL, when compiled into the library (GPU handles only).
+};
+
 /// Status codes returned by the public API functions.
 enum class ddlaStatus_t {
     DDLA_STATUS_SUCCESS = 0,        ///< Operation completed successfully.
@@ -69,6 +76,27 @@ bool ddlaBackendAvailable(DdlaBackend backend);
 /// Return the resolved backend for this handle.
 /// @throws std::runtime_error if @p handle is null.
 DdlaBackend ddlaGetBackend(const DdlaHandle_t& handle);
+
+/// Select communication before or after ddlaSet. Before ddlaSet this is local
+/// and allocates no resources. Afterwards every rank in the handle communicator
+/// must call it, with the same valid handle and mode, on the MPI-initializing
+/// thread. Inconsistent/invalid choices or active internal communication groups
+/// return INVALID_VALUE collectively; unsupported modes return BACKEND_UNAVAILABLE.
+/// Rejected choices preserve the previous mode. Null returns INVALID_HANDLE.
+/// Actual changes finish all handle queues and create/release CCL communicators
+/// as needed; an unchanged choice performs agreement but no resource/queue work.
+/// Do not call concurrently with any operation, or inside a group on any handle.
+/// A repeated ddlaSet preserves the selection. GPU defaults to CCL when linked,
+/// otherwise MPI; CPU always defaults to MPI. Host staging is always selectable on GPU.
+ddlaStatus_t ddlaSetCommunication(const DdlaHandle_t& handle, DdlaCommunication mode);
+
+/// Return the selected mode, including before ddlaSet; null throws runtime_error.
+DdlaCommunication ddlaGetCommunication(const DdlaHandle_t& handle);
+
+/// Local capability query; false for null handles, invalid modes or unsupported
+/// backend/mode pairs. GPU MPI availability does not certify the MPI installation
+/// accepts device pointers: choosing it is the caller's responsibility.
+bool ddlaCommunicationAvailable(const DdlaHandle_t& handle, DdlaCommunication mode);
 
 // ---------------------------------------------------------------------------
 // Memory, copies, events and queries (vendor-neutral)

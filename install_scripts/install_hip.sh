@@ -66,7 +66,6 @@ cmake -B $BUILD_DIR -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
         -DCMAKE_CXX_COMPILER=g++ \
         -DCMAKE_CXX_FLAGS="-g -O2 -fopenmp" \
         -DDDLA_USE_CCL=ON \
-        -DDDLA_USE_GPU_CPU_TUNNEL=ON \
         -DCMAKE_HIP_FLAGS="-g -O2 -fopenmp -fgpu-rdc -Wno-return-type"
 
         # -DDDLA_USE_DEBUG=ON \

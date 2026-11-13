@@ -303,6 +303,39 @@ int ddla_c_set(void* handle, int f_comm, int nprows, int npcols, char major)
     catch (...) { ddla_c_record_error("unknown C++ exception in ddla_c_set"); return DDLA_C_STATUS_EXCEPTION; }
 }
 
+// Do not validate mode here: after ddlaSet the core setter must agree on
+// invalid, unsupported or mismatched requests collectively before returning.
+int ddla_c_set_communication(void* handle, int communication)
+{
+    try {
+        return static_cast<int>(ddla::ddlaSetCommunication(
+            static_cast<ddla::DdlaHandle_t>(handle),
+            static_cast<ddla::DdlaCommunication>(communication)));
+    } catch (const std::exception& e) { ddla_c_record_error(e.what()); return DDLA_C_STATUS_EXCEPTION; }
+    catch (...) { ddla_c_record_error("unknown C++ exception in ddla_c_set_communication"); return DDLA_C_STATUS_EXCEPTION; }
+}
+
+int ddla_c_get_communication(void* handle, int* communication)
+{
+    if (handle == nullptr) return DDLA_C_STATUS_INVALID_HANDLE;
+    if (communication == nullptr) return DDLA_C_STATUS_INVALID_VALUE;
+    try {
+        *communication = static_cast<int>(ddla::ddlaGetCommunication(
+            static_cast<ddla::DdlaHandle_t>(handle)));
+        return DDLA_C_STATUS_SUCCESS;
+    } catch (const std::exception& e) { ddla_c_record_error(e.what()); return DDLA_C_STATUS_EXCEPTION; }
+    catch (...) { ddla_c_record_error("unknown C++ exception in ddla_c_get_communication"); return DDLA_C_STATUS_EXCEPTION; }
+}
+
+int ddla_c_communication_available(void* handle, int communication)
+{
+    try {
+        return ddla::ddlaCommunicationAvailable(static_cast<ddla::DdlaHandle_t>(handle),
+            static_cast<ddla::DdlaCommunication>(communication)) ? 1 : 0;
+    } catch (const std::exception& e) { ddla_c_record_error(e.what()); return 0; }
+    catch (...) { ddla_c_record_error("unknown C++ exception in ddla_c_communication_available"); return 0; }
+}
+
 int ddla_c_destroy(void** handle)
 {
     try {
@@ -691,13 +724,15 @@ module ddla
 """)
     # publics
     typeless = ["ddla_init_backend", "ddla_set", "ddla_destroy",
-                "ddla_backend_available", "ddla_get_backend", "ddla_grid_dims",
+                "ddla_backend_available", "ddla_get_backend", "ddla_set_communication",
+                "ddla_get_communication", "ddla_communication_available", "ddla_grid_dims",
                 "ddla_grid_coords", "ddla_rank", "ddla_size", "ddla_descinit",
                 "ddla_numloc", "ddla_malloc", "ddla_free", "ddla_memcpy",
                 "ddla_memcpy2d", "ddla_memset", "ddla_synchronize",
                 "ddla_error_string", "ddla_error_text", "ddla_check",
                 "ddla_complex_float", "ddla_complex_double",
                 "DDLA_BACKEND_CPU", "DDLA_BACKEND_GPU",
+                "DDLA_COMMUNICATION_MPI", "DDLA_COMMUNICATION_HOST_STAGED_MPI", "DDLA_COMMUNICATION_CCL",
                 "DDLA_STATUS_SUCCESS", "DDLA_STATUS_INVALID_HANDLE",
                 "DDLA_STATUS_INVALID_VALUE", "DDLA_STATUS_ALLOC_FAILED",
                 "DDLA_STATUS_BACKEND_UNAVAILABLE", "DDLA_STATUS_INTERNAL_ERROR",
@@ -712,6 +747,11 @@ module ddla
   ! Backend ids for ddla_init_backend / ddla_backend_available / ddla_get_backend.
   integer(c_int), parameter :: DDLA_BACKEND_CPU = 0_c_int
   integer(c_int), parameter :: DDLA_BACKEND_GPU = 1_c_int
+
+  ! Per-handle communication ids. MPI on GPU requires a compatible GPU-aware MPI.
+  integer(c_int), parameter :: DDLA_COMMUNICATION_MPI = 0_c_int
+  integer(c_int), parameter :: DDLA_COMMUNICATION_HOST_STAGED_MPI = 1_c_int
+  integer(c_int), parameter :: DDLA_COMMUNICATION_CCL = 2_c_int
 
   ! Status codes returned by every binding (mirror ddlaStatus_t plus one).
   integer(c_int), parameter :: DDLA_STATUS_SUCCESS = 0_c_int
@@ -775,6 +815,34 @@ module ddla
       integer(c_int), value :: nprows, npcols
       character(kind=c_char), value :: major
     end function ddla_set
+
+    ! After ddla_set, all ranks call the setter with the same requested mode.
+    function ddla_set_communication(handle, communication) &
+        result(status) bind(C, name="ddla_c_set_communication")
+      import :: c_int, c_ptr
+      implicit none
+      integer(c_int) :: status
+      type(c_ptr), value :: handle
+      integer(c_int), value :: communication
+    end function ddla_set_communication
+
+    function ddla_get_communication(handle, communication) &
+        result(status) bind(C, name="ddla_c_get_communication")
+      import :: c_int, c_ptr
+      implicit none
+      integer(c_int) :: status
+      type(c_ptr), value :: handle
+      integer(c_int), intent(out) :: communication
+    end function ddla_get_communication
+
+    function ddla_communication_available(handle, communication) &
+        result(avail) bind(C, name="ddla_c_communication_available")
+      import :: c_int, c_ptr
+      implicit none
+      integer(c_int) :: avail
+      type(c_ptr), value :: handle
+      integer(c_int), value :: communication
+    end function ddla_communication_available
 
     function ddla_destroy(handle) &
         result(status) bind(C, name="ddla_c_destroy")
@@ -1003,6 +1071,11 @@ STATUS_EXCEPTION = 6
 BACKEND_CPU = 0
 BACKEND_GPU = 1
 
+# Per-handle communication ids
+COMMUNICATION_MPI = 0
+COMMUNICATION_HOST_STAGED_MPI = 1
+COMMUNICATION_CCL = 2
+
 # ScaLAPACK descriptor constants
 DTYPE_ = 0
 CTXT_ = 1
@@ -1145,6 +1218,18 @@ ddla_c_set = lib.ddla_c_set
 ddla_c_set.restype = ctypes.c_int
 ddla_c_set.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_char]
 
+ddla_c_set_communication = lib.ddla_c_set_communication
+ddla_c_set_communication.restype = ctypes.c_int
+ddla_c_set_communication.argtypes = [ctypes.c_void_p, ctypes.c_int]
+
+ddla_c_get_communication = lib.ddla_c_get_communication
+ddla_c_get_communication.restype = ctypes.c_int
+ddla_c_get_communication.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)]
+
+ddla_c_communication_available = lib.ddla_c_communication_available
+ddla_c_communication_available.restype = ctypes.c_int
+ddla_c_communication_available.argtypes = [ctypes.c_void_p, ctypes.c_int]
+
 ddla_c_destroy = lib.ddla_c_destroy
 ddla_c_destroy.restype = ctypes.c_int
 ddla_c_destroy.argtypes = [ctypes.c_void_p]
@@ -1286,7 +1371,7 @@ def main():
     with open(os.path.join(py_dir, "_c_api.py"), "w") as f:
         f.write(gen_py())
     n_c = sum(len(TYPES if t == "all4" else TYPES[:2]) for _, t, _, _ in FUNCS)
-    print("generated %d typed compute bindings + 20 type-less C functions" % n_c)
+    print("generated %d typed compute bindings + communication/lifecycle C functions" % n_c)
 
 
 if __name__ == "__main__":

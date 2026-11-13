@@ -288,6 +288,7 @@ constexpr auto gpucclSum = ncclSum;
 #define gpucclReduce ncclReduce
 #define gpucclBcast ncclBcast
 #define gpucclCommDestroy ncclCommDestroy
+#define gpucclCommAbort ncclCommAbort
 #define gpucclCommInitRank ncclCommInitRank
 #define gpucclGetUniqueId ncclGetUniqueId
 #define gpucclGroupEnd ncclGroupEnd

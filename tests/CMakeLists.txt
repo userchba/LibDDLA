@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------
 # Apply per-target backend connector definitions.
 # In CPU-only mode only DDLA_USE_CPU+DEBUG are relevant.
-# In GPU/dual mode the selected GPU vendor + CCL/TUNNEL/DEBUG are required
+# In GPU/dual mode the selected GPU vendor + CCL/DEBUG are required
 # because test sources include ddla_connector.h.
 # ---------------------------------------------------------------------------
 function(apply_test_connector_defs target)
@@ -15,9 +15,6 @@ function(apply_test_connector_defs target)
     endif()
     if(DDLA_USE_CCL)
         target_compile_definitions(${target} PRIVATE DDLA_USE_CCL)
-    endif()
-    if(DDLA_USE_GPU_CPU_TUNNEL)
-        target_compile_definitions(${target} PRIVATE DDLA_USE_GPU_CPU_TUNNEL)
     endif()
     if(DDLA_USE_DEBUG)
         target_compile_definitions(${target} PRIVATE DDLA_USE_DEBUG)
@@ -110,7 +107,9 @@ endif()
 # Check/query/borrowed-execution tests use an optional executable-local
 # diagnostic preload; the numerical library has no tracing hooks.
 add_test_executable(test_comm)
+add_test_executable(test_runtime_communication)
 target_link_libraries(test_comm PRIVATE ${CMAKE_DL_LIBS})
+target_link_libraries(test_runtime_communication PRIVATE ${CMAKE_DL_LIBS})
 add_test_executable(test_workspace_core 1)
 add_test_executable(test_workspace_write_matrix 1)
 add_test_executable(test_workspace_transfer)
@@ -659,9 +658,11 @@ endif()
 
 # The communication test checks cold/warm host-cache allocations explicitly.
 if(TARGET workspace_trace)
-    add_dependencies(test_comm workspace_trace)
-    set_tests_properties(test_comm_mpi PROPERTIES ENVIRONMENT
-        "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1;DDLA_WORKSPACE_TRACE_REQUIRED=1;LD_PRELOAD=$<TARGET_FILE:workspace_trace>")
+    foreach(_communication_test test_comm test_runtime_communication)
+        add_dependencies(${_communication_test} workspace_trace)
+        set_tests_properties(${_communication_test}_mpi PROPERTIES ENVIRONMENT
+            "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1;DDLA_WORKSPACE_TRACE_REQUIRED=1;LD_PRELOAD=$<TARGET_FILE:workspace_trace>")
+    endforeach()
 endif()
 
 # Reused workspace and selected-triangle contracts of batched GEMMT.

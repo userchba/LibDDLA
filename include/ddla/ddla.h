@@ -68,8 +68,8 @@ template <typename U> struct real_type<std::complex<U>> { using type = U; };
  *                                     B := B * op(A)^{-1}    (side='R').
  *
  * Solves a triangular system on a distributed matrix using block-cyclic
- * data distribution and MPI (CPU handles) or MPI/NCCL/RCCL (GPU handles) communication (per the DDLA_USE_CCL /
- * DDLA_USE_GPU_CPU_TUNNEL build configuration).  Corresponds to the
+ * data distribution and MPI (CPU handles) or MPI/NCCL/RCCL (GPU handles) communication selected by the handle's
+ * DdlaCommunication policy.  Corresponds to the
  * ScaLAPACK PZTRTRS / PDTRTRS routine.
  *
  * @tparam T  Scalar type (float, double, complex<float>, complex<double>).

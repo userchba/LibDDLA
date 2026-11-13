@@ -426,8 +426,9 @@ void factor_one(const DdlaHandle_t& h, int j, T* a, bool lower, int nb, int ld, 
     const int nr = num_loc(j, nb, mr, 0, pr), inc = lower ? ld : 1;
     const int tail = num_loc(j - 1, nb, mr, 0, pr), pivot_owner = (j - 1) / nb % pr;
     const int owner = j / nb % pc, localj = indxg2l(j, nb, pc);
-#if DDLA_HAS_GPU && defined(DDLA_USE_CCL) && !defined(DDLA_USE_GPU_CPU_TUNNEL)
-    if constexpr (B == DdlaBackend::GPU) {
+#if DDLA_HAS_GPU && defined(DDLA_USE_CCL)
+    if constexpr (B == DdlaBackend::GPU)
+    if (h->communication == DdlaCommunication::CCL) {
         using D = DeviceScalarT<T>;
         detail::agree_local(h,"one-stage eigensolver", [&] {
             if (mc == owner) {
@@ -443,7 +444,7 @@ void factor_one(const DdlaHandle_t& h, int j, T* a, bool lower, int nb, int ld, 
                 const R* packets = norm_work;
                 if (pr > 1) {
                     CCL_CHECK(gpucclAllGather(norm_work, norm_work + 4, 4 * sizeof(R), gpucclInt8,
-                                              CommTraits<B>::comm(h, (lower ? CommScope::Row : CommScope::Col)),
+                                              CommTraits<B>::ccl_comm(h, (lower ? CommScope::Row : CommScope::Col)),
                                               static_cast<gpuStream_t>(h->stream)));
                     packets = norm_work + 4;
                 }
@@ -744,8 +745,8 @@ void reduce_workspace_size(const DdlaHandle_t& h, const spectral_impl::HetrdPlan
         2 * padded_bytes<T>(2 * cap) + (p.stored_only ? 2 * padded_bytes<T>(lc) : 0) +
         (tiles ? padded_bytes<T>(ldr * ((ldc + 31) / 32)) + padded_bytes<T>(ldc * ((ldr + 31) / 32)) : 0) +
         padded_bytes<R>(4 * (std::size_t(pr) + 1)) + padded_bytes<R>(2 * std::size_t(p.n)) + transpose;
-#if defined(DDLA_USE_CCL) && !defined(DDLA_USE_GPU_CPU_TUNNEL)
-    if (p.backend == DdlaBackend::GPU)
+#if defined(DDLA_USE_CCL)
+    if (p.backend == DdlaBackend::GPU && h->communication == DdlaCommunication::CCL)
         *backend_bytes += padded_bytes<int>(1);
 #endif
     *host_bytes = padded_bytes<R>(3 * std::size_t(pr));
@@ -783,9 +784,9 @@ void reduce(const DdlaHandle_t& h, char uplo, int n, T* a, const int* desc, T* t
     R* norm_work = take<R>(w, 4 * (std::size_t(pr) + 1));
     R* packed = take<R>(w, std::size_t(2) * n);
     int* invalid = nullptr;
-#if defined(DDLA_USE_CCL) && !defined(DDLA_USE_GPU_CPU_TUNNEL)
+#if defined(DDLA_USE_CCL)
     if constexpr (B == DdlaBackend::GPU)
-        invalid = take<int>(w, 1);
+        if (h->communication == DdlaCommunication::CCL) invalid = take<int>(w, 1);
 #endif
     assert(static_cast<std::size_t>(w - base) <= backend_bytes);
     void* const transpose_work = w;
@@ -1016,6 +1017,7 @@ void HetrdResources::cancel_reduction() noexcept {
 
 HetrdPlan phetrd_geometry(const DdlaHandle_t& h,DdlaBackend backend,char uplo,int n,const int* a,bool stored_only) {
     HetrdPlan p;p.backend=backend;p.uplo=uplo;p.n=n;p.stored_only=stored_only;
+    p.communication=h->communication;
     ddlaGetGridDims(h,p.pr,p.pc);ddlaGetGridCoords(h,p.mr,p.mc);
     std::copy_n(a,DDLA_DLEN_,p.a.begin());return p;
 }
@@ -1038,10 +1040,17 @@ template<class T>HetrdPlan phetrd_check(const DdlaHandle_t& h,DdlaBackend backen
     detail::agree_signature(h,"phetrd",sig);return p;
 }
 template<class T>void phetrd_workspace_size(const DdlaHandle_t& h,const HetrdPlan& p,std::size_t* backend,std::size_t* host) {
+    if(p.backend==DdlaBackend::GPU && p.communication!=h->communication)
+        throw std::invalid_argument("phetrd: communication changed; check and query a new plan");
     *backend=*host=0;if(!p.n)return;detail::reduce_workspace_size<T>(h,p,backend,host);
 }
 template<DdlaBackend B,class T>void phetrd_run(const DdlaHandle_t& h,const HetrdPlan& p,HetrdResources& resources,
     T* A,T* tau,typename real_type<T>::type* de,int& info,void* work,std::size_t bytes,void* host,std::size_t host_bytes) {
+    if constexpr(B==DdlaBackend::GPU)
+        detail::agree_check(h,"phetrd transport",[&](detail::Agree&){
+            if(p.communication!=h->communication)
+                throw std::invalid_argument("phetrd: communication changed; check and query a new plan");
+        });
     info=0;if(!p.n)return;
     struct Exit {HetrdResources& resources;~Exit(){resources.cancel_reduction();}} guard{resources};
     try {

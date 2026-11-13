@@ -22,6 +22,9 @@ from ._c_api import (
     STATUS_EXCEPTION,
     BACKEND_CPU,
     BACKEND_GPU,
+    COMMUNICATION_MPI,
+    COMMUNICATION_HOST_STAGED_MPI,
+    COMMUNICATION_CCL,
     DTYPE_,
     CTXT_,
     M_,
@@ -34,7 +37,7 @@ from ._c_api import (
     DLEN_
 )
 
-from .backend import Backend, Handle
+from .backend import Backend, Communication, Handle
 from .layout import ProcessorLayout
 from .matrix import DistributedMatrix
 from .ops import (
@@ -68,6 +71,7 @@ __all__ = [
     "finalize",
     # Classes
     "Backend",
+    "Communication",
     "Handle",
     "ProcessorLayout",
     "DistributedMatrix",
@@ -98,5 +102,8 @@ __all__ = [
     # Constants
     "STATUS_SUCCESS",
     "BACKEND_CPU",
+    "COMMUNICATION_MPI",
+    "COMMUNICATION_HOST_STAGED_MPI",
+    "COMMUNICATION_CCL",
     "BACKEND_GPU",
 ]

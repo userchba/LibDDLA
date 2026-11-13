@@ -40,15 +40,10 @@ public:
 template<class S>bool no_allocation(const S& s) {
     return !s.ddla_alloc&&!s.ddla_free&&!s.pinned_alloc&&!s.raw_gpu_alloc&&!s.host_new&&!s.vendor_query&&!s.resource_setup;
 }
-// GPU messages staged in the handle's host buffers (tunnel builds, and the
-// all-to-all of builds without CCL; comm_traits.h) grow them on first use:
+// Host-staged GPU messages grow the handle's communication buffers on first use:
 // there the first run of a case may allocate.
-template<DdlaBackend B>bool may_grow_staging(int pass) {
-#if defined(DDLA_USE_GPU_CPU_TUNNEL) || !defined(DDLA_USE_CCL)
-    return B==DdlaBackend::GPU&&pass==0;
-#else
-    (void)pass;return false;
-#endif
+template<DdlaBackend B>bool may_grow_staging(DdlaHandle_t h,int pass) {
+    return B==DdlaBackend::GPU && ddlaGetCommunication(h)==DdlaCommunication::HostStagedMPI && pass==0;
 }
 template<class F>void measured_run(DdlaHandle_t h,F&& f,bool may_allocate=false) {
     workspace_test::Scope scope;f();const auto s=scope.finish();
@@ -88,7 +83,7 @@ template<DdlaBackend B,class R>void tridiagonal_case(DdlaHandle_t h,int n,bool c
     for(int repeat=0;repeat<2;++repeat) {
         d=diagonal;e=off;upload(h,Y.ptr,original);
         measured_run(h,[&]{pstedc_run<B,R>(h,p,resources,d.data(),e.data(),w.data(),Y.ptr,scratch,
-            work.backend(),backend_bytes,work.host(),host_bytes);},may_grow_staging<B>(repeat));
+            work.backend(),backend_bytes,work.host(),host_bytes);},may_grow_staging<B>(h,repeat));
         auto local=download(h,Y.ptr,ysize);
         bool padding=true;for(int j=0;j<n;++j)for(int r=rows;r<ld;++r)padding=padding&&local[r+std::size_t(j)*ld]==poison;
         require_close(h,"tridiagonal output padding",padding?0:1,0);
@@ -133,7 +128,7 @@ template<DdlaBackend B,class R>void bidiagonal_case(DdlaHandle_t h,int n,char up
     for(int repeat=0;repeat<2;++repeat) {
         d=diagonal;e=off;upload(h,U.ptr,initial);upload(h,V.ptr,initial);int info=-1;
         measured_run(h,[&]{pbdsdc_run<B,R>(h,p,team,d.data(),e.data(),values.data(),U.ptr,V.ptr,info,
-            work.backend(),backend_bytes,work.host(),host_bytes);},may_grow_staging<B>(repeat));
+            work.backend(),backend_bytes,work.host(),host_bytes);},may_grow_staging<B>(h,repeat));
         require_close(h,"bidiagonal info",info?1:0,0);
         auto u=download(h,U.ptr,elements),v=download(h,V.ptr,elements);
         bool padding=true;for(int j=0;j<n;++j)for(int r=rows;r<ld;++r)
@@ -233,7 +228,7 @@ template<DdlaBackend B,class T>void band_case(DdlaHandle_t h,int n,int upper_til
     for(int repeat=0;repeat<2;++repeat) {
         upload(h,A.ptr,original);upload(h,factors.ptr,initial);int info=-1;
         measured_run(h,[&]{phe2hb_run<B,T>(h,p,A.ptr,factors.ptr+8,info,work.backend(),backend_bytes,work.host(),host_bytes);},
-            may_grow_staging<B>(repeat));
+            may_grow_staging<B>(h,repeat));
         require_close(h,"band reduction info",info?1:0,0);
         auto a=download(h,A.ptr,original.size()),t=download(h,factors.ptr,initial.size());
         bool padding=true;

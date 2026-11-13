@@ -261,7 +261,7 @@ void product_panel_run(const DdlaHandle_t& h, bool left, char trans, int n, int 
     const int nb=dc[DDLA_MB_];
     const int load_rows=num_loc(n,nb,h->myprow_,dc[DDLA_RSRC_],h->nprows_);
     const int load_cols=num_loc(n,nb,h->mypcol_,dc[DDLA_CSRC_],h->npcols_);
-#if defined(DDLA_USE_CCL) && !defined(DDLA_USE_GPU_CPU_TUNNEL)
+#if defined(DDLA_USE_CCL)
     if constexpr (Backend==DdlaBackend::GPU) {
         // These N broadcasts have distinct buffers and no intermediate
         // receive-to-send dependency. One NCCL/RCCL group can enqueue
@@ -269,7 +269,7 @@ void product_panel_run(const DdlaHandle_t& h, bool left, char trans, int n, int 
         // retain their required ordering in the general path below.
         const int source=di[left ? DDLA_RSRC_ : DDLA_CSRC_];
         const int target=dc[left ? DDLA_RSRC_ : DDLA_CSRC_];
-        if (kw>nb && trans=='N' && source==target) {
+        if (h->communication==DdlaCommunication::CCL && kw>nb && trans=='N' && source==target) {
             commGroupStart<Backend>(h);
             bool active=true;
             try {
