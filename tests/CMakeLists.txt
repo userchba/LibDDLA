@@ -518,11 +518,18 @@ if(UNIX AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_pstedc_threads.cpp")
     target_link_libraries(test_pstedc_threads PRIVATE ddla_lib ${CMAKE_DL_LIBS})
     target_compile_definitions(test_pstedc_threads PRIVATE DDLA_USE_CPU)
     set_target_properties(test_pstedc_threads PROPERTIES ENABLE_EXPORTS ON)
-    add_test(NAME test_pstedc_threads
-        COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1 ${MPIEXEC_PREFLAGS}
-                $<TARGET_FILE:test_pstedc_threads> --threads 4 --blas-threads 4 ${MPIEXEC_POSTFLAGS})
-    set_tests_properties(test_pstedc_threads PROPERTIES PROCESSORS 4 LABELS cpu SKIP_RETURN_CODE 77 TIMEOUT 180
-        ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=4;OMP_DYNAMIC=false;OMP_PROC_BIND=false;OMP_WAIT_POLICY=PASSIVE;OPENBLAS_MAIN_FREE=1")
+    foreach(_np 1 2)
+        set(_name test_pstedc_threads)
+        if(_np EQUAL 2)
+            set(_name test_pstedc_threads_mpi2)
+        endif()
+        add_test(NAME ${_name}
+            COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${_np} ${MPIEXEC_PREFLAGS}
+                    $<TARGET_FILE:test_pstedc_threads> --threads 4 --blas-threads 4 ${MPIEXEC_POSTFLAGS})
+        math(EXPR _processors "4 * ${_np}")
+        set_tests_properties(${_name} PROPERTIES PROCESSORS ${_processors} LABELS cpu SKIP_RETURN_CODE 77 TIMEOUT 180
+            ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=4;OMP_DYNAMIC=false;OMP_PROC_BIND=false;OMP_WAIT_POLICY=PASSIVE;OPENBLAS_MAIN_FREE=1")
+    endforeach()
 endif()
 
 add_test_executable(test_hb2st_householder_cpu)
