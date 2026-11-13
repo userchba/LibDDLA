@@ -1655,6 +1655,51 @@ template void punmtr_he2hb<std::complex<float>>(const DdlaHandle_t& handle, char
 template void punmtr_he2hb<std::complex<double>>(const DdlaHandle_t& handle, char trans, int n, int nbw, const std::complex<double>* A, const int* descA, const std::complex<double>* tmat, std::complex<double>* Z, const int* descZ, int& info);
 
 template <typename T>
+void herm_complete(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return herm_complete<DdlaBackend::GPU, T>(handle, uplo, n, A, lda);
+#endif
+    return herm_complete<DdlaBackend::CPU, T>(handle, uplo, n, A, lda);
+}
+
+template void herm_complete<float>(const DdlaHandle_t&, char, int, float*, int);
+template void herm_complete<double>(const DdlaHandle_t&, char, int, double*, int);
+template void herm_complete<std::complex<float>>(const DdlaHandle_t&, char, int, std::complex<float>*, int);
+template void herm_complete<std::complex<double>>(const DdlaHandle_t&, char, int, std::complex<double>*, int);
+
+template <typename T>
+void syrm_complete(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return syrm_complete<DdlaBackend::GPU, T>(handle, uplo, n, A, lda);
+#endif
+    return syrm_complete<DdlaBackend::CPU, T>(handle, uplo, n, A, lda);
+}
+
+template void syrm_complete<float>(const DdlaHandle_t&, char, int, float*, int);
+template void syrm_complete<double>(const DdlaHandle_t&, char, int, double*, int);
+template void syrm_complete<std::complex<float>>(const DdlaHandle_t&, char, int, std::complex<float>*, int);
+template void syrm_complete<std::complex<double>>(const DdlaHandle_t&, char, int, std::complex<double>*, int);
+
+template <typename T>
+void psyrm_complete(const DdlaHandle_t& handle, char uplo, int n, T* A, const int* descA)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return psyrm_complete<DdlaBackend::GPU, T>(handle, uplo, n, A, descA);
+#endif
+    return psyrm_complete<DdlaBackend::CPU, T>(handle, uplo, n, A, descA);
+}
+
+template void psyrm_complete<float>(const DdlaHandle_t&, char, int, float*, const int*);
+template void psyrm_complete<double>(const DdlaHandle_t&, char, int, double*, const int*);
+template void psyrm_complete<std::complex<float>>(const DdlaHandle_t&, char, int, std::complex<float>*, const int*);
+template void psyrm_complete<std::complex<double>>(const DdlaHandle_t&, char, int, std::complex<double>*, const int*);
+
+template <typename T>
 void pherm_complete(
     const DdlaHandle_t& handle, char uplo, int n, T* A, const int* descA)
 {

@@ -2086,6 +2086,41 @@ void punmtr_he2hb(
     int& info
 );
 
+/**
+ * @brief Complete a local Hermitian matrix in place from uplo='U' or 'L'.
+ * Only the selected triangle of the leading n-by-n column-major block is read.
+ * The opposite triangle is filled with its conjugate transpose and the diagonal
+ * is made real. Other columns and lda padding are preserved. CPU uses host
+ * storage; GPU uses backend storage and queues work on the handle stream.
+ * No workspace or communication. n=0 permits null A and ignores lda.
+ */
+template <typename T>
+void herm_complete(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda);
+
+/**
+ * @brief Complete a local symmetric matrix in place from uplo='U' or 'L'.
+ * Same layout and ordering as herm_complete; copies without conjugation and
+ * preserves the diagonal, including its imaginary part for complex types.
+ */
+template <typename T>
+void syrm_complete(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda);
+
+/**
+ * @brief Complete a distributed symmetric matrix from uplo='U' or 'L'.
+ * Copies the stored triangle of the leading n-by-n block across the diagonal
+ * without conjugation; the diagonal is unchanged, including complex values.
+ * A remains block-cyclic and padding/parent data are preserved. Blocks must
+ * be square with RSRC=CSRC=0. All ranks participate, including empty ranks.
+ * Owns rank-local workspace with the same distribution bounds as pherm_complete.
+ */
+template <typename T>
+void psyrm_complete(const DdlaHandle_t& handle, char uplo, int n, T* A, const int* descA);
+
+/**
+ * @brief Complete a distributed Hermitian matrix from uplo='U' or 'L'.
+ * Same distribution contract as psyrm_complete; conjugates the copied entries
+ * and makes the diagonal real. The unselected triangle is never read.
+ */
 template <typename T>
 void pherm_complete(
     const DdlaHandle_t& handle,

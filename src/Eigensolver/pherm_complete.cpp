@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// pherm_complete: build the full Hermitian matrix from ONE stored triangle.
+// Shared local/distributed symmetric and Hermitian completion from one triangle.
 //
 // ScaLAPACK contract for uplo = 'U' / 'L': only that triangle of the leading
 // n x n block is referenced (the opposite triangle and the imaginary part of
@@ -46,6 +46,7 @@
 #include <exception>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace ddla {
@@ -150,6 +151,18 @@ bool pherm_borrows_scratch(const spectral_impl::HermitianPlan& p,std::size_t sen
 template <typename U> inline void pherm_make_real(U&) {}
 template <typename R> inline void pherm_make_real(std::complex<R>& v) { v = std::complex<R>(v.real(), R(0)); }
 
+template <typename T, bool Hermitian>
+void complete_columns(T* a, int n, int lda, bool upper, int first, int last)
+{
+    for (int c = first; c < last; ++c) {
+        if constexpr (Hermitian)
+            pherm_make_real(a[c + static_cast<long long>(c) * lda]);
+        for (int r = upper ? c + 1 : 0; r < (upper ? n : c); ++r)
+            a[r + static_cast<long long>(c) * lda] =
+                detail::host_conj(a[c + static_cast<long long>(r) * lda], Hermitian);
+    }
+}
+
 // f(i) for every block i of v; blocks write disjoint regions of the destination
 template <typename F>
 void pherm_for_blocks(const HermBlk* v, std::size_t count, int nth, const F& f)
@@ -161,7 +174,7 @@ void pherm_for_blocks(const HermBlk* v, std::size_t count, int nth, const F& f)
                               });
 }
 
-template <typename T>
+template <typename T, bool Hermitian>
 void pherm_exec_cpu(const DdlaHandle_t& handle,const HermPlan& p,bool upper,T* A,int nprocs,
     int nth,T* sendbuf,T* recvbuf)
 {
@@ -171,7 +184,7 @@ void pherm_exec_cpu(const DdlaHandle_t& handle,const HermPlan& p,bool upper,T* A
             for (int c = 0; c < b.cols; ++c)
                 for (int r = 0; r < b.rows; ++r)
                     dst[b.dst_off + r + static_cast<long long>(c) * b.dst_ld] =
-                        detail::host_conj(src[b.src_off + c + static_cast<long long>(r) * b.src_ld]);
+                        detail::host_conj(src[b.src_off + c + static_cast<long long>(r) * b.src_ld], Hermitian);
         };
     };
     try {
@@ -192,14 +205,7 @@ void pherm_exec_cpu(const DdlaHandle_t& handle,const HermPlan& p,bool upper,T* A
                     recvbuf[b.src_off + r + static_cast<long long>(c) * b.src_ld];
     });
     pherm_for_blocks(p.diag, p.ndiag, nth, [A, upper](const HermBlk& b) {
-        T* a = A + b.src_off;
-        for (int c = 0; c < b.cols; ++c) {
-            pherm_make_real(a[c + static_cast<long long>(c) * b.src_ld]);
-            // the stored triangle is read, the opposite one is written
-            for (int r = upper ? c + 1 : 0; r < (upper ? b.rows : c); ++r)
-                a[r + static_cast<long long>(c) * b.src_ld] =
-                    detail::host_conj(a[c + static_cast<long long>(r) * b.src_ld]);
-        }
+        complete_columns<T, Hermitian>(A + b.src_off, b.rows, b.src_ld, upper, 0, b.cols);
     });
 
 }
@@ -215,14 +221,14 @@ template <typename R>
 __device__ __forceinline__ void pherm_dmake_real(thrust::complex<R>& v) { v = thrust::complex<R>(v.real(), R(0)); }
 
 // one thread block per HermBlk; src and dst may be the same array (the regions are disjoint)
-template <typename U>
+template <typename U, bool Hermitian>
 __global__ void pherm_xpose_kernel(const U* src, U* dst, const HermBlk* blks)
 {
     const HermBlk b = blks[blockIdx.x];
     for (int c = threadIdx.y; c < b.cols; c += blockDim.y)
         for (int r = threadIdx.x; r < b.rows; r += blockDim.x)
             dst[b.dst_off + r + static_cast<long long>(c) * b.dst_ld] =
-                detail::device_conj(src[b.src_off + c + static_cast<long long>(r) * b.src_ld]);
+                detail::device_conj(src[b.src_off + c + static_cast<long long>(r) * b.src_ld], Hermitian);
 }
 
 template <typename U>
@@ -235,23 +241,41 @@ __global__ void pherm_copy_kernel(const U* src, U* dst, const HermBlk* blks)
                 src[b.src_off + r + static_cast<long long>(c) * b.src_ld];
 }
 
-template <typename U>
+template <typename U, bool Hermitian>
+__device__ __forceinline__ void complete_element(U* a, int lda, bool upper, int r, int c)
+{
+    const long long offset = r + static_cast<long long>(c) * lda;
+    if (r == c) {
+        if constexpr (Hermitian) pherm_dmake_real(a[offset]);
+    } else if (upper ? r > c : r < c) {
+        a[offset] = detail::device_conj(a[c + static_cast<long long>(r) * lda], Hermitian);
+    }
+}
+
+// Local completion needs no descriptor allocation or host/device metadata copy.
+template <typename U, bool Hermitian>
+__global__ void complete_local_kernel(U* a, int n, int lda, bool upper)
+{
+    for (long long c = blockIdx.y * blockDim.y + threadIdx.y; c < n;
+         c += static_cast<long long>(gridDim.y) * blockDim.y)
+        for (long long r = blockIdx.x * blockDim.x + threadIdx.x; r < n;
+             r += static_cast<long long>(gridDim.x) * blockDim.x)
+            complete_element<U, Hermitian>(a, lda, upper, static_cast<int>(r), static_cast<int>(c));
+}
+
+template <typename U, bool Hermitian>
 __global__ void pherm_diag_kernel(U* a_base, const HermBlk* blks, bool upper)
 {
     const HermBlk b = blks[blockIdx.x];
     U* a = a_base + b.src_off;
     for (int c = threadIdx.y; c < b.cols; c += blockDim.y) {
         for (int r = threadIdx.x; r < b.rows; r += blockDim.x) {
-            const long long lo = r + static_cast<long long>(c) * b.src_ld;
-            if (r == c)
-                pherm_dmake_real(a[lo]);
-            else if (upper ? r > c : r < c)
-                a[lo] = detail::device_conj(a[c + static_cast<long long>(r) * b.src_ld]);
+            complete_element<U, Hermitian>(a, b.src_ld, upper, r, c);
         }
     }
 }
 
-template <typename T>
+template <typename T, bool Hermitian>
 void pherm_exec_gpu(const DdlaHandle_t& handle,const HermPlan& p,bool upper,T* A,int nprocs,
     HermBlk* d_meta,HermBlk* meta,T* d_send,T* d_recv)
 {
@@ -269,12 +293,12 @@ void pherm_exec_gpu(const DdlaHandle_t& handle,const HermPlan& p,bool upper,T* A
         if(meta_count)
             DDLA_CHECK(ddlaMemcpy(handle,d_meta,meta,meta_count*sizeof(HermBlk)));
         if (p.npack) {
-            pherm_xpose_kernel<devT><<<static_cast<unsigned>(p.npack), block, 0, stream>>>(
+            pherm_xpose_kernel<devT, Hermitian><<<static_cast<unsigned>(p.npack), block, 0, stream>>>(
                 a_dev, send_dev, d_meta + o_pack);
             DDLA_CHECK(ddlaGetLastError(handle));
         }
         if (p.nlocal) {
-            pherm_xpose_kernel<devT><<<static_cast<unsigned>(p.nlocal), block, 0, stream>>>(
+            pherm_xpose_kernel<devT, Hermitian><<<static_cast<unsigned>(p.nlocal), block, 0, stream>>>(
                 a_dev, a_dev, d_meta + o_local);
             DDLA_CHECK(ddlaGetLastError(handle));
         }
@@ -292,7 +316,7 @@ void pherm_exec_gpu(const DdlaHandle_t& handle,const HermPlan& p,bool upper,T* A
         DDLA_CHECK(ddlaGetLastError(handle));
     }
     if (p.ndiag) {
-        pherm_diag_kernel<devT><<<static_cast<unsigned>(p.ndiag), block, 0, stream>>>(
+        pherm_diag_kernel<devT, Hermitian><<<static_cast<unsigned>(p.ndiag), block, 0, stream>>>(
             a_dev, d_meta + o_diag, upper);
         DDLA_CHECK(ddlaGetLastError(handle));
     }
@@ -303,28 +327,61 @@ void pherm_exec_gpu(const DdlaHandle_t& handle,const HermPlan& p,bool upper,T* A
 
 #endif // DDLA_HAS_GPU
 
+template <DdlaBackend Backend, typename T, bool Hermitian>
+void complete_local(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda)
+{
+    const char* name = Hermitian ? "herm_complete" : "syrm_complete";
+    detail::require_backend<Backend>(handle, name);
+    if (uplo != 'U' && uplo != 'L')
+        throw std::invalid_argument(std::string(name) + ": uplo must be 'U' or 'L'");
+    if (n < 0) throw std::invalid_argument(std::string(name) + ": negative n");
+    if (n == 0) return;
+    if (!A || lda < n)
+        throw std::invalid_argument(std::string(name) + ": null A or insufficient lda");
+    if constexpr (Backend == DdlaBackend::CPU) {
+        const int threads = n >= 256 ? handle->host_threads : 1;
+        detail::host_parallel_for(n, 8, threads, [&](long long first, long long last) {
+            complete_columns<T, Hermitian>(A, n, lda, uplo == 'U',
+                                           static_cast<int>(first), static_cast<int>(last));
+        });
+    } else {
+#if DDLA_HAS_GPU
+        using U = detail::DeviceScalarT<T>;
+        const dim3 block(32, 8);
+        const dim3 grid(static_cast<unsigned>(std::min(65535LL, (n + 31LL) / 32)),
+                        static_cast<unsigned>(std::min(65535LL, (n + 7LL) / 8)));
+        complete_local_kernel<U, Hermitian><<<grid, block, 0, static_cast<gpuStream_t>(handle->stream)>>>(
+            reinterpret_cast<U*>(A), n, lda, uplo == 'U');
+        DDLA_CHECK(ddlaGetLastError(handle));
+#endif
+    }
+}
+
 } // namespace
 
 namespace spectral_impl {
-HermitianPlan pherm_complete_check(const DdlaHandle_t& handle,DdlaBackend backend,char uplo,int n,const void* A,const int* descA)
+HermitianPlan pherm_complete_check(const DdlaHandle_t& handle,DdlaBackend backend,char uplo,int n,const void* A,const int* descA,
+    bool hermitian)
 {
-    auto p=detail::agree_check(handle,"pherm_complete",[&](detail::Agree& agreement)->HermitianPlan {
-        agreement.mode("spectral operation",3104);
-    detail::require_backend(handle,backend,"pherm_complete");
-    if(uplo!='U'&&uplo!='L')throw std::runtime_error("pherm_complete: uplo must be 'U' or 'L'");
+    const char* name=hermitian?"pherm_complete":"psyrm_complete";
+    auto p=detail::agree_check(handle,name,[&](detail::Agree& agreement)->HermitianPlan {
+        agreement.mode("spectral operation",hermitian?3104:3105);
+    detail::require_backend(handle,backend,name);
+    if(uplo!='U'&&uplo!='L')throw std::runtime_error(std::string(name)+": uplo must be 'U' or 'L'");
     check_desc(descA,handle);
-    if(descA[DDLA_MB_]!=descA[DDLA_NB_])throw std::runtime_error("pherm_complete: requires square blocks (mb == nb)");
-    if(descA[DDLA_RSRC_]!=0||descA[DDLA_CSRC_]!=0)throw std::runtime_error("pherm_complete: requires RSRC == CSRC == 0");
-    if(n<0||n>descA[DDLA_M_]||n>descA[DDLA_N_])throw std::runtime_error("pherm_complete: n exceeds descriptor dimensions");
-    HermitianPlan p;p.backend=backend;p.upper=uplo=='U';p.n=n;p.nb=descA[DDLA_NB_];p.lld=descA[DDLA_LLD_];
+    if(descA[DDLA_MB_]!=descA[DDLA_NB_])throw std::runtime_error(std::string(name)+": requires square blocks (mb == nb)");
+    if(descA[DDLA_RSRC_]!=0||descA[DDLA_CSRC_]!=0)throw std::runtime_error(std::string(name)+": requires RSRC == CSRC == 0");
+    if(n<0||n>descA[DDLA_M_]||n>descA[DDLA_N_])throw std::runtime_error(std::string(name)+": n exceeds descriptor dimensions");
+    HermitianPlan p;p.backend=backend;p.upper=uplo=='U';p.hermitian=hermitian;p.n=n;p.nb=descA[DDLA_NB_];p.lld=descA[DDLA_LLD_];
     ddlaGetGridDims(handle,p.pr,p.pc);ddlaGetGridCoords(handle,p.mr,p.mc);p.major=handle->major;
     if(n>0&&num_loc(n,p.nb,p.mr,0,p.pr)>0&&num_loc(n,p.nb,p.mc,0,p.pc)>0&&!A)
-        throw std::invalid_argument("pherm_complete: null active input/output");
+        throw std::invalid_argument(std::string(name)+": null active input/output");
     return p;
     });
-    int signature[13]={int(backend),int(uplo),n,handle->nprows_,handle->npcols_,int(handle->major)};
+    int signature[14]={int(backend),int(uplo),n,handle->nprows_,handle->npcols_,int(handle->major)};
+    signature[13]=int(hermitian);
     detail::descriptor_signature(signature+6,descA);
-    detail::agree_signature(handle,"pherm_complete",signature);
+    detail::agree_signature(handle,name,signature);
     if(n>0&&backend==DdlaBackend::CPU) {
         // Preserve collective topology discovery; the worker budget itself
         // belongs to the handle and cannot be warmed by an unrelated call.
@@ -395,10 +452,16 @@ void pherm_complete_run(const DdlaHandle_t& handle,const HermitianPlan& p,T* A,T
     assert(static_cast<std::size_t>(w-static_cast<char*>(backend_work))<=backend_bytes);
     (void)backend_bytes;(void)device;
     if constexpr(Backend==DdlaBackend::CPU) {
-        pherm_exec_cpu<T>(handle,plan,p.upper,A,p.pr*p.pc,p.threads,send,recv);
+        if (p.hermitian)
+            pherm_exec_cpu<T, true>(handle,plan,p.upper,A,p.pr*p.pc,p.threads,send,recv);
+        else
+            pherm_exec_cpu<T, false>(handle,plan,p.upper,A,p.pr*p.pc,p.threads,send,recv);
     } else {
 #if DDLA_HAS_GPU
-        pherm_exec_gpu<T>(handle,plan,p.upper,A,p.pr*p.pc,device,meta,send,recv);
+        if (p.hermitian)
+            pherm_exec_gpu<T, true>(handle,plan,p.upper,A,p.pr*p.pc,device,meta,send,recv);
+        else
+            pherm_exec_gpu<T, false>(handle,plan,p.upper,A,p.pr*p.pc,device,meta,send,recv);
 #endif
     }
 }
@@ -406,9 +469,9 @@ void pherm_complete_run(const DdlaHandle_t& handle,const HermitianPlan& p,T* A,T
 
 template<DdlaBackend Backend,class T>
 void detail::pherm_complete_with_workspace(const DdlaHandle_t& handle,char uplo,int n,T* A,const int* descA,
-    T* scratch,std::size_t scratch_elements)
+    T* scratch,std::size_t scratch_elements,bool hermitian)
 {
-    const auto p=spectral_impl::pherm_complete_check(handle,Backend,uplo,n,A,descA);
+    const auto p=spectral_impl::pherm_complete_check(handle,Backend,uplo,n,A,descA,hermitian);
     const std::size_t capacity=scratch?scratch_elements:0;
     std::size_t backend_bytes=0,host_bytes=0;
     vector<char> backend_work(handle);std::vector<char> host_work;std::exception_ptr failure;
@@ -423,17 +486,42 @@ void detail::pherm_complete_with_workspace(const DdlaHandle_t& handle,char uplo,
 }
 
 template <DdlaBackend Backend, typename T>
+void herm_complete(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda)
+{
+    complete_local<Backend, T, true>(handle, uplo, n, A, lda);
+}
+
+template <DdlaBackend Backend, typename T>
+void syrm_complete(const DdlaHandle_t& handle, char uplo, int n, T* A, int lda)
+{
+    complete_local<Backend, T, false>(handle, uplo, n, A, lda);
+}
+
+template <DdlaBackend Backend, typename T>
+void psyrm_complete(const DdlaHandle_t& handle, char uplo, int n, T* A, const int* descA)
+{
+    detail::pherm_complete_with_workspace<Backend, T>(handle, uplo, n, A, descA, nullptr, 0, false);
+}
+
+template <DdlaBackend Backend, typename T>
 void pherm_complete(const DdlaHandle_t& handle, char uplo, int n,
                     T* A, const int* descA)
 {
     detail::pherm_complete_with_workspace<Backend, T>(handle, uplo, n, A, descA, nullptr, 0);
 }
 
+#define INSTANTIATE_COMPLETE(B, T) \
+    template void herm_complete<B,T>(const DdlaHandle_t&,char,int,T*,int); \
+    template void syrm_complete<B,T>(const DdlaHandle_t&,char,int,T*,int); \
+    template void psyrm_complete<B,T>(const DdlaHandle_t&,char,int,T*,const int*)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_COMPLETE)
+#undef INSTANTIATE_COMPLETE
+
 #define INSTANTIATE_PHERM_COMPLETE(BACKEND, TYPE)                                \
     template void pherm_complete<BACKEND, TYPE>(                                 \
         const DdlaHandle_t&, char, int, TYPE*, const int*);                       \
     template void detail::pherm_complete_with_workspace<BACKEND, TYPE>(          \
-        const DdlaHandle_t&, char, int, TYPE*, const int*, TYPE*, std::size_t); \
+        const DdlaHandle_t&, char, int, TYPE*, const int*, TYPE*, std::size_t, bool); \
     template void spectral_impl::pherm_complete_run<BACKEND,TYPE>(const DdlaHandle_t&, \
         const spectral_impl::HermitianPlan&,TYPE*,TYPE*,std::size_t,void*,std::size_t,void*,std::size_t)
 #define INSTANTIATE_PHERM_COMPLETE_SIZE(TYPE) \

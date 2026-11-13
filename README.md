@@ -1066,3 +1066,22 @@ Automatic thresholds calibrated for full eigenvectors are applied only to
 `nev=n`. Partial-vector multi-rank calls retain the conservative two-stage
 route; an explicit one-stage request remains available. Single-rank automatic
 calls retain the local vendor solver.
+
+
+### Completing a matrix from one stored triangle
+
+```cpp
+ddla::herm_complete(handle, 'U', n, A, lda);       // local Hermitian
+ddla::syrm_complete(handle, 'L', n, A, lda);       // local symmetric
+ddla::pherm_complete(handle, 'U', n, A, descA);    // distributed Hermitian
+ddla::psyrm_complete(handle, 'L', n, A, descA);    // distributed symmetric
+```
+
+`U`/`L` selects the source triangle. Completion is in place: the other triangle
+is overwritten, while parent data and leading-dimension padding are preserved.
+Hermitian completion conjugates and sets complex diagonal imaginary parts to
+zero; symmetric completion does neither, including for complex matrices.
+Local operations need no scratch or communication; GPU work uses the handle
+stream. Distributed operations share the tile-exchange implementation and
+require square descriptor blocks with `RSRC=CSRC=0`. All ranks participate;
+no rank gathers the full matrix.

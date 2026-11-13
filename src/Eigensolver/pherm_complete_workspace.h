@@ -17,7 +17,7 @@ namespace ddla { namespace detail {
 template <DdlaBackend Backend, typename T>
 void pherm_complete_with_workspace(const DdlaHandle_t& handle, char uplo, int n,
                                    T* A, const int* descA,
-                                   T* scratch, std::size_t scratch_elements);
+                                   T* scratch, std::size_t scratch_elements, bool hermitian=true);
 
 } }
 #endif
