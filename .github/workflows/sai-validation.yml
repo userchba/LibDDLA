@@ -1,0 +1,71 @@
+name: SAI CUDA validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full 40-character commit SHA approved by the SAI administrator
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: libddla-sai-cuda129
+  cancel-in-progress: false
+
+jobs:
+  cuda:
+    if: >-
+      github.repository == 'userchba/LibDDLA' &&
+      github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    name: SAI V100, full CUDA suite and six-rank matrix tests
+    runs-on: [self-hosted, Linux, X64, sai-libddla]
+    environment: sai-libddla
+    timeout-minutes: 180
+    env:
+      DDLA_SOURCE_SHA: ${{ inputs.source_sha }}
+      DDLA_RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}
+      DDLA_SSH_CONFIG: /home/libddla-runner/ci/ssh/config
+    steps:
+      - name: Checkout trusted relay and reporting code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted-control
+          sparse-checkout: .ci/sai
+          persist-credentials: false
+
+      - name: Prepare, submit and collect SAI validation
+        run: |
+          set -euo pipefail
+          python3 trusted-control/.ci/sai/relay.py \
+            --source-sha "$DDLA_SOURCE_SHA" --run-id "$DDLA_RUN_ID" \
+            --ssh-config "$DDLA_SSH_CONFIG" \
+            --work "$RUNNER_TEMP/libddla-sai-$DDLA_RUN_ID" \
+            --results "$RUNNER_TEMP/libddla-sai-results-$DDLA_RUN_ID"
+
+      - name: Request cancellation of this run's remaining Slurm jobs
+        if: cancelled()
+        run: |
+          python3 trusted-control/.ci/sai/relay.py \
+            --source-sha "$DDLA_SOURCE_SHA" --run-id "$DDLA_RUN_ID" \
+            --ssh-config "$DDLA_SSH_CONFIG" --cancel-only \
+            --work "$RUNNER_TEMP/libddla-sai-$DDLA_RUN_ID" \
+            --results "$RUNNER_TEMP/libddla-sai-results-$DDLA_RUN_ID"
+
+      - name: Upload JUnit, logs, toolchain and Slurm evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: libddla-sai-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/libddla-sai-results-${{ env.DDLA_RUN_ID }}/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove this attempt's temporary source objects
+        if: always()
+        run: |
+          rm -rf -- "$RUNNER_TEMP/libddla-sai-$DDLA_RUN_ID"
