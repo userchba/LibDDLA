@@ -30,18 +30,10 @@ jobs:
       DDLA_RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}
       DDLA_SSH_CONFIG: /home/libddla-runner/ci/ssh/config
     steps:
-      - name: Checkout trusted relay and reporting code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: ${{ github.workflow_sha }}
-          path: trusted-control
-          sparse-checkout: .ci/sai
-          persist-credentials: false
-
       - name: Prepare, submit and collect SAI validation
         run: |
           set -euo pipefail
-          python3 trusted-control/.ci/sai/relay.py \
+          python3 /home/libddla-runner/ci/bin/relay.py \
             --source-sha "$DDLA_SOURCE_SHA" --run-id "$DDLA_RUN_ID" \
             --ssh-config "$DDLA_SSH_CONFIG" \
             --work "$RUNNER_TEMP/libddla-sai-$DDLA_RUN_ID" \
@@ -50,7 +42,7 @@ jobs:
       - name: Request cancellation of this run's remaining Slurm jobs
         if: cancelled()
         run: |
-          python3 trusted-control/.ci/sai/relay.py \
+          python3 /home/libddla-runner/ci/bin/relay.py \
             --source-sha "$DDLA_SOURCE_SHA" --run-id "$DDLA_RUN_ID" \
             --ssh-config "$DDLA_SSH_CONFIG" --cancel-only \
             --work "$RUNNER_TEMP/libddla-sai-$DDLA_RUN_ID" \
