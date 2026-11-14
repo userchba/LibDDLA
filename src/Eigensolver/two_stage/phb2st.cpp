@@ -2550,6 +2550,8 @@ template<DdlaBackend B,class T>void phb2st_run(const DdlaHandle_t& h,const Phb2s
         }
     }
 #endif
+    // The sink borrows these counters until the final drain completes.
+    std::atomic<long long> emitted{0},consumed{0};std::atomic<int> aborted{0};
     if(team->available()){
         team->reset_run(band);const auto stream=team->stream();
         if(sink){try{detail::agree_local(h->comm,"phb2st spatial allocation",[&]{sink->start_stager_run(stream.records,stream.capacity,stream.emitted,
@@ -2568,7 +2570,7 @@ template<DdlaBackend B,class T>void phb2st_run(const DdlaHandle_t& h,const Phb2s
         while(bytes){const auto count=int(std::min(bytes,std::size_t(INT_MAX)));MPI_CHECK(MPI_Bcast(data,count,MPI_BYTE,0,h->comm));data+=count;bytes-=count;}
         hb2st_rot<T>* local_records=p.local.bounded?detail::take<hb2st_rot<T>>(hw,std::size_t(p.local.record_capacity)):nullptr;
         const std::size_t local_bytes=host_bytes-std::size_t(hw-host_base);
-        std::atomic<long long> emitted{0},consumed{0};std::atomic<int> aborted{0};StreamWindow window;window.ring=p.local.record_capacity;window.consumed=&consumed;
+        StreamWindow window;window.ring=p.local.record_capacity;window.consumed=&consumed;
         if(sink){try{detail::agree_local(h->comm,"phb2st spatial allocation",[&]{sink->start_stager_run(local_records,p.local.record_capacity,&emitted,&window,&aborted,1,false);});}catch(...){sink->cancel_run();throw;}}
         struct Publish {const Phb2stPlan& p;detail::DistributedHistory<T>& history;std::atomic<long long>& emitted;std::atomic<long long>& consumed;
             std::atomic<int>& aborted;long long handed=0;};Publish publish{p,resources.history(),emitted,consumed,aborted};
