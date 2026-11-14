@@ -8,11 +8,15 @@
 #include <thread>
 #include <cerrno>
 #include "allocation_probe_ddla.h"
+#include "allocation_probe_caller.h"
+
+extern "C" int ddla_test_external_allocations();
 
 // Executable-only allocation injection. No production hooks. Only the main
-// thread is armed, so MPI/OpenMP background threads are unaffected.
+// thread is armed. MPI may allocate on that same thread; host allocation
+// wrappers therefore also check the owner before counting or injecting faults.
 namespace allocation_probe {
-thread_local bool enabled=false,fired=false,fail_after=false;
+thread_local bool enabled=false,fired=false,fail_after=false,resolving=false;
 thread_local double** input=nullptr;
 thread_local std::size_t before=0,after=0,fail_at=0;
 void inspect() {
@@ -26,24 +30,40 @@ void inspect() {
 void begin(double** y,bool consumed,std::size_t index) {
     input=y;fail_after=consumed;fail_at=index;before=after=0;fired=false;enabled=true;
 }
+void inspect_host(void* caller) {
+    if(!enabled || resolving) return;
+    struct Guard {Guard(){resolving=true;} ~Guard(){resolving=false;}} guard;
+    if(managed_caller(caller)) inspect();
 }
-void* operator new(std::size_t bytes) {
-    allocation_probe::inspect();void* p=std::malloc(bytes?bytes:1);if(!p) throw std::bad_alloc();return p;
+void* allocate(std::size_t bytes,void* caller) {
+    inspect_host(caller);void* p=std::malloc(bytes?bytes:1);if(!p) throw std::bad_alloc();return p;
 }
-void* operator new[](std::size_t n) {return ::operator new(n);}
-void operator delete(void* p) noexcept {std::free(p);}
-void operator delete[](void* p) noexcept {std::free(p);}
-void operator delete(void* p,std::size_t) noexcept {std::free(p);}
-void operator delete[](void* p,std::size_t) noexcept {std::free(p);}
-extern "C" int posix_memalign(void** out,std::size_t alignment,std::size_t bytes) noexcept {
-    try {allocation_probe::inspect();} catch(const std::bad_alloc&) {return ENOMEM;}
+int allocate_aligned(void** out,std::size_t alignment,std::size_t bytes,void* caller) noexcept {
+    try {inspect_host(caller);} catch(const std::bad_alloc&) {return ENOMEM;}
     if(alignment<sizeof(void*) || (alignment&(alignment-1))) return EINVAL;
     if(bytes>std::numeric_limits<std::size_t>::max()-(alignment-1)) return ENOMEM;
     const std::size_t rounded=((std::max<std::size_t>(bytes,1)+alignment-1)/alignment)*alignment;
     void* p=std::aligned_alloc(alignment,rounded);if(!p) return ENOMEM;*out=p;return 0;
 }
-void* operator new(std::size_t n,std::align_val_t a) {void* p=nullptr;if(posix_memalign(&p,static_cast<std::size_t>(a),n)) throw std::bad_alloc();return p;}
-void* operator new[](std::size_t n,std::align_val_t a) {return ::operator new(n,a);}
+void* allocate(std::size_t bytes,std::align_val_t alignment,void* caller) {
+    void* p=nullptr;if(allocate_aligned(&p,static_cast<std::size_t>(alignment),bytes,caller)) throw std::bad_alloc();return p;
+}
+}
+// Preserve the original caller for every entry point, including array/aligned
+// new; delegating to another interposing wrapper loses that boundary at -O0.
+#define DDLA_ALLOCATION_CALLER __builtin_extract_return_addr(__builtin_return_address(0))
+void* operator new(std::size_t n) {return allocation_probe::allocate(n,DDLA_ALLOCATION_CALLER);}
+void* operator new[](std::size_t n) {return allocation_probe::allocate(n,DDLA_ALLOCATION_CALLER);}
+extern "C" int posix_memalign(void** p,std::size_t a,std::size_t n) noexcept {
+    return allocation_probe::allocate_aligned(p,a,n,DDLA_ALLOCATION_CALLER);
+}
+void* operator new(std::size_t n,std::align_val_t a) {return allocation_probe::allocate(n,a,DDLA_ALLOCATION_CALLER);}
+void* operator new[](std::size_t n,std::align_val_t a) {return allocation_probe::allocate(n,a,DDLA_ALLOCATION_CALLER);}
+#undef DDLA_ALLOCATION_CALLER
+void operator delete(void* p) noexcept {std::free(p);}
+void operator delete[](void* p) noexcept {std::free(p);}
+void operator delete(void* p,std::size_t) noexcept {std::free(p);}
+void operator delete[](void* p,std::size_t) noexcept {std::free(p);}
 void operator delete(void* p,std::align_val_t) noexcept {std::free(p);}
 void operator delete[](void* p,std::align_val_t) noexcept {std::free(p);}
 void operator delete(void* p,std::size_t,std::align_val_t) noexcept {std::free(p);}
@@ -51,6 +71,49 @@ void operator delete[](void* p,std::size_t,std::align_val_t) noexcept {std::free
 
 using namespace api_grid_test;
 namespace {
+// Excluding vendor allocations must leave both counting and failure injection
+// effective for actual scratch, before and after input consumption.
+void check_allocation_probe(const ddla::DdlaHandle_t& h)
+{
+    using Allocate=void*(*)(std::size_t);
+    using AlignedAllocate=void*(*)(std::size_t,std::align_val_t);
+    Allocate volatile plain=static_cast<Allocate>(&::operator new);
+    Allocate volatile array=static_cast<Allocate>(&::operator new[]);
+    AlignedAllocate volatile aligned=static_cast<AlignedAllocate>(&::operator new);
+    AlignedAllocate volatile aligned_array=static_cast<AlignedAllocate>(&::operator new[]);
+    for(bool consumed:{false,true}) for(int kind=0;kind<6;++kind) for(bool fail:{false,true}) {
+        double value=0; double* watched=consumed?nullptr:&value;
+        allocation_probe::begin(&watched,consumed,fail?1:0);
+        const bool external_ok=ddla_test_external_allocations()!=0;
+        const bool external_clean=allocation_probe::before==0 && allocation_probe::after==0 && !allocation_probe::fired;
+        void* p=nullptr; bool rejected=false;
+        try {
+            switch(kind) {
+            case 0: p=plain(128); break;
+            case 1: p=array(128); break;
+            case 2: p=aligned(128,std::align_val_t(64)); break;
+            case 3: p=aligned_array(128,std::align_val_t(64)); break;
+            case 4: rejected=posix_memalign(&p,64,128)!=0; break;
+            case 5: rejected=ddlaMalloc(h,&p,128)!=ddlaStatus_t::DDLA_STATUS_SUCCESS; break;
+            }
+        } catch(const std::bad_alloc&) {rejected=true;}
+        allocation_probe::enabled=false;
+        const auto count=consumed?allocation_probe::after:allocation_probe::before;
+        const auto other=consumed?allocation_probe::before:allocation_probe::after;
+        if(p) {
+            if(kind==5) ddlaFree(h,p);
+            else if(kind==1) ::operator delete[](p);
+            else if(kind==2) ::operator delete(p,std::align_val_t(64));
+            else if(kind==3) ::operator delete[](p,std::align_val_t(64));
+            else if(kind==4) std::free(p);
+            else ::operator delete(p);
+        }
+        if(!external_ok || !external_clean) throw std::runtime_error("allocation probe counted or failed a vendor allocation");
+        if(count!=1 || other!=0 || rejected!=fail || allocation_probe::fired!=fail)
+            throw std::runtime_error("allocation probe missed managed allocation or failure injection");
+    }
+}
+
 template<class T> std::complex<long double> wide(T v) { return {static_cast<long double>(v),0}; }
 template<class R> std::complex<long double> wide(std::complex<R> v) { return {static_cast<long double>(v.real()),static_cast<long double>(v.imag())}; }
 template<class R> R yvalue(int r,int c) { return R((r*17+c*13)%47-23)/R(47); }
@@ -234,6 +297,7 @@ int main(int argc,char** argv)
             if(ddlaInit(h,DdlaBackend::CPU)!=ddlaStatus_t::DDLA_STATUS_SUCCESS ||
                ddlaSet(h,MPI_COMM_WORLD,grid.first,grid.second)!=ddlaStatus_t::DDLA_STATUS_SUCCESS)
                 throw std::runtime_error("CPU handle/grid");
+            check_allocation_probe(h);
             small_cases<float>(h);small_cases<double>(h);
             small_cases<std::complex<float>>(h);small_cases<std::complex<double>>(h);
             check_replay<double>(h,1025,8,64,true,true);

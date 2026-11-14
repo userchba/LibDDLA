@@ -513,6 +513,8 @@ endif()
 
 add_test_executable(test_pheevd_cpu_replay)
 if(TARGET test_pheevd_cpu_replay)
+    add_library(allocation_probe_external SHARED allocation_probe_external.cpp)
+    target_link_libraries(test_pheevd_cpu_replay PRIVATE allocation_probe_external)
     set_tests_properties(test_pheevd_cpu_replay_mpi PROPERTIES TIMEOUT 600 LABELS cpu)
 endif()
 
