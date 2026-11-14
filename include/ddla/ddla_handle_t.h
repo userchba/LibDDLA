@@ -281,14 +281,20 @@ ddlaStatus_t ddlaMemGetInfo(const DdlaHandle_t& handle, std::size_t* free_bytes,
 /// failed vendor call on the calling thread.  The pointer stays valid until the next call on this thread.
 const char* ddlaGetErrorString(ddlaStatus_t status);
 
-/// Set the compute stream of a GPU handle; subsequent library calls on this
-/// handle are enqueued on @p stream.
+/// Replace the compute stream of an initialized GPU handle. The call finishes
+/// outstanding work on the handle's queues and rebinds its BLAS/solver handles.
+/// On success the handle owns @p stream and destroys the previous non-null
+/// compute stream. The caller must not separately destroy a transferred stream.
+/// On failure ownership stays with the caller and the previous bindings remain
+/// in effect, unless a vendor rollback itself fails (reported by exception).
 ///
-/// The handle takes ownership of @p stream: it is destroyed by ddlaDestroy,
-/// so the caller must not destroy it separately.
+/// Passing the current stream is a no-op. A null stream selects the native
+/// default stream, which is synchronized but never destroyed by the handle.
+/// An uninitialized handle, an active communication group, or a private data/
+/// level queue passed as the replacement returns DDLA_STATUS_INVALID_VALUE.
 ///
-/// @throws std::runtime_error if the handle uses the CPU backend (CPU
-/// handles have no device stream).
+/// @throws std::runtime_error if the handle uses the CPU backend or a native
+/// GPU operation fails. CPU handles have no device stream.
 ddlaStatus_t ddlaSetStream(const DdlaHandle_t& handle, void* stream);
 
 // ---------------------------------------------------------------------------

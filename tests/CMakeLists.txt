@@ -82,6 +82,22 @@ function(add_bench_executable test_name)
 endfunction()
 
 enable_testing()
+if(UNIX AND NOT APPLE)
+    find_package(Threads REQUIRED)
+    add_test_executable(test_stream_ownership 1)
+    target_link_libraries(test_stream_ownership PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
+    if(DDLA_HAS_GPU)
+        add_library(stream_ownership_trace SHARED stream_ownership_trace.cpp)
+        apply_test_connector_defs(stream_ownership_trace)
+        target_include_directories(stream_ownership_trace PRIVATE
+            $<TARGET_PROPERTY:ddla_lib,INTERFACE_INCLUDE_DIRECTORIES>)
+        target_link_libraries(stream_ownership_trace PRIVATE ${CMAKE_DL_LIBS})
+        add_dependencies(test_stream_ownership stream_ownership_trace)
+        set_tests_properties(test_stream_ownership_mpi PROPERTIES TIMEOUT 120
+            ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:stream_ownership_trace>;OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+    endif()
+endif()
+
 # This client must compile without private connector/vendor definitions.
 add_executable(test_public_handle_dispatch test_public_handle_dispatch.cpp)
 target_link_libraries(test_public_handle_dispatch PRIVATE ddla_lib)

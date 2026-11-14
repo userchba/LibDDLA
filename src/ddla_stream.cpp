@@ -60,7 +60,8 @@ void clean_resources(DdlaStream& s)
         if (s.local_device >= 0) GPU_CHECK(gpuSetDevice(s.local_device));
         // CCL work may still reference the queues. Finish it before releasing
         // communicators, then destroy queues and compute-library resources.
-        if (s.stream) GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(s.stream)));
+        if (s.stream || s.blasH || s.solverH)
+            GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(s.stream)));
         if (s.stream_data) GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(s.stream_data)));
         if (s.stream_level) GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(s.stream_level)));
         s.communicator->release(&s, false);

@@ -8,6 +8,7 @@
 #include <cstring>
 #include <string>
 #include <limits>
+#include <exception>
 #if DDLA_HAS_GPU
 #include "memory_tri_kernels.h"
 #endif
@@ -760,15 +761,47 @@ ddlaStatus_t ddlaSetStream(const DdlaHandle_t& handle, void* stream)
             "ddlaSetStream: setting a stream requires a GPU handle");
     }
 #if DDLA_HAS_GPU
+    if (!handle->initialized || !handle->blasH || !handle->solverH)
+        return ddlaStatus_t::DDLA_STATUS_INVALID_VALUE;
+    if (stream == handle->stream) return ddlaStatus_t::DDLA_STATUS_SUCCESS;
+    if (handle->communication_group_depth != 0 ||
+        (stream && (stream == handle->stream_data || stream == handle->stream_level)))
+        return ddlaStatus_t::DDLA_STATUS_INVALID_VALUE;
+
+    GPU_CHECK(gpuSetDevice(handle->local_device));
+    // All three queues can reference work submitted with the previous compute
+    // stream. Finish that work before retiring an owned stream. A null compute
+    // stream is the native default stream and must also be drained.
+    GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(handle->stream)));
+    if (handle->stream_data)
+        GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(handle->stream_data)));
+    if (handle->stream_level)
+        GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(handle->stream_level)));
+
+    const auto old = static_cast<gpuStream_t>(handle->stream);
+    const auto next = static_cast<gpuStream_t>(stream);
+    const auto blas = static_cast<gpublasHandle_t>(handle->blasH);
+    const auto solver = static_cast<gpusolverHandle_t>(handle->solverH);
+    try {
+        BLAS_CHECK(gpublasSetStream(blas, next));
+        SOLVER_CHECK(gpusolverSetStream(solver, next));
+        if (old) GPU_CHECK(gpuStreamDestroy(old));
+    } catch (...) {
+        const auto failure = std::current_exception();
+        // Attempt both restores even if one fails. Ownership of next has not
+        // transferred, and the public stream pointer still names the old one.
+        const auto blas_status = gpublasSetStream(blas, old);
+        const auto solver_status = gpusolverSetStream(solver, old);
+        if (blas_status != GPUBLAS_STATUS_SUCCESS || solver_status != GPUSOLVER_STATUS_SUCCESS)
+            throw std::runtime_error("ddlaSetStream: vendor stream rollback failed; destroy and recreate the handle");
+        std::rethrow_exception(failure);
+    }
     handle->stream = stream;
-#endif
-    // Re-bind the BLAS/solver handles so subsequent calls honor the new
-    // stream (mirrors what DdlaStream::init does at creation time).
-#if DDLA_HAS_GPU
-    BLAS_CHECK(gpublasSetStream(static_cast<gpublasHandle_t>(handle->blasH), static_cast<gpuStream_t>(handle->stream)));
-    SOLVER_CHECK(gpusolverSetStream(static_cast<gpusolverHandle_t>(handle->solverH), static_cast<gpuStream_t>(handle->stream)));
-#endif
     return ddlaStatus_t::DDLA_STATUS_SUCCESS;
+#else
+    (void)stream;
+    return ddlaStatus_t::DDLA_STATUS_INTERNAL_ERROR;
+#endif
 }
 
 // ---------------------------------------------------------------------------
