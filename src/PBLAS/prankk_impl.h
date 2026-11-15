@@ -1,6 +1,7 @@
 #ifndef DDLA_PRANKK_IMPL_H
 #define DDLA_PRANKK_IMPL_H
 
+#include "check_agree.h"
 #include <ddla/ddla.h>
 #include <ddla/ddla_vector.h>
 #include "BLAS/blas_impl.h"
@@ -62,9 +63,17 @@ void execute(const DdlaHandle_t& h, char uplo, char trans, int n, int k,
         return;
     }
     std::size_t backend_bytes=0,host_bytes=0;
-    prankk_impl::workspace_size<T>(h,Hermitian ? 'H' : 'S',uplo,trans,tb,product,Rank2,n,k,da,db,dc,&backend_bytes,&host_bytes);
-    vector<char> backend_work(h,backend_bytes);
-    std::vector<char> host_work(host_bytes);
+    vector<char> backend_work(h);
+    std::vector<char> host_work;
+    auto prepare = [&] {
+        prankk_impl::workspace_size<T>(h,Hermitian ? 'H' : 'S',uplo,trans,tb,product,Rank2,n,k,da,db,dc,&backend_bytes,&host_bytes);
+        backend_work.resize(backend_bytes);
+        host_work.resize(host_bytes);
+    };
+    if (h->nprocs > 1)
+        detail::agree_local(h, "prankk workspace preparation", prepare);
+    else
+        prepare();
     prankk_impl::run<Backend,T>(h,Hermitian ? 'H' : 'S',uplo,trans,tb,product,Rank2,n,k,alpha,A,da,B,db,beta,C,dc,
         backend_work.data(),backend_bytes,host_work.data(),host_bytes);
 }
