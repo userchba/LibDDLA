@@ -110,6 +110,8 @@ int main(int argc, char** argv)
                     ptrmm<double>(h, 'L', 'L', 'N', 'U', n, n, 1., a.data(), a.d, c.data(), c.d);
                 else if (op == "ptrtrs")
                     ptrtrs<double>(h, 'L', 'L', 'N', 'U', n, n, a.data(), a.d, c.data(), c.d);
+                else if (op == "ppotrf")
+                    ppotrf<double>(h, 'L', n, a.data(), 1, 1, a.d, info);
                 else if (op == "pgeqrf")
                     pgeqrf<double>(h, n, n, a.data(), a.d, tau.data(), info);
                 else if (op == "pgeqrs")
