@@ -1,4 +1,5 @@
 #include <ddla/ddla.h>
+#include "check_agree.h"
 #include <ddla/ddla_vector.h>
 #include "phemm_impl.h"
 #include "instantiate.h"
@@ -18,9 +19,17 @@ void psymm(const DdlaHandle_t& h, char side, char uplo, int m, int n,
     side=static_cast<char>(std::toupper(static_cast<unsigned char>(side)));
     uplo=static_cast<char>(std::toupper(static_cast<unsigned char>(uplo)));
     std::size_t backend_bytes=0,host_bytes=0;
-    phemm_impl::phemm_workspace_size<T>(h,side,m,n,alpha==T(0),da,db,dc,false,&backend_bytes,&host_bytes);
-    vector<char> backend_work(h,backend_bytes);
-    std::vector<char> host_work(host_bytes);
+    vector<char> backend_work(h);
+    std::vector<char> host_work;
+    auto prepare = [&] {
+        phemm_impl::phemm_workspace_size<T>(h,side,m,n,alpha==T(0),da,db,dc,false,&backend_bytes,&host_bytes);
+        backend_work.resize(backend_bytes);
+        host_work.resize(host_bytes);
+    };
+    if (h->nprocs > 1)
+        detail::agree_local(h, "psymm workspace preparation", prepare);
+    else
+        prepare();
     phemm_impl::phemm_run<Backend,T>(h,side,uplo,m,n,alpha,A,da,B,db,beta,C,dc,false,
         backend_work.data(),backend_bytes,host_work.data(),host_bytes);
 }
