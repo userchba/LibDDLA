@@ -87,6 +87,12 @@ int main(int argc, char** argv)
                 else if (op == "pgeadd")
                     pgeadd<double>(h, 'T', 'N', n, n, 1., a.data(), 2, 3, a.d,
                         1., b.data(), 1, 2, b.d, c.data(), 3, 2, c.d);
+                else if (op == "ptrtrm")
+                    ptrtrm<double>(h, 'L', 'N', 'L', 'N', n, 1., a.data(), a.d, b.data(), b.d, 1., c.data(), c.d);
+                else if (op == "ptrmm")
+                    ptrmm<double>(h, 'L', 'L', 'N', 'U', n, n, 1., a.data(), a.d, c.data(), c.d);
+                else if (op == "ptrtrs")
+                    ptrtrs<double>(h, 'L', 'L', 'N', 'U', n, n, a.data(), a.d, c.data(), c.d);
                 else throw std::invalid_argument("unknown operation");
             };
             if (!prewarm()) throw std::runtime_error("allocator preload failed to resolve ddlaMalloc");
