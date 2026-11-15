@@ -158,9 +158,17 @@ void pgemmt(const DdlaHandle_t& h, char uplo, char ta, char tb,
     uplo=blas_impl::upper(uplo);ta=blas_impl::upper(ta);tb=blas_impl::upper(tb);
     if (n==0 || (!product && beta==T(1))) return;
     std::size_t backend_bytes=0,host_bytes=0;
-    pgemmt_impl::workspace_size<T>(h,uplo,ta,tb,product,n,k,da,db,dc,&backend_bytes,&host_bytes);
-    vector<char> backend_work(h,backend_bytes);
-    std::vector<char> host_work(host_bytes);
+    vector<char> backend_work(h);
+    std::vector<char> host_work;
+    auto prepare = [&] {
+        pgemmt_impl::workspace_size<T>(h,uplo,ta,tb,product,n,k,da,db,dc,&backend_bytes,&host_bytes);
+        backend_work.resize(backend_bytes);
+        host_work.resize(host_bytes);
+    };
+    if (h->nprocs > 1)
+        detail::agree_local(h, "pgemmt workspace preparation", prepare);
+    else
+        prepare();
     pgemmt_impl::run<Backend,T>(h,uplo,ta,tb,product,n,k,alpha,A,da,B,db,beta,C,dc,
         backend_work.data(),backend_bytes,host_work.data(),host_bytes);
 }
@@ -184,8 +192,17 @@ void pgemmt(const DdlaHandle_t& h,char uplo,char ta,char tb,int n,int k,
     uplo=blas_impl::upper(uplo);ta=blas_impl::upper(ta);tb=blas_impl::upper(tb);
     if (n==0 || (!product && beta==T(1))) return;
     std::size_t bytes=0,host_bytes=0;
-    pgemmt_impl::workspace_size<T,R,std::complex<R>>(h,uplo,ta,tb,product,n,k,da,db,dc,&bytes,&host_bytes);
-    vector<char> work(h,bytes);std::vector<char> host(host_bytes);
+    vector<char> work(h);
+    std::vector<char> host;
+    auto prepare = [&] {
+        pgemmt_impl::workspace_size<T,R,std::complex<R>>(h,uplo,ta,tb,product,n,k,da,db,dc,&bytes,&host_bytes);
+        work.resize(bytes);
+        host.resize(host_bytes);
+    };
+    if (h->nprocs > 1)
+        detail::agree_local(h, "pgemmt workspace preparation", prepare);
+    else
+        prepare();
     pgemmt_impl::run<Backend,T>(h,uplo,ta,tb,product,n,k,alpha,A,da,B,db,beta,C,dc,
         work.data(),bytes,host.data(),host_bytes);
 }
@@ -200,8 +217,17 @@ void pgemmt(const DdlaHandle_t& h,char uplo,char ta,char tb,int n,int k,
     uplo=blas_impl::upper(uplo);ta=blas_impl::upper(ta);tb=blas_impl::upper(tb);
     if (n==0 || (!product && beta==T(1))) return;
     std::size_t bytes=0,host_bytes=0;
-    pgemmt_impl::workspace_size<T,std::complex<R>,R>(h,uplo,ta,tb,product,n,k,da,db,dc,&bytes,&host_bytes);
-    vector<char> work(h,bytes);std::vector<char> host(host_bytes);
+    vector<char> work(h);
+    std::vector<char> host;
+    auto prepare = [&] {
+        pgemmt_impl::workspace_size<T,std::complex<R>,R>(h,uplo,ta,tb,product,n,k,da,db,dc,&bytes,&host_bytes);
+        work.resize(bytes);
+        host.resize(host_bytes);
+    };
+    if (h->nprocs > 1)
+        detail::agree_local(h, "pgemmt workspace preparation", prepare);
+    else
+        prepare();
     pgemmt_impl::run<Backend,T>(h,uplo,ta,tb,product,n,k,alpha,A,da,B,db,beta,C,dc,
         work.data(),bytes,host.data(),host_bytes);
 }
