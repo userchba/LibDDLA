@@ -81,6 +81,9 @@ int main(int argc, char** argv)
         DDLA_CHECK(ddlaSet(h, MPI_COMM_WORLD, rows, size / rows));
         {
             Matrix a(h, n + 4, 1), b(h, n + 4, 2), c(h, n + 4, 5);
+            std::vector<double> tau(std::size_t(n) + 8, -888.);
+            const auto original_tau = tau;
+            int info = -1;
             auto call = [&] {
                 if (op == "pgemm")
                     pgemm<double>(h, 'N', 'N', n, n, n, 1., a.data(), a.d, b.data(), b.d, 1., c.data(), c.d);
@@ -107,6 +110,8 @@ int main(int argc, char** argv)
                     ptrmm<double>(h, 'L', 'L', 'N', 'U', n, n, 1., a.data(), a.d, c.data(), c.d);
                 else if (op == "ptrtrs")
                     ptrtrs<double>(h, 'L', 'L', 'N', 'U', n, n, a.data(), a.d, c.data(), c.d);
+                else if (op == "pgeqrf")
+                    pgeqrf<double>(h, n, n, a.data(), a.d, tau.data(), info);
                 else throw std::invalid_argument("unknown operation");
             };
             if (!prewarm()) throw std::runtime_error("allocator preload failed to resolve ddlaMalloc");
@@ -131,6 +136,7 @@ int main(int argc, char** argv)
             local &= a.unchanged(h);
             local &= b.unchanged(h);
             local &= c.unchanged(h);
+            local &= tau == original_tau;
             int all = 0;
             MPI_Allreduce(&local, &all, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
             if (!all) throw std::runtime_error("fault did not fire once and preserve every rank's matrices");

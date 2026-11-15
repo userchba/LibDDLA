@@ -547,9 +547,17 @@ void factorize(
     const bool inplace = qr_impl::pgeqrf_check<Backend>(handle, uplo, m, n, descA, tau);
     if (m == 0 || n == 0) return;
     std::size_t backend_bytes = 0, host_bytes = 0;
-    qr_impl::pgeqrf_workspace_size<T>(handle, uplo, inplace, m, n, A, descA, tau, &backend_bytes, &host_bytes);
-    vector<char> backend_work(handle, backend_bytes);
-    std::vector<char> host_work(host_bytes);
+    vector<char> backend_work(handle);
+    std::vector<char> host_work;
+    auto prepare = [&] {
+        qr_impl::pgeqrf_workspace_size<T>(handle, uplo, inplace, m, n, A, descA, tau, &backend_bytes, &host_bytes);
+        backend_work.resize(backend_bytes);
+        host_work.resize(host_bytes);
+    };
+    if (handle->nprocs > 1)
+        detail::agree_local(handle, "pgeqrf workspace preparation", prepare);
+    else
+        prepare();
     qr_impl::pgeqrf_run<Backend, T>(handle, uplo, inplace, m, n, A, descA, tau,
                                     backend_work.data(), backend_bytes, host_work.data(), host_bytes);
 }
