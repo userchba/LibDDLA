@@ -91,6 +91,8 @@ int main(int argc, char** argv)
                     psyrk<double>(h, 'L', 'N', n, n, 1., a.data(), a.d, 1., c.data(), c.d);
                 else if (op == "psyr2k")
                     psyr2k<double>(h, 'L', 'N', n, n, 1., a.data(), a.d, b.data(), b.d, 1., c.data(), c.d);
+                else if (op == "pgemmt")
+                    pgemmt<double>(h, 'L', 'N', 'N', n, n, 1., a.data(), a.d, b.data(), b.d, 1., c.data(), c.d);
                 else if (op == "ptrtrm")
                     ptrtrm<double>(h, 'L', 'N', 'L', 'N', n, 1., a.data(), a.d, b.data(), b.d, 1., c.data(), c.d);
                 else if (op == "ptrmm")
