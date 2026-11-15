@@ -112,6 +112,8 @@ int main(int argc, char** argv)
                     ptrtrs<double>(h, 'L', 'L', 'N', 'U', n, n, a.data(), a.d, c.data(), c.d);
                 else if (op == "pgeqrf")
                     pgeqrf<double>(h, n, n, a.data(), a.d, tau.data(), info);
+                else if (op == "pgeqrs")
+                    pgeqrs<double>(h, n, n, n, a.data(), a.d, tau.data(), c.data(), c.d, info);
                 else throw std::invalid_argument("unknown operation");
             };
             if (!prewarm()) throw std::runtime_error("allocator preload failed to resolve ddlaMalloc");

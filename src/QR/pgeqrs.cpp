@@ -71,18 +71,20 @@ void pgeqrs(const DdlaHandle_t& handle, int m, int n, int nrhs,
 
     // For m >= n the Q-left punmbr path uses QR's columns, unit diagonal,
     // and forward reflector product. Its tau input is replicated on the host.
-    const auto apply = spectral_impl::punmbr_geometry(handle, Backend, 'Q', 'L', 'C',
-                                                     m, nrhs, n, descA, descB);
-    std::size_t apply_backend = 0, apply_host = 0, solve_backend = 0, solve_host = 0;
-    spectral_impl::punmbr_workspace_size<T>(handle, apply, &apply_backend, &apply_host);
-    ptrtrs_impl::ptrtrs_workspace_size<T>(handle, 'L', 'N', n, nrhs, descA, descB,
-                                          &solve_backend, &solve_host);
-    const std::size_t backend_bytes = std::max(apply_backend, solve_backend);
-    const std::size_t host_bytes = std::max(apply_host, solve_host);
+    spectral_impl::PunmbrPlan apply;
+    std::size_t backend_bytes = 0, host_bytes = 0;
     vector<char> backend_work(handle);
     std::vector<char> host_work;
     std::vector<T> full_tau;
-    detail::agree_check(handle, "pgeqrs workspace", [&](detail::Agree&) {
+    detail::agree_local(handle, "pgeqrs workspace preparation", [&] {
+        apply = spectral_impl::punmbr_geometry(handle, Backend, 'Q', 'L', 'C',
+                                              m, nrhs, n, descA, descB);
+        std::size_t apply_backend = 0, apply_host = 0, solve_backend = 0, solve_host = 0;
+        spectral_impl::punmbr_workspace_size<T>(handle, apply, &apply_backend, &apply_host);
+        ptrtrs_impl::ptrtrs_workspace_size<T>(handle, 'L', 'N', n, nrhs, descA, descB,
+                                              &solve_backend, &solve_host);
+        backend_bytes = std::max(apply_backend, solve_backend);
+        host_bytes = std::max(apply_host, solve_host);
         backend_work.resize(backend_bytes);
         host_work.resize(host_bytes);
         full_tau.resize(n, T(0));
