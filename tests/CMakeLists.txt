@@ -98,7 +98,7 @@ if(UNIX AND NOT APPLE)
     else()
         set(_fault_label cpu)
     endif()
-    foreach(_fault_case pgemm_backend pgeadd_host ptrmm_backend ptrtrm_backend ptrtrs_backend psyrk_backend psyr2k_backend pgemmt_backend psymm_backend psymmt_backend)
+    foreach(_fault_case pgemm_backend pgeadd_host ptrmm_backend ptrtrm_backend ptrtrs_backend psyrk_backend psyr2k_backend pgemmt_backend psymm_backend psymmt_backend phemm_backend phemmt_backend)
         string(REPLACE "_" ";" _fault_args "${_fault_case}")
         add_test(NAME preparation_failure_${_fault_case}
             COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${DDLA_TEST_NP}
