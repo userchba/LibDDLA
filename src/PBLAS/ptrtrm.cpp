@@ -472,8 +472,17 @@ void ptrtrm(const DdlaHandle_t& h, char ua, char ta, char ub, char tb, int n,
         return;
     }
     std::size_t bytes=0,host_bytes=0;
-    ptrtrm_impl::ptrtrm_workspace_size<T>(h,ta,tb,n,da,db,dc,&bytes,&host_bytes);
-    vector<char> work(h,bytes);std::vector<char> host(host_bytes);
+    vector<char> work(h);
+    std::vector<char> host;
+    auto prepare = [&] {
+        ptrtrm_impl::ptrtrm_workspace_size<T>(h,ta,tb,n,da,db,dc,&bytes,&host_bytes);
+        work.resize(bytes);
+        host.resize(host_bytes);
+    };
+    if (h->nprocs > 1)
+        detail::agree_local(h, "ptrtrm workspace preparation", prepare);
+    else
+        prepare();
     ptrtrm_impl::ptrtrm_run<Backend,T>(h,ua,ta,ub,tb,n,alpha,A,da,B,db,beta,C,dc,
         work.data(),bytes,host.data(),host_bytes);
 }

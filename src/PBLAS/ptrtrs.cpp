@@ -382,11 +382,20 @@ void ptrtrs(
 )
 {
     ptrtrs_impl::ptrtrs_check<Backend>(handle, side, uplo, trans, diag, m, n, array_descA, array_descB);
+    if (m == 0 || n == 0) return;
     std::size_t backend_bytes = 0, host_bytes = 0;
-    ptrtrs_impl::ptrtrs_workspace_size<T>(handle, side, trans, m, n, array_descA, array_descB,
-                                          &backend_bytes, &host_bytes);
-    vector<char> backend_work(handle, backend_bytes);
-    std::vector<char> host_work(host_bytes);
+    vector<char> backend_work(handle);
+    std::vector<char> host_work;
+    auto prepare = [&] {
+        ptrtrs_impl::ptrtrs_workspace_size<T>(handle, side, trans, m, n, array_descA, array_descB,
+                                              &backend_bytes, &host_bytes);
+        backend_work.resize(backend_bytes);
+        host_work.resize(host_bytes);
+    };
+    if (handle->nprocs > 1)
+        detail::agree_local(handle, "ptrtrs workspace preparation", prepare);
+    else
+        prepare();
     ptrtrs_impl::ptrtrs_run<Backend, T>(handle, side, uplo, trans, diag, m, n, A, array_descA, B, array_descB,
                                         backend_work.data(), backend_bytes, host_work.data(), host_bytes);
 }

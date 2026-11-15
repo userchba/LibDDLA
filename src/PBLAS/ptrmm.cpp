@@ -263,10 +263,18 @@ void ptrmm(const DdlaHandle_t& handle, char side, char uplo, char trans, char di
     trans=static_cast<char>(std::toupper(static_cast<unsigned char>(trans)));
     diag=static_cast<char>(std::toupper(static_cast<unsigned char>(diag)));
     std::size_t backend_bytes = 0, host_bytes = 0;
-    ptrmm_impl::ptrmm_workspace_size<T>(handle, side, trans, m, n, alpha == T(0), descA, descB,
-                                        &backend_bytes, &host_bytes);
-    vector<char> backend_work(handle, backend_bytes);
-    std::vector<char> host_work(host_bytes);
+    vector<char> backend_work(handle);
+    std::vector<char> host_work;
+    auto prepare = [&] {
+        ptrmm_impl::ptrmm_workspace_size<T>(handle, side, trans, m, n, alpha == T(0), descA, descB,
+                                            &backend_bytes, &host_bytes);
+        backend_work.resize(backend_bytes);
+        host_work.resize(host_bytes);
+    };
+    if (handle->nprocs > 1)
+        detail::agree_local(handle, "ptrmm workspace preparation", prepare);
+    else
+        prepare();
     ptrmm_impl::ptrmm_run<Backend, T>(handle, side, uplo, trans, diag, m, n,
                                       alpha, A, descA, B, descB,
                                       backend_work.data(), backend_bytes, host_work.data(), host_bytes);
