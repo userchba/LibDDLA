@@ -82,6 +82,36 @@ function(add_bench_executable test_name)
 endfunction()
 
 enable_testing()
+# Fault injection remains in a test-only preload, outside the production library.
+if(UNIX AND NOT APPLE)
+    add_library(pblas_alloc_failure SHARED pblas_alloc_failure.cpp)
+    apply_test_connector_defs(pblas_alloc_failure)
+    target_include_directories(pblas_alloc_failure PRIVATE
+        $<TARGET_PROPERTY:ddla_lib,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_link_libraries(pblas_alloc_failure PRIVATE MPI::MPI_CXX ${CMAKE_DL_LIBS})
+    add_executable(test_pblas_alloc_failure test_pblas_alloc_failure.cpp)
+    apply_test_connector_defs(test_pblas_alloc_failure)
+    target_link_libraries(test_pblas_alloc_failure PRIVATE ddla_lib ${CMAKE_DL_LIBS})
+    add_dependencies(test_pblas_alloc_failure pblas_alloc_failure)
+    if(DDLA_HAS_GPU)
+        set(_fault_label gpu)
+    else()
+        set(_fault_label cpu)
+    endif()
+    foreach(_fault_case pgemm_backend pgeadd_host)
+        string(REPLACE "_" ";" _fault_args "${_fault_case}")
+        add_test(NAME preparation_failure_${_fault_case}
+            COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${DDLA_TEST_NP}
+                ${MPIEXEC_PREFLAGS} ${CMAKE_COMMAND} -E env
+                "LD_PRELOAD=$<TARGET_FILE:pblas_alloc_failure>"
+                $<TARGET_FILE:test_pblas_alloc_failure> ${_fault_args} 17 1 0
+                ${MPIEXEC_POSTFLAGS})
+        set_tests_properties(preparation_failure_${_fault_case} PROPERTIES
+            LABELS "${_fault_label}" PROCESSORS ${DDLA_TEST_NP}
+            SKIP_RETURN_CODE 77 TIMEOUT 60
+            ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+    endforeach()
+endif()
 if(UNIX AND NOT APPLE)
     find_package(Threads REQUIRED)
     add_test_executable(test_stream_ownership 1)
