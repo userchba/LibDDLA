@@ -484,9 +484,17 @@ void phemm(const DdlaHandle_t& h, char side, char uplo, int m, int n,
     side=static_cast<char>(std::toupper(static_cast<unsigned char>(side)));
     uplo=static_cast<char>(std::toupper(static_cast<unsigned char>(uplo)));
     std::size_t backend_bytes=0,host_bytes=0;
-    phemm_impl::phemm_workspace_size<T>(h,side,m,n,alpha==T(0),da,db,dc,true,&backend_bytes,&host_bytes);
-    vector<char> backend_work(h,backend_bytes);
-    std::vector<char> host_work(host_bytes);
+    vector<char> backend_work(h);
+    std::vector<char> host_work;
+    auto prepare = [&] {
+        phemm_impl::phemm_workspace_size<T>(h,side,m,n,alpha==T(0),da,db,dc,true,&backend_bytes,&host_bytes);
+        backend_work.resize(backend_bytes);
+        host_work.resize(host_bytes);
+    };
+    if (h->nprocs > 1)
+        detail::agree_local(h, "phemm workspace preparation", prepare);
+    else
+        prepare();
     phemm_impl::phemm_run<Backend,T>(h,side,uplo,m,n,alpha,A,da,B,db,beta,C,dc,true,
         backend_work.data(),backend_bytes,host_work.data(),host_bytes);
 }
@@ -509,8 +517,17 @@ void phemm(const DdlaHandle_t& h,char side,char uplo,int m,int n,
     if (phemm_impl::phemm_check<Backend,T>(h,side,uplo,m,n,alpha,A,da,B,db,beta,C,dc)) return;
     side=blas_impl::upper(side);uplo=blas_impl::upper(uplo);
     std::size_t bytes=0,host_bytes=0;
-    phemm_impl::phemm_workspace_size<T,R,std::complex<R>>(h,side,m,n,alpha==T(0),da,db,dc,true,&bytes,&host_bytes);
-    vector<char> work(h,bytes);std::vector<char> host(host_bytes);
+    vector<char> work(h);
+    std::vector<char> host;
+    auto prepare = [&] {
+        phemm_impl::phemm_workspace_size<T,R,std::complex<R>>(h,side,m,n,alpha==T(0),da,db,dc,true,&bytes,&host_bytes);
+        work.resize(bytes);
+        host.resize(host_bytes);
+    };
+    if (h->nprocs > 1)
+        detail::agree_local(h, "phemm workspace preparation", prepare);
+    else
+        prepare();
     phemm_impl::phemm_run<Backend,T>(h,side,uplo,m,n,alpha,A,da,B,db,beta,C,dc,true,
         work.data(),bytes,host.data(),host_bytes);
 }
@@ -524,8 +541,17 @@ void phemm(const DdlaHandle_t& h,char side,char uplo,int m,int n,
     if (phemm_impl::phemm_check<Backend,T>(h,side,uplo,m,n,alpha,A,da,B,db,beta,C,dc)) return;
     side=blas_impl::upper(side);uplo=blas_impl::upper(uplo);
     std::size_t bytes=0,host_bytes=0;
-    phemm_impl::phemm_workspace_size<T,std::complex<R>,R>(h,side,m,n,alpha==T(0),da,db,dc,true,&bytes,&host_bytes);
-    vector<char> work(h,bytes);std::vector<char> host(host_bytes);
+    vector<char> work(h);
+    std::vector<char> host;
+    auto prepare = [&] {
+        phemm_impl::phemm_workspace_size<T,std::complex<R>,R>(h,side,m,n,alpha==T(0),da,db,dc,true,&bytes,&host_bytes);
+        work.resize(bytes);
+        host.resize(host_bytes);
+    };
+    if (h->nprocs > 1)
+        detail::agree_local(h, "phemm workspace preparation", prepare);
+    else
+        prepare();
     phemm_impl::phemm_run<Backend,T>(h,side,uplo,m,n,alpha,A,da,B,db,beta,C,dc,true,
         work.data(),bytes,host.data(),host_bytes);
 }
