@@ -441,10 +441,18 @@ void run(
         });
     }
     std::size_t backend_bytes = 0, host_bytes = 0;
-    pgemm_workspace_size<T, TA, TB>(handle, algorithm, panel_width, alpha == T(0), transa, transb, m, n, k, beta != T(0),
-                                    descA, descB, descC, &backend_bytes, &host_bytes);
-    vector<char> backend_work(handle, backend_bytes);
-    std::vector<char> host_work(host_bytes);
+    vector<char> backend_work(handle);
+    std::vector<char> host_work;
+    auto prepare = [&] {
+        pgemm_workspace_size<T, TA, TB>(handle, algorithm, panel_width, alpha == T(0), transa, transb, m, n, k, beta != T(0),
+                                        descA, descB, descC, &backend_bytes, &host_bytes);
+        backend_work.resize(backend_bytes);
+        host_work.resize(host_bytes);
+    };
+    if (handle->nprocs > 1)
+        detail::agree_local(handle, "pgemm workspace preparation", prepare);
+    else
+        prepare();
     pgemm_run<Backend, T, TA, TB>(handle, algorithm, panel_width, transa, transb, m, n, k, alpha,
                           A, descA, B, descB, beta, C, descC,
                           backend_work.data(), backend_bytes, host_work.data(), host_bytes);

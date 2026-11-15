@@ -691,16 +691,24 @@ void pgeadd(const DdlaHandle_t& h, char transa, char transb, int m, int n,
     transa=static_cast<char>(std::toupper(static_cast<unsigned char>(transa)));
     transb=static_cast<char>(std::toupper(static_cast<unsigned char>(transb)));
     std::size_t backend_bytes=0,host_bytes=0;
-    pgeadd_impl::pgeadd_workspace_size<T>(h,transa,transb,alpha!=T(0),beta!=T(0),m,n,dc,
-        &backend_bytes,&host_bytes,da,db,
-        (alpha!=T(0) && (transa=='N'
-            ? !pgeadd_impl::local_layout(h,transa,da,ia-1,ja-1,dc,ic-1,jc-1)
-            : !pgeadd_impl::aligned_blocks(transa,da,ia-1,ja-1,dc,ic-1,jc-1)))
-        || (beta!=T(0) && (transb=='N'
-            ? !pgeadd_impl::local_layout(h,transb,db,ib-1,jb-1,dc,ic-1,jc-1)
-            : !pgeadd_impl::aligned_blocks(transb,db,ib-1,jb-1,dc,ic-1,jc-1))));
-    vector<char> backend_work(h,backend_bytes);
-    std::vector<char> host_work(host_bytes);
+    vector<char> backend_work(h);
+    std::vector<char> host_work;
+    auto prepare = [&] {
+        pgeadd_impl::pgeadd_workspace_size<T>(h,transa,transb,alpha!=T(0),beta!=T(0),m,n,dc,
+            &backend_bytes,&host_bytes,da,db,
+            (alpha!=T(0) && (transa=='N'
+                ? !pgeadd_impl::local_layout(h,transa,da,ia-1,ja-1,dc,ic-1,jc-1)
+                : !pgeadd_impl::aligned_blocks(transa,da,ia-1,ja-1,dc,ic-1,jc-1)))
+            || (beta!=T(0) && (transb=='N'
+                ? !pgeadd_impl::local_layout(h,transb,db,ib-1,jb-1,dc,ic-1,jc-1)
+                : !pgeadd_impl::aligned_blocks(transb,db,ib-1,jb-1,dc,ic-1,jc-1))));
+        backend_work.resize(backend_bytes);
+        host_work.resize(host_bytes);
+    };
+    if (h->nprocs > 1)
+        detail::agree_local(h, "pgeadd workspace preparation", prepare);
+    else
+        prepare();
     pgeadd_impl::pgeadd_run<Backend,T>(h,transa,transb,m,n,
         alpha,a,ia,ja,da,beta,b,ib,jb,db,c,ic,jc,dc,
         backend_work.data(),backend_bytes,host_work.data(),host_bytes);
