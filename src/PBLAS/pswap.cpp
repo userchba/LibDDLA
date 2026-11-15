@@ -226,8 +226,15 @@ void pswap(
     pswap_impl::pswap_check<Backend>(handle, N, ia, ja, array_descA, inca,
                                      ib, jb, array_descB, incb);
     std::size_t backend_bytes = 0;
-    pswap_impl::pswap_workspace_size<T>(handle, array_descA, &backend_bytes);
-    vector<char> work(handle, backend_bytes);
+    vector<char> work(handle);
+    auto prepare = [&] {
+        pswap_impl::pswap_workspace_size<T>(handle, array_descA, &backend_bytes);
+        work.resize(backend_bytes);
+    };
+    if (handle->nprocs > 1)
+        detail::agree_local(handle, "pswap workspace preparation", prepare);
+    else
+        prepare();
     pswap_impl::pswap_run<Backend, T>(handle, N, A, ia, ja, array_descA, inca, B, ib, jb, array_descB, incb,
                                       work.data(), backend_bytes);
 }

@@ -1,6 +1,7 @@
 // Run only with libpblas_alloc_failure.so preloaded; see the matching test recipe.
 #include "mpi_test_init.h"
 #include "test_backend.h"
+#include "LU/lu_internal.h"
 #include "test_desc_helpers.h"
 #include <ddla/ddla.h>
 #include <ddla/ddla_vector.h>
@@ -81,9 +82,14 @@ int main(int argc, char** argv)
         DDLA_CHECK(ddlaSet(h, MPI_COMM_WORLD, rows, size / rows));
         {
             Matrix a(h, n + 4, 1), b(h, n + 4, 2), c(h, n + 4, 5);
+            std::vector<int> piv(std::size_t(n) + 8, -777);
+            const auto original_piv = piv;
             std::vector<double> tau(std::size_t(n) + 8, -888.);
             const auto original_tau = tau;
             int info = -1;
+            ddla::vector<int> block_piv(h, piv.size());
+            DDLA_CHECK(ddlaMemcpy(h, block_piv.data(), piv.data(), piv.size() * sizeof(int)));
+            DDLA_CHECK(ddlaSynchronize(h));
             auto call = [&] {
                 if (op == "pgemm")
                     pgemm<double>(h, 'N', 'N', n, n, n, 1., a.data(), a.d, b.data(), b.d, 1., c.data(), c.d);
@@ -116,10 +122,36 @@ int main(int argc, char** argv)
                     ppotrs<double>(h, 'L', 'L', 'N', n, n, a.data(), a.d, c.data(), c.d);
                 else if (op == "pposv")
                     pposv<double>(h, 'L', 'L', 'N', n, n, a.data(), 1, 1, a.d, c.data(), 1, 1, c.d, info);
+                else if (op == "pswap")
+                    pswap<double>(h, n, a.data(), 1, 1, a.d, 1, c.data(), 1, 1, c.d, 1);
                 else if (op == "pgeqrf")
                     pgeqrf<double>(h, n, n, a.data(), a.d, tau.data(), info);
                 else if (op == "pgeqrs")
                     pgeqrs<double>(h, n, n, n, a.data(), a.d, tau.data(), c.data(), c.d, info);
+                else if (op == "pgetrf")
+                    pgetrf<double>(h, n, n, a.data(), 1, 1, a.d, piv.data(), info);
+                else if (op == "pgetf2")
+                    pgetf2<ddla_test::execution_backend, double>(h, n, n, 4, a.data(), 1, 1, a.d, piv.data(), info);
+                else if (op == "pgetrf_bpiv")
+                    pgetrf_bpiv<double>(h, n, n, a.data(), a.d, block_piv.data(), info);
+                else if (op == "pgetrf_nopiv")
+                    pgetrf_nopiv<double>(h, n, n, a.data(), a.d, info);
+                else if (op == "pgetrs")
+                    pgetrs<double>(h, 'L', 'N', n, n, a.data(), a.d, piv.data(), c.data(), c.d);
+                else if (op == "pgetrs_bpiv")
+                    pgetrs_bpiv<double>(h, 'L', 'N', n, n, a.data(), a.d, block_piv.data(), c.data(), c.d);
+                else if (op == "pgetrs_nopiv")
+                    pgetrs_nopiv<double>(h, 'L', 'N', n, n, a.data(), a.d, c.data(), c.d);
+                else if (op == "pgesv")
+                    pgesv<double>(h, 'L', 'N', n, n, a.data(), a.d, c.data(), c.d);
+                else if (op == "pgesv_bpiv")
+                    pgesv_bpiv<double>(h, 'L', 'N', n, n, a.data(), a.d, c.data(), c.d);
+                else if (op == "pgesv_nopiv")
+                    pgesv_nopiv<double>(h, 'L', 'N', n, n, a.data(), a.d, c.data(), c.d);
+                else if (op == "plapiv")
+                    plapiv<double>(h, 'F', 'R', 'C', n, n, a.data(), a.d, piv.data(), a.d, nullptr);
+                else if (op == "ppotrf_bottom_right")
+                    ppotrf_bottom_right<double>(h, 'L', n, a.data(), a.d, info);
                 else throw std::invalid_argument("unknown operation");
             };
             if (!prewarm()) throw std::runtime_error("allocator preload failed to resolve ddlaMalloc");
@@ -144,7 +176,11 @@ int main(int argc, char** argv)
             local &= a.unchanged(h);
             local &= b.unchanged(h);
             local &= c.unchanged(h);
-            local &= tau == original_tau;
+            local &= piv == original_piv && tau == original_tau;
+            std::vector<int> actual_block_piv(piv.size());
+            DDLA_CHECK(ddlaMemcpy(h, actual_block_piv.data(), block_piv.data(), piv.size() * sizeof(int)));
+            DDLA_CHECK(ddlaSynchronize(h));
+            local &= actual_block_piv == original_piv;
             int all = 0;
             MPI_Allreduce(&local, &all, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
             if (!all) throw std::runtime_error("fault did not fire once and preserve every rank's matrices");

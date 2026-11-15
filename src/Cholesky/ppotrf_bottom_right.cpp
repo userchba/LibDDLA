@@ -361,9 +361,17 @@ void ppotrf_bottom_right(
     cholesky_impl::ppotrf_bottom_right_check<Backend>(handle,uplo,n,A,descA);
     info=0;if(n==0)return;
     std::size_t backend_bytes=0,host_bytes=0;
-    cholesky_impl::ppotrf_bottom_right_workspace_size<T>(handle,uplo,n,A,descA,&backend_bytes,&host_bytes);
-    vector<char> backend_work(handle,backend_bytes);
-    std::vector<char> host_work(host_bytes);
+    vector<char> backend_work(handle);
+    std::vector<char> host_work;
+    auto prepare = [&] {
+        cholesky_impl::ppotrf_bottom_right_workspace_size<T>(handle,uplo,n,A,descA,&backend_bytes,&host_bytes);
+        backend_work.resize(backend_bytes);
+        host_work.resize(host_bytes);
+    };
+    if (handle->nprocs > 1)
+        detail::agree_local(handle, "ppotrf_bottom_right workspace preparation", prepare);
+    else
+        prepare();
     cholesky_impl::ppotrf_bottom_right_run<Backend,T>(handle,uplo,n,A,descA,info,
                                                       backend_work.data(),backend_bytes,host_work.data(),host_bytes);
 }

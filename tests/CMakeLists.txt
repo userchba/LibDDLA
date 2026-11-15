@@ -93,18 +93,33 @@ if(UNIX AND NOT APPLE)
     apply_test_connector_defs(test_pblas_alloc_failure)
     target_link_libraries(test_pblas_alloc_failure PRIVATE ddla_lib ${CMAKE_DL_LIBS})
     add_dependencies(test_pblas_alloc_failure pblas_alloc_failure)
+    target_include_directories(test_pblas_alloc_failure PRIVATE "${PROJECT_SOURCE_DIR}/src")
     if(DDLA_HAS_GPU)
         set(_fault_label gpu)
     else()
         set(_fault_label cpu)
     endif()
-    foreach(_fault_case pgemm_backend pgeadd_host ptrmm_backend ptrtrm_backend ptrtrs_backend psyrk_backend psyr2k_backend pgemmt_backend psymm_backend psymmt_backend phemm_backend phemmt_backend pgeqrf_backend pgeqrs_backend pgeqrs_host ppotrf_backend ppotrs_backend pposv_backend)
-        string(REPLACE "_" ";" _fault_args "${_fault_case}")
+    foreach(_fault_case pgemm_backend pgeadd_host ptrmm_backend ptrtrm_backend ptrtrs_backend psyrk_backend psyr2k_backend pgemmt_backend psymm_backend psymmt_backend phemm_backend phemmt_backend pgeqrf_backend pgeqrs_backend pgeqrs_host ppotrf_backend ppotrs_backend pposv_backend pswap_backend pgetrf_backend pgetf2_backend pgetrf_bpiv_backend pgetrf_nopiv_backend pgetrs_backend pgetrs_bpiv_backend pgetrs_nopiv_backend pgesv_backend pgesv_bpiv_backend pgesv_nopiv_backend plapiv_backend ppotrf_bottom_right_backend)
+        string(REGEX REPLACE "_(backend|host)$" "" _fault_op "${_fault_case}")
+        string(REGEX MATCH "(backend|host)$" _fault_kind "${_fault_case}")
+        set(_fault_args ${_fault_op} ${_fault_kind})
+        set(_fault_rows 1)
+        if(_fault_op STREQUAL "ppotrf_bottom_right")
+            # Reverse Cholesky needs a square grid; omit this case otherwise.
+            set(_fault_square 1)
+            while(_fault_square LESS DDLA_TEST_NP)
+                math(EXPR _fault_rows "${_fault_rows} + 1")
+                math(EXPR _fault_square "${_fault_rows} * ${_fault_rows}")
+            endwhile()
+            if(NOT _fault_square EQUAL DDLA_TEST_NP)
+                continue()
+            endif()
+        endif()
         add_test(NAME preparation_failure_${_fault_case}
             COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${DDLA_TEST_NP}
                 ${MPIEXEC_PREFLAGS} ${CMAKE_COMMAND} -E env
                 "LD_PRELOAD=$<TARGET_FILE:pblas_alloc_failure>"
-                $<TARGET_FILE:test_pblas_alloc_failure> ${_fault_args} 17 1 0
+                $<TARGET_FILE:test_pblas_alloc_failure> ${_fault_args} 17 ${_fault_rows} 0
                 ${MPIEXEC_POSTFLAGS})
         set_tests_properties(preparation_failure_${_fault_case} PROPERTIES
             LABELS "${_fault_label}" PROCESSORS ${DDLA_TEST_NP}

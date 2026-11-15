@@ -291,9 +291,17 @@ void pgetf2(const DdlaHandle_t& handle, int m, int n, int width, T* A, int ia, i
     if (width == 0) return;
     // 2. the scratch of this panel call.
     std::size_t backend_bytes = 0, host_bytes = 0;
-    lu_impl::pgetf2_workspace_size<T>(handle, gather, m, n, width, A, ia, ja, desc, ja, &backend_bytes, &host_bytes);
-    vector<char> backend_work(handle, backend_bytes);
-    std::vector<char> host_work(host_bytes);
+    vector<char> backend_work(handle);
+    std::vector<char> host_work;
+    auto prepare = [&] {
+        lu_impl::pgetf2_workspace_size<T>(handle, gather, m, n, width, A, ia, ja, desc, ja, &backend_bytes, &host_bytes);
+        backend_work.resize(backend_bytes);
+        host_work.resize(host_bytes);
+    };
+    if (handle->nprocs > 1)
+        detail::agree_local(handle, "pgetf2 workspace preparation", prepare);
+    else
+        prepare();
     // 3. the factorization.
     lu_impl::pgetf2_run<Backend,T>(handle, gather, m, n, width, A, ia, ja, desc, ipiv, info, ja,
                                    backend_work.data(), backend_bytes, host_work.data(), host_bytes);

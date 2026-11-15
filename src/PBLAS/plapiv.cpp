@@ -198,8 +198,15 @@ void plapiv(
     (void)iwork;
     plapiv_impl::plapiv_check<Backend>(handle, direc, rowcol, pivroc, m, n, array_descA, array_descIP);
     std::size_t backend_bytes = 0;
-    plapiv_impl::plapiv_workspace_size<T>(handle, n, array_descA, &backend_bytes);
-    vector<char> work(handle, backend_bytes);
+    vector<char> work(handle);
+    auto prepare = [&] {
+        plapiv_impl::plapiv_workspace_size<T>(handle, n, array_descA, &backend_bytes);
+        work.resize(backend_bytes);
+    };
+    if (handle->nprocs > 1)
+        detail::agree_local(handle, "plapiv workspace preparation", prepare);
+    else
+        prepare();
     plapiv_impl::plapiv_run<Backend, T>(handle, direc, rowcol, m, n, A, array_descA, ipiv, array_descIP,
                                         work.data(), backend_bytes);
 }

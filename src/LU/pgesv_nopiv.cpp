@@ -98,10 +98,18 @@ void pgesv_nopiv(
     if (n == 0) return;
     // 2. the scratch of the factorization and of the solve.
     std::size_t backend_bytes = 0, host_bytes = 0;
-    lu_impl::pgesv_nopiv_workspace_size<T>(handle, side, trans, n, nrhs, array_descA, array_descB,
-                                           &backend_bytes, &host_bytes);
-    vector<char> backend_work(handle, backend_bytes);
-    std::vector<char> host_work(host_bytes);
+    vector<char> backend_work(handle);
+    std::vector<char> host_work;
+    auto prepare = [&] {
+        lu_impl::pgesv_nopiv_workspace_size<T>(handle, side, trans, n, nrhs, array_descA, array_descB,
+                                               &backend_bytes, &host_bytes);
+        backend_work.resize(backend_bytes);
+        host_work.resize(host_bytes);
+    };
+    if (handle->nprocs > 1)
+        detail::agree_local(handle, "pgesv_nopiv workspace preparation", prepare);
+    else
+        prepare();
     // 3. factor, then solve.
     int info = 1;
     lu_impl::pgesv_nopiv_run<Backend, T>(handle, side, trans, n, nrhs, A, array_descA, B, array_descB, info,
