@@ -112,6 +112,10 @@ int main(int argc, char** argv)
                     ptrtrs<double>(h, 'L', 'L', 'N', 'U', n, n, a.data(), a.d, c.data(), c.d);
                 else if (op == "ppotrf")
                     ppotrf<double>(h, 'L', n, a.data(), 1, 1, a.d, info);
+                else if (op == "ppotrs")
+                    ppotrs<double>(h, 'L', 'L', 'N', n, n, a.data(), a.d, c.data(), c.d);
+                else if (op == "pposv")
+                    pposv<double>(h, 'L', 'L', 'N', n, n, a.data(), 1, 1, a.d, c.data(), 1, 1, c.d, info);
                 else if (op == "pgeqrf")
                     pgeqrf<double>(h, n, n, a.data(), a.d, tau.data(), info);
                 else if (op == "pgeqrs")

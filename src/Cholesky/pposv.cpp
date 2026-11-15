@@ -46,9 +46,17 @@ void pposv(const DdlaHandle_t& h,char side,char uplo,char trans,int n,int nrhs,T
     cholesky_impl::pposv_check<Backend>(h,side,uplo,trans,n,nrhs,A,ia,ja,da,B,ib,jb,db);
     if(n==0){info=0;return;}
     std::size_t backend_bytes=0,host_bytes=0;
-    cholesky_impl::pposv_workspace_size<T>(h,side,uplo,n,nrhs,A,da,db,&backend_bytes,&host_bytes);
-    vector<char> backend_work(h,backend_bytes);
-    std::vector<char> host_work(host_bytes);
+    vector<char> backend_work(h);
+    std::vector<char> host_work;
+    auto prepare = [&] {
+        cholesky_impl::pposv_workspace_size<T>(h,side,uplo,n,nrhs,A,da,db,&backend_bytes,&host_bytes);
+        backend_work.resize(backend_bytes);
+        host_work.resize(host_bytes);
+    };
+    if (h->nprocs > 1)
+        detail::agree_local(h, "pposv workspace preparation", prepare);
+    else
+        prepare();
     cholesky_impl::pposv_run<Backend,T>(h,side,uplo,trans,n,nrhs,A,ia,ja,da,B,ib,jb,db,info,
                                         backend_work.data(),backend_bytes,host_work.data(),host_bytes);
     DDLA_CHECK(ddlaSynchronize(h));
