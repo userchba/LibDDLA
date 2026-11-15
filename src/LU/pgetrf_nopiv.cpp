@@ -92,8 +92,15 @@ void pgetrf_nopiv(
     if (m <= 0 || n <= 0) return;
     // 2. the scratch.
     std::size_t backend_bytes = 0;
-    lu_impl::pgetrf_nopiv_workspace_size<T>(handle, m, n, array_descA, &backend_bytes);
-    vector<char> backend_work(handle, backend_bytes);
+    vector<char> backend_work(handle);
+    auto prepare = [&] {
+        lu_impl::pgetrf_nopiv_workspace_size<T>(handle, m, n, array_descA, &backend_bytes);
+        backend_work.resize(backend_bytes);
+    };
+    if (handle->nprocs > 1)
+        detail::agree_local(handle, "pgetrf_nopiv workspace preparation", prepare);
+    else
+        prepare();
     // 3. the factorization.
     lu_impl::pgetrf_nopiv_run<Backend, T>(handle, m, n, A, array_descA, info, backend_work.data(), backend_bytes);
 }
