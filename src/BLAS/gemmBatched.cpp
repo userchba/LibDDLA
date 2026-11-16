@@ -1,4 +1,5 @@
 #include "blas_impl.h"
+#include <limits>
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -259,6 +260,7 @@ void gemmBatched_run(
                     gemm_run<Backend,R>(handle,transa,transb,m,n,k,alpha,Aarray[q],lda,Barray[q],ldb,beta,Carray[q],ldc,work,bytes);
                 return;
             }
+            const bool direct_left=complex_left && transa=='N' && lda<=std::numeric_limits<int>::max()/2;
             const std::size_t packed=2*(complex_left ? std::size_t(m)*depth : std::size_t(depth)*panel);
             const std::size_t result=2*std::size_t(m)*panel,stride=packed+result;
             char* cursor=static_cast<char*>(work);
@@ -276,12 +278,12 @@ void gemmBatched_run(
                 q=cap>1?omp_get_thread_num():0;
 #endif
                 R* p=data+q*stride;
-                if constexpr (complex_left) if(depth==k && transa!='N')
+                if constexpr (complex_left) if(depth==k && !direct_left)
                     detail::mixed_pack_left<R>(transa,m,k,Aarray[product],lda,p);
                 for (int j0=0;j0<n;) {
                     const int nj=std::min(panel,n-j0);
                     cp[q]=p+packed;
-                    if constexpr(complex_left) if(transa=='N') {
+                    if constexpr(complex_left) if(direct_left) {
                         // The complex row pairs can go straight to real BLAS.
                         gemm_run<Backend,R>(handle,'N',transb,2*m,nj,k,R(1),
                             reinterpret_cast<const R*>(Aarray[product]),2*lda,
