@@ -16,6 +16,22 @@
 #include "gemm_template_device_defs.hpp"
 #include "gemm_template_device.hpp"
 
+// Zero products must scale C without reading input matrices, including when
+// their entries are null. This shared tile store also avoids reading old C
+// when beta is zero.
+template<typename T, int BM, int BN>
+__device__ void gemm_vbatched_scale_tile(int m,int n,T* c,int ld,T beta)
+{
+    const int tid=threadIdx.x+blockDim.x*threadIdx.y;
+    for(int p=tid;p<BM*BN;p+=blockDim.x*blockDim.y) {
+        const int i=blockIdx.x*BM+p%BM,j=blockIdx.y*BN+p/BM;
+        if(i<m && j<n) {
+            const std::size_t index=i+std::size_t(j)*ld;
+            c[index]=beta==make_FloatingPoint(0.,0.) ? make_FloatingPoint(0.,0.) : mul(beta,c[index]);
+        }
+    }
+}
+
 template<typename T>
 using Func_gemm_template_vbatched_kernel = void(*)(
     int*, int*, int*,
@@ -62,7 +78,13 @@ void gemm_template_vbatched_nn_kernel(
 
     // now either my_M or my_N is +ve, but my_K >= 0
     // check for my_K == 0 && beta == 1, for which C is unchanged
-    if(my_K == 0 && beta == make_FloatingPoint(1.,0.)) return;
+    if(my_K == 0 || alpha == make_FloatingPoint(0.,0.)) {
+        if(beta == make_FloatingPoint(1.,0.)) return;
+        if(Carray[batchid] != NULL)
+            gemm_vbatched_scale_tile<T,BLK_M,BLK_N>(my_M,my_N,
+                Carray[batchid]+std::size_t(LDC[batchid])*Cj+Ci,LDC[batchid],beta);
+        return;
+    }
 
     if( Aarray[batchid] == NULL || Barray[batchid] == NULL || Carray[batchid] == NULL ) return;
     if( blockIdx.x >= ddlaVbatchedCeilDiv( my_M, BLK_M ) ) return;
@@ -119,7 +141,13 @@ void gemm_template_vbatched_nt_kernel(
 
     // now either my_M or my_N is +ve, but my_K >= 0
     // check for my_K == 0 && beta == 1, for which C is unchanged
-    if(my_K == 0 && beta == make_FloatingPoint(1.,0.)) return;
+    if(my_K == 0 || alpha == make_FloatingPoint(0.,0.)) {
+        if(beta == make_FloatingPoint(1.,0.)) return;
+        if(Carray[batchid] != NULL)
+            gemm_vbatched_scale_tile<T,BLK_M,BLK_N>(my_M,my_N,
+                Carray[batchid]+std::size_t(LDC[batchid])*Cj+Ci,LDC[batchid],beta);
+        return;
+    }
 
     if( Aarray[batchid] == NULL || Barray[batchid] == NULL || Carray[batchid] == NULL ) return;
     if( blockIdx.x >= (my_M+BLK_M-1)/BLK_M ) return;
@@ -176,7 +204,13 @@ void gemm_template_vbatched_tn_kernel(
 
     // now either my_M or my_N is +ve, but my_K >= 0
     // check for my_K == 0 && beta == 1, for which C is unchanged
-    if(my_K == 0 && beta == make_FloatingPoint(1.,0.)) return;
+    if(my_K == 0 || alpha == make_FloatingPoint(0.,0.)) {
+        if(beta == make_FloatingPoint(1.,0.)) return;
+        if(Carray[batchid] != NULL)
+            gemm_vbatched_scale_tile<T,BLK_M,BLK_N>(my_M,my_N,
+                Carray[batchid]+std::size_t(LDC[batchid])*Cj+Ci,LDC[batchid],beta);
+        return;
+    }
 
     if( Aarray[batchid] == NULL || Barray[batchid] == NULL || Carray[batchid] == NULL ) return;
     if( blockIdx.x >= (my_M+BLK_M-1)/BLK_M ) return;
@@ -233,7 +267,13 @@ void gemm_template_vbatched_tt_kernel(
 
     // now either my_M or my_N is +ve, but my_K >= 0
     // check for my_K == 0 && beta == 1, for which C is unchanged
-    if(my_K == 0 && beta == make_FloatingPoint(1.,0.)) return;
+    if(my_K == 0 || alpha == make_FloatingPoint(0.,0.)) {
+        if(beta == make_FloatingPoint(1.,0.)) return;
+        if(Carray[batchid] != NULL)
+            gemm_vbatched_scale_tile<T,BLK_M,BLK_N>(my_M,my_N,
+                Carray[batchid]+std::size_t(LDC[batchid])*Cj+Ci,LDC[batchid],beta);
+        return;
+    }
 
     if( Aarray[batchid] == NULL || Barray[batchid] == NULL || Carray[batchid] == NULL ) return;
     if( blockIdx.x >= (my_M+BLK_M-1)/BLK_M ) return;

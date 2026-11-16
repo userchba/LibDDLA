@@ -12,6 +12,8 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <cstring>
+#include <limits>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -76,13 +78,13 @@ void reference_gemm(
         for (int row = 0; row < m; ++row)
         {
             T sum{};
-            for (int inner = 0; inner < k; ++inner)
-            {
-                sum += matrix_element(A, lda, row, inner, transA)
-                    * matrix_element(B, ldb, inner, column, transB);
-            }
-            C[row + column * ldc] =
-                alpha * sum + beta * C[row + column * ldc];
+            if (alpha != T{})
+                for (int inner = 0; inner < k; ++inner)
+                    sum += matrix_element(A, lda, row, inner, transA)
+                        * matrix_element(B, ldb, inner, column, transB);
+            const T product = alpha * sum;
+            const auto index = row + column * ldc;
+            C[index] = beta == T{} ? product : product + beta * C[index];
         }
     }
 }
@@ -90,7 +92,10 @@ void reference_gemm(
 template <typename T>
 double difference(T lhs, T rhs)
 {
-    return static_cast<double>(std::abs(lhs - rhs));
+    const double error = static_cast<double>(std::abs(lhs - rhs));
+    if (!std::isfinite(error))
+        throw std::runtime_error("nonfinite variable-batch GEMM output or reference");
+    return error;
 }
 
 template <typename T>
@@ -279,7 +284,7 @@ double run_standard_case(
         c_sizes[batch] = C[batch].size();
     }
 
-    const T alpha = value<T>(19);
+    const T alpha = T{1} + value<T>(19);
     DeviceArray<int> d_m(handle, m), d_n(handle, n), d_k(handle, k);
     DeviceArray<int> d_lda(handle, lda), d_ldb(handle, ldb), d_ldc(handle, ldc);
     DeviceMatrixBatch<T> d_A(handle, A), d_B(handle, B);
@@ -287,7 +292,14 @@ double run_standard_case(
     const std::array<T, 3> betas{T{}, T{1}, value<T>(23)};
     for (const T beta : betas)
     {
-        auto expected = C;
+        auto input = C;
+        if (beta == T{})
+            for (int batch = 0; batch < 3; ++batch)
+                for (int column = 0; column < n[batch]; ++column)
+                    for (int row = 0; row < m[batch]; ++row)
+                        input[batch][row + column * ldc[batch]] =
+                            T(std::numeric_limits<double>::quiet_NaN());
+        auto expected = input;
         for (int batch = 0; batch < 3; ++batch)
         {
             reference_gemm(
@@ -296,7 +308,7 @@ double run_standard_case(
                 beta, expected[batch], ldc[batch]);
         }
 
-        DeviceMatrixBatch<T> d_C(handle, C);
+        DeviceMatrixBatch<T> d_C(handle, input);
         ddla::gemmVbatched(
             handle, transA, transB, d_m.data(), d_n.data(), d_k.data(),
             alpha, const_cast<const T* const*>(d_A.data()), d_lda.data(),
@@ -309,8 +321,12 @@ double run_standard_case(
         {
             for (int column = 0; column < n[batch]; ++column)
             {
-                for (int row = 0; row < m[batch]; ++row)
+                for (int row = 0; row < ldc[batch]; ++row)
                 {
+                    if (row >= m[batch] && std::memcmp(
+                            &actual[batch][row + column * ldc[batch]],
+                            &input[batch][row + column * ldc[batch]], sizeof(T)))
+                        throw std::runtime_error("variable-batch GEMM modified padding");
                     maximum_error = std::max(
                         maximum_error,
                         difference(
@@ -319,6 +335,63 @@ double run_standard_case(
                 }
             }
         }
+    }
+    return maximum_error;
+}
+
+template <typename T>
+double run_zero_product_case(
+    char transA, char transB, bool zero_alpha,
+    const ddla::DdlaHandle_t& handle)
+{
+    const std::vector<int> m{2, 33, 65}, n{3, 17, 67};
+    const std::vector<int> k = zero_alpha ? std::vector<int>{5, 7, 9}
+                                         : std::vector<int>{0, 0, 0};
+    std::vector<int> lda(3), ldb(3), ldc(3);
+    std::vector<std::vector<T>> C(3);
+    std::vector<std::size_t> sizes(3);
+    for (int batch = 0; batch < 3; ++batch)
+    {
+        lda[batch] = storage_rows(transA, m[batch], k[batch]) + 1;
+        ldb[batch] = storage_rows(transB, k[batch], n[batch]) + 2;
+        ldc[batch] = m[batch] + 3;
+        C[batch] = make_matrix<T>(ldc[batch], n[batch], 31 * batch + 7);
+        sizes[batch] = C[batch].size();
+    }
+    DeviceArray<int> d_m(handle, m), d_n(handle, n), d_k(handle, k);
+    DeviceArray<int> d_lda(handle, lda), d_ldb(handle, ldb), d_ldc(handle, ldc);
+    DeviceArray<const T*> null_inputs(handle, std::vector<const T*>(3, nullptr));
+    double maximum_error = 0;
+    for (const T beta : {T{}, T{1}, value<T>(23)})
+    {
+        auto input = C, expected = C;
+        for (int batch = 0; batch < 3; ++batch)
+            for (int column = 0; column < n[batch]; ++column)
+                for (int row = 0; row < m[batch]; ++row)
+                {
+                    const auto index = row + column * ldc[batch];
+                    if (beta == T{})
+                        input[batch][index] = T(std::numeric_limits<double>::quiet_NaN());
+                    expected[batch][index] = beta == T{} ? T{} : beta * C[batch][index];
+                }
+        DeviceMatrixBatch<T> output(handle, input);
+        ddla::gemmVbatched<T>(
+            handle, transA, transB, d_m.data(), d_n.data(), d_k.data(),
+            zero_alpha ? T{} : T{1}, null_inputs.data(), d_lda.data(),
+            null_inputs.data(), d_ldb.data(), beta, output.data(), d_ldc.data(), 3);
+        ddla::DDLA_CHECK(ddla::ddlaSynchronize(handle));
+        const auto actual = output.download(sizes);
+        for (int batch = 0; batch < 3; ++batch)
+            for (int column = 0; column < n[batch]; ++column)
+                for (int row = 0; row < ldc[batch]; ++row)
+                {
+                    const auto index = row + column * ldc[batch];
+                    if ((row >= m[batch] || beta == T{1}) && std::memcmp(
+                            &actual[batch][index], &input[batch][index], sizeof(T)))
+                        throw std::runtime_error("zero-product GEMM modified untouched output");
+                    maximum_error = std::max(maximum_error,
+                        difference(actual[batch][index], expected[batch][index]));
+                }
     }
     return maximum_error;
 }
@@ -403,7 +476,8 @@ double run_two_stage_case(bool temporary_on_left, const ddla::DdlaHandle_t& hand
     // Match LibRI: each segment packs its matrices independently into one buffer.
     // Segment offsets differ (0,6 versus 0,8), so reusing the pointer-table prefix
     // corrupts the second segment even though both segments fit in the buffer.
-    DeviceArray<T> temporary_storage(handle, 18, T{});
+    DeviceArray<T> temporary_storage(
+        handle, 18, T(std::numeric_limits<double>::quiet_NaN()));
     std::vector<T*> temporary_pointers{
         temporary_storage.data(), temporary_storage.data() + 6,
         temporary_storage.data(), temporary_storage.data() + 8};
@@ -531,7 +605,7 @@ double run_large_segment_case(const ddla::DdlaHandle_t& handle)
 }
 
 template <typename T>
-double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
+double run_type(const ddla::DdlaHandle_t& handle, int& case_count, int mode)
 {
     const std::vector<std::pair<char, char>>
         operations{
@@ -542,6 +616,8 @@ double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
             {'C', 'N'},
             {'N', 'C'},
             {'C', 'C'},
+            {'T', 'C'},
+            {'C', 'T'},
             {'n', 't'}};
 
     const char* type_name = [] {
@@ -559,13 +635,31 @@ double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
     int operation_index = 0;
     for (const auto& [transA, transB] : operations)
     {
-        const double error = run_standard_case<T>(transA, transB, handle);
-        std::cout << "DDLA_GEMM_VBATCHED_CASE type=" << type_name
-                  << " operation_index=" << operation_index++
-                  << " error=" << error << '\n';
-        maximum_error = std::max(maximum_error, error);
-        ++case_count;
+        if (mode == 0 || mode == 3)
+        {
+            const double error = run_standard_case<T>(transA, transB, handle);
+            std::cout << "DDLA_GEMM_VBATCHED_CASE type=" << type_name
+                      << " operation_index=" << operation_index
+                      << " error=" << error << '\n';
+            maximum_error = std::max(maximum_error, error);
+            ++case_count;
+        }
+        for (int zero_mode : {1, 2})
+            if (mode == 0 || mode == zero_mode)
+            {
+                const double error = run_zero_product_case<T>(
+                    transA, transB, zero_mode == 2, handle);
+                std::cout << "DDLA_GEMM_VBATCHED_ZERO_CASE type=" << type_name
+                          << " operation_index=" << operation_index
+                          << " zero_alpha=" << (zero_mode == 2)
+                          << " error=" << error << '\n';
+                maximum_error = std::max(maximum_error, error);
+                ++case_count;
+            }
+        ++operation_index;
     }
+    if (mode >= 1 && mode <= 3)
+        return maximum_error;
     const double left_error = run_two_stage_case<T>(true, handle);
     std::cout << "DDLA_GEMM_VBATCHED_2S_CASE type=" << type_name
               << " temporary=left error=" << left_error << '\n';
@@ -583,6 +677,9 @@ double run_type(const ddla::DdlaHandle_t& handle, int& case_count)
         maximum_error = std::max(maximum_error, large_error);
         ++case_count;
     }
+
+    if (mode == 4)
+        return maximum_error;
 
     // An empty batch is a no-op whatever the pointers are.
     ddla::gemmVbatched<T>(
@@ -651,13 +748,25 @@ int main(int argc, char** argv)
         ddla::ddlaInit(handle, ddla_test::execution_backend);
         ddla::ddlaSet(handle, MPI_COMM_WORLD);
 
+        int mode = 0;
+        if (argc == 2)
+        {
+            const std::string option = argv[1];
+            if (option == "--zero-k") mode = 1;
+            else if (option == "--zero-alpha") mode = 2;
+            else if (option == "--beta-zero") mode = 3;
+            else if (option == "--two-stage") mode = 4;
+            else throw std::invalid_argument("unknown variable-batch test option");
+        }
+        else if (argc != 1)
+            throw std::invalid_argument("too many variable-batch test options");
         int case_count = 0;
         const double float_error = std::max(
-            run_type<float>(handle, case_count),
-            run_type<std::complex<float>>(handle, case_count));
+            run_type<float>(handle, case_count, mode),
+            run_type<std::complex<float>>(handle, case_count, mode));
         const double double_error = std::max(
-            run_type<double>(handle, case_count),
-            run_type<std::complex<double>>(handle, case_count));
+            run_type<double>(handle, case_count, mode),
+            run_type<std::complex<double>>(handle, case_count, mode));
         ddla::ddlaDestroy(handle);
 
         if (float_error > 1.0e-5 || double_error > 1.0e-12)
