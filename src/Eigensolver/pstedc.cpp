@@ -566,13 +566,6 @@ PstedcVectorPlan pstedc_policy(const DdlaHandle_t& h, int n)
         const int share = n / p.ranks + (n % p.ranks != 0);
         p.leaf = std::min({p.leaf, n / 2 + n % 2, std::max(256, share)});
     }
-    int onnode = 1;
-    MPI_Comm node = MPI_COMM_NULL;
-    if(p.ranks>1) {
-        MPI_CHECK(MPI_Comm_split_type(h->comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &node));
-        MPI_CHECK(MPI_Comm_size(node, &onnode));
-        MPI_CHECK(MPI_Comm_free(&node));
-    }
     p.threads = h->host_threads;
     p.profile = eig_profile_enabled();
     const auto rows = (static_cast<unsigned long long>(n) + p.ranks - 1) / p.ranks;
