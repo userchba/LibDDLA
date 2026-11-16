@@ -167,26 +167,6 @@ void punmbr_run(const DdlaHandle_t& handle,const PunmbrPlan& p,const T* A,const 
             DDLA_CHECK(ddlaMemcpy(handle, d_tau, tau, static_cast<std::size_t>(nref) * sizeof(T)));
         }
 
-        // Packed active rows begin at local index first.  The global mapping must
-        // retain that offset when restoring each reflector's unit entry.
-        auto unit_trapezoid = [&](T* V, int ld, int rows, int jb, int u0, int first,
-                                  int blk, int me, int src, int np) {
-            if constexpr (Backend == DdlaBackend::GPU) {
-#if DDLA_HAS_GPU
-                detail::qr_build_v<T>(handle, true, 0, V, ld, V, ld, rows, jb,
-                                       u0, nq - u0, first, blk, me, src, np);
-#endif
-            } else {
-                for (int jj = 0; jj < jb; ++jj)
-                    for (int i = 0; i < rows; ++i) {
-                        const int g = indxl2g(first + i, blk, me, src, np);
-                        const int u = u0 + jj;
-                        if (g < u) V[i + static_cast<std::size_t>(jj) * ld] = T(0);
-                        else if (g == u) V[i + static_cast<std::size_t>(jj) * ld] = T(1);
-                    }
-            }
-        };
-
         // Both backends build T directly from the reduced Gram matrix.
         // Bounded panels fit the GPU recurrence without host staging.
         auto panel_T = [&](const T* R, int rows, int ld, int jb, int j0, CommScope gram_scope) {
@@ -236,7 +216,9 @@ void punmbr_run(const DdlaHandle_t& handle,const PunmbrPlan& p,const T* A,const 
                             A + indxg2l(j0, mbA, nprows) + static_cast<std::size_t>(first) * lldA,
                             lldA, T(0), nullptr, 1, V, ldv);
                     }
-                    unit_trapezoid(V, ldv, active, jb, j0 + off, first, block, me, source, ranks);
+                    // Preserve the descriptor offset of the packed active rows.
+                    detail::qr_build_v<Backend, T>(handle, true, 0, V, ldv, V, ldv,
+                        active, jb, j0 + off, nq - j0 - off, first, block, me, source, ranks);
                 }
                 if ((left ? npcols : nprows) > 1)
                     commBcast<Backend>(handle, broadcast_scope, V, static_cast<std::size_t>(active) * jb, owner);

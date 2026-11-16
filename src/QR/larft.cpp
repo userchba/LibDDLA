@@ -112,11 +112,11 @@ void gpu_larft(const DdlaHandle_t& handle, void* work, bool backward, int n, int
     // V^H V of the explicit V = [head; rest] (F) / [rest; tail] (B): the k x k unit-triangular block comes out of the
     // window in LAPACK storage, the other n - k rows are pure V entries.  Only the upper triangle of VV is formed and read.
     if (!backward) {
-        detail::qr_build_v<T>(handle, false, 0, head, k, V, ldv, k, k, 0, n, 0, mb, 0, 0, 1);
+        detail::qr_build_v<DdlaBackend::GPU, T>(handle, false, 0, head, k, V, ldv, k, k, 0, n, 0, mb, 0, 0, 1);
         blas_impl::herk_run<DdlaBackend::GPU, T>(handle, 'U', 'C', k, k, rt(1), head, k, rt(0), vv, k);
         if (n > k) blas_impl::herk_run<DdlaBackend::GPU, T>(handle, 'U', 'C', k, n - k, rt(1), V + k, ldv, rt(1), vv, k);
     } else {
-        detail::qr_build_v<T>(handle, false, 1, head, k, V, ldv, k, k, 0, n, n - k, mb, 0, 0, 1);
+        detail::qr_build_v<DdlaBackend::GPU, T>(handle, false, 1, head, k, V, ldv, k, k, 0, n, n - k, mb, 0, 0, 1);
         if (n > k) {
             blas_impl::herk_run<DdlaBackend::GPU, T>(handle, 'U', 'C', k, n - k, rt(1), V, ldv, rt(0), vv, k);
             blas_impl::herk_run<DdlaBackend::GPU, T>(handle, 'U', 'C', k, k, rt(1), head, k, rt(1), vv, k);

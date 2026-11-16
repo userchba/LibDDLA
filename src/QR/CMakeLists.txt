@@ -1,15 +1,12 @@
-# Distributed QR (p?geqrf) and its host LAPACK arms.  Only pgeqrf_kernels.cpp
-# is GPU-only; the rest compiles on every backend.
+# Distributed QR (p?geqrf), backend reflector construction and host LAPACK arms.
 target_sources(ddla_lib PRIVATE
     geqrf.cpp
     larft.cpp
     pgeqrf.cpp
     pgeqrs.cpp
     pgeqr2_panel.cpp
+    pgeqrf_kernels.cpp
 )
-if(DDLA_HAS_GPU)
-    target_sources(ddla_lib PRIVATE pgeqrf_kernels.cpp)
-endif()
 # pgeqrf_kernels.cpp (index maps) and
 # SVD/pgebrd_kernels.cpp carry the exact LAPACK scalar ports (larfg/dladiv) and
 # the robust norms, and only a contraction-free compile keeps them

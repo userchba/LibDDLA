@@ -1,7 +1,7 @@
 #include "ddla_connector.h"
 // ---------------------------------------------------------------------------
-// Device kernels of the pgeqrf panel step on the GPU.  The panel itself is factored by the vendor
-// geqrf (src/geqrf.cpp); what is left here is index and layout work, all of it run once per panel:
+// Backend reflector construction and GPU layout kernels for the pgeqrf panel.
+// The panel itself is factored by geqrf; these helpers prepare its layout:
 //
 //   qr_reverse    -- local J-reversal for GPU geqrf with uplo = 'L'
 //   qr_build_v    -- the explicit V (unit entries and zeros planted) from the window or in place
@@ -16,10 +16,10 @@
 
 #include <algorithm>
 
-#if DDLA_HAS_GPU
-
 namespace ddla {
 namespace detail {
+
+#if DDLA_HAS_GPU
 
 namespace {
 
@@ -59,7 +59,7 @@ __global__ void qr_reverse_kernel(int m, int n, const T* src, int ldsrc, T* dst,
 // (qr_l2g(lr0 + i) == j0 + c), 0 above it, the window value (g - j0, c) below
 // it.  rev == 1 (QL, unit-UPPER V): the unit entry of column c sits at global
 // row j0 + m_w - jb + c, 0 below it, the window value (g - j0, c) above it.
-// in_place: the source is v itself, every entry reads only its own element.
+// in_place: source row i is local; src can alias v or be a separate panel.
 // 2D grid (row block, column).
 // ---------------------------------------------------------------------------
 template <typename rt, bool Cplx>
@@ -132,22 +132,6 @@ void qr_reverse(const DdlaHandle_t& handle, int m, int n, const T* src, int ldsr
 }
 
 template <typename T>
-void qr_build_v(const DdlaHandle_t& handle, bool in_place, int rev, T* v, int ldv, const T* src, int ldsrc,
-                int lrp, int jb, int j0, int m_w, int lr0, int mb, int myprow,
-                int rsrc, int nprows)
-{
-    const gpuStream_t stream = static_cast<gpuStream_t>(handle->stream);
-    using rt = typename real_type<T>::type;
-    constexpr bool Cplx = !std::is_same<rt, T>::value;
-    if (lrp <= 0 || jb <= 0) return;
-    qr_build_v_kernel<rt, Cplx><<<qr_rowcol_grid(lrp, jb), kQrThreads, 0, stream>>>(
-        in_place ? 1 : 0, rev, reinterpret_cast<rt*>(v), ldv,
-        reinterpret_cast<const rt*>(src), ldsrc, lrp, jb, j0, m_w, lr0, mb, myprow,
-        rsrc, nprows);
-    DDLA_CHECK(ddlaGetLastError(handle));
-}
-
-template <typename T>
 void qr_adjoint_T(const DdlaHandle_t& handle, T* out, int ldout, const T* in, int jb)
 {
     const gpuStream_t stream = static_cast<gpuStream_t>(handle->stream);
@@ -162,15 +146,65 @@ void qr_adjoint_T(const DdlaHandle_t& handle, T* out, int ldout, const T* in, in
 // Explicit instantiations for the four scalar types.
 #define DDLA_QR_INST_MAP_KERNELS(T)                                                \
     template void qr_reverse<T>(const DdlaHandle_t&, int, int, const T*, int, T*, int); \
-    template void qr_build_v<T>(const DdlaHandle_t&, bool, int, T*, int, const T*, int, int, int, int,  \
-                                int, int, int, int, int, int);    \
     template void qr_adjoint_T<T>(const DdlaHandle_t&, T*, int, const T*, int)
 
 DDLA_FOR_EACH_TYPE(DDLA_QR_INST_MAP_KERNELS)
 
 #undef DDLA_QR_INST_MAP_KERNELS
 
+#endif // DDLA_HAS_GPU
+
+
+template <DdlaBackend Backend, typename T>
+void qr_build_v(const DdlaHandle_t& handle, bool local_source, int rev, T* v, int ldv,
+                const T* src, int ldsrc, int lrp, int jb, int j0, int m_w, int lr0,
+                int mb, int myprow, int rsrc, int nprows)
+{
+    if (lrp <= 0 || jb <= 0) return;
+    if constexpr (Backend == DdlaBackend::CPU) {
+        (void)handle;
+        // Step the block-cyclic rows without division inside the element loop.
+        const int cycle = nprows * mb;
+        const int shift = ((nprows + myprow - rsrc) % nprows) * mb;
+        const int first_offset = lr0 % mb;
+        const int first_base = cycle * (lr0 / mb) + shift;
+        const bool copy_values = !local_source || src != v || ldsrc != ldv;
+        for (int c = 0; c < jb; ++c) {
+            const int pivot = rev ? j0 + m_w - jb + c : j0 + c;
+            T* const column = v + std::size_t(c) * ldv;
+            const T* const source = copy_values ? src + std::size_t(c) * ldsrc : nullptr;
+            int offset = first_offset;
+            int row_base = first_base;
+            for (int i = 0; i < lrp; ++i) {
+                const int global_row = row_base + offset;
+                if (++offset == mb) {
+                    offset = 0;
+                    row_base += cycle;
+                }
+                if (global_row == pivot) column[i] = T(1);
+                else if (rev ? global_row > pivot : global_row < pivot) column[i] = T(0);
+                else if (copy_values) column[i] = source[local_source ? i : global_row - j0];
+            }
+        }
+    } else {
+#if DDLA_HAS_GPU
+        using rt = typename real_type<T>::type;
+        constexpr bool Cplx = !std::is_same<rt, T>::value;
+        const auto stream = static_cast<gpuStream_t>(handle->stream);
+        qr_build_v_kernel<rt, Cplx><<<qr_rowcol_grid(lrp, jb), kQrThreads, 0, stream>>>(
+            local_source ? 1 : 0, rev, reinterpret_cast<rt*>(v), ldv,
+            reinterpret_cast<const rt*>(src), ldsrc, lrp, jb, j0, m_w, lr0, mb,
+            myprow, rsrc, nprows);
+        DDLA_CHECK(ddlaGetLastError(handle));
+#endif
+    }
+}
+
+#define INSTANTIATE_BUILD_V(BACKEND, TYPE) \
+    template void qr_build_v<BACKEND, TYPE>(const DdlaHandle_t&, bool, int, TYPE*, int, \
+        const TYPE*, int, int, int, int, int, int, int, int, int, int)
+DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_BUILD_V)
+#undef INSTANTIATE_BUILD_V
+
 } // namespace detail
 } // namespace ddla
-
-#endif // DDLA_HAS_GPU

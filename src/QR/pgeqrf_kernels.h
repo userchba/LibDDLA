@@ -370,10 +370,9 @@ DDLA_QR_HD inline int qr_l2g(int i, int nb, int p, int src, int np)
     return np * nb * (i / nb) + i % nb + ((np + p - src) % np) * nb;
 }
 
-// --- GPU launcher wrappers ---------------------------------------------------
-// Defined in pgeqrf_kernels.cpp in GPU-vendor builds only.  They are declared in every build so the
-// `if constexpr (Backend == GPU)` arms of the host code (pgeqr2_panel.cpp) name them without a
-// preprocessor guard; a CPU-only build never instantiates those arms, so nothing refers to them.
+// --- QR layout helpers ------------------------------------------------------
+// qr_build_v is defined for every backend in pgeqrf_kernels.cpp. The reversal
+// and adjoint launchers are GPU-only; CPU callers discard those branches.
 
 // Local J A J reversal used by the vendor QL implementation. No distribution.
 template <typename T>
@@ -383,10 +382,11 @@ void qr_reverse(const DdlaHandle_t& handle, int m, int n, const T* src, int ldsr
 // (i, c) of v (lrp rows, ldv), g = global row of local row lr0 + i.  rev == 0 (QR,
 // unit-lower V): 1 on the global diagonal (g == j0 + c), 0 above it, the window
 // value (g - j0, c) below.  rev == 1 (QL, unit-upper V): 1 at g == j0 + m_w - jb + c,
-// 0 below it, the window value (g - j0, c) above.  in_place: src aliases v and every
-// entry reads only its own element (i, c).
-template <typename T>
-void qr_build_v(const DdlaHandle_t& handle, bool in_place, int rev, T* v, int ldv, const T* src, int ldsrc,
+// 0 below it, the window value (g - j0, c) above. local_source selects source
+// row i instead of g - j0; src may alias v or be a separate local panel.
+// Neither path changes padding or allocates workspace. Empty panels are no-ops.
+template <DdlaBackend Backend, typename T>
+void qr_build_v(const DdlaHandle_t& handle, bool local_source, int rev, T* v, int ldv, const T* src, int ldsrc,
                 int lrp, int jb, int j0, int m_w, int lr0, int mb, int myprow,
                 int rsrc, int nprows);
 

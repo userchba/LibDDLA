@@ -124,34 +124,9 @@ void qr_panel_gathered(const DdlaHandle_t& handle, T* A, const int* descA, QrWor
     // every rank of a single-process-row grid) builds V straight from the
     // window; peers with rows convert their received block in place.
     const bool from_window = root;   // nprows == 1: the only rank is the root
-    if (from_window || lrp_ > 0) {
-        if constexpr (Backend == DdlaBackend::GPU) {
-            if (from_window)
-                detail::qr_build_v<T>(handle, false, ql ? 1 : 0, V, ldv, W, ldw, lrp_, jb, g0, m_w,
-                                      lr0_, mb, myprow, rsrc, nprows);
-            else
-                detail::qr_build_v<T>(handle, true, ql ? 1 : 0, V, ldv, V, ldv, lrp_, jb, g0, m_w,
-                                      lr0_, mb, myprow, rsrc, nprows);
-        } else {
-            const long long total = static_cast<long long>(lrp_) * jb;
-            for (long long kk = 0; kk < total; ++kk) {
-                const int i = static_cast<int>(kk % lrp_);
-                const int c = static_cast<int>(kk / lrp_);
-                const int g = detail::qr_l2g(lr0_ + i, mb, myprow, rsrc, nprows);
-                const int d = g - g0;
-                const int piv = ql ? g0 + m_w - jb + c : g0 + c;
-                const std::size_t vo = static_cast<std::size_t>(i)
-                                     + static_cast<std::size_t>(c) * ldv;
-                T out;
-                if (g == piv) out = T(1);
-                else if (ql ? g > piv : g < piv) out = T(0);
-                else if (from_window)
-                    out = W[static_cast<std::size_t>(d) + static_cast<std::size_t>(c) * ldw];
-                else out = V[vo];
-                V[vo] = out;
-            }
-        }
-    }
+    detail::qr_build_v<Backend, T>(handle, !from_window, ql ? 1 : 0, V, ldv,
+        from_window ? W : V, from_window ? ldw : ldv, lrp_, jb, g0, m_w,
+        lr0_, mb, myprow, rsrc, nprows);
     // Non-root owner-column ranks without rows keep the zeroed 1 x jb V slot from above.  The root
     // wrote the taus (geqrf); EVERY peer takes them from T's diagonal -- the lrp == 0 ranks own tau
     // slots too, and the root only wrote its own.
@@ -357,26 +332,10 @@ void qr_panel_distributed(const DdlaHandle_t& handle, T* A, const int* descA, Qr
 
     // ---- explicit V, the taus, T ---------------------------------------------------------------
     // A rank without window rows keeps a zeroed 1 x jb V slot: the Row broadcast reads it.
-    const int piv0 = ql ? g_end - jb : g0;   // global row of column 0's unit entry (CPU V loop)
     T* const Apan = A + static_cast<std::size_t>(lr0) + static_cast<std::size_t>(lc0) * lld;
     if (lrp > 0) {
-        if constexpr (Backend == DdlaBackend::GPU) {
-            // in_place: every entry reads only its own native element (i, c) of Apan (leading
-            // dimension lld); rev == ql selects the unit-upper layout of the QL panel
-            detail::qr_build_v<T>(handle, true, ql ? 1 : 0, V, ldv, Apan, lld, lrp, jb, g0, m_w, lr0,
-                                  mb, myprow, rsrc, nprows);
-        } else {
-            for (int c = 0; c < jb; ++c)
-                for (int i = 0; i < lrp; ++i) {
-                    const int g = detail::qr_l2g(lr0 + i, mb, myprow, rsrc, nprows);
-                    const int piv = piv0 + c;
-                    T out;
-                    if (g == piv) out = T(1);
-                    else if (ql ? g > piv : g < piv) out = T(0);
-                    else out = Apan[static_cast<std::size_t>(i) + static_cast<std::size_t>(c) * lld];
-                    V[static_cast<std::size_t>(i) + static_cast<std::size_t>(c) * ldv] = out;
-                }
-        }
+        detail::qr_build_v<Backend, T>(handle, true, ql ? 1 : 0, V, ldv, Apan, lld,
+            lrp, jb, g0, m_w, lr0, mb, myprow, rsrc, nprows);
     } else {
         DDLA_CHECK(ddlaMemset(handle, V, 0, static_cast<std::size_t>(ldv) * jb * sizeof(T)));
     }
