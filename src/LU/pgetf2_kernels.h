@@ -7,6 +7,12 @@
 
 namespace ddla::detail {
 
+constexpr int kLuPivotBatch = 32;
+// Copy a bounded host pivot batch through kernel arguments; no host pointer is retained.
+void pgetf2_store_pivots(const DdlaHandle_t& handle, int count, const int* host_pivots, int* pivots);
+// Backend-to-backend prefix copy with conversion to descriptor-global row indices.
+void pgetf2_copy_pivots(const DdlaHandle_t& handle, int count, const int* source, int* destination, int offset);
+
 template <typename T>
 std::size_t pgetf2_pivot_workspace_size();
 

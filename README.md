@@ -728,6 +728,16 @@ C entries; n=0 or alpha=0,beta=1 permits null data pointers.
 public API. `DDLA_LU_PANEL=inplace` (default) or `gather` selects the panel
 method, and all ranks must use the same setting.
 
+`pgetrf`, `pgetrs` and public `plapiv` take pivot arrays in the selected
+backend: host memory for CPU handles and device memory for GPU handles.
+Allocate them with `ddla::vector<int>(handle, local_rows)` (local rows of the
+full factor descriptor). Entries remain one-based global row indices,
+distributed by process row and replicated across process columns. Use
+`ddlaMemcpy` plus synchronization only when host code needs to inspect them.
+`pgesv` owns its pivots in backend workspace. GPU panel/control logic still
+uses small host metadata; no global matrix replica is introduced.
+
+
 ### Cholesky
 
 | Function | Description |

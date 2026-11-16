@@ -187,11 +187,14 @@ template <DdlaBackend B,typename T> void cases(DdlaHandle_t h)
     }
     std::vector<int> piv(ddla_test::m_loc(h,x.d));
     for(std::size_t i=0;i<piv.size();++i){const int global=indx_l2g_r(x.d,h,int(i));piv[i]=global==0?n:global+1;}
+    ddla::vector<int> backend_piv(h, piv.size());
+    DDLA_CHECK(ddlaMemcpy(h, backend_piv.data(), piv.data(), piv.size()*sizeof(int)));
+    check_ddla_sync(h);
     for(char rc:{'R','C'})
         exercise(x,"PBLAS host permutation reuse",[&]{plapiv_impl::plapiv_check<B>(h,'F',rc,'C',n,nrhs,x.d,x.d);},
             [&](std::size_t* bb,std::size_t* hb){*hb=0;plapiv_impl::plapiv_workspace_size<T>(h,nrhs,x.d,bb);},
             [&](void* w,std::size_t wb,void*,std::size_t){plapiv_impl::plapiv_run<B,T>(h,'F',rc,n,nrhs,x.a.ptr,x.d,piv.data(),x.d,w,wb);},
-            [&]{plapiv<T>(h,'F',rc,'C',n,nrhs,x.a.ptr,x.d,piv.data(),x.d,nullptr);});
+            [&]{plapiv<T>(h,'F',rc,'C',n,nrhs,x.a.ptr,x.d,backend_piv.data(),x.d,nullptr);});
     // Scratch-free APIs deliberately have no size-query stage.
     x.reset(0);const int order=pdam_impl::pdam_check<B>(h,n,x.d);
     workspace_test::Scope pdam_scope;pdam_impl::pdam_run<B,T,T>(h,order,T(2),x.a.ptr,x.d);

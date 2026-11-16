@@ -1,3 +1,4 @@
+#include <ddla/ddla_vector.h>
 #include "api_grid_test_common.h"
 
 #include <type_traits>
@@ -240,7 +241,7 @@ void check_pgetrf_pgetrs_submatrix(const ddla::DdlaHandle_t& handle, const Shape
             DeviceBuffer<Complex> d_A(handle, h_A.size());
             upload(handle, d_A.ptr, h_A);
             check_ddla_sync(handle);
-            std::vector<int> ipiv(ddla_test::m_loc(handle, descA_ex));
+            ddla::vector<int> ipiv(handle, ddla_test::m_loc(handle, descA_ex));
             int info = -1;
             ddla::pgetrf(handle, n, n, d_A.ptr, 1, 1, descA_ex, ipiv.data(), info);
             if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
@@ -251,7 +252,7 @@ void check_pgetrf_pgetrs_submatrix(const ddla::DdlaHandle_t& handle, const Shape
             DeviceBuffer<Complex> d_A(handle, h_A.size());
             upload(handle, d_A.ptr, h_A);
             check_ddla_sync(handle);
-            std::vector<int> ipiv(ddla_test::m_loc(handle, descA_p));
+            ddla::vector<int> ipiv(handle, ddla_test::m_loc(handle, descA_p));
             int info = -1;
             ddla::pgetrf(handle, n, n, d_A.ptr, 1, 1, descA_p, ipiv.data(), info);
             if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
@@ -292,7 +293,7 @@ void check_pgetrf_pgetrs_submatrix(const ddla::DdlaHandle_t& handle, const Shape
             upload(handle, d_A.ptr, h_A);
             upload(handle, d_B.ptr, h_B);
             check_ddla_sync(handle);
-            std::vector<int> ipiv(ddla_test::m_loc(handle, descA_ex));
+            ddla::vector<int> ipiv(handle, ddla_test::m_loc(handle, descA_ex));
             int info = -1;
             ddla::pgetrf(handle, n, n, d_A.ptr, 1, 1, descA_ex, ipiv.data(), info);
             if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
@@ -307,7 +308,7 @@ void check_pgetrf_pgetrs_submatrix(const ddla::DdlaHandle_t& handle, const Shape
             upload(handle, d_A.ptr, h_A);
             upload(handle, d_B.ptr, h_B);
             check_ddla_sync(handle);
-            std::vector<int> ipiv(ddla_test::m_loc(handle, descA_p));
+            ddla::vector<int> ipiv(handle, ddla_test::m_loc(handle, descA_p));
             int info = -1;
             ddla::pgetrf(handle, n, n, d_A.ptr, 1, 1, descA_p, ipiv.data(), info);
             if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
@@ -496,7 +497,9 @@ void check_plapiv_submatrix(const ddla::DdlaHandle_t& handle, const Shape& base)
                 DeviceBuffer<Complex> d_A(handle, h_A.size());
                 upload(handle, d_A.ptr, h_A);
                 check_ddla_sync(handle);
-                ddla::plapiv(handle, direc, rowcol, 'C', m, seg, d_A.ptr, desc_ex, ipiv.data(), desc_ex, nullptr);
+                ddla::vector<int> backend_ipiv(handle, ipiv.size());
+                DDLA_CHECK(ddlaMemcpy(handle, backend_ipiv.data(), ipiv.data(), ipiv.size() * sizeof(int)));
+                ddla::plapiv(handle, direc, rowcol, 'C', m, seg, d_A.ptr, desc_ex, backend_ipiv.data(), desc_ex, nullptr);
                 exact_out = download(handle, d_A.ptr, h_A.size());
             }
             {
@@ -509,7 +512,9 @@ void check_plapiv_submatrix(const ddla::DdlaHandle_t& handle, const Shape& base)
                 DeviceBuffer<Complex> d_A(handle, h_A.size());
                 upload(handle, d_A.ptr, h_A);
                 check_ddla_sync(handle);
-                ddla::plapiv(handle, direc, rowcol, 'C', m, seg, d_A.ptr, desc_p, ipiv.data(), desc_p, nullptr);
+                ddla::vector<int> backend_ipiv(handle, ipiv.size());
+                DDLA_CHECK(ddlaMemcpy(handle, backend_ipiv.data(), ipiv.data(), ipiv.size() * sizeof(int)));
+                ddla::plapiv(handle, direc, rowcol, 'C', m, seg, d_A.ptr, desc_p, backend_ipiv.data(), desc_p, nullptr);
                 auto out = download(handle, d_A.ptr, h_A.size());
                 check_leading_block(handle, name, desc_ex, desc_p,
                                     exact_out, out, m, m, 1e-12);

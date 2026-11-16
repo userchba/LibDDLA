@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cassert>
 #include <stdexcept>
+#include <vector>
 #include "BLAS/blas_impl.h"
 #include "ddla_connector.h"
 #include "ddla_stream.h"
@@ -58,6 +59,26 @@ void plapiv_workspace_size(const DdlaHandle_t& handle, int n, const int* array_d
     *backend_bytes = std::size_t(std::max(length_rowcol_R, length_rowcol_C)) * sizeof(T);
 }
 
+std::size_t pivot_host_bytes(const DdlaHandle_t& handle, int m, const int* descIP)
+{
+    if (handle->backend != DdlaBackend::GPU || m <= 1) return 0;
+    return detail::padded_bytes<int>(num_loc(m - 1, descIP[DDLA_MB_], handle->myprow_,
+                                            descIP[DDLA_RSRC_], handle->nprows_));
+}
+
+const int* stage_pivots(const DdlaHandle_t& handle, int m, const int* descIP,
+                        const int* ipiv, void* host_work, std::size_t host_bytes)
+{
+    if (handle->backend != DdlaBackend::GPU || m <= 1) return ipiv;
+    const int count = num_loc(m - 1, descIP[DDLA_MB_], handle->myprow_, descIP[DDLA_RSRC_], handle->nprows_);
+    assert(pivot_host_bytes(handle, m, descIP) <= host_bytes);
+    if (count > 0) {
+        DDLA_CHECK(ddlaMemcpy(handle, host_work, ipiv, std::size_t(count) * sizeof(int)));
+        DDLA_CHECK(ddlaSynchronize(handle));
+    }
+    return static_cast<const int*>(host_work);
+}
+
 // Component 3.
 template <DdlaBackend Backend, typename T>
 void plapiv_run(const DdlaHandle_t& handle, char direc, char rowcol,
@@ -66,8 +87,8 @@ void plapiv_run(const DdlaHandle_t& handle, char direc, char rowcol,
                 void* backend_work, [[maybe_unused]] std::size_t backend_bytes)
 {
     try {
+        if (m <= 1 || n <= 0) return;
         if(handle->nprocs==1) {
-            if(m<=1 || n<=0)return;
             const int ld=array_descA[DDLA_LLD_];
             const int first=direc=='F'?0:m-2, end=direc=='F'?m-1:-1, step=direc=='F'?1:-1;
             for(int i=first;i!=end;i+=step) {
@@ -197,17 +218,23 @@ void plapiv(
 {
     (void)iwork;
     plapiv_impl::plapiv_check<Backend>(handle, direc, rowcol, pivroc, m, n, array_descA, array_descIP);
-    std::size_t backend_bytes = 0;
+    if (m <= 1 || n <= 0) return;
+    std::size_t backend_bytes = 0, host_bytes = 0;
     vector<char> work(handle);
+    std::vector<char> host_pivots;
     auto prepare = [&] {
         plapiv_impl::plapiv_workspace_size<T>(handle, n, array_descA, &backend_bytes);
+        host_bytes = plapiv_impl::pivot_host_bytes(handle, m, array_descIP);
         work.resize(backend_bytes);
+        host_pivots.resize(host_bytes);
     };
     if (handle->nprocs > 1)
         detail::agree_local(handle, "plapiv workspace preparation", prepare);
     else
         prepare();
-    plapiv_impl::plapiv_run<Backend, T>(handle, direc, rowcol, m, n, A, array_descA, ipiv, array_descIP,
+    const int* host_ipiv = plapiv_impl::stage_pivots(handle, m, array_descIP, ipiv,
+                                                    host_pivots.data(), host_bytes);
+    plapiv_impl::plapiv_run<Backend, T>(handle, direc, rowcol, m, n, A, array_descA, host_ipiv, array_descIP,
                                         work.data(), backend_bytes);
 }
 

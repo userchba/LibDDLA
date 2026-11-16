@@ -3,6 +3,8 @@
 #include "ddla_stream.h"
 
 #include <climits>
+#include <cassert>
+#include <cstring>
 #include <algorithm>
 #include <complex>
 #include <type_traits>
@@ -10,6 +12,22 @@
 namespace ddla::detail {
 
 namespace {
+
+struct PivotBatch {
+    int values[kLuPivotBatch];
+};
+
+__global__ void store_pivots_kernel(int count, PivotBatch batch, int* destination)
+{
+    if (threadIdx.x < count) destination[threadIdx.x] = batch.values[threadIdx.x];
+}
+
+__global__ void copy_pivots_kernel(int count, const int* source, int* destination, int offset)
+{
+    for (std::size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < std::size_t(count);
+         i += std::size_t(gridDim.x) * blockDim.x)
+        destination[i] = source[i] + offset;
+}
 
 constexpr int kPivotThreads = 256;
 constexpr int kUpdateThreads = 256;
@@ -178,6 +196,24 @@ T to_host_scalar(const PivotScalarT<T>& value)
 }
 
 } // namespace
+
+void pgetf2_store_pivots(const DdlaHandle_t& handle, int count, const int* host_pivots, int* pivots)
+{
+    assert(count >= 0 && count <= kLuPivotBatch);
+    if (count == 0) return;
+    PivotBatch batch{};
+    std::memcpy(batch.values, host_pivots, std::size_t(count) * sizeof(int));
+    store_pivots_kernel<<<1, kLuPivotBatch, 0, static_cast<gpuStream_t>(handle->stream)>>>(count, batch, pivots);
+    GPU_CHECK(gpuGetLastError());
+}
+
+void pgetf2_copy_pivots(const DdlaHandle_t& handle, int count, const int* source, int* destination, int offset)
+{
+    if (count == 0) return;
+    const int blocks = static_cast<int>(std::min<std::size_t>((std::size_t(count) + 255) / 256, 65535));
+    copy_pivots_kernel<<<blocks, 256, 0, static_cast<gpuStream_t>(handle->stream)>>>(count, source, destination, offset);
+    GPU_CHECK(gpuGetLastError());
+}
 
 template <typename T>
 std::size_t pgetf2_pivot_workspace_size()

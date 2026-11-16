@@ -3,6 +3,8 @@ import numpy as np
 import ctypes
 from typing import Optional, Tuple, Union
 from .matrix import DistributedMatrix
+from .backend import Backend
+from .pivots import PivotVector
 from ._c_api import (
     lib, check_status, to_scalar,
     ddla_c_float_complex, ddla_c_double_complex
@@ -55,41 +57,58 @@ def pgemm(A: DistributedMatrix, B: DistributedMatrix, C: Optional[DistributedMat
     check_status(st, f"ddla_{A.type_char}_pgemm")
     return C
 
-def pgetrf(A: DistributedMatrix, ipiv: Optional[np.ndarray] = None) -> Tuple[DistributedMatrix, np.ndarray, int]:
-    """Distributed LU factorization with partial pivoting: A = P * L * U."""
+def _pivot_storage(A, ipiv):
     if ipiv is None:
-        ipiv = np.zeros(A.m_loc + A.mb, dtype=np.int32)
+        ipiv = (np.zeros(A.m_loc + A.mb, dtype=np.int32)
+                if A.handle.backend == Backend.CPU else PivotVector(A.handle, A.m_loc + A.mb))
+    if isinstance(ipiv, PivotVector):
+        if ipiv.handle is not A.handle or len(ipiv) < A.m_loc or ipiv._closed:
+            raise ValueError("pivots need matching handle, sufficient local rows and live storage")
+        return ipiv, ipiv.data_ptr
+    if A.handle.backend != Backend.CPU:
+        raise TypeError("GPU LU pivots must use ddla.PivotVector(handle, local_rows + mb)")
+    if (not isinstance(ipiv, np.ndarray) or ipiv.dtype != np.int32 or ipiv.ndim != 1
+            or not ipiv.flags.c_contiguous or not ipiv.flags.writeable or ipiv.size < A.m_loc):
+        raise ValueError("CPU pivots need a contiguous, writable int32 vector covering local rows")
+    return ipiv, ipiv.ctypes.data
+
+
+def pgetrf(A: DistributedMatrix, ipiv=None):
+    """Factor A in place; pivots are NumPy on CPU and PivotVector on GPU."""
+    ipiv, pivot_ptr = _pivot_storage(A, ipiv)
     info = ctypes.c_int(0)
     func = getattr(lib, f"ddla_{A.type_char}_pgetrf")
     st = func(
         A.handle.ptr, A.m, A.n, ctypes.c_void_p(A.data_ptr), 1, 1,
-        ctypes.c_void_p(A.desc.ctypes.data), ctypes.c_void_p(ipiv.ctypes.data),
-        ctypes.byref(info)
+        ctypes.c_void_p(A.desc.ctypes.data), ctypes.c_void_p(pivot_ptr), ctypes.byref(info)
     )
     check_status(st, f"ddla_{A.type_char}_pgetrf")
     return A, ipiv, info.value
 
-def pgetrs(A: DistributedMatrix, B: DistributedMatrix, ipiv: np.ndarray,
-           trans: str = 'N') -> DistributedMatrix:
-    """Solve distributed linear system op(A) * X = B using LU factors from pgetrf."""
+
+def pgetrs(A: DistributedMatrix, B: DistributedMatrix, ipiv, trans: str = 'N') -> DistributedMatrix:
+    """Solve using the backend pivot vector returned by pgetrf."""
+    if ipiv is None:
+        raise TypeError("pgetrs requires the pivots returned by pgetrf")
+    ipiv, pivot_ptr = _pivot_storage(A, ipiv)
     t = _to_char_bytes(trans)
     func = getattr(lib, f"ddla_{A.type_char}_pgetrs")
     st = func(
         A.handle.ptr, b'L', t, A.n, B.n,
         ctypes.c_void_p(A.data_ptr), ctypes.c_void_p(A.desc.ctypes.data),
-        ctypes.c_void_p(ipiv.ctypes.data),
-        ctypes.c_void_p(B.data_ptr), ctypes.c_void_p(B.desc.ctypes.data)
+        ctypes.c_void_p(pivot_ptr), ctypes.c_void_p(B.data_ptr), ctypes.c_void_p(B.desc.ctypes.data)
     )
     check_status(st, f"ddla_{A.type_char}_pgetrs")
     return B
 
-def pgesv(A: DistributedMatrix, B: DistributedMatrix,
-          ipiv: Optional[np.ndarray] = None) -> Tuple[DistributedMatrix, np.ndarray, int]:
-    """Solve distributed linear system A * X = B with partial pivoting (computes LU then solves)."""
+
+def pgesv(A: DistributedMatrix, B: DistributedMatrix, ipiv=None):
+    """Factor and solve; retain pivots in the selected backend."""
     A, ipiv, info = pgetrf(A, ipiv=ipiv)
     if info == 0:
         pgetrs(A, B, ipiv, trans='N')
     return B, ipiv, info
+
 
 def ppotrf(A: DistributedMatrix, uplo: str = 'L') -> Tuple[DistributedMatrix, int]:
     """Distributed Cholesky factorization of a symmetric/Hermitian positive-definite matrix."""

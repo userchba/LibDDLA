@@ -107,9 +107,14 @@ void pgetrf_run(const DdlaHandle_t& handle, bool gather, int m, int n, T* A, int
             // Preserve the distributed interface's untouched pivot suffix on
             // singular input, although the local vendor continues factoring.
             const int count=info>0?std::min(k,info):(info==0?k:0);
-            DDLA_CHECK(ddlaMemcpy(handle,ipiv+ia-1,piv,std::size_t(count)*sizeof(int)));
-            if constexpr (Backend == DdlaBackend::GPU) DDLA_CHECK(ddlaSynchronize(handle));
-            for (int i=0;i<count;++i) ipiv[ia-1+i]+=ia-1;
+            if constexpr (Backend == DdlaBackend::CPU) {
+                for (int i = 0; i < count; ++i) ipiv[ia - 1 + i] = piv[i] + ia - 1;
+            } else {
+#if DDLA_HAS_GPU
+                detail::pgetf2_copy_pivots(handle, count, piv, ipiv + ia - 1, ia - 1);
+                DDLA_CHECK(ddlaSynchronize(handle));
+#endif
+            }
             return;
         }
         int nprows, npcols, myprow, mypcol;

@@ -118,6 +118,8 @@ void lu_impl::factor_inplace(const DdlaHandle_t& h, int m, int n, int width, T* 
     void* const pivot_workspace = w;
     assert(std::size_t(w-static_cast<char*>(backend_work)) <= backend_bytes);
     assert(jl < 0 || width <= std::max(1,swap_count));
+    assert(width <= detail::kLuPivotBatch);
+    std::array<int, detail::kLuPivotBatch> selected{};
     for (int k=0; k<width; ++k) {
         const int owner_row = indxg2p(row0+k,nb,desc[DDLA_RSRC_],nprows);
         const int i = num_loc(row0+k,nb,myprow,desc[DDLA_RSRC_],nprows);
@@ -145,7 +147,7 @@ void lu_impl::factor_inplace(const DdlaHandle_t& h, int m, int n, int width, T* 
         MPI_CHECK(MPI_Bcast(pivot_message.data(),static_cast<int>(pivot_message.size()),MPI_BYTE,owner_col,h->row_comm));
         std::memcpy(&max_row, pivot_message.data(), sizeof(max_row));
         std::memcpy(&max_value, pivot_message.data() + sizeof(max_row), sizeof(max_value));
-        if (myprow == owner_row) ipiv[i] = max_row+1;
+        selected[k] = max_row + 1;
         if (swap_count > 0)
             detail::swap_rows<Backend,T>(h, A, desc, row0+k, swap_begin,
                                          A, desc, max_row, swap_begin,
@@ -165,6 +167,9 @@ void lu_impl::factor_inplace(const DdlaHandle_t& h, int m, int n, int width, T* 
             }
         }
     }
+    const int first = indx_g2l_r(desc, h, row0);
+    if (first >= 0)
+        store_pivots<Backend>(h, info > 0 ? info : width, selected.data(), ipiv + first);
     if (info != 0) DDLA_CHECK(ddlaSynchronize(h));
 }
 

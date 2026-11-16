@@ -1,3 +1,4 @@
+#include <ddla/ddla_vector.h>
 #include "test_backend.h"
 #include <cassert>
 #include "LU/lu_internal.h"
@@ -35,7 +36,7 @@ void check_pzgetrf(int n, const DdlaHandle_t& ddla_handle)
     std::complex<double> *d_A, *d_A_copy;
     int *d_ipiv;
     
-    std::vector<int>ipiv(ddla_test::m_loc(ddla_handle, matrix_desc));
+    ddla::vector<int> ipiv(ddla_handle, ddla_test::m_loc(ddla_handle, matrix_desc));
     ddla_handle->check_memory();
     MPI_Barrier(MPI_COMM_WORLD);
 

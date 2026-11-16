@@ -1,3 +1,4 @@
+#include <ddla/ddla_vector.h>
 #include "api_grid_test_common.h"
 #include "LU/lu_internal.h"
 #include "mpi_datatype.h"
@@ -89,9 +90,12 @@ void one(const DdlaHandle_t& h,int m,int n,int nb,int start,int width,int kind,i
     auto host=make_local<T>(h,desc,value);
     DeviceBuffer<T> d(h,host.size()); upload(h,d.ptr,host);
     std::vector<int> piv(std::max(1,ddla_test::m_loc(h,desc)),-1);
+    ddla::vector<int> backend_piv(h, piv.size());
+    DDLA_CHECK(ddlaMemcpy(h, backend_piv.data(), piv.data(), piv.size() * sizeof(int)));
     int info=-1;
-    if(routine==0) ddla::pgetf2<B>(h,m-start,n-start,width,d.ptr,row_shift+start+1,col_shift+start+1,desc,piv.data(),info);
-    else ddla::pgetrf(h,m,n,d.ptr,row_shift+1,col_shift+1,desc,piv.data(),info);
+    if(routine==0) ddla::pgetf2<B>(h,m-start,n-start,width,d.ptr,row_shift+start+1,col_shift+start+1,desc,backend_piv.data(),info);
+    else ddla::pgetrf(h,m,n,d.ptr,row_shift+1,col_shift+1,desc,backend_piv.data(),info);
+    DDLA_CHECK(ddlaMemcpy(h, piv.data(), backend_piv.data(), piv.size() * sizeof(int)));
     check_ddla_sync(h);
     auto out=download(h,d.ptr,host.size());
     hash_bytes(out.data(),out.size()*sizeof(T)); hash_bytes(piv.data(),piv.size()*sizeof(int));hash_bytes(&info,sizeof(info));
@@ -218,9 +222,11 @@ template<DdlaBackend B> void selector_checks(const DdlaHandle_t& h) {
     int desc[DDLA_DLEN_];DDLA_CHECK(ddlaDescInit(desc,h,4,4,2,2,0,0));
     auto initial=make_local<double>(h,desc,[](int i,int j){return i==j?1.0:0.0;});
     DeviceBuffer<double> a(h,initial.size());std::vector<int> piv(std::max(1,ddla_test::m_loc(h,desc)),-1);
+    ddla::vector<int> backend_piv(h, piv.size());
+    DDLA_CHECK(ddlaMemcpy(h, backend_piv.data(), piv.data(), piv.size() * sizeof(int)));
     auto call=[&](int routine,int m,int n,int width,int& info,int ia=1,int ja=1) {
-        if(routine==0)ddla::pgetf2<B>(h,m,n,width,a.ptr,ia,ja,desc,piv.data(),info);
-        else ddla::pgetrf(h,m,n,a.ptr,ia,ja,desc,piv.data(),info);
+        if(routine==0)ddla::pgetf2<B>(h,m,n,width,a.ptr,ia,ja,desc,backend_piv.data(),info);
+        else ddla::pgetrf(h,m,n,a.ptr,ia,ja,desc,backend_piv.data(),info);
     };
     upload(h,a.ptr,initial);
     for(int routine=0;routine<2;++routine) {
@@ -241,7 +247,7 @@ template<DdlaBackend B> void selector_checks(const DdlaHandle_t& h) {
         }
         for(int storage=0;storage<2;++storage) {
             double* ap=rank==0 && storage==0?nullptr:a.ptr;
-            int* pp=rank==0 && storage==1?nullptr:piv.data();
+            int* pp=rank==0 && storage==1?nullptr:backend_piv.data();
             bool caught=false;int info=-1;
             try {
                 if(routine==0)ddla::pgetf2<B,double>(h,4,4,1,ap,1,1,desc,pp,info);
@@ -278,7 +284,7 @@ template<DdlaBackend B> void solve_checks(const DdlaHandle_t& h) {
     auto b0=make_local<double>(h,dB,[](int i,int j){return 1.0+i+j;});
     DeviceBuffer<double> a(h,a0.size()),b(h,b0.size());
     const std::size_t npiv=std::size_t(std::max(1,ddla_test::m_loc(h,dA)));
-    std::vector<int> ipiv(npiv,1);
+    ddla::vector<int> ipiv(h, npiv);
     DeviceBuffer<int> blockpiv(h,npiv);
     upload(h,blockpiv.ptr,std::vector<int>(npiv,1));
     enum {GETRS,GETRS_NOPIV,GETRS_BPIV,GESV,GESV_NOPIV,GESV_BPIV,GETRF_NOPIV,GETRF_BPIV,ROUTINES};

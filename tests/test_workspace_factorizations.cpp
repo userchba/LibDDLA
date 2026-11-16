@@ -65,9 +65,9 @@ template<DdlaBackend B,class T> void cases(DdlaHandle_t h)
         // The size query must leave A as it found it (the previous iteration's panel run factored A).
         const auto before=download(h,a.ptr,initial.size());
         workspace_test::Scope qs(true);std::size_t bb=0,hb=0;lu_impl::pgetrf_workspace_size<T>(h,gather,n,n,a.ptr,1,1,da,&bb,&hb);query_clean(h,qs.finish());same(h,before,download(h,a.ptr,initial.size()));Guarded work(h,bb,hb);
-        for(int repeat=0;repeat<2;++repeat){upload(h,a.ptr,initial);upload(h,ref.ptr,initial);std::fill(piv.begin(),piv.end(),-17);std::fill(pivref.begin(),pivref.end(),-17);int got=-1,want=-1;pgetrf<T>(h,n,n,ref.ptr,1,1,da,pivref.data(),want);workspace_test::Scope run;lu_impl::pgetrf_run<B,T>(h,gather,n,n,a.ptr,1,1,da,piv.data(),got,work.backend(),bb,work.host(),hb);run_clean(h,run.finish());same(h,download(h,ref.ptr,initial.size()),download(h,a.ptr,initial.size()));require_close(h,"LU info and pivots",got==want&&piv==pivref?0:1,0);work.verify();}
+        for(int repeat=0;repeat<2;++repeat){upload(h,a.ptr,initial);upload(h,ref.ptr,initial);std::fill(piv.begin(),piv.end(),-17);std::fill(pivref.begin(),pivref.end(),-17);upload(h,dp.ptr,piv);upload(h,dpr.ptr,pivref);int got=-1,want=-1;pgetrf<T>(h,n,n,ref.ptr,1,1,da,dpr.ptr,want);workspace_test::Scope run;lu_impl::pgetrf_run<B,T>(h,gather,n,n,a.ptr,1,1,da,dp.ptr,got,work.backend(),bb,work.host(),hb);run_clean(h,run.finish());same(h,download(h,ref.ptr,initial.size()),download(h,a.ptr,initial.size()));require_close(h,"LU info and pivots",got==want&&download(h,dp.ptr,piv.size())==download(h,dpr.ptr,pivref.size())?0:1,0);work.verify();}
         workspace_test::Scope ps(true);std::size_t pb=0,ph=0;lu_impl::pgetf2_workspace_size<T>(h,gather,n,n,nb,a.ptr,1,1,da,1,&pb,&ph);query_clean(h,ps.finish());Guarded panelwork(h,pb,ph);
-        upload(h,a.ptr,initial);upload(h,ref.ptr,initial);int got=0,want=0;pgetf2<B,T>(h,n,n,nb,ref.ptr,1,1,da,pivref.data(),want);workspace_test::Scope pr;lu_impl::pgetf2_run<B,T>(h,gather,n,n,nb,a.ptr,1,1,da,piv.data(),got,1,panelwork.backend(),pb,panelwork.host(),ph);run_clean(h,pr.finish());same(h,download(h,ref.ptr,initial.size()),download(h,a.ptr,initial.size()));panelwork.verify();
+        upload(h,a.ptr,initial);upload(h,ref.ptr,initial);int got=0,want=0;pgetf2<B,T>(h,n,n,nb,ref.ptr,1,1,da,dpr.ptr,want);workspace_test::Scope pr;lu_impl::pgetf2_run<B,T>(h,gather,n,n,nb,a.ptr,1,1,da,dp.ptr,got,1,panelwork.backend(),pb,panelwork.host(),ph);run_clean(h,pr.finish());same(h,download(h,ref.ptr,initial.size()),download(h,a.ptr,initial.size()));panelwork.verify();
     }
     for(bool bpiv:{false,true}){
         workspace_test::Scope qs(true);std::size_t bb=0,hb=0;if(bpiv)lu_impl::pgetrf_bpiv_workspace_size<T>(h,n,n,a.ptr,da,&bb,&hb);else lu_impl::pgetrf_nopiv_workspace_size<T>(h,n,n,da,&bb);query_clean(h,qs.finish());Guarded work(h,bb,hb);
@@ -120,7 +120,7 @@ template<DdlaBackend B,class T>void tiny_case(DdlaHandle_t h)
 {
     int d[DDLA_DLEN_];DDLA_CHECK(ddlaDescInit(d,h,1,1,3,3,h->nprows_-1,h->npcols_-1));
     const auto input=make_local<T>(h,d,[](int,int){return T(4);});DeviceBuffer<T> a(h,input.size());upload(h,a.ptr,input);
-    std::vector<int> piv(num_loc(1,3,h->myprow_,d[DDLA_RSRC_],h->nprows_),-1);
+    ddla::vector<int> piv(h,num_loc(1,3,h->myprow_,d[DDLA_RSRC_],h->nprows_));
     for(bool gather:{false,true}){
         std::size_t bb=0,hb=0;lu_impl::pgetrf_workspace_size<T>(h,gather,1,1,a.ptr,1,1,d,&bb,&hb);Guarded w(h,bb,hb);
         for(int pass=0;pass<2;++pass){upload(h,a.ptr,input);int info=-1;workspace_test::Scope run;lu_impl::pgetrf_run<B,T>(h,gather,1,1,a.ptr,1,1,d,piv.data(),info,w.backend(),bb,w.host(),hb);run_clean(h,run.finish());require_close(h,"zero-local-extent LU info",info,0);same(h,input,download(h,a.ptr,input.size()));w.verify();}

@@ -42,8 +42,8 @@ bool pgesv_check(const DdlaHandle_t& handle, char side, char trans, int n, int n
     });
 }
 
-// Component 2: host bytes of [ the pivots (local rows of A's leading n x n block) | the rest ], backend bytes of
-// the rest; the factorization and the solve run one after the other on the rest, so it is the larger of the two.
+// Component 2: backend bytes of [ local pivots | reusable factor/solve scratch ].
+// Host scratch is the larger factor/solve requirement, including GPU pivot control staging.
 template <typename T>
 void pgesv_workspace_size(const DdlaHandle_t& handle, bool gather, char side, char trans, int n, int nrhs,
                           T* A, const int* array_descA, const int* array_descB,
@@ -56,8 +56,8 @@ void pgesv_workspace_size(const DdlaHandle_t& handle, bool gather, char side, ch
     std::size_t factor_backend = 0, factor_host = 0, solve_backend = 0, solve_host = 0;
     pgetrf_workspace_size<T>(handle, gather, n, n, A, 1, 1, array_descA, &factor_backend, &factor_host);
     pgetrs_workspace_size<T>(handle, side, trans, n, nrhs, array_descA, array_descB, &solve_backend, &solve_host);
-    *backend_bytes = std::max(factor_backend, solve_backend);
-    *host_bytes = detail::padded_bytes<int>(std::size_t(local_rows)) + std::max(factor_host, solve_host);
+    *backend_bytes = detail::padded_bytes<int>(std::size_t(local_rows)) + std::max(factor_backend, solve_backend);
+    *host_bytes = std::max(factor_host, solve_host);
 }
 
 // Component 3.
@@ -72,15 +72,15 @@ void pgesv_run(const DdlaHandle_t& handle, bool gather, char side, char trans, i
         // The scratch, in the order pgesv_workspace_size counts it.
         const int local_rows = num_loc(n, array_descA[DDLA_MB_], handle->myprow_, array_descA[DDLA_RSRC_],
                                        handle->nprows_);
-        char* hw = static_cast<char*>(host_work);
-        int* const ipiv = detail::take<int>(hw, std::size_t(local_rows));
-        const std::size_t used = std::size_t(hw - static_cast<char*>(host_work));
-        assert(used <= host_bytes);
+        char* work = static_cast<char*>(backend_work);
+        int* const ipiv = detail::take<int>(work, std::size_t(local_rows));
+        const std::size_t used = std::size_t(work - static_cast<char*>(backend_work));
+        assert(used <= backend_bytes);
         pgetrf_run<Backend, T>(handle, gather, n, n, A, 1, 1, array_descA, ipiv, info,
-                               backend_work, backend_bytes, hw, host_bytes - used);
+                               work, backend_bytes - used, host_work, host_bytes);
         if (info != 0 || nrhs == 0) return;
         pgetrs_run<Backend, T>(handle, side, trans, n, nrhs, A, array_descA, ipiv, B, array_descB,
-                               backend_work, backend_bytes, hw, host_bytes - used);
+                               work, backend_bytes - used, host_work, host_bytes);
     } catch (...) {
         // Retire queued host reads before the caller reuses or releases scratch.
         if (ddlaGetBackend(handle) == DdlaBackend::GPU)

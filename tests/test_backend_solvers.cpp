@@ -1,3 +1,4 @@
+#include <ddla/ddla_vector.h>
 #include "backend_api.h" // Internal-only wrong-backend implementation checks.
 // ---------------------------------------------------------------------------
 // test_backend_solvers exercises handle-driven distributed LU, Cholesky,
@@ -104,7 +105,7 @@ void check_lu(const DdlaHandle_t& h, int n, int nb, int nrhs, bool all_variants)
             {   // pgetrf + pgetrs
                 DeviceBuffer<T> dA(h, h_A.size()), dB(h, h_B.size());
                 fresh(dA, dB);
-                std::vector<int> ipiv(ddla_test::m_loc(h, descA) + 1, 0);
+                ddla::vector<int> ipiv(h, ddla_test::m_loc(h, descA) + 1);
                 int info = -1;
                 ddla::pgetrf(h, n, n, dA.ptr, 1, 1, descA, ipiv.data(), info);
                 if (info != 0) MPI_Abort(ddlaGetCommunicator(h), 1);
@@ -161,7 +162,7 @@ void check_lu_info(const DdlaHandle_t& h, int n, int nb)
         DeviceBuffer<T> dA(h, h_A.size());
         upload(h, dA.ptr, h_A);
         check_ddla_sync(h);
-        std::vector<int> ipiv(ddla_test::m_loc(h, descA) + 1, -1);
+        ddla::vector<int> ipiv(h, ddla_test::m_loc(h, descA) + 1);
         int info = -1;
         ddla::pgetrf(h, n, n, dA.ptr, 1, 1, descA, ipiv.data(), info);
         require_close(h, tag_of(B, "pgetrf", ty, "singular info"), std::abs(info - (zero_at + 1)), 0.0);
@@ -453,7 +454,7 @@ void check_rejected(const DdlaHandle_t& h, const char* name)
     std::vector<double> local(local_size(h, desc), 1.0);
     DeviceBuffer<double> d(h, local.size());
     int info = 0;
-    std::vector<int> ipiv(ddla_test::m_loc(h, desc) + 1, 0);
+    ddla::vector<int> ipiv(h, ddla_test::m_loc(h, desc) + 1);
     bool threw = false;
     try { ddla::pgetrf<Wrong>(h, n, n, d.ptr, 1, 1, desc, ipiv.data(), info); } catch (const std::runtime_error&) { threw = true; }
     bool threw2 = false;
@@ -510,8 +511,10 @@ void check_collective_rejection(const DdlaHandle_t& h, const char* label)
     both("pdam", [&](bool bad) { ddla::pdam(h, 1.0, a.ptr, desc, bad ? n + 1 : n); });
     both("pswap", [&](bool bad) {
         ddla::pswap(h, 4, a.ptr, 1, 1, desc, bad ? 5 : 1, b.ptr, 1, 1, desc, 1); });
+    ddla::vector<int> backend_ipiv(h, ipiv.size());
+    DDLA_CHECK(ddlaMemcpy(h, backend_ipiv.data(), ipiv.data(), ipiv.size() * sizeof(int)));
     both("plapiv", [&](bool bad) {
-        ddla::plapiv(h, bad ? 'X' : 'F', 'R', 'C', 1, n, a.ptr, desc, ipiv.data(), desc, nullptr); });
+        ddla::plapiv(h, bad ? 'X' : 'F', 'R', 'C', 1, n, a.ptr, desc, backend_ipiv.data(), desc, nullptr); });
     both("ptrtrs", [&](bool bad) {
         ddla::ptrtrs(h, bad ? 'X' : 'L', 'L', 'N', 'N', 1, 1, a.ptr, desc, b.ptr, desc); });
     both("ptrmm", [&](bool bad) {

@@ -190,10 +190,11 @@ void panel_gather(const DdlaHandle_t& h, int m, int n, int width, T* A, int ia, 
     assert(std::size_t(2)*std::size_t(std::max(1,local_cols))*sizeof(T) <= pool_bytes);
     T* const rows = reinterpret_cast<T*>(pool);
     T* const recv = rows+std::max(1,local_cols);
+    const int first = indx_g2l_r(desc, h, ia);
+    if (first >= 0)
+        store_pivots<Backend>(h, width, meta + 1, ipiv + first);
     for (int k=0; k<width; ++k) {
         const int r = ia+k, pivot = meta[k+1]-1;
-        const int il = indx_g2l_r(desc,h,r);
-        if (il >= 0) ipiv[il] = pivot+1;
         detail::swap_rows<Backend,T>(h, A, desc, r, first_col, A, desc, pivot, first_col,
                                      left, rows, recv);
         detail::swap_rows<Backend,T>(h, A, desc, r, right, A, desc, pivot, right,

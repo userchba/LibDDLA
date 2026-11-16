@@ -26,7 +26,13 @@ template <typename T>
 void plapiv_workspace_size(const DdlaHandle_t& handle, int n, const int* array_descA,
                            std::size_t* backend_bytes);
 
-// Component 3: the pivoting.  No validation, no allocation.  `iwork` of the
+// Host control staging for backend-resident public pivot arrays. Only the
+// leading m-1 global entries are read; the existing raw swap engine needs host indices.
+std::size_t pivot_host_bytes(const DdlaHandle_t& handle, int m, const int* descIP);
+const int* stage_pivots(const DdlaHandle_t& handle, int m, const int* descIP,
+                        const int* ipiv, void* host_work, std::size_t host_bytes);
+
+// Component 3: the pivoting, with HOST pivot control metadata.  No validation, no allocation.  `iwork` of the
 // public routine is unused and has no counterpart here.
 template <DdlaBackend Backend, typename T>
 void plapiv_run(const DdlaHandle_t& handle, char direc, char rowcol,

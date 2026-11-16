@@ -1,3 +1,4 @@
+#include <ddla/ddla_vector.h>
 #include "test_backend.h"
 #include <cassert>
 #include "LU/lu_internal.h"
@@ -56,7 +57,7 @@ void check_pgetrf_nopiv(int n, const DdlaHandle_t& ddla_handle)
     DDLA_CHECK(ddlaSynchronize(ddla_handle));
     MPI_Barrier(MPI_COMM_WORLD);
 
-    std::vector<int> ipiv(ddla_test::m_loc(ddla_handle, matrix_desc));
+    ddla::vector<int> ipiv(ddla_handle, ddla_test::m_loc(ddla_handle, matrix_desc));
 
     // 1) pgetrf (partial pivoting)
     int info_piv = -1;

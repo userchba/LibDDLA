@@ -1,3 +1,4 @@
+#include <ddla/ddla_vector.h>
 #include "api_grid_test_common.h"
 
 using namespace api_grid_test;
@@ -21,7 +22,7 @@ void check_pgetrf(const ddla::DdlaHandle_t& handle, const Shape& base)
         upload(handle, d_singular.ptr, h_singular);
         check_ddla_sync(handle);
 
-        std::vector<int> singular_ipiv(ddla_test::m_loc(handle, descA), -1);
+        ddla::vector<int> singular_ipiv(handle, ddla_test::m_loc(handle, descA));
         int singular_info = -1;
         ddla::pgetrf(handle, n, n, d_singular.ptr, 1, 1, descA, singular_ipiv.data(), singular_info);
         require_close(handle, "pgetrf(handle, singular info)",
@@ -37,7 +38,7 @@ void check_pgetrf(const ddla::DdlaHandle_t& handle, const Shape& base)
     upload(handle, d_B.ptr, h_B);
     check_ddla_sync(handle);
 
-    std::vector<int> ipiv(ddla_test::m_loc(handle, descA));
+    ddla::vector<int> ipiv(handle, ddla_test::m_loc(handle, descA));
     int info = -1;
     ddla::pgetrf(handle, n, n, d_A.ptr, 1, 1, descA, ipiv.data(), info);
     if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);

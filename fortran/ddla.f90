@@ -273,7 +273,7 @@ module ddla
       integer(c_int), value :: n
       type(c_ptr), value :: a
       integer(c_int), intent(in) :: desca(9)
-      integer(c_int), intent(in) :: ipiv(*)
+      type(c_ptr), value :: ipiv
       integer(c_int), intent(in) :: descip(9)
       type(c_ptr), value :: iwork
     end function ddla_s_plapiv
@@ -291,7 +291,7 @@ module ddla
       integer(c_int), value :: n
       type(c_ptr), value :: a
       integer(c_int), intent(in) :: desca(9)
-      integer(c_int), intent(in) :: ipiv(*)
+      type(c_ptr), value :: ipiv
       integer(c_int), intent(in) :: descip(9)
       type(c_ptr), value :: iwork
     end function ddla_d_plapiv
@@ -309,7 +309,7 @@ module ddla
       integer(c_int), value :: n
       type(c_ptr), value :: a
       integer(c_int), intent(in) :: desca(9)
-      integer(c_int), intent(in) :: ipiv(*)
+      type(c_ptr), value :: ipiv
       integer(c_int), intent(in) :: descip(9)
       type(c_ptr), value :: iwork
     end function ddla_c_plapiv
@@ -327,7 +327,7 @@ module ddla
       integer(c_int), value :: n
       type(c_ptr), value :: a
       integer(c_int), intent(in) :: desca(9)
-      integer(c_int), intent(in) :: ipiv(*)
+      type(c_ptr), value :: ipiv
       integer(c_int), intent(in) :: descip(9)
       type(c_ptr), value :: iwork
     end function ddla_z_plapiv
@@ -556,7 +556,7 @@ module ddla
       integer(c_int), value :: ia
       integer(c_int), value :: ja
       integer(c_int), intent(in) :: desca(9)
-      integer(c_int), intent(inout) :: ipiv(*)
+      type(c_ptr), value :: ipiv
       integer(c_int), intent(out) :: info
     end function ddla_s_pgetrf
 
@@ -572,7 +572,7 @@ module ddla
       integer(c_int), value :: ia
       integer(c_int), value :: ja
       integer(c_int), intent(in) :: desca(9)
-      integer(c_int), intent(inout) :: ipiv(*)
+      type(c_ptr), value :: ipiv
       integer(c_int), intent(out) :: info
     end function ddla_d_pgetrf
 
@@ -588,7 +588,7 @@ module ddla
       integer(c_int), value :: ia
       integer(c_int), value :: ja
       integer(c_int), intent(in) :: desca(9)
-      integer(c_int), intent(inout) :: ipiv(*)
+      type(c_ptr), value :: ipiv
       integer(c_int), intent(out) :: info
     end function ddla_c_pgetrf
 
@@ -604,7 +604,7 @@ module ddla
       integer(c_int), value :: ia
       integer(c_int), value :: ja
       integer(c_int), intent(in) :: desca(9)
-      integer(c_int), intent(inout) :: ipiv(*)
+      type(c_ptr), value :: ipiv
       integer(c_int), intent(out) :: info
     end function ddla_z_pgetrf
 
@@ -672,7 +672,7 @@ module ddla
       integer(c_int), value :: nrhs
       type(c_ptr), value :: a
       integer(c_int), intent(in) :: desca(9)
-      integer(c_int), intent(in) :: ipiv(*)
+      type(c_ptr), value :: ipiv
       type(c_ptr), value :: b
       integer(c_int), intent(in) :: descb(9)
     end function ddla_s_pgetrs
@@ -689,7 +689,7 @@ module ddla
       integer(c_int), value :: nrhs
       type(c_ptr), value :: a
       integer(c_int), intent(in) :: desca(9)
-      integer(c_int), intent(in) :: ipiv(*)
+      type(c_ptr), value :: ipiv
       type(c_ptr), value :: b
       integer(c_int), intent(in) :: descb(9)
     end function ddla_d_pgetrs
@@ -706,7 +706,7 @@ module ddla
       integer(c_int), value :: nrhs
       type(c_ptr), value :: a
       integer(c_int), intent(in) :: desca(9)
-      integer(c_int), intent(in) :: ipiv(*)
+      type(c_ptr), value :: ipiv
       type(c_ptr), value :: b
       integer(c_int), intent(in) :: descb(9)
     end function ddla_c_pgetrs
@@ -723,7 +723,7 @@ module ddla
       integer(c_int), value :: nrhs
       type(c_ptr), value :: a
       integer(c_int), intent(in) :: desca(9)
-      integer(c_int), intent(in) :: ipiv(*)
+      type(c_ptr), value :: ipiv
       type(c_ptr), value :: b
       integer(c_int), intent(in) :: descb(9)
     end function ddla_z_pgetrs

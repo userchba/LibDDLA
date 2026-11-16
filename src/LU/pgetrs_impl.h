@@ -41,7 +41,7 @@ template <typename T>
 void pgetrs_workspace_size(const DdlaHandle_t& handle, char side, char trans, int n, int nrhs,
                            const int* descA, const int* descB, std::size_t* backend_bytes, std::size_t* host_bytes);
 
-// Component 3: the permutation of B (plapiv_run, ipiv in host memory) and the two triangular solves (ptrtrs_run).
+// Component 3: stage backend pivots for host control, apply plapiv_run, then run the two triangular solves.
 template <DdlaBackend Backend, typename T>
 void pgetrs_run(const DdlaHandle_t& handle, char side, char trans, int n, int nrhs,
                 T* A, const int* descA, const int* ipiv, T* B, const int* descB,
@@ -101,8 +101,8 @@ template <DdlaBackend Backend>
 bool pgesv_check(const DdlaHandle_t& handle, char side, char trans, int n, int nrhs,
                  const void* A, const int* descA, const int* descB);
 
-// Component 2: n x nrhs.  Backend: the larger of pgetrf's and pgetrs's; host: [ the pivots (local rows of A's
-// leading n x n block) | the larger of pgetrf's and pgetrs's ].  A is what pgetrf's vendor query is made with.
+// Component 2: backend local pivots plus the larger factor/solve workspace;
+// host scratch is the larger requirement of the two routines.
 // n == 0 needs nothing.
 template <typename T>
 void pgesv_workspace_size(const DdlaHandle_t& handle, bool gather, char side, char trans, int n, int nrhs,

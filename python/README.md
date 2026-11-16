@@ -140,3 +140,14 @@ The Python communication tests default to CPU coverage. Set
 `DDLA_TEST_GPU_COMMUNICATION=1` only in an allocation with one assigned GPU per
 rank to enable the GPU setter/getter test; it switches policies without probing
 GPU-aware MPI with device traffic.
+
+## LU pivot storage
+
+`pgetrf` returns `(A, pivots, info)`. CPU pivots remain a NumPy int32 array;
+GPU pivots are a `ddla.PivotVector` owned by the selected backend. Pass that
+object directly to `pgetrs`, or call `pivots.to_host()` to inspect its values.
+Create reusable storage with `ddla.PivotVector(handle, A.m_loc + A.mb)` and
+release it with `pivots.close()` before destroying the handle. Values remain
+one-based global row indices, indexed by locally owned descriptor rows.
+The low-level C/Fortran interfaces now also require backend pivot pointers;
+Fortran callers pass `c_loc(host_pivots)` for CPU or a device `c_ptr` for GPU.

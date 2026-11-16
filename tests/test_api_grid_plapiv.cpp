@@ -1,3 +1,4 @@
+#include <ddla/ddla_vector.h>
 #include "api_grid_test_common.h"
 
 using namespace api_grid_test;
@@ -81,7 +82,9 @@ inline void check_one_case(const ddla::DdlaHandle_t& handle, const int* desc,
     upload(handle, d_A.ptr, h_A);
     check_ddla_sync(handle);
 
-    ddla::plapiv(handle, direc, rowcol, 'C', m, n, d_A.ptr, desc, ipiv.data(), desc, nullptr);
+    ddla::vector<int> backend_ipiv(handle, ipiv.size());
+    DDLA_CHECK(ddlaMemcpy(handle, backend_ipiv.data(), ipiv.data(), ipiv.size() * sizeof(int)));
+    ddla::plapiv(handle, direc, rowcol, 'C', m, n, d_A.ptr, desc, backend_ipiv.data(), desc, nullptr);
     auto out = download(handle, d_A.ptr, h_A.size());
 
     const auto G = make_global(m, n, value);
@@ -125,7 +128,9 @@ inline void check_nonsquare_col(const ddla::DdlaHandle_t& handle,
     upload(handle, d_B.ptr, h_B);
     check_ddla_sync(handle);
 
-    ddla::plapiv(handle, direc, 'C', 'C', m, n_seg, d_B.ptr, descB, ipiv.data(), descIP, nullptr);
+    ddla::vector<int> backend_ipiv(handle, ipiv.size());
+    DDLA_CHECK(ddlaMemcpy(handle, backend_ipiv.data(), ipiv.data(), ipiv.size() * sizeof(int)));
+    ddla::plapiv(handle, direc, 'C', 'C', m, n_seg, d_B.ptr, descB, backend_ipiv.data(), descIP, nullptr);
     auto out = download(handle, d_B.ptr, h_B.size());
 
     // Global column-swap reference over the n_seg x m matrix (row-major).

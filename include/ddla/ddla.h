@@ -356,7 +356,8 @@ void syr2k(const DdlaHandle_t& handle, char uplo, char trans, int n, int k,
  * @param handle Handle owning the process grid and stream.
  * @param A     Pointer in the selected backend to distributed matrix A.
  * @param descA   ScaLAPACK int[9] descriptor for A.
- * @param ipiv    Host array of pivot indices (1-based, length >= m).
+ * @param ipiv    Backend array of 1-based pivot indices, indexed by local rows of descIP.
+ *                Host memory for CPU handles, device memory for GPU handles.
  * @param descIP  ScaLAPACK int[9] descriptor for the pivot vector
  *                (same row distribution as A).
  * @param iwork   Workspace (unused, pass nullptr).
@@ -470,7 +471,8 @@ void scatter(const DdlaHandle_t& handle, int m, int n,
  * @param ia      First selected global row (one-based).
  * @param ja      First selected global column (one-based).
  * @param descA    ScaLAPACK int[9] descriptor for A (mb == nb required).
- * @param ipiv     Host row-distributed pivots indexed by local descriptor row; values are
+ * @param ipiv     Pivot array in the selected backend (host for CPU, device for GPU),
+ *                 distributed by local descriptor row; values are
  *                absolute global one-based pivot rows. Other entries stay unchanged.
  * @param info     0 on success; >0 is the failing one-based position within the selected submatrix (early stop).
  */
@@ -479,7 +481,7 @@ void pgetrf(
     const DdlaHandle_t& handle,
     int m, int n,
     T* A, int ia, int ja, const int* descA,
-    int* ipiv, // host
+    int* ipiv, // selected backend
     int& info  // host
 );
 
@@ -530,7 +532,7 @@ void pgetrf_nopiv(
  * @param A     Pointer in the selected backend to LU factors (from pgetrf).
  * @param handle  Handle owning the process grid and stream.
  * @param descA   ScaLAPACK int[9] descriptor for A.
- * @param ipiv    Host pivot array from pgetrf.
+ * @param ipiv    Pivot array from pgetrf in the selected backend (host for CPU, device for GPU).
  * @param B     Pointer in the selected backend to RHS / solution B (input/output).
  * @param descB   ScaLAPACK int[9] descriptor for B (same MB as A; rows for
  *                side 'L' / columns for side 'R' distributed like A's).
@@ -540,7 +542,7 @@ void pgetrs(
     const DdlaHandle_t& handle,
     char side, char trans, int n, int nrhs,
     T* A, const int* descA,
-    const int* ipiv, // host
+    const int* ipiv, // selected backend
     T* B, const int* descB
 );
 

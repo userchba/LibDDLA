@@ -143,15 +143,15 @@ int main(int argc, char** argv)
                 else if (op == "pgeqrs")
                     pgeqrs<double>(h, n, n, n, a.data(), a.d, tau.data(), c.data(), c.d, info);
                 else if (op == "pgetrf")
-                    pgetrf<double>(h, n, n, a.data(), 1, 1, a.d, piv.data(), info);
+                    pgetrf<double>(h, n, n, a.data(), 1, 1, a.d, block_piv.data(), info);
                 else if (op == "pgetf2")
-                    pgetf2<ddla_test::execution_backend, double>(h, n, n, 4, a.data(), 1, 1, a.d, piv.data(), info);
+                    pgetf2<ddla_test::execution_backend, double>(h, n, n, 4, a.data(), 1, 1, a.d, block_piv.data(), info);
                 else if (op == "pgetrf_bpiv")
                     pgetrf_bpiv<double>(h, n, n, a.data(), a.d, block_piv.data(), info);
                 else if (op == "pgetrf_nopiv")
                     pgetrf_nopiv<double>(h, n, n, a.data(), a.d, info);
                 else if (op == "pgetrs")
-                    pgetrs<double>(h, 'L', 'N', n, n, a.data(), a.d, piv.data(), c.data(), c.d);
+                    pgetrs<double>(h, 'L', 'N', n, n, a.data(), a.d, block_piv.data(), c.data(), c.d);
                 else if (op == "pgetrs_bpiv")
                     pgetrs_bpiv<double>(h, 'L', 'N', n, n, a.data(), a.d, block_piv.data(), c.data(), c.d);
                 else if (op == "pgetrs_nopiv")
@@ -163,7 +163,7 @@ int main(int argc, char** argv)
                 else if (op == "pgesv_nopiv")
                     pgesv_nopiv<double>(h, 'L', 'N', n, n, a.data(), a.d, c.data(), c.d);
                 else if (op == "plapiv")
-                    plapiv<double>(h, 'F', 'R', 'C', n, n, a.data(), a.d, piv.data(), a.d, nullptr);
+                    plapiv<double>(h, 'F', 'R', 'C', n, n, a.data(), a.d, block_piv.data(), a.d, nullptr);
                 else if (op == "ppotrf_bottom_right")
                     ppotrf_bottom_right<double>(h, 'L', n, a.data(), a.d, info);
                 else if (op == "pstedc")

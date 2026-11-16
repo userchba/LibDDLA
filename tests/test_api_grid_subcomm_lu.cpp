@@ -1,3 +1,4 @@
+#include <ddla/ddla_vector.h>
 #include "test_backend.h"
 #include "api_grid_test_common.h"
 #include "LU/lu_internal.h"
@@ -80,7 +81,7 @@ int main(int argc, char** argv)
 
         run_factorization_case(handle, "subcomm pgetrf",
             [&](Complex* d_A, const int* descA, int& info){
-                std::vector<int> ipiv(std::max(1, ddla_test::m_loc(handle, descA)));
+                ddla::vector<int> ipiv(handle, std::max(1, ddla_test::m_loc(handle, descA)));
                 ddla::pgetrf(handle, descA[DDLA_M_], descA[DDLA_N_], d_A, 1, 1, descA, ipiv.data(), info);
             });
 

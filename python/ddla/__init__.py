@@ -40,6 +40,7 @@ from ._c_api import (
 from .backend import Backend, Communication, Handle
 from .layout import ProcessorLayout
 from .matrix import DistributedMatrix
+from .pivots import PivotVector
 from .ops import (
     pgemm,
     pgetrf,
@@ -75,6 +76,7 @@ __all__ = [
     "Handle",
     "ProcessorLayout",
     "DistributedMatrix",
+    "PivotVector",
     # Distributed Linear Algebra Operations
     "pgemm",
     "pgetrf",

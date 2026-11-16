@@ -1,3 +1,4 @@
+#include <ddla/ddla_vector.h>
 #include "test_backend.h"
 #include <algorithm>
 #include <complex>
@@ -67,9 +68,13 @@ double benchmark_plapiv(char direc, char rowcol, int m, int n,
             ipiv[iloc] = k + 1;
     }
 
+    ddla::vector<int> backend_ipiv(handle, ipiv.size());
+    DDLA_CHECK(ddlaMemcpy(handle, backend_ipiv.data(), ipiv.data(), ipiv.size() * sizeof(int)));
+    DDLA_CHECK(ddlaSynchronize(handle));
+
     MPI_Barrier(handle->comm);
     const double start = MPI_Wtime();
-    plapiv(handle, direc, rowcol, 'C', m, n, d_A, desc, ipiv.data(), desc, nullptr);
+    plapiv(handle, direc, rowcol, 'C', m, n, d_A, desc, backend_ipiv.data(), desc, nullptr);
     DDLA_CHECK(ddlaSynchronize(handle));
     MPI_Barrier(handle->comm);
     const double elapsed = MPI_Wtime() - start;

@@ -1,3 +1,4 @@
+#include <ddla/ddla_vector.h>
 #include "api_grid_test_common.h"
 
 using namespace api_grid_test;
@@ -28,7 +29,7 @@ void check_pgetrs(const ddla::DdlaHandle_t& handle, const Shape& base)
         upload(handle, d_B.ptr, h_B);
         check_ddla_sync(handle);
 
-        std::vector<int> ipiv(ddla_test::m_loc(handle, descA));
+        ddla::vector<int> ipiv(handle, ddla_test::m_loc(handle, descA));
         int info = -1;
         ddla::pgetrf(handle, n, n, d_A.ptr, 1, 1, descA, ipiv.data(), info);
         if(info != 0) MPI_Abort(ddlaGetCommunicator(handle), 1);
@@ -48,7 +49,7 @@ void check_pgetrs(const ddla::DdlaHandle_t& handle, const Shape& base)
     // to write at local index -1).
     int nprows = 0, npcols = 0;
     ddlaGetGridDims(handle, nprows, npcols);
-    std::vector<int> ipiv(std::max(1, ddla_test::m_loc(handle, descA)), 1);
+    ddla::vector<int> ipiv(handle, std::max(1, ddla_test::m_loc(handle, descA)));
     auto reject = [&](char side, int rsrc, int csrc, const std::string& what){
         const int b_rows = (side == 'L') ? n : nrhs;
         const int b_cols = (side == 'L') ? nrhs : n;

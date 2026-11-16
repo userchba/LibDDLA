@@ -350,7 +350,7 @@ try:
     _fn.restype = ctypes.c_int
     _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_char, ctypes.c_char, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _TYPED_ROUTINES[("plapiv", "s")] = _fn
-    _ROUTINE_ARGS[("plapiv", "s")] = [('h', 'handle'), ('c', 'direc'), ('c', 'rowcol'), ('c', 'pivroc'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('ph_in', 'ipiv'), ('d', 'descIP'), ('pi_io', 'iwork')]
+    _ROUTINE_ARGS[("plapiv", "s")] = [('h', 'handle'), ('c', 'direc'), ('c', 'rowcol'), ('c', 'pivroc'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('pi_i', 'ipiv'), ('d', 'descIP'), ('pi_io', 'iwork')]
 except AttributeError:
     pass
 
@@ -360,7 +360,7 @@ try:
     _fn.restype = ctypes.c_int
     _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_char, ctypes.c_char, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _TYPED_ROUTINES[("plapiv", "d")] = _fn
-    _ROUTINE_ARGS[("plapiv", "d")] = [('h', 'handle'), ('c', 'direc'), ('c', 'rowcol'), ('c', 'pivroc'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('ph_in', 'ipiv'), ('d', 'descIP'), ('pi_io', 'iwork')]
+    _ROUTINE_ARGS[("plapiv", "d")] = [('h', 'handle'), ('c', 'direc'), ('c', 'rowcol'), ('c', 'pivroc'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('pi_i', 'ipiv'), ('d', 'descIP'), ('pi_io', 'iwork')]
 except AttributeError:
     pass
 
@@ -370,7 +370,7 @@ try:
     _fn.restype = ctypes.c_int
     _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_char, ctypes.c_char, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _TYPED_ROUTINES[("plapiv", "c")] = _fn
-    _ROUTINE_ARGS[("plapiv", "c")] = [('h', 'handle'), ('c', 'direc'), ('c', 'rowcol'), ('c', 'pivroc'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('ph_in', 'ipiv'), ('d', 'descIP'), ('pi_io', 'iwork')]
+    _ROUTINE_ARGS[("plapiv", "c")] = [('h', 'handle'), ('c', 'direc'), ('c', 'rowcol'), ('c', 'pivroc'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('pi_i', 'ipiv'), ('d', 'descIP'), ('pi_io', 'iwork')]
 except AttributeError:
     pass
 
@@ -380,7 +380,7 @@ try:
     _fn.restype = ctypes.c_int
     _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_char, ctypes.c_char, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _TYPED_ROUTINES[("plapiv", "z")] = _fn
-    _ROUTINE_ARGS[("plapiv", "z")] = [('h', 'handle'), ('c', 'direc'), ('c', 'rowcol'), ('c', 'pivroc'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('ph_in', 'ipiv'), ('d', 'descIP'), ('pi_io', 'iwork')]
+    _ROUTINE_ARGS[("plapiv", "z")] = [('h', 'handle'), ('c', 'direc'), ('c', 'rowcol'), ('c', 'pivroc'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('d', 'descA'), ('pi_i', 'ipiv'), ('d', 'descIP'), ('pi_io', 'iwork')]
 except AttributeError:
     pass
 
@@ -510,7 +510,7 @@ try:
     _fn.restype = ctypes.c_int
     _fn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _TYPED_ROUTINES[("pgetrf", "s")] = _fn
-    _ROUTINE_ARGS[("pgetrf", "s")] = [('h', 'handle'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('i', 'ia'), ('i', 'ja'), ('d', 'descA'), ('ph_io', 'ipiv'), ('ip', 'info')]
+    _ROUTINE_ARGS[("pgetrf", "s")] = [('h', 'handle'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('i', 'ia'), ('i', 'ja'), ('d', 'descA'), ('pi_io', 'ipiv'), ('ip', 'info')]
 except AttributeError:
     pass
 
@@ -520,7 +520,7 @@ try:
     _fn.restype = ctypes.c_int
     _fn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _TYPED_ROUTINES[("pgetrf", "d")] = _fn
-    _ROUTINE_ARGS[("pgetrf", "d")] = [('h', 'handle'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('i', 'ia'), ('i', 'ja'), ('d', 'descA'), ('ph_io', 'ipiv'), ('ip', 'info')]
+    _ROUTINE_ARGS[("pgetrf", "d")] = [('h', 'handle'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('i', 'ia'), ('i', 'ja'), ('d', 'descA'), ('pi_io', 'ipiv'), ('ip', 'info')]
 except AttributeError:
     pass
 
@@ -530,7 +530,7 @@ try:
     _fn.restype = ctypes.c_int
     _fn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _TYPED_ROUTINES[("pgetrf", "c")] = _fn
-    _ROUTINE_ARGS[("pgetrf", "c")] = [('h', 'handle'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('i', 'ia'), ('i', 'ja'), ('d', 'descA'), ('ph_io', 'ipiv'), ('ip', 'info')]
+    _ROUTINE_ARGS[("pgetrf", "c")] = [('h', 'handle'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('i', 'ia'), ('i', 'ja'), ('d', 'descA'), ('pi_io', 'ipiv'), ('ip', 'info')]
 except AttributeError:
     pass
 
@@ -540,7 +540,7 @@ try:
     _fn.restype = ctypes.c_int
     _fn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _TYPED_ROUTINES[("pgetrf", "z")] = _fn
-    _ROUTINE_ARGS[("pgetrf", "z")] = [('h', 'handle'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('i', 'ia'), ('i', 'ja'), ('d', 'descA'), ('ph_io', 'ipiv'), ('ip', 'info')]
+    _ROUTINE_ARGS[("pgetrf", "z")] = [('h', 'handle'), ('i', 'm'), ('i', 'n'), ('pm_io', 'A'), ('i', 'ia'), ('i', 'ja'), ('d', 'descA'), ('pi_io', 'ipiv'), ('ip', 'info')]
 except AttributeError:
     pass
 
@@ -590,7 +590,7 @@ try:
     _fn.restype = ctypes.c_int
     _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_char, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _TYPED_ROUTINES[("pgetrs", "s")] = _fn
-    _ROUTINE_ARGS[("pgetrs", "s")] = [('h', 'handle'), ('c', 'side'), ('c', 'trans'), ('i', 'n'), ('i', 'nrhs'), ('pm_io', 'A'), ('d', 'descA'), ('ph_in', 'ipiv'), ('pm_io', 'B'), ('d', 'descB')]
+    _ROUTINE_ARGS[("pgetrs", "s")] = [('h', 'handle'), ('c', 'side'), ('c', 'trans'), ('i', 'n'), ('i', 'nrhs'), ('pm_io', 'A'), ('d', 'descA'), ('pi_i', 'ipiv'), ('pm_io', 'B'), ('d', 'descB')]
 except AttributeError:
     pass
 
@@ -600,7 +600,7 @@ try:
     _fn.restype = ctypes.c_int
     _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_char, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _TYPED_ROUTINES[("pgetrs", "d")] = _fn
-    _ROUTINE_ARGS[("pgetrs", "d")] = [('h', 'handle'), ('c', 'side'), ('c', 'trans'), ('i', 'n'), ('i', 'nrhs'), ('pm_io', 'A'), ('d', 'descA'), ('ph_in', 'ipiv'), ('pm_io', 'B'), ('d', 'descB')]
+    _ROUTINE_ARGS[("pgetrs", "d")] = [('h', 'handle'), ('c', 'side'), ('c', 'trans'), ('i', 'n'), ('i', 'nrhs'), ('pm_io', 'A'), ('d', 'descA'), ('pi_i', 'ipiv'), ('pm_io', 'B'), ('d', 'descB')]
 except AttributeError:
     pass
 
@@ -610,7 +610,7 @@ try:
     _fn.restype = ctypes.c_int
     _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_char, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _TYPED_ROUTINES[("pgetrs", "c")] = _fn
-    _ROUTINE_ARGS[("pgetrs", "c")] = [('h', 'handle'), ('c', 'side'), ('c', 'trans'), ('i', 'n'), ('i', 'nrhs'), ('pm_io', 'A'), ('d', 'descA'), ('ph_in', 'ipiv'), ('pm_io', 'B'), ('d', 'descB')]
+    _ROUTINE_ARGS[("pgetrs", "c")] = [('h', 'handle'), ('c', 'side'), ('c', 'trans'), ('i', 'n'), ('i', 'nrhs'), ('pm_io', 'A'), ('d', 'descA'), ('pi_i', 'ipiv'), ('pm_io', 'B'), ('d', 'descB')]
 except AttributeError:
     pass
 
@@ -620,7 +620,7 @@ try:
     _fn.restype = ctypes.c_int
     _fn.argtypes = [ctypes.c_void_p, ctypes.c_char, ctypes.c_char, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     _TYPED_ROUTINES[("pgetrs", "z")] = _fn
-    _ROUTINE_ARGS[("pgetrs", "z")] = [('h', 'handle'), ('c', 'side'), ('c', 'trans'), ('i', 'n'), ('i', 'nrhs'), ('pm_io', 'A'), ('d', 'descA'), ('ph_in', 'ipiv'), ('pm_io', 'B'), ('d', 'descB')]
+    _ROUTINE_ARGS[("pgetrs", "z")] = [('h', 'handle'), ('c', 'side'), ('c', 'trans'), ('i', 'n'), ('i', 'nrhs'), ('pm_io', 'A'), ('d', 'descA'), ('pi_i', 'ipiv'), ('pm_io', 'B'), ('d', 'descB')]
 except AttributeError:
     pass
 

@@ -1,3 +1,4 @@
+#include <ddla/ddla_vector.h>
 #include "test_backend.h"
 #include <algorithm>
 #include <complex>
@@ -141,7 +142,7 @@ double benchmark_pgetrs(char side, int n, int nrhs, const DdlaHandle_t& handle)
     const int b_cols = (side == 'L') ? nrhs : n;
     fill_local(b_rows, b_cols, descB, d_B, handle, [&](int i, int j){ return rhs_value(i, j, n); });
 
-    std::vector<int> ipiv(ddla_test::m_loc(handle, descA));
+    ddla::vector<int> ipiv(handle, ddla_test::m_loc(handle, descA));
     int info = -1;
     pgetrf(handle, n, n, d_A, 1, 1, descA, ipiv.data(), info);
     DDLA_CHECK(ddlaSynchronize(handle));

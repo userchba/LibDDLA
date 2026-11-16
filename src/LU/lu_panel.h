@@ -13,6 +13,8 @@
 
 #include "lu_internal.h"
 #include "ddla_desc.h"
+#include "pgetf2_kernels.h"
+#include <cstring>
 
 #include <algorithm>
 #include <cstddef>
@@ -24,10 +26,25 @@ namespace ddla::lu_impl {
 // one definition of that sequence, so the bytes a size function counts are the bytes a run carves.
 // ---------------------------------------------------------------------------
 
+// Store the panel's pivot control data in the selected backend. GPU kernel
+// arguments own the small batch, so the caller can immediately reuse its host buffer.
+template <DdlaBackend Backend>
+void store_pivots(const DdlaHandle_t& handle, int count, const int* source, int* destination)
+{
+    if (count == 0) return;
+    if constexpr (Backend == DdlaBackend::CPU) {
+        std::memcpy(destination, source, std::size_t(count) * sizeof(int));
+    } else {
+#if DDLA_HAS_GPU
+        detail::pgetf2_store_pivots(handle, count, source, destination);
+#endif
+    }
+}
+
 // Inner subpanel width: at most 32 columns, at most half a descriptor block.
 inline int inner_width(int nb)
 {
-    return std::min(32, std::max(1, nb / 2));
+    return std::min(detail::kLuPivotBatch, std::max(1, nb / 2));
 }
 
 // Width of the inner subpanel that starts k columns into a width-wide panel whose first row is row0 (zero-based).

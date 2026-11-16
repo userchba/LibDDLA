@@ -31,7 +31,8 @@ TYPES = [
 #   sr     scalar of the REAL type of the matrix type (herk/her2k)
 #   pm_io  backend pointer, written
 #   pm_i   backend pointer, read-only
-#   ph_in  host int array, read-only (ipiv of pgetrf/plapiv)
+#   ph_in  host int array, read-only
+#   pi_io / pi_i backend integer array, written / read-only
 #   ph_io  host int array, written
 #   pt     host array of the matrix type, written (pgeqrf tau)
 #   d      ScaLAPACK int[9] descriptor, read-only
@@ -49,7 +50,7 @@ FUNCS = [
                        ("pm_io","B"),("d","descB")], {}),
     ("plapiv", "all4", [("h","handle"),("c","direc"),("c","rowcol"),("c","pivroc"),
                         ("i","m"),("i","n"),("pm_io","A"),("d","descA"),
-                        ("ph_in","ipiv"),("d","descIP"),("pi_io","iwork")], {}),
+                        ("pi_i","ipiv"),("d","descIP"),("pi_io","iwork")], {}),
     ("pswap", "all4", [("h","handle"),("i","N"),("pm_io","A"),("i","ia"),("i","ja"),
                        ("d","descA"),("i","inca"),("pm_io","B"),("i","ib"),("i","jb"),
                        ("d","descB"),("i","incb")], {}),
@@ -59,11 +60,11 @@ FUNCS = [
                          ("i","ja"),("d","descA"),("i","root"),("pm_i","src"),("i","ldsrc")], {}),
     # ---------------- distributed: LU family ----------------
     ("pgetrf", "all4", [("h","handle"),("i","m"),("i","n"),("pm_io","A"),("i","ia"),
-                        ("i","ja"),("d","descA"),("ph_io","ipiv"),("ip","info")], {}),
+                        ("i","ja"),("d","descA"),("pi_io","ipiv"),("ip","info")], {}),
     ("pgetrf_nopiv", "all4", [("h","handle"),("i","m"),("i","n"),("pm_io","A"),
                               ("d","descA"),("ip","info")], {}),
     ("pgetrs", "all4", [("h","handle"),("c","side"),("c","trans"),("i","n"),("i","nrhs"),
-                        ("pm_io","A"),("d","descA"),("ph_in","ipiv"),
+                        ("pm_io","A"),("d","descA"),("pi_i","ipiv"),
                         ("pm_io","B"),("d","descB")], {}),
     ("pgetrs_nopiv", "all4", [("h","handle"),("c","side"),("c","trans"),("i","n"),("i","nrhs"),
                               ("pm_io","A"),("d","descA"),("pm_io","B"),("d","descB")], {}),

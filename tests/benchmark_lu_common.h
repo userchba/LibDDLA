@@ -1,3 +1,4 @@
+#include <ddla/ddla_vector.h>
 #ifndef DDLA_BENCHMARK_LU_COMMON_H
 #define DDLA_BENCHMARK_LU_COMMON_H
 
@@ -90,7 +91,9 @@ template<class T> std::array<double,3> check(const DdlaHandle_t& h,int n,int wid
         int db[DDLA_DLEN_];DDLA_CHECK(ddlaDescInit(db,h,n,nrhs,o.nb,o.nb,0,0));
         auto rhs=make_local<T>(h,db,[&](int i,int j){return reference[i+j*n];});
         DeviceBuffer<T> b(h,rhs.size());upload(h,b.ptr,rhs);
-        ddla::pgetrs(h,'L','N',n,nrhs,device_A,desc,piv.data(),b.ptr,db);
+        ddla::vector<int> backend_piv(h,piv.size());
+        DDLA_CHECK(ddlaMemcpy(h,backend_piv.data(),piv.data(),piv.size()*sizeof(int)));
+        ddla::pgetrs(h,'L','N',n,nrhs,device_A,desc,backend_piv.data(),b.ptr,db);
         check_ddla_sync(h);auto sol=download(h,b.ptr,rhs.size());
         solve_error=local_max_error(h,db,sol,[](int i,int j){return probe<T>(i,j);});
         MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE,&solve_error,1,MPI_DOUBLE,MPI_MAX,ddlaGetCommunicator(h)));
@@ -118,6 +121,7 @@ template<class T>void run_size(const DdlaHandle_t& h,int n,const Options& o,bool
     }
     sum(h,reference);
     std::vector<int> ipiv(std::max(1,ddla_test::m_loc(h,desc)),-1);
+    ddla::vector<int> backend_ipiv(h, ipiv.size());
     std::array<std::vector<double>,2> samples;
     std::array<std::array<double,3>,2> errors{};
     std::string routine=full?"pgetrf":"pgetf2";
@@ -127,14 +131,14 @@ template<class T>void run_size(const DdlaHandle_t& h,int n,const Options& o,bool
             const char* mode=method?"gather":"inplace";
             if(o.mode!="both" && o.mode!=mode)continue;
             setenv("DDLA_LU_PANEL",mode,1);
-            upload(h,a.ptr,initial);std::fill(ipiv.begin(),ipiv.end(),-1);check_ddla_sync(h);
+            upload(h,a.ptr,initial);std::fill(ipiv.begin(),ipiv.end(),-1);DDLA_CHECK(ddlaMemcpy(h,backend_ipiv.data(),ipiv.data(),ipiv.size()*sizeof(int)));check_ddla_sync(h);
             MPI_CHECK(MPI_Barrier(ddlaGetCommunicator(h)));
             #if defined(DDLA_USE_CUDA)
             if(std::getenv("DDLA_BENCH_PROFILE")) GPU_CHECK(cudaProfilerStart());
 #endif
             int info=-1;const double begin=MPI_Wtime();
-            if(full)ddla::pgetrf(h,n,n,a.ptr, 1, 1,desc,ipiv.data(),info);
-            else ddla::pgetf2<ddla_test::execution_backend>(h,n,n,width,a.ptr, 1, 1,desc,ipiv.data(),info);
+            if(full)ddla::pgetrf(h,n,n,a.ptr, 1, 1,desc,backend_ipiv.data(),info);
+            else ddla::pgetf2<ddla_test::execution_backend>(h,n,n,width,a.ptr, 1, 1,desc,backend_ipiv.data(),info);
             check_ddla_sync(h);double elapsed=MPI_Wtime()-begin;
 #if defined(DDLA_USE_CUDA)
             if(std::getenv("DDLA_BENCH_PROFILE")) GPU_CHECK(cudaProfilerStop());
@@ -148,8 +152,11 @@ template<class T>void run_size(const DdlaHandle_t& h,int n,const Options& o,bool
                     <<" grid="<<benchmark_cli::grid_name(o.grid)<<" matrix="<<o.matrix<<" method="<<mode
                     <<" rep="<<iteration-o.warmups<<" time_s="<<elapsed<<std::endl;
             }
-            if(iteration==o.warmups+o.grid.repeats-1)
+            if(iteration==o.warmups+o.grid.repeats-1) {
+                DDLA_CHECK(ddlaMemcpy(h,ipiv.data(),backend_ipiv.data(),ipiv.size()*sizeof(int)));
+                check_ddla_sync(h);
                 errors[method]=check(h,n,width,desc,a.ptr,ipiv,reference,o,full,initial.size());
+            }
         }
     }
     if(rank==0)for(int method=0;method<2;++method)if(!samples[method].empty()) {

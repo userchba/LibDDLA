@@ -2,6 +2,7 @@
 #include <ddla/ddla_vector.h>
 #include "ddla_desc.h"
 #include <algorithm>
+#include <cassert>
 #include <complex>
 #include <cstddef>
 #include <vector>
@@ -46,18 +47,24 @@ void pgetrs_workspace_size(const DdlaHandle_t& handle, char side, char trans, in
                                           array_descA, array_descB, &solve_bytes, host_bytes);
     plapiv_impl::plapiv_workspace_size<T>(handle, nrhs, array_descB, &pivot_bytes);
     *backend_bytes = std::max(solve_bytes, pivot_bytes);
+    *host_bytes += plapiv_impl::pivot_host_bytes(handle, n, array_descA);
 }
 
 // Component 3.
 template<DdlaBackend Backend,class T>
 void pgetrs_run(const DdlaHandle_t& handle, char side, char trans, int n, int nrhs,
                 T* A, const int* array_descA,
-                const int* ipiv, // host
+                const int* ipiv, // selected backend
                 T* B, const int* array_descB,
                 void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes)
 {
     try {
         if(n==0 || nrhs==0)return;
+        const std::size_t pivot_bytes = plapiv_impl::pivot_host_bytes(handle, n, array_descA);
+        assert(pivot_bytes <= host_bytes);
+        ipiv = plapiv_impl::stage_pivots(handle, n, array_descA, ipiv, host_work, pivot_bytes);
+        if (pivot_bytes != 0) host_work = static_cast<char*>(host_work) + pivot_bytes;
+        host_bytes -= pivot_bytes;
 
         // Descriptors may describe matrices larger than the logical sub-matrix
         // (leading-block); only the leading n columns of A and the corresponding
@@ -123,7 +130,7 @@ template <DdlaBackend Backend, typename T>
 void pgetrs(
     const DdlaHandle_t& handle, char side, char trans, int n, int nrhs,
     T* A, const int* array_descA,
-    const int* ipiv, // host
+    const int* ipiv, // selected backend
     T* B, const int* array_descB
 )
 {
