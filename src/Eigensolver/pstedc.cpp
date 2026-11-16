@@ -895,21 +895,8 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
 
     pstedc_split_leaves(n, nsub, d, e, sizes, start);
 
-    // block diagonal from the start (host: zeroed by the rank's threads, so the pages spread over its sockets)
-    if constexpr (kGpu) {
-#if DDLA_HAS_GPU
-        DDLA_CHECK(ddlaMemset(handle, dQ, 0, slab * sizeof(rt)));
-#endif
-    } else {
-        const std::size_t bytes = slab * sizeof(rt);
-        detail::host_parallel_for(
-            static_cast<long long>(bytes / 4096 + 1), 256, nth, [&](long long a, long long b) {
-                const std::size_t l = static_cast<std::size_t>(a) * 4096;
-                const std::size_t h = std::min(bytes, static_cast<std::size_t>(b) * 4096);
-                if (l < h)
-                    std::memset(reinterpret_cast<unsigned char*>(dQ) + l, 0, h - l);
-            });
-    }
+    // Initialize the local eigenvector slab as block diagonal.
+    DDLA_CHECK(ddlaMemset(handle, dQ, 0, slab * sizeof(rt)));
 
     // ---- leaves: independent host solves; only retained factors are broadcast.
     {

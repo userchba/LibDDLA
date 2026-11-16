@@ -63,13 +63,7 @@ public:
     }
     void zero(int nthreads)
     {
-        T* const p = p_;
-        host_parallel_for(static_cast<long long>(n_ * sizeof(T) / 4096 + 1), 256, nthreads,
-                          [p, this](long long a, long long b) {
-                              const std::size_t lo = static_cast<std::size_t>(a) * 4096;
-                              const std::size_t hi = std::min(n_ * sizeof(T), static_cast<std::size_t>(b) * 4096);
-                              if (lo < hi) std::memset(reinterpret_cast<unsigned char*>(p) + lo, 0, hi - lo);
-                          });
+        host_memset(p_,0,n_*sizeof(T),nthreads);
     }
     T* data() { return p_; }
     const T* data() const { return p_; }

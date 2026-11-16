@@ -193,11 +193,7 @@ void ptranspose_vectors_run(const DdlaHandle_t& handle,const VectorRedistPlan& p
     T* const aux = static_cast<T*>(backend_work);
     assert(aux_elems * sizeof(T) <= backend_bytes);
     (void)backend_bytes;
-    if constexpr (Backend == DdlaBackend::CPU) {
-        std::memset(aux, 0, aux_elems * sizeof(T));
-    } else {
-        DDLA_CHECK(ddlaMemset(handle, aux, 0, aux_elems * sizeof(T)));
-    }
+    DDLA_CHECK(ddlaMemset(handle, aux, 0, aux_elems * sizeof(T)));
 
 #if DDLA_HAS_GPU
     using devT = detail::DeviceScalarT<T>;
