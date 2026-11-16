@@ -478,6 +478,10 @@ add_bench_executable(benchmark_svd_compare)
 
 # Backend handle test — works for all backends
 add_test_executable(test_memory_tri)
+add_test_executable(test_memset 1)
+target_include_directories(test_memset PRIVATE "${PROJECT_SOURCE_DIR}/src")
+set_tests_properties(test_memset_mpi PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1;OMP_MAX_ACTIVE_LEVELS=4")
 
 add_executable(test_backend_handle test_backend_handle.cpp)
 target_link_libraries(test_backend_handle PRIVATE ddla_lib)

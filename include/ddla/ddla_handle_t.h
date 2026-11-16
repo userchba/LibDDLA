@@ -199,6 +199,8 @@ ddlaStatus_t ddlaMemcpy2D(const DdlaHandle_t& handle, void* dst, std::size_t dpi
 /// Set @p bytes bytes of @p ptr to @p value on the handle's queue.  A GPU handle needs
 /// device, managed or pinned memory; a CPU handle calls memset.  Zero bytes succeeds without touching
 /// @p ptr; a null @p ptr with a nonzero size is DDLA_STATUS_INVALID_VALUE.
+// Byte fill: large CPU ranges use the handle's cached host-worker budget;
+// GPU fills remain asynchronous on the handle stream.
 ddlaStatus_t ddlaMemset(const DdlaHandle_t& handle, void* ptr, int value, std::size_t bytes);
 
 /// Local column-major triangular memory operations (no transpose/conjugation).

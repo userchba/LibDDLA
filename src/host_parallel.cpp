@@ -4,11 +4,34 @@
 #include "ddla_connector.h"
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 namespace ddla { namespace detail {
+void host_memset(void* pointer,int value,std::size_t bytes,int nthreads)
+{
+    if (bytes == 0) return;
+#ifdef _OPENMP
+    if (bytes >= kHostMemsetParallelBytes && nthreads > 1 && !omp_in_parallel()) {
+        constexpr std::size_t grain = 1024 * 1024;
+        const std::size_t chunks = bytes / grain + (bytes % grain != 0);
+        host_parallel_for(static_cast<long long>(chunks),1,nthreads,[&](long long first,long long last) {
+            for (long long chunk=first;chunk<last;++chunk) {
+                const std::size_t offset=static_cast<std::size_t>(chunk)*grain;
+                std::memset(static_cast<unsigned char*>(pointer)+offset,value,
+                            std::min(grain,bytes-offset));
+            }
+        });
+        return;
+    }
+#else
+    (void)nthreads;
+#endif
+    std::memset(pointer,value,bytes);
+}
+
 int host_thread_budget(MPI_Comm comm, int& node_ranks)
 {
     MPI_Comm node = MPI_COMM_NULL;

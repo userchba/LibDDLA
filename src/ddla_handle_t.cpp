@@ -458,7 +458,10 @@ ddlaStatus_t ddlaMemset(const DdlaHandle_t& handle, void* ptr, int value, std::s
     if (bytes == 0) return kOk;
     if (ptr == nullptr) return kBadValue;
     if (!is_gpu(handle)) {
-        std::memset(ptr, value, bytes);
+        if (bytes < detail::kHostMemsetParallelBytes || handle->host_threads <= 1)
+            std::memset(ptr, value, bytes);
+        else
+            detail::host_memset(ptr, value, bytes, handle->host_threads);
         return kOk;
     }
 #if DDLA_HAS_GPU
