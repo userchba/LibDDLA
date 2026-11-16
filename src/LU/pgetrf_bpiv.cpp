@@ -170,7 +170,7 @@ void pgetrf_block_run(const DdlaHandle_t& handle, bool pivot, int m, int n, T* A
                 // (owner_row, owner_col), so broadcast them first.
                 if (pivot && on_row) {
                     commBcast<Backend>(handle, CommScope::Row, pivots + mm_row_start, (std::size_t)nb_real, owner_col);
-                    swap_rows(A + mm_row_start, l_cols);
+                    if (l_cols > 0) swap_rows(A + mm_row_start, l_cols);
                 }
                 break;
             }
@@ -198,7 +198,7 @@ void pgetrf_block_run(const DdlaHandle_t& handle, bool pivot, int m, int n, T* A
             if (on_row) {
                 if (pivot) {
                     commBcast<Backend>(handle, CommScope::Row, pivots + mm_row_start, (std::size_t)nb_real, owner_col);
-                    swap_rows(A + mm_row_start, l_cols);
+                    if (l_cols > 0) swap_rows(A + mm_row_start, l_cols);
                 }
                 if (n_loc > right_panel_col_start) {
                     T* right_panel = A + std::size_t(right_panel_col_start) * lld + mm_row_start;
