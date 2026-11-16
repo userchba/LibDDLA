@@ -777,12 +777,8 @@ void pbdsdc_freeze_policy(const DdlaHandle_t& h,PbdsdcPlan& p)
     if(!p.n)return;
     if(!p.rank)p.leaf=std::min(256,dc_leaf_size("DDLA_SVD_DC_LEAF",128));
     if(h->nprocs>1)MPI_CHECK(MPI_Bcast(&p.leaf,1,MPI_INT,0,h->comm));
-    int onnode=1;MPI_Comm node=MPI_COMM_NULL;
-    if(h->nprocs>1) {
-        MPI_CHECK(MPI_Comm_split_type(h->comm,MPI_COMM_TYPE_SHARED,0,MPI_INFO_NULL,&node));
-        MPI_CHECK(MPI_Comm_size(node,&onnode));MPI_CHECK(MPI_Comm_free(&node));
-    }
-    p.threads=p.n>p.leaf?detail::dc_host_threads(onnode,p.backend==DdlaBackend::CPU?h->host_threads:0):1;
+    // ddlaSet cached shared-memory ranks from this same h->comm.
+    p.threads=p.n>p.leaf?detail::dc_host_threads(h->node_ranks,p.backend==DdlaBackend::CPU?h->host_threads:0):1;
 }
 
 PbdsdcPlan pbdsdc_check(const DdlaHandle_t& h,DdlaBackend backend,char uplo,int n,
