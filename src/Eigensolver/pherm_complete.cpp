@@ -382,14 +382,8 @@ HermitianPlan pherm_complete_check(const DdlaHandle_t& handle,DdlaBackend backen
     signature[13]=int(hermitian);
     detail::descriptor_signature(signature+6,descA);
     detail::agree_signature(handle,name,signature);
-    if(n>0&&backend==DdlaBackend::CPU) {
-        // Preserve collective topology discovery; the worker budget itself
-        // belongs to the handle and cannot be warmed by an unrelated call.
-        MPI_Comm node=MPI_COMM_NULL;int ranks_on_node=1;
-        MPI_CHECK(MPI_Comm_split_type(ddlaGetCommunicator(handle),MPI_COMM_TYPE_SHARED,0,MPI_INFO_NULL,&node));
-        MPI_CHECK(MPI_Comm_size(node,&ranks_on_node));MPI_CHECK(MPI_Comm_free(&node));
+    if(n>0&&backend==DdlaBackend::CPU)
         p.threads=handle->host_threads;
-    }
     return p;
 }
 void pherm_complete_geometry(const HermitianPlan& p,std::size_t& pack_count, std::size_t& local_count, std::size_t& unpack_count, std::size_t& diag_count, std::size_t& send_total_count, std::size_t& recv_total_count)
