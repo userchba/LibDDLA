@@ -1832,46 +1832,56 @@ PSTEDC_PHASE_RUN(DdlaBackend::GPU, double);
 
 template <typename rt>
 void pstedc_allocate(const DdlaHandle_t& handle, const spectral_impl::PstedcPlan& p,
-                     rt* diag_in, rt* e_in, rt* w, rt* z)
+                     rt* diag_in, rt* e_in, rt* w, rt* z, rt* scratch = nullptr)
 {
     const int n = p.rows.n;
     const bool vectors = p.mode != spectral_impl::PstedcMode::values;
     if (!n)
         return;
-    detail::EigMemProfile mp(handle, p.rows.profile && vectors, handle->backend == DdlaBackend::GPU);
-    if (vectors && handle->backend == DdlaBackend::GPU)
-        mp.phase("start");
-    // size, allocation and resources may fail on one rank only: agree before the collective run
-    std::size_t backend_bytes = 0, host_bytes = 0;
-    vector<char> backend_work(handle);
-    std::vector<char> host_work;
-    std::optional<spectral_impl::PstedcResources> rows;
-    detail::agree_local(handle,"pstedc: workspace preparation", [&] {
-        spectral_impl::pstedc_workspace_size<rt>(handle, p, &backend_bytes, &host_bytes);
-        backend_work.resize(backend_bytes);
-        host_work.resize(host_bytes);
-        if (vectors)
-            rows.emplace(handle, p.rows);
-    });
-    switch (handle->backend) {
-    case DdlaBackend::CPU:
-        spectral_impl::pstedc_run<DdlaBackend::CPU, rt>(handle, p, diag_in, e_in, w, z, backend_work.data(),
-                                                        backend_bytes, host_work.data(), host_bytes,
-                                                        rows ? &*rows : nullptr);
-        break;
+    std::optional<detail::EigMemProfile> profile;
+    {
+        std::size_t backend_bytes = 0, host_bytes = 0;
+        vector<char> backend_work(handle);
+        std::vector<char> host_work;
+        std::optional<spectral_impl::PstedcResources> rows;
+        // Queries, allocation, upload fences and the optional profiling thread
+        // may fail on one rank. Prepare all of them before collective execution.
+        detail::agree_local(handle, "pstedc: workspace preparation", [&] {
+            if (vectors && handle->backend == DdlaBackend::GPU) {
+                profile.emplace(handle, p.rows.profile, true);
+                profile->phase("start");
+            }
+            spectral_impl::pstedc_workspace_size<rt>(handle, p, &backend_bytes, &host_bytes);
+            backend_work.resize(backend_bytes);
+            host_work.resize(host_bytes);
+            if (vectors)
+                rows.emplace(handle, p.rows);
+        });
+        auto run = [&](auto backend) {
+            constexpr DdlaBackend B = decltype(backend)::value;
+            if (vectors)
+                spectral_impl::pstedc_run<B, rt>(handle, p.rows, *rows, diag_in, e_in, w, z, scratch,
+                    backend_work.data(), backend_bytes, host_work.data(), host_bytes);
+            else
+                spectral_impl::pstedc_run<B, rt>(handle, p, diag_in, e_in, w, z, backend_work.data(),
+                    backend_bytes, host_work.data(), host_bytes, nullptr);
+        };
+        switch (handle->backend) {
+        case DdlaBackend::CPU:
+            run(std::integral_constant<DdlaBackend, DdlaBackend::CPU>{});
+            break;
 #if DDLA_HAS_GPU
-    case DdlaBackend::GPU:
-        spectral_impl::pstedc_run<DdlaBackend::GPU, rt>(handle, p, diag_in, e_in, w, z, backend_work.data(),
-                                                        backend_bytes, host_work.data(), host_bytes,
-                                                        rows ? &*rows : nullptr);
-        break;
+        case DdlaBackend::GPU:
+            run(std::integral_constant<DdlaBackend, DdlaBackend::GPU>{});
+            break;
 #endif
-    default:
-        throw std::runtime_error("pstedc: backend not built");
-    }
-    if (vectors && handle->backend == DdlaBackend::GPU) {
-        mp.phase("pstedc");
-        mp.report(handle->myid, n);
+        default:
+            throw std::runtime_error("pstedc: backend not built");
+        }
+    } // Drain upload fences and release solve scratch before the final mark.
+    if (profile) {
+        profile->phase("pstedc");
+        profile->report(handle->myid, n);
     }
 }
 
@@ -1913,51 +1923,10 @@ void pstedc(const DdlaHandle_t& handle, int n, rt* d, rt* e, rt* w, rt* Y, int l
     const auto backend = ddlaGetBackend(handle);
     if (!ddlaBackendAvailable(backend))
         throw std::runtime_error("pstedc: the handle's backend is not built into this library");
-#if DDLA_HAS_GPU
-    // DDLA_EIG_PROFILE=1: PHEEVDMEM lines for the solve.
-    std::optional<detail::EigMemProfile> profile;
-    if (backend == DdlaBackend::GPU) {
-        profile.emplace(handle, eig_profile_enabled(), true);
-        profile->phase("start");
-    }
-#endif
-    {
-        const auto p =
-            spectral_impl::pstedc_check(handle, n, d, e, w, Y, ldy, scratch, scratch_elements);
-        // size, allocation and resources may fail on one rank only: agree before the collective run
-        std::size_t backend_bytes = 0, host_bytes = 0;
-        vector<char> backend_work(handle);
-        std::vector<char> host_work;
-        std::optional<spectral_impl::PstedcResources> resources;
-        detail::agree_local(handle,"pstedc: workspace preparation", [&] {
-            spectral_impl::pstedc_workspace_size<rt>(handle, p, &backend_bytes, &host_bytes);
-            backend_work.resize(backend_bytes);
-            host_work.resize(host_bytes);
-            resources.emplace(handle, p);
-        });
-        switch (backend) {
-        case DdlaBackend::CPU:
-            spectral_impl::pstedc_run<DdlaBackend::CPU, rt>(handle, p, *resources, d, e, w, Y, scratch,
-                                                                 backend_work.data(), backend_bytes,
-                                                                 host_work.data(), host_bytes);
-            break;
-#if DDLA_HAS_GPU
-        case DdlaBackend::GPU:
-            spectral_impl::pstedc_run<DdlaBackend::GPU, rt>(handle, p, *resources, d, e, w, Y, scratch,
-                                                                 backend_work.data(), backend_bytes,
-                                                                 host_work.data(), host_bytes);
-            break;
-#endif
-        default:
-            throw std::runtime_error("pstedc: the handle's backend is not built into this library");
-        }
-    } // Release solve workspace before reporting its final memory usage.
-#if DDLA_HAS_GPU
-    if (profile) {
-        profile->phase("pstedc");
-        profile->report(handle->myid, n);
-    }
-#endif
+    spectral_impl::PstedcPlan p;
+    p.mode = spectral_impl::PstedcMode::vectors;
+    p.rows = spectral_impl::pstedc_check(handle, n, d, e, w, Y, ldy, scratch, scratch_elements);
+    pstedc_allocate(handle, p, d, e, w, Y, scratch);
 }
 
 template void pstedc<float>(const DdlaHandle_t&, int, float*, float*, float*, float*, int);

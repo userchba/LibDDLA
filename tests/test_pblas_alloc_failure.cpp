@@ -2,6 +2,8 @@
 #include "mpi_test_init.h"
 #include "test_backend.h"
 #include "LU/lu_internal.h"
+#include "row_share.h"
+#include <algorithm>
 #include "test_desc_helpers.h"
 #include <ddla/ddla.h>
 #include <ddla/ddla_vector.h>
@@ -90,6 +92,18 @@ int main(int argc, char** argv)
             ddla::vector<int> block_piv(h, piv.size());
             DDLA_CHECK(ddlaMemcpy(h, block_piv.data(), piv.data(), piv.size() * sizeof(int)));
             DDLA_CHECK(ddlaSynchronize(h));
+            const bool profiled_dc = op == "pstedc";
+            std::vector<double> dc_d(profiled_dc ? n : 0, 4.), dc_e(profiled_dc ? n - 1 : 0, -1.);
+            std::vector<double> dc_w(profiled_dc ? n : 0, -111.);
+            const auto original_dc_d = dc_d, original_dc_e = dc_e, original_dc_w = dc_w;
+            const int dc_ld = std::max(1, ddla::detail::RowShare(n, size).count(rank));
+            std::vector<double> dc_initial(profiled_dc ? 16 + std::size_t(dc_ld) * n : 0, -731.);
+            ddla::vector<double> dc_y(h, dc_initial.size());
+            if (profiled_dc) {
+                DDLA_CHECK(ddlaMemcpy(h, dc_y.data(), dc_initial.data(), dc_initial.size() * sizeof(double)));
+                DDLA_CHECK(ddlaSynchronize(h));
+                setenv("DDLA_EIG_PROFILE", "1", 1);
+            }
             auto call = [&] {
                 if (op == "pgemm")
                     pgemm<double>(h, 'N', 'N', n, n, n, 1., a.data(), a.d, b.data(), b.d, 1., c.data(), c.d);
@@ -152,6 +166,8 @@ int main(int argc, char** argv)
                     plapiv<double>(h, 'F', 'R', 'C', n, n, a.data(), a.d, piv.data(), a.d, nullptr);
                 else if (op == "ppotrf_bottom_right")
                     ppotrf_bottom_right<double>(h, 'L', n, a.data(), a.d, info);
+                else if (op == "pstedc")
+                    pstedc<double>(h, 'V', n, dc_d.data(), dc_e.data(), dc_w.data(), dc_y.data() + 8, dc_ld, info);
                 else throw std::invalid_argument("unknown operation");
             };
             if (!prewarm()) throw std::runtime_error("allocator preload failed to resolve ddlaMalloc");
@@ -181,6 +197,12 @@ int main(int argc, char** argv)
             DDLA_CHECK(ddlaMemcpy(h, actual_block_piv.data(), block_piv.data(), piv.size() * sizeof(int)));
             DDLA_CHECK(ddlaSynchronize(h));
             local &= actual_block_piv == original_piv;
+            if (profiled_dc) {
+                std::vector<double> actual_dc(dc_initial.size());
+                DDLA_CHECK(ddlaMemcpy(h, actual_dc.data(), dc_y.data(), actual_dc.size() * sizeof(double)));
+                DDLA_CHECK(ddlaSynchronize(h));
+                local &= dc_d == original_dc_d && dc_e == original_dc_e && dc_w == original_dc_w && actual_dc == dc_initial;
+            }
             int all = 0;
             MPI_Allreduce(&local, &all, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
             if (!all) throw std::runtime_error("fault did not fire once and preserve every rank's matrices");

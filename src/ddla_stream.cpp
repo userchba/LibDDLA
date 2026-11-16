@@ -2,6 +2,7 @@
 #include "ddla_connector.h"
 
 #include <cmath>
+#include <exception>
 #include <cstdio>
 #include <stdexcept>
 #include <type_traits>
@@ -178,8 +179,24 @@ void DdlaStream::init(int rows, int cols, MPI_Comm comm_group, char order)
     }
     MPI_CHECK(MPI_Comm_split(comm, myprow_, myid, &row_comm));
     MPI_CHECK(MPI_Comm_split(comm, mypcol_, myid, &col_comm));
-    if (backend == DdlaBackend::CPU) init_resources<DdlaBackend::CPU>(*this);
-    else init_resources<DdlaBackend::GPU>(*this);
+    if (backend == DdlaBackend::CPU) {
+        init_resources<DdlaBackend::CPU>(*this);
+    } else {
+        // No rank may enter CCL initialization after another failed local
+        // setup. CPU setup above owns no vendor resources and cannot fail.
+        std::exception_ptr setup_error;
+        try { init_resources<DdlaBackend::GPU>(*this); }
+        catch (...) { setup_error = std::current_exception(); }
+        int failed = setup_error ? 1 : 0;
+        MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &failed, 1, MPI_INT, MPI_MAX, comm));
+        if (failed) {
+            // Every rank owns the same communicator topology, including a rank
+            // whose vendor setup stopped partway through resource creation.
+            try { clean(); } catch (...) {}
+            if (setup_error) std::rethrow_exception(setup_error);
+            throw std::runtime_error("ddla: GPU resource preparation failed on another rank");
+        }
+    }
     communicator->initialize(this);
     initialized = true;
 }
