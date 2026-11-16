@@ -2220,6 +2220,29 @@ void gemm(
     std::complex<R>* C, int ldc);
 
 /**
+ * @brief Local symmetric tridiagonal eigensolver (all four scalar output types).
+ *
+ * compz='N' computes eigenvalues only; 'I' also writes tridiagonal eigenvectors;
+ * 'V' replaces the input orthogonal/unitary Z with Z times those eigenvectors.
+ * D (n), E (max(0,n-1)) and info are HOST storage on both backends. On success,
+ * D contains ascending eigenvalues; E is destroyed. Z is column-major in the
+ * handle's backend memory, ldz >= max(1,n); padding is preserved. Z/ldz are
+ * ignored for 'N'; n=0 permits null arrays. All active arrays must be disjoint.
+ *
+ * CPU uses LAPACK S/D/C/ZSTEDC. GPU uses host LAPACK leaves/secular roots and
+ * device vector updates; values-only uses host LAPACK. The call completes
+ * before return, owns its workspace and performs no MPI communication. Different
+ * ranks may solve different local problems. Initialize a GPU handle with ddlaSet
+ * first, as for other local BLAS operations. info is LAPACK's status on CPU and
+ * for values-only, zero on GPU-vector success; a GPU D&C numerical failure sets
+ * info=1 and throws. Invalid arguments and runtime failures throw.
+ */
+template<typename T>
+void stedc(const DdlaHandle_t& handle, char compz, int n,
+           typename real_type<T>::type* d, typename real_type<T>::type* e,
+           T* Z, int ldz, int& info);
+
+/**
  * @brief Diagonalize a replicated real symmetric tridiagonal matrix collectively.
  * @tparam T float or double. d, e and w are host vectors on every rank.
  * @param jobz 'N': eigenvalues only; 'V': eigenvalues and row-distributed vectors.

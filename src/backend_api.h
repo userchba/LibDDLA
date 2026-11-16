@@ -714,6 +714,9 @@ void gemm(
     std::complex<R>* C, int ldc);
 
 template <DdlaBackend Backend, typename T>
+void stedc(const DdlaHandle_t& handle, char compz, int n, typename real_type<T>::type* d, typename real_type<T>::type* e, T* Z, int ldz, int& info);
+
+template <DdlaBackend Backend, typename T>
 void syevd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
            T* A, int lda, T* w, int* info);
 

@@ -876,3 +876,13 @@ endif()
 foreach(_method_test test_pheevd_methods test_pheevd_policy)
     add_test_executable(${_method_test})
 endforeach()
+
+add_test_executable(test_stedc)
+set_tests_properties(test_stedc_mpi PROPERTIES LABELS cpu TIMEOUT 180)
+if(DDLA_HAS_GPU)
+    add_test(NAME test_stedc_gpu_mpi
+        COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${DDLA_TEST_NP}
+            ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_stedc> --gpu ${MPIEXEC_POSTFLAGS})
+    set_tests_properties(test_stedc_gpu_mpi PROPERTIES LABELS gpu
+        PROCESSORS ${DDLA_TEST_NP} TIMEOUT 180)
+endif()

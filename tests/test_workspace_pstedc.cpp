@@ -1,4 +1,5 @@
 #include "Eigensolver/pstedc_impl.h"
+#include "plan_util.h"
 #include "api_grid_test_common.h"
 #include "ddla_stream.h"
 #include "workspace_test_common.h"
@@ -12,7 +13,7 @@ using namespace ddla::spectral_impl;
 namespace {
 struct Env {
     const char* name;bool present;std::string saved;
-    Env(const char* n,const char* value):name(n),present(std::getenv(n)!=nullptr),saved(present?std::getenv(n):""){setenv(name,value,1);}
+    Env(const char* n,const char* value):name(n),present(std::getenv(n)!=nullptr),saved(present?std::getenv(n):""){if(value)setenv(name,value,1);else unsetenv(name);}
     ~Env(){if(present)setenv(name,saved.c_str(),1);else unsetenv(name);}
 };
 bool no_growth(const workspace_test::Snapshot& s)
@@ -184,6 +185,30 @@ template<DdlaBackend B,class R>void cases(DdlaHandle_t h)
         for(const char* keep:{"0","64"}){Env cache("DDLA_EIG_DC_KEEP_MB",keep);solve_case<B,R>(h,'N',73);}
         for(const char* split:{"0","1","2"}){Env splitting("DDLA_EIG_DC_SPLIT",split);solve_case<B,R>(h,'V',73);}
         solve_case<B,R>(h,'V',73);
+    }
+    if (h->nprocs == 1) {
+        Env default_leaves("DDLA_EIG_DC_LEAF",nullptr);
+        if constexpr (B == DdlaBackend::GPU) {
+            for (int n : {129,257,512,1024}) {
+                auto p=pstedc_policy<R>(h,n);
+                p.ldy=n;p.borrow_q2=true;
+                std::size_t backend=0,host=0;
+                pstedc_workspace_size<R>(h,p,&backend,&host);
+                const auto previous_device=ddla::detail::padded_bytes<R>(std::size_t(n)*n)+
+                                           ddla::detail::padded_bytes<int>(n);
+                require_close(h,"small local pstedc adds no device workspace",
+                    pstedc_leaves(n,p.leaf)==1&&backend==previous_device?0:1,0);
+                p.borrow_q=true;
+                pstedc_workspace_size<R>(h,p,&backend,&host);
+                require_close(h,"small local pstedc retains borrowed Q savings",
+                    backend==ddla::detail::padded_bytes<int>(n)?0:1,0);
+            }
+        }
+        solve_case<B,R>(h,'V',129);
+        solve_case<B,R>(h,'V',257);
+        // An explicit smaller-leaf policy must still prepare the merge fence.
+        Env merging("DDLA_EIG_DC_LEAF","128");
+        solve_case<B,R>(h,'V',129);
     }
     Env leaves("DDLA_EIG_DC_LEAF","8");
     solve_case<B,R>(h,'N',131);solve_case<B,R>(h,'N',33,true);

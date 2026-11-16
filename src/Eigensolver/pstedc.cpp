@@ -18,6 +18,7 @@
 #include "mpi_datatype.h"
 #include "plan_util.h"
 #include "pstedc_impl.h"
+#include "stedc_impl.h"
 #include "pstedc_numeric.h"
 #include "check_agree.h"
 #include "BLAS/blas_impl.h"
@@ -87,24 +88,58 @@ bool local_stedc_cpu(const PstedcVectorPlan& p) {
     return p.backend==DdlaBackend::CPU && p.ranks==1 &&
         std::size_t(p.n)*(std::size_t(p.n)+4)+1<=std::size_t(INT_MAX);
 }
-template<class R>std::size_t local_stedc_bytes(int n,bool vectors) {
-    const std::size_t count=vectors?std::size_t(n)*(std::size_t(n)+4)+1:1;
-    const std::size_t integers=vectors?3+5*std::size_t(n):1;
-    return detail::padded_bytes<R>(std::max(1,n-1))+detail::padded_bytes<R>(count)+
-        detail::padded_bytes<int>(integers);
+template<class R>
+StedcPlan pstedc_local_plan(const DdlaHandle_t& h, const PstedcVectorPlan& p, char job)
+{
+    if (p.backend == DdlaBackend::GPU) {
+        // Real I output already has the checked row geometry and borrowing
+        // decisions. Use STEDC execution without changing those decisions or
+        // discarding an explicit PSTEDC leaf/strip override.
+        StedcPlan local;
+        local.compz = job;
+        local.n = p.n;
+        local.rows = p;
+        stedc_rows_workspace_size<R>(h, p, &local.engine_backend, &local.engine_host);
+        local.backend_bytes = local.engine_backend;
+        local.host_bytes = local.engine_host;
+        return local;
+    }
+    // Keep the existing native real LAPACK workspace bound. Unlike the public
+    // four-type planner this needs no vendor query during reusable execution.
+    StedcPlan local;
+    local.compz = job;
+    local.n = p.n;
+    local.lwork = job == 'I' ? int(std::size_t(p.n) * (std::size_t(p.n) + 4) + 1) : 1;
+    local.liwork = job == 'I' ? 3 + 5 * p.n : 1;
+    local.backend_bytes = detail::padded_bytes<R>(local.lwork) +
+                          detail::padded_bytes<int>(local.liwork);
+    return local;
 }
-template<class R>void local_stedc_run(const DdlaHandle_t& h,char job,int n,R* d,R* e,R* w,R* z,int ldz,void* scratch) {
-    char* cursor=static_cast<char*>(scratch);
-    R* off=detail::take<R>(cursor,std::max(1,n-1));
-    if(n>1)std::copy_n(e,n-1,off);
-    std::memmove(w,d,std::size_t(n)*sizeof(R));
-    const int count=job=='I'?int(std::size_t(n)*(std::size_t(n)+4)+1):1;
-    const int integers=job=='I'?3+5*n:1;
-    R* work=detail::take<R>(cursor,count);int* iwork=detail::take<int>(cursor,integers);
-    R dummy=0;if(!z)z=&dummy;
-    int info=0;detail::ScopedBlasThreads threads(h->host_threads);
-    stedc(job,n,w,off,z,ldz,work,count,iwork,integers,info);
-    if(info)throw std::runtime_error("pstedc: local STEDC failed, info="+std::to_string(info));
+
+template<DdlaBackend B, class R>
+void pstedc_local_run(const DdlaHandle_t& h, const PstedcVectorPlan& p, char job,
+                      R* d, R* e, R* w, R* z, R* scratch, void* backend_work,
+                      void* host_work, PstedcResources* resources)
+{
+    const auto local = pstedc_local_plan<R>(h, p, job);
+    char* work = static_cast<char*>(backend_work);
+    R* off = e;
+    if constexpr (B == DdlaBackend::CPU) {
+        off = detail::take<R>(work, std::max(1, p.n - 1));
+        if (p.n > 1)
+            std::copy_n(e, p.n - 1, off);
+    }
+    std::memmove(w, d, std::size_t(p.n) * sizeof(R));
+    int info = 0;
+    if constexpr (B == DdlaBackend::CPU) {
+        PstedcResources unused(h, local.rows);
+        stedc_run<B,R>(h, local, unused, w, off, z, p.ldy, info, work, host_work);
+    } else {
+        assert(resources);
+        stedc_run<B,R>(h, local, *resources, w, off, z, p.ldy, info, work, host_work, scratch);
+    }
+    if (info)
+        throw std::runtime_error("pstedc: local STEDC failed, info=" + std::to_string(info));
 }
 }
 
@@ -546,7 +581,11 @@ PstedcVectorPlan pstedc_policy(const DdlaHandle_t& h, int n)
         return p;
     int policy[3] = {1024, 0, 0};
     if (p.rank == 0) {
-        policy[0] = dc_leaf_size("DDLA_EIG_DC_LEAF", 1024);
+        // Keep the old one-leaf device footprint through 1024. Above it,
+        // local STEDC's smaller leaves reduce host work without adding a strip.
+        const int leaf = p.backend == DdlaBackend::GPU && p.ranks == 1 && n > 1024
+            ? stedc_gpu_leaf_size(n) : 1024;
+        policy[0] = dc_leaf_size("DDLA_EIG_DC_LEAF", leaf);
         policy[1] = p.backend == DdlaBackend::CPU ? dc_split_gemm_mode() : 0;
         if (const char* env = std::getenv("DDLA_EIG_DC_STRIP")) {
             const long v = std::strtol(env, nullptr, 10);
@@ -578,6 +617,8 @@ PstedcVectorPlan pstedc_policy(const DdlaHandle_t& h, int n)
     p.root_chunk = std::max(
         32, std::min({4 * p.threads, 256,
                       static_cast<int>((128ull << 20) / (sizeof(R) * static_cast<std::size_t>(n) + 1))}));
+    if (p.backend == DdlaBackend::GPU && p.ranks == 1)
+        p.strip = std::min(p.strip, n);
     if (p.ranks > 1 && n > 1) {
         const int share = n / p.ranks + (n % p.ranks != 0);
         // At most a rank's share of the secular matrix is formed at once.
@@ -640,7 +681,7 @@ PstedcPlan pstedc_check(const DdlaHandle_t& h, char jobz, int n, const R* d, con
 
 // The buffers of pstedc_run in its carving order (listed in pstedc_impl.h).
 template <class R>
-void pstedc_workspace_size(const DdlaHandle_t&, const PstedcVectorPlan& p, std::size_t* backend_bytes,
+void stedc_rows_workspace_size(const DdlaHandle_t&, const PstedcVectorPlan& p, std::size_t* backend_bytes,
                                 std::size_t* host_bytes)
 {
     using detail::padded_bytes;
@@ -648,10 +689,6 @@ void pstedc_workspace_size(const DdlaHandle_t&, const PstedcVectorPlan& p, std::
     *host_bytes = 0;
     if (!p.n)
         return;
-    if(local_stedc_cpu(p)) {
-        *backend_bytes=local_stedc_bytes<R>(p.n,true);
-        return;
-    }
     const bool gpu = p.backend == DdlaBackend::GPU;
     const std::size_t n = p.n;
     const int leaves = pstedc_leaves(p.n, p.leaf), mine = pstedc_my_leaves(leaves, p.rank, p.ranks);
@@ -696,10 +733,27 @@ void pstedc_workspace_size(const DdlaHandle_t&, const PstedcVectorPlan& p, std::
     *host_bytes = host;
 }
 
-template void pstedc_workspace_size<float>(const DdlaHandle_t&, const PstedcVectorPlan&, std::size_t*,
+template void stedc_rows_workspace_size<float>(const DdlaHandle_t&, const PstedcVectorPlan&, std::size_t*,
                                                 std::size_t*);
-template void pstedc_workspace_size<double>(const DdlaHandle_t&, const PstedcVectorPlan&, std::size_t*,
+template void stedc_rows_workspace_size<double>(const DdlaHandle_t&, const PstedcVectorPlan&, std::size_t*,
                                                  std::size_t*);
+
+template <class R>
+void pstedc_workspace_size(const DdlaHandle_t& h, const PstedcVectorPlan& p,
+                           std::size_t* backend_bytes, std::size_t* host_bytes)
+{
+    if (p.n && (local_stedc_cpu(p) || (p.backend == DdlaBackend::GPU && p.ranks == 1))) {
+        const auto local = pstedc_local_plan<R>(h, p, 'I');
+        *backend_bytes = local.backend_bytes;
+        *host_bytes = local.host_bytes;
+        if (p.backend == DdlaBackend::CPU)
+            *backend_bytes += detail::padded_bytes<R>(std::max(1, p.n - 1));
+        return;
+    }
+    stedc_rows_workspace_size<R>(h, p, backend_bytes, host_bytes);
+}
+template void pstedc_workspace_size<float>(const DdlaHandle_t&, const PstedcVectorPlan&, std::size_t*, std::size_t*);
+template void pstedc_workspace_size<double>(const DdlaHandle_t&, const PstedcVectorPlan&, std::size_t*, std::size_t*);
 
 // Values-only host scratch; the vector case uses exactly the row engine's layout.
 template <class R>
@@ -717,7 +771,8 @@ void pstedc_workspace_size(const DdlaHandle_t& h, const PstedcPlan& p, std::size
     if (!a.n)
         return;
     if(local_stedc_cpu(a)) {
-        *backend_bytes=local_stedc_bytes<R>(a.n,false);
+        *backend_bytes = pstedc_local_plan<R>(h, a, 'N').backend_bytes +
+                         padded_bytes<R>(std::max(1, a.n - 1));
         return;
     }
     const std::size_t n = a.n;
@@ -782,6 +837,10 @@ PstedcVectorPlan pstedc_check(const DdlaHandle_t& h, int n, const R* d, const R*
                  !detail::array_overlaps(scratch, slab, Y, std::size_t(ldy) * n) &&
                  !detail::array_overlaps(scratch, slab, d, n) &&
                  !detail::array_overlaps(scratch, slab, e, n - 1) && !detail::array_overlaps(scratch, slab, w, n);
+    // Native one-rank LAPACK writes Y directly and needs no separate Q.
+    // Do not report a borrowed factor which this path never touches.
+    if (local_stedc_cpu(p))
+        p.borrow_q = false;
     p.borrow_q2 = share.count(p.rank) > 0 && ldy == std::max(1, share.count(p.rank)) &&
                   !detail::array_overlaps(Y, slab, d, n) &&
                   !detail::array_overlaps(Y, slab, e, n - 1) &&
@@ -797,7 +856,7 @@ template PstedcVectorPlan pstedc_check<double>(const DdlaHandle_t&, int, const d
                                                   std::size_t);
 
 template <DdlaBackend B, typename rt>
-void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, PstedcResources& resources,
+void stedc_rows_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, PstedcResources& resources,
                      rt* d, rt* e, rt* w, rt* dY, rt* scratch, void* backend_work,
                      [[maybe_unused]] std::size_t backend_bytes, void* host_work,
                      [[maybe_unused]] std::size_t host_bytes)
@@ -807,12 +866,6 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
     const int n = policy.n, ldy = policy.ldy;
     if (!n)
         return;
-    if constexpr(B==DdlaBackend::CPU) {
-        if(local_stedc_cpu(policy)) {
-            local_stedc_run(handle,'I',n,d,e,w,dY,ldy,backend_work);
-            return;
-        }
-    }
     MPI_Comm comm = handle->comm;
     const int P = policy.ranks, me = policy.rank;
     const MPI_Datatype mt = detail::mpi_datatype<rt>();
@@ -941,7 +994,10 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
         for (int j = 0; j < mine; ++j)
             if (errs[j] && !leaf_err)
                 leaf_err = errs[j];
-        agree_or_throw(comm, leaf_err, "pstedc", "leaf ?STEDC");
+        if (P > 1)
+            agree_or_throw(comm, leaf_err, "pstedc", "leaf ?STEDC");
+        else if (leaf_err)
+            throw std::runtime_error("stedc: leaf ?STEDC failed (info=" + std::to_string(leaf_err) + ")");
         if (P > 1)
             for (int i = 0; i < nsub; ++i)
                 MPI_CHECK(MPI_Bcast(d + start[i], sizes[i], mt, i % P, comm));
@@ -1054,7 +1110,10 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
         std::copy(indxq + s, indxq + s + m, iq);
         int K = 0, givptr = 0, i8 = 0;
         laed8_decide(K, m, d + s, iq, rho, m1, z, dlamda, wv, perm, givptr, givcol, givnum, indxp, indx, i8);
-        pstedc_agree_deflation(comm, i8, K);
+        if (P > 1)
+            pstedc_agree_deflation(comm, i8, K);
+        else if (i8)
+            throw std::runtime_error("stedc: ?LAED8 failed (info=" + std::to_string(i8) + ")");
         t_decide += clk.lap();
 
         // the split GEMM reorders the kept columns [left | mixed | right] (and S's rows with them); the skipped GEMM blocks are
@@ -1385,8 +1444,15 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
     // fence below also retires their host uploads.
 
     // ---- ascending eigenvalues and the matching columns -----------------------
+    // Local STEDC overwrites D with the sorted values. The final permutation
+    // must read an intact source; the last merge's lambda scratch is dead now.
+    const rt* values = d;
+    if (w == d && nsub > 1) {
+        std::copy_n(d, n, lam);
+        values = lam;
+    }
     for (int i = 0; i < n; ++i)
-        w[i] = d[indxq[static_cast<std::size_t>(i)] - 1] * orgnrm;
+        w[i] = values[indxq[static_cast<std::size_t>(i)] - 1] * orgnrm;
     if (nrl > 0) {
         if constexpr (kGpu) {
 #if DDLA_HAS_GPU
@@ -1414,7 +1480,7 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, Pste
 }
 
 #define PSTEDC_VECTORS_RUN(B, R)                                                                                \
-    template void pstedc_run<B, R>(const DdlaHandle_t&, const PstedcVectorPlan&, PstedcResources&,    \
+    template void stedc_rows_run<B, R>(const DdlaHandle_t&, const PstedcVectorPlan&, PstedcResources&,    \
                                         R*, R*, R*, R*, R*, void*, std::size_t, void*, std::size_t)
 PSTEDC_VECTORS_RUN(DdlaBackend::CPU, float);
 PSTEDC_VECTORS_RUN(DdlaBackend::CPU, double);
@@ -1423,6 +1489,31 @@ PSTEDC_VECTORS_RUN(DdlaBackend::GPU, float);
 PSTEDC_VECTORS_RUN(DdlaBackend::GPU, double);
 #endif
 #undef PSTEDC_VECTORS_RUN
+
+template <DdlaBackend B, class R>
+void pstedc_run(const DdlaHandle_t& h, const PstedcVectorPlan& p, PstedcResources& resources,
+                R* d, R* e, R* w, R* z, R* scratch, void* backend_work,
+                std::size_t backend_bytes, void* host_work, std::size_t host_bytes)
+{
+    if (!p.n)
+        return;
+    if (local_stedc_cpu(p) || (p.backend == DdlaBackend::GPU && p.ranks == 1)) {
+        pstedc_local_run<B,R>(h, p, 'I', d, e, w, z, scratch, backend_work, host_work, &resources);
+        return;
+    }
+    stedc_rows_run<B,R>(h, p, resources, d, e, w, z, scratch, backend_work,
+                        backend_bytes, host_work, host_bytes);
+}
+#define PSTEDC_LOCAL_DISPATCH(B,R) \
+    template void pstedc_run<B,R>(const DdlaHandle_t&,const PstedcVectorPlan&,PstedcResources&, \
+                                  R*,R*,R*,R*,R*,void*,std::size_t,void*,std::size_t)
+PSTEDC_LOCAL_DISPATCH(DdlaBackend::CPU,float);
+PSTEDC_LOCAL_DISPATCH(DdlaBackend::CPU,double);
+#if DDLA_HAS_GPU
+PSTEDC_LOCAL_DISPATCH(DdlaBackend::GPU,float);
+PSTEDC_LOCAL_DISPATCH(DdlaBackend::GPU,double);
+#endif
+#undef PSTEDC_LOCAL_DISPATCH
 
 template <DdlaBackend B, typename rt>
 void pstedc_run(const DdlaHandle_t& handle, const PstedcPlan& policy, rt* d, rt* e, rt* w, rt* vectors,
@@ -1441,7 +1532,8 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcPlan& policy, rt* d, rt*
 
         if constexpr(B==DdlaBackend::CPU) {
             if(local_stedc_cpu(policy.rows)) {
-                local_stedc_run(handle,'N',policy.rows.n,d,e,w,static_cast<rt*>(nullptr),1,backend_work);
+                pstedc_local_run<B,rt>(handle,policy.rows,'N',d,e,w,static_cast<rt*>(nullptr),
+                    static_cast<rt*>(nullptr),backend_work,host_work,nullptr);
                 return;
             }
         }

@@ -1783,6 +1783,21 @@ template void gemm<float>(const DdlaHandle_t& handle, char transa, char transb, 
 template void gemm<double>(const DdlaHandle_t& handle, char transa, char transb, int m, int n, int k, const std::complex<double>& alpha, const std::complex<double>* A, int lda, const double* B, int ldb, const std::complex<double>& beta, std::complex<double>* C, int ldc);
 
 template <typename T>
+void stedc(const DdlaHandle_t& handle, char compz, int n, typename real_type<T>::type* d, typename real_type<T>::type* e, T* Z, int ldz, int& info)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return stedc<DdlaBackend::GPU, T>(handle, compz, n, d, e, Z, ldz, info);
+#endif
+    return stedc<DdlaBackend::CPU, T>(handle, compz, n, d, e, Z, ldz, info);
+}
+
+template void stedc<float>(const DdlaHandle_t& handle, char compz, int n, typename real_type<float>::type* d, typename real_type<float>::type* e, float* Z, int ldz, int& info);
+template void stedc<double>(const DdlaHandle_t& handle, char compz, int n, typename real_type<double>::type* d, typename real_type<double>::type* e, double* Z, int ldz, int& info);
+template void stedc<std::complex<float>>(const DdlaHandle_t& handle, char compz, int n, typename real_type<std::complex<float>>::type* d, typename real_type<std::complex<float>>::type* e, std::complex<float>* Z, int ldz, int& info);
+template void stedc<std::complex<double>>(const DdlaHandle_t& handle, char compz, int n, typename real_type<std::complex<double>>::type* d, typename real_type<std::complex<double>>::type* e, std::complex<double>* Z, int ldz, int& info);
+
+template <typename T>
 void syevd(
     const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, int lda, T* w, int* info)
 {

@@ -39,7 +39,7 @@ int main(int argc,char** argv)
             else if(arg.rfind("--",0)==0)throw std::invalid_argument("unknown benchmark option: "+arg);
             else sizes.push_back(std::stoi(arg));
         }
-        if(reps<1||(kind!=0&&kind!=1&&kind!=5))throw std::invalid_argument("invalid repetitions or matrix kind");
+        if(reps<1||(kind!=0&&kind!=1&&kind!=5&&kind!=6))throw std::invalid_argument("invalid repetitions or matrix kind");
         if(sizes.empty())sizes={2000,5000,10000};
         ddla::DdlaHandle_t h=nullptr;ddla::ddlaInit(h, ddla_test::execution_backend);ddla::ddlaSet(h,MPI_COMM_WORLD,1,P);
         const double eps=std::numeric_limits<double>::epsilon();
@@ -48,8 +48,8 @@ int main(int argc,char** argv)
             const ddla::detail::RowShare share(n,P);const int nr=share.count(rank),lo=share.lo(rank),ld=std::max(1,nr);
             DeviceBuffer<double> Y(h,std::size_t(ld)*n);
             std::vector<double> d0(n),e0(n,0),d,e,w(n),times;
-            for(int i=0;i<n;++i){d0[i]=kind==5?2:kind==1?0.5*(i%4):hash01(i,1);
-                if(i+1<n)e0[i]=kind==5?-1:kind==1?1e-3*hash01(i,3):hash01(i,2);}
+            for(int i=0;i<n;++i){d0[i]=kind==6?std::sin(.73*i)+.2*std::cos(.17*i):kind==5?2:kind==1?0.5*(i%4):hash01(i,1);
+                if(i+1<n)e0[i]=kind==6?std::sqrt(double(n-i-1))*(1+.04*std::sin(.37*i)):kind==5?-1:kind==1?1e-3*hash01(i,3):hash01(i,2);}
             double normT=0;
             for(int i=0;i<n;++i)normT=std::max(normT,std::abs(d0[i])+std::abs(e0[i])+(i?std::abs(e0[i-1]):0));
             for(int rep=-1;rep<reps;++rep){

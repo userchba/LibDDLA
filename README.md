@@ -984,6 +984,19 @@ major version.
 
 LGPL v3.  See [LICENSE](./LICENSE).
 
+For an independent local tridiagonal solve, use
+`stedc<T>(handle, compz, n, d, e, Z, ldz, info)` with real or complex
+single/double precision output. `compz='N'` returns eigenvalues only;
+`'I'` writes tridiagonal eigenvectors; `'V'` replaces the input orthogonal
+or unitary `Z` with `Z` times those eigenvectors. `d`, `e`, and `info` are
+**host** data on both backends; `Z` is in handle-selected memory. `d` is
+replaced by ascending eigenvalues, `e` is destroyed, and leading-dimension
+padding is preserved. The call completes before returning and performs no
+MPI communication. CPU uses native LAPACK STEDC; GPU uses hybrid divide and
+conquer with host LAPACK leaves/secular roots and device eigenvector updates.
+Values-only uses host LAPACK on either backend. GPU handles must first be
+initialized with `ddlaSet`, as for local BLAS operations.
+
 `pstedc<T>(handle, jobz, n, d, e, w, z, ldz, info)` has two modes:
 `jobz='N'` computes eigenvalues only; `jobz='V'` also returns eigenvectors as
 contiguous row slabs in backend memory. For communicator rank q among P ranks,
@@ -996,7 +1009,11 @@ eigenvalues on every rank. For 'N', z and ldz are ignored and z may be null.
 
 The former `descZ` overload and its automatic row-to-2D redistribution have
 been removed. Callers must allocate the row layout described above.
-`pstedc` uses the existing row-distributed divide-and-conquer engine, with
+With one rank, vector `pstedc` uses local `stedc` on CPU or GPU, including its
+GPU leaf policy above order 1024 and validated caller-supplied factor scratch.
+Orders through 1024 retain the one-leaf default to avoid extra device workspace;
+explicit leaf overrides remain supported. Multi-rank
+`pstedc` uses the shared row-distributed divide-and-conquer engine, with
 secular factors generated in bounded strips. The eigenvalues-only tree keeps
 only the boundary rows needed by later merges.
 

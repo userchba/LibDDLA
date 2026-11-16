@@ -4,6 +4,7 @@ target_sources(ddla_lib PRIVATE
     eig_cpu_kernels.cpp
     pvector_redist.cpp
     pstedc.cpp
+    stedc.cpp
     pheevd.cpp
     heevd.cpp
     hegvd.cpp
@@ -19,13 +20,13 @@ set_source_files_properties(eig_cpu_kernels.cpp TARGET_DIRECTORY ddla_lib
 
 if(DDLA_USE_CUDA)
     set_source_files_properties(
-        pvector_redist.cpp pstedc.cpp pheevd.cpp
+        pvector_redist.cpp pstedc.cpp stedc.cpp pheevd.cpp
         heevd.cpp hegvd.cpp phegvd.cpp syevd.cpp pheevd_adapter.cpp pherm_complete.cpp
         TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE CUDA)
 endif()
 if(DDLA_USE_HIP)
     set_source_files_properties(
-        pvector_redist.cpp pstedc.cpp pheevd.cpp
+        pvector_redist.cpp pstedc.cpp stedc.cpp pheevd.cpp
         heevd.cpp hegvd.cpp phegvd.cpp syevd.cpp pheevd_adapter.cpp pherm_complete.cpp
         TARGET_DIRECTORY ddla_lib PROPERTIES LANGUAGE HIP)
 endif()

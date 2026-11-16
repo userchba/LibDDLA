@@ -88,6 +88,13 @@ void check_case(const ddla::DdlaHandle_t& h,int n,int kind,int padding) {
         if(mode==Mode::Overlap) scratch=Y.ptr+(count>1?1:0);
         if(mode==Mode::Unaligned)
             scratch=reinterpret_cast<R*>(reinterpret_cast<unsigned char*>(scratch)+1);
+        const auto checked=ddla::spectral_impl::pstedc_check<R>(
+            h,n,d.data(),e.data(),w.data(),Y.ptr,ldy,
+            mode==Mode::Owned?nullptr:scratch,mode==Mode::Owned?0:available);
+        const bool native_cpu=ddla::ddlaGetBackend(h)==ddla::DdlaBackend::CPU && P==1 &&
+            std::size_t(n)*(std::size_t(n)+4)+1<=std::size_t(std::numeric_limits<int>::max());
+        require_close(h,"pstedc planner reports actual factor borrowing",
+            checked.borrow_q==(mode==Mode::Adequate && nr>0 && !native_cpu)?0:1,0);
         if(mode==Mode::Owned)
             ddla::pstedc(h,n,d.data(),e.data(),w.data(),Y.ptr,ldy);
         else
@@ -105,7 +112,7 @@ void check_case(const ddla::DdlaHandle_t& h,int n,int kind,int padding) {
         }
         for(std::size_t i=slab+2*guard;i<scratch_count;++i) guardbad+=scratch_after[i]!=sentinel;
         for(std::size_t i=0;i<slab;++i) changed+=scratch_after[guard+i]!=sentinel;
-        const bool borrowed=mode==Mode::Adequate && nr>0;
+        const bool borrowed=checked.borrow_q;
         require_close(h,tag+" scratch guards",guardbad,0);
         require_close(h,tag+" scratch ownership",borrowed?(changed!=double(slab)):(changed!=0),0);
         // Re-upload after return, then let its owner free it: this also checks
@@ -164,6 +171,10 @@ template<class R> void run(const ddla::DdlaHandle_t& h) {
             check_case<R,true>(h,257,2,padding);
             for(int n:{0,1,2,37,67}) check_case<R,true>(h,n,0,padding);
             check_case<R,true>(h,67,1,padding);
+        } else {
+            // Borrowed Q must survive the local GPU STEDC dispatch and its
+            // smaller-leaf merge, for compact and padded output alike.
+            check_case<R>(h,257,2,padding);
         }
     }
 }

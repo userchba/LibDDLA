@@ -48,6 +48,10 @@ namespace ddla
 namespace spectral_impl
 {
 
+// Shared host LAPACK adapters used by local STEDC and D&C leaves.
+void stedc(char, int, float*, float*, float*, int, float*, int, int*, int, int&);
+void stedc(char, int, double*, double*, double*, int, double*, int, int*, int, int&);
+
 // Policy and alias decisions belong to the collective checker. The scratch
 // below is a function of this POD alone, including on zero-row ranks.
 struct PstedcVectorPlan
@@ -118,6 +122,17 @@ template <class R>
 void pstedc_workspace_size(const DdlaHandle_t &, const PstedcVectorPlan &, std::size_t *backend_bytes,
                            std::size_t *host_bytes);
 
+// Numerical row engine shared by local STEDC and distributed PSTEDC. These
+// entries do not dispatch back to the local solver.
+template <class R>
+void stedc_rows_workspace_size(const DdlaHandle_t&, const PstedcVectorPlan&,
+                               std::size_t*, std::size_t*);
+
+inline int stedc_gpu_leaf_size(int n) noexcept
+{
+    return n <= 4096 ? 128 : 1024;
+}
+
 // Owns the reusable GPU copy fence and its pending-source-read state.
 // Construct/destroy outside check, size and run. No event is needed
 // for CPU or a single-leaf problem.
@@ -179,6 +194,10 @@ template <DdlaBackend B, class R>
 void pstedc_run(const DdlaHandle_t &, const PstedcVectorPlan &, PstedcResources &, R *d, R *e, R *w, R *Y,
                 R *scratch, void *backend_work, std::size_t backend_bytes, void *host_work,
                 std::size_t host_bytes);
+
+template <DdlaBackend B, class R>
+void stedc_rows_run(const DdlaHandle_t&, const PstedcVectorPlan&, PstedcResources&,
+                    R*, R*, R*, R*, R*, void*, std::size_t, void*, std::size_t);
 
 enum class PstedcMode
 {

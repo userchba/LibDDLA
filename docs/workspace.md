@@ -187,3 +187,41 @@ library belongs to the tests, and adds no instrumentation to LibDDLA.
 Compare the same public-API executable against baseline and candidate
 libraries when checking numerical preservation. Use restored inputs and the
 same hardware, rank/thread placement, warm-ups and repetitions for timing.
+
+### Local tridiagonal eigensolver
+
+`stedc` owns its scratch; private `spectral_impl::stedc_plan<T>` and
+`stedc_run<B,T>` allow internal callers and benchmarks to reuse it. The plan
+query neither inspects input arrays nor communicates. CPU host scratch comes
+from the native S/D/C/ZSTEDC query. GPU vector solves reuse the PSTEDC engine
+with a single-rank plan: two real n-by-n device factors (one borrows compact real output), an at-most-512-column
+secular strip, host factors of leaves of at most 128 rows for n<=4096, otherwise 1024 rows, and linear merge
+metadata. Complex output requires a real n-by-n result before conversion;
+COMPZ=V also requires a separate result matrix to avoid overwriting its input.
+The D&C and result-product/mixed-GEMM phases share scratch after the D&C completion fence.
+CPU complex COMPZ=V packs padded Z into a compact temporary before calling
+C/ZSTEDC, then copies back only active rows; this avoids the noncompact-stride
+corruption reproduced in HPC3 OpenBLAS 0.3.29 CSTEDC. Compact CPU Z has no such copy.
+These local allocations do not alter the row-distributed ownership of PSTEDC.
+D, E and INFO are host arrays, and local STEDC completes its device work before
+returning so its owning scratch can be released safely.
+
+For complex single precision, the CPU query also enforces LAPACK's exact
+integer RWORK minimum when the floating-point query reaches 2^24. CSTEDC's
+REAL query can round an odd required count down (for example 33,570,817
+at n=4096 with COMPZ=I). Execution must not pass that rounded-down count
+back as LRWORK. The same conversion also protects single-precision LWORK if its query rounds
+down; modern LAPACK normally rounds that query up already. LP64 counts are
+clamped to INT_MAX only when the checked documented minimum still fits.
+
+For a one-rank vector `pstedc`, private local `stedc` execution and shared row-engine workspace sizing are
+used, preserving padded output and accepted borrowed Q scratch. A shared
+row-engine entry avoids dispatch recursion. Its final eigenvalue permutation
+can overwrite D using dead merge scratch, so local GPU STEDC no longer needs
+an additional host eigenvalue vector. Multi-rank row-slab factors, bounded
+strips and GPU values-only boundary-row execution retain their existing
+ownership and schedule. Prepare the local GPU merge fence using its own leaf
+policy, including orders 129–1024.
+Single-rank GPU PSTEDC retains one default leaf through order 1024, avoiding
+an additional device secular strip in that range. Orders 1025–4096 use the
+shared 128-row leaf default. The explicit PSTEDC leaf override remains honored.
