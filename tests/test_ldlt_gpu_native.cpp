@@ -435,16 +435,13 @@ int main(int argc, char** argv)
             cases<std::complex<float>>(h, cpu, trace, native);
             cases<std::complex<double>>(h, cpu, trace, native);
             invalid_calls(h);
-            DdlaHandle_t alternate = nullptr;
-            DDLA_CHECK(ddlaInit(alternate, DdlaBackend::GPU));
-            DDLA_CHECK(ddlaSet(alternate, MPI_COMM_WORLD, o.pr, o.pc));
-            void* old = ddlaGetStream(h);
-            DDLA_CHECK(ddlaSetStream(h, ddlaGetStream(alternate)));
+            // A successful replacement transfers ownership to h.
+            gpuStream_t alternate = nullptr;
+            GPU_CHECK(gpuStreamCreateWithFlags(&alternate, gpuStreamNonBlocking));
+            DDLA_CHECK(ddlaSetStream(h, alternate));
             for (int op : {0, 1, 2})
                 test<std::complex<double>>(h, cpu, trace, op, 129, 'U', op == 1 ? 2 : 0, 16, 24,
                                            native, 0);
-            DDLA_CHECK(ddlaSetStream(h, old));
-            DDLA_CHECK(ddlaDestroy(alternate));
         }
         DDLA_CHECK(ddlaDestroy(h));
         DDLA_CHECK(ddlaDestroy(cpu));

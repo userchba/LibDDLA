@@ -261,11 +261,9 @@ void run(DdlaBackend backend, bool sanitizer)
     DDLA_CHECK(ddlaSet(h, MPI_COMM_WORLD, 1, size, 'R'));
     cases = 0;
 #if DDLA_HAS_GPU
-    void* original_stream = nullptr;
     gpuStream_t alternate = nullptr;
     if (backend == DdlaBackend::GPU) {
         DDLA_CHECK(ddlaSynchronize(h));
-        original_stream = ddlaGetStream(h);
         GPU_CHECK(gpuStreamCreateWithFlags(&alternate, gpuStreamNonBlocking));
         DDLA_CHECK(ddlaSetStream(h, alternate));
     }
@@ -297,14 +295,6 @@ void run(DdlaBackend backend, bool sanitizer)
     (void)sanitizer;
 #endif
     DDLA_CHECK(ddlaSynchronize(h));
-#if DDLA_HAS_GPU
-    if (backend == DdlaBackend::GPU) {
-        // Restore ownership of the original stream before releasing the
-        // temporary nonblocking stream used for the queue-ordering checks.
-        DDLA_CHECK(ddlaSetStream(h, original_stream));
-        GPU_CHECK(gpuStreamDestroy(alternate));
-    }
-#endif
     if (!ddlaGetRank(h)) std::cout << "MEMORY_TRI_PASS backend=" << int(backend)
                                   << " cases=" << cases << " sanitizer=" << sanitizer << '\n';
     DDLA_CHECK(ddlaDestroy(h));
