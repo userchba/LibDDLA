@@ -2399,8 +2399,8 @@ void phb2st_band_run(const DdlaHandle_t& h,const Phb2stBandPlan& p,const T* A,T*
         T* band=detail::take<T>(w,elements);T* temporary=detail::take<T>(w,elements);
         assert(std::size_t(w-static_cast<char*>(backend_work))<=backend_bytes);(void)backend_bytes;
         const int n=p.n,nbw=p.band,nb=p.nb,lld=p.lld,npr=p.nprows,npc=p.npcols,myprow=p.myprow,mypcol=p.mypcol;
+        DDLA_CHECK(ddlaMemset(h,band,0,elements*sizeof(T)));
         if constexpr(Backend==DdlaBackend::CPU) {
-            std::memset(band,0,elements*sizeof(T));
             for(int col=0;col<n;++col) {
                 if((col/nb)%npc!=mypcol)continue;
                 const int lj=nb*(col/(nb*npc))+col%nb;
@@ -2412,7 +2412,6 @@ void phb2st_band_run(const DdlaHandle_t& h,const Phb2stBandPlan& p,const T* A,T*
             }
         } else {
 #if DDLA_HAS_GPU
-            DDLA_CHECK(ddlaMemset(h,band,0,elements*sizeof(T)));
             const unsigned blocks=static_cast<unsigned>(std::min(std::size_t(1024),(elements+255)/256));
             band_extract_kernel<T><<<blocks,256,0,static_cast<gpuStream_t>(h->stream)>>>(band,n,nbw,A,lld,nb,myprow,mypcol,npr,npc);
             DDLA_CHECK(ddlaGetLastError(h));DDLA_CHECK(ddlaSynchronize(h));

@@ -896,7 +896,7 @@ template<class T,int W>void replay_rows_input(const DdlaHandle_t& h,const Hb2stC
     if(!p.input_2d.enabled){replay_input_counts(p,&nsend,&nrecv);send=take<R>(w,nsend);recv=take<R>(w,nrecv);}
     assert(std::size_t(w-base)<=bytes);(void)bytes;
     const int n=p.n,ldy=p.ldy,threads=p.policy.threads;const std::size_t stride=replay_tile_stride<T>(p),count=replay_block_count<T>(p);
-    host_parallel_for((count*sizeof(R)+4095)/4096,256,threads,[&](long long lo,long long hi){const auto begin=std::size_t(lo)*4096,end=std::min(count*sizeof(R),std::size_t(hi)*4096);if(begin<end)std::memset(reinterpret_cast<std::byte*>(data)+begin,0,end-begin);});
+    host_memset(data,0,count*sizeof(R),threads);
     // Each input value is put directly in its final replay tile. In complex
     // arithmetic preserve the original real/imaginary phase expressions,
     // including signed zeros; no BLAS or complex-expression reordering.
