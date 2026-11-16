@@ -199,12 +199,10 @@ int main(int argc, char** argv)
             for (char uplo : {'L', 'U'})
                 for (double scale : {1e-100, 1e100, 1e-300, 1e300})
                     test(h, 129, uplo, 0, scale, true, native);
-            // Reuse another DDLA handle's stream, then restore both owners.
-            DdlaHandle_t alternate = nullptr;
-            DDLA_CHECK(ddlaInit(alternate, DdlaBackend::GPU));
-            DDLA_CHECK(ddlaSet(alternate, MPI_COMM_WORLD, 1, ranks));
-            void* previous = ddlaGetStream(h);
-            DDLA_CHECK(ddlaSetStream(h, ddlaGetStream(alternate)));
+            // A successful replacement transfers ownership to h.
+            gpuStream_t alternate = nullptr;
+            GPU_CHECK(gpuStreamCreateWithFlags(&alternate, gpuStreamNonBlocking));
+            DDLA_CHECK(ddlaSetStream(h, alternate));
             test(h, 129, 'L', 0, 1, true, native);
             test(h, 1100, 'U', 1, 1, false, native);
             for (char uplo : {'L', 'U'})
@@ -213,8 +211,6 @@ int main(int argc, char** argv)
                 test(h, 2305, uplo, 1, 1, true, native);
                 test(h, 2305, uplo, 3, 1, true, native);
             }
-            DDLA_CHECK(ddlaSetStream(h, previous));
-            DDLA_CHECK(ddlaDestroy(alternate));
         }
         DDLA_CHECK(ddlaDestroy(h));
     }

@@ -144,23 +144,15 @@ template<class T> void type(ddla::DdlaHandle_t h)
 void body(ddla::DdlaHandle_t h,const Shape&)
 {
 #if DDLA_HAS_GPU
-    void* original=nullptr;
     gpuStream_t alternate=nullptr;
     if(ddla::ddlaGetBackend(h)==ddla::DdlaBackend::GPU) {
-        DDLA_CHECK(ddla::ddlaSynchronize(h));original=ddla::ddlaGetStream(h);
+        DDLA_CHECK(ddla::ddlaSynchronize(h));
         GPU_CHECK(gpuStreamCreateWithFlags(&alternate,gpuStreamNonBlocking));
         DDLA_CHECK(ddla::ddlaSetStream(h,static_cast<void*>(alternate)));
     }
 #endif
     type<float>(h);type<double>(h);type<std::complex<float>>(h);type<std::complex<double>>(h);
     invalid(h);
-#if DDLA_HAS_GPU
-    if(alternate) {
-        DDLA_CHECK(ddla::ddlaSynchronize(h));
-        DDLA_CHECK(ddla::ddlaSetStream(h,original));
-        GPU_CHECK(gpuStreamDestroy(alternate));
-    }
-#endif
 }
 }
 int main(int argc,char** argv) { return run_grid_test(argc,argv,"test_matrix_complete",body); }

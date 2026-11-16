@@ -557,20 +557,19 @@ int main(int argc, char **argv)
             if (n < 0)
             {
                 invalid_calls<B>(h);
+#if DDLA_HAS_GPU
                 if constexpr (B == DdlaBackend::GPU)
                 {
-                    DdlaHandle_t alternate = nullptr;
-                    DDLA_CHECK(ddlaInit(alternate, B));
-                    DDLA_CHECK(ddlaSet(alternate, MPI_COMM_WORLD, pr, pc));
-                    auto previous = ddlaGetStream(h);
-                    DDLA_CHECK(ddlaSetStream(h, ddlaGetStream(alternate)));
+                    // A successful replacement transfers ownership to h.
+                    gpuStream_t alternate = nullptr;
+                    GPU_CHECK(gpuStreamCreateWithFlags(&alternate, gpuStreamNonBlocking));
+                    DDLA_CHECK(ddlaSetStream(h, alternate));
                     for (int method : {1, 2, 3, 4})
                         test<B, std::complex<double>>(h, cpu, trace, method, 65, 3, 'U',
                                                       method == 1 || method == 3 ? 1 : 0, 3, 4,
                                                       true, 0);
-                    DDLA_CHECK(ddlaSetStream(h, previous));
-                    DDLA_CHECK(ddlaDestroy(alternate));
                 }
+#endif
             }
             DDLA_CHECK(ddlaDestroy(h));
             DDLA_CHECK(ddlaDestroy(cpu));
