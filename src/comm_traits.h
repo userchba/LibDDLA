@@ -35,36 +35,36 @@ inline MPI_Op to_mpi_op(gpucclRedOp_t op)
 #endif
 
 template <DdlaBackend Backend = detail::local_backend_v>
-inline void commGroupStart(const DdlaHandle_t& h) { communicator<Backend>(h).group_start(h); }
+inline void commGroupStart(const DdlaHandle_t& h, void* queue = nullptr) { communicator<Backend>(h).group_start(h, queue); }
 
 template <DdlaBackend Backend = detail::local_backend_v>
-inline void commGroupEnd(const DdlaHandle_t& h) { communicator<Backend>(h).group_end(h); }
+inline void commGroupEnd(const DdlaHandle_t& h, void* queue = nullptr) { communicator<Backend>(h).group_end(h, queue); }
 
 // Only CPU broadcasts accept derived MPI datatypes, including strided panels.
 template <DdlaBackend Backend = detail::local_backend_v, typename T>
 inline void commBcast(const DdlaHandle_t& h, CommScope scope, T* buf, int count,
-                      MPI_Datatype datatype, int root)
+                      MPI_Datatype datatype, int root, void* queue = nullptr)
 {
     static_assert(Backend == DdlaBackend::CPU, "MPI datatypes require a CPU broadcast");
-    communicator<Backend>(h).bcast(h, scope, buf, count, datatype, 0, root);
+    communicator<Backend>(h).bcast(h, scope, buf, count, datatype, 0, root, queue);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v, typename T>
-inline void commBcast(const DdlaHandle_t& h, CommScope scope, T* buf, std::size_t count, int root)
+inline void commBcast(const DdlaHandle_t& h, CommScope scope, T* buf, std::size_t count, int root, void* queue = nullptr)
 {
-    communicator<Backend>(h).bcast(h, scope, buf, count, detail::mpi_datatype<T>(), sizeof(T), root);
+    communicator<Backend>(h).bcast(h, scope, buf, count, detail::mpi_datatype<T>(), sizeof(T), root, queue);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v, typename T>
-inline void commSend(const DdlaHandle_t& h, CommScope scope, const T* buf, std::size_t count, int peer)
+inline void commSend(const DdlaHandle_t& h, CommScope scope, const T* buf, std::size_t count, int peer, void* queue = nullptr)
 {
-    communicator<Backend>(h).send(h, scope, buf, count, detail::mpi_datatype<T>(), sizeof(T), peer);
+    communicator<Backend>(h).send(h, scope, buf, count, detail::mpi_datatype<T>(), sizeof(T), peer, queue);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v, typename T>
-inline void commRecv(const DdlaHandle_t& h, CommScope scope, T* buf, std::size_t count, int peer)
+inline void commRecv(const DdlaHandle_t& h, CommScope scope, T* buf, std::size_t count, int peer, void* queue = nullptr)
 {
-    communicator<Backend>(h).recv(h, scope, buf, count, detail::mpi_datatype<T>(), sizeof(T), peer);
+    communicator<Backend>(h).recv(h, scope, buf, count, detail::mpi_datatype<T>(), sizeof(T), peer, queue);
 }
 
 // MPI uses Sendrecv for cycles above the eager limit; CCL implements the
@@ -72,64 +72,64 @@ inline void commRecv(const DdlaHandle_t& h, CommScope scope, T* buf, std::size_t
 template <DdlaBackend Backend = detail::local_backend_v, typename T>
 inline void commSendrecv(const DdlaHandle_t& h, CommScope scope,
                          const T* send, std::size_t send_count, int dest,
-                         T* recv, std::size_t recv_count, int source)
+                         T* recv, std::size_t recv_count, int source, void* queue = nullptr)
 {
     communicator<Backend>(h).sendrecv(h, scope, send, send_count, dest, recv, recv_count, source,
-                                      detail::mpi_datatype<T>(), sizeof(T));
+                                      detail::mpi_datatype<T>(), sizeof(T), queue);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v, typename T>
 inline void commSendrecv(const DdlaHandle_t& h, CommScope scope,
-                         const T* send, T* recv, std::size_t count, int peer)
+                         const T* send, T* recv, std::size_t count, int peer, void* queue = nullptr)
 {
-    commSendrecv<Backend>(h, scope, send, count, peer, recv, count, peer);
+    commSendrecv<Backend>(h, scope, send, count, peer, recv, count, peer, queue);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v, typename T>
 inline void commAllReduce(const DdlaHandle_t& h, CommScope scope,
-                          const T* send, T* recv, int count, cclOp op)
+                          const T* send, T* recv, int count, cclOp op, void* queue = nullptr)
 {
     // Retain the existing complex-float componentwise MPI reduction and the
     // complex-double MPI datatype. CCL maps complex-double to real components.
     if constexpr (std::is_same_v<T, std::complex<float>>)
         communicator<Backend>(h).allreduce(h, scope, send, recv, count * 2,
-                                            MPI_FLOAT, sizeof(float), to_mpi_op(op));
+                                            MPI_FLOAT, sizeof(float), to_mpi_op(op), queue);
     else {
         static_assert(std::is_same_v<T, float> || std::is_same_v<T, double> ||
                       std::is_same_v<T, std::complex<double>>, "unsupported allreduce scalar type");
         const auto type = std::is_same_v<T, std::complex<double>> ? MPI_DOUBLE_COMPLEX : detail::mpi_datatype<T>();
-        communicator<Backend>(h).allreduce(h, scope, send, recv, count, type, sizeof(T), to_mpi_op(op));
+        communicator<Backend>(h).allreduce(h, scope, send, recv, count, type, sizeof(T), to_mpi_op(op), queue);
     }
 }
 
 template <DdlaBackend Backend = detail::local_backend_v, typename T>
 inline void commReduceSum(const DdlaHandle_t& h, CommScope scope,
-                          const T* send, T* recv, std::size_t count, int root)
+                          const T* send, T* recv, std::size_t count, int root, void* queue = nullptr)
 {
     // Bound MPI counts and CCL real-component counts without allocating a
     // global reduction buffer. Only the root's output is defined afterwards.
     for (std::size_t offset = 0; offset < count; ) {
         const int length = static_cast<int>(std::min(count - offset, std::size_t(INT_MAX / 2)));
         communicator<Backend>(h).reduce_sum(h, scope, send + offset, recv + offset, length,
-                                             detail::mpi_datatype<T>(), sizeof(T), root);
+                                             detail::mpi_datatype<T>(), sizeof(T), root, queue);
         offset += length;
     }
 }
 
 template <DdlaBackend Backend = detail::local_backend_v, typename T>
 inline void commAllGather(const DdlaHandle_t& h, CommScope scope,
-                          const T* send, T* recv, std::size_t count)
+                          const T* send, T* recv, std::size_t count, void* queue = nullptr)
 {
-    communicator<Backend>(h).allgather(h, scope, send, recv, count, detail::mpi_datatype<T>(), sizeof(T));
+    communicator<Backend>(h).allgather(h, scope, send, recv, count, detail::mpi_datatype<T>(), sizeof(T), queue);
 }
 
 template <DdlaBackend Backend = detail::local_backend_v, typename T>
 inline void commAlltoallv(const DdlaHandle_t& h, CommScope scope, int nprocs,
                           const T* send, const int* send_counts, const int* send_displs,
-                          T* recv, const int* recv_counts, const int* recv_displs)
+                          T* recv, const int* recv_counts, const int* recv_displs, void* queue = nullptr)
 {
     communicator<Backend>(h).alltoallv(h, scope, nprocs, send, send_counts, send_displs,
-                                      recv, recv_counts, recv_displs, detail::mpi_datatype<T>(), sizeof(T));
+                                      recv, recv_counts, recv_displs, detail::mpi_datatype<T>(), sizeof(T), queue);
 }
 
 } // namespace ddla

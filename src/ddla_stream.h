@@ -55,6 +55,7 @@ public:
     // Internal groups may be rank-local. Transport changes are forbidden until
     // they close; a handle is never used concurrently by application threads.
     int communication_group_depth = 0;
+    void* communication_group_queue = nullptr;
 
     // -- host threading ----------------------------------------------------
     // Host-loop and eigensolver budget, frozen collectively by ddlaSet for
@@ -122,16 +123,22 @@ inline MPI_Comm Communicator::mpi_comm(const DdlaHandle_t& h, CommScope scope) n
     }
 }
 
-inline void Communicator::group_start(const DdlaHandle_t& h) const
+inline void Communicator::group_start(const DdlaHandle_t& h, void* queue) const
 {
+    void* const selected = queue ? queue : h->stream;
+    if (h->communication_group_depth && h->communication_group_queue != selected)
+        throw std::runtime_error("ddla: a communication group must use one queue");
+    if (!h->communication_group_depth) h->communication_group_queue = selected;
     ++h->communication_group_depth;
 }
 
-inline void Communicator::group_end(const DdlaHandle_t& h) const
+inline void Communicator::group_end(const DdlaHandle_t& h, void* queue) const
 {
     if (h->communication_group_depth <= 0)
         throw std::runtime_error("ddla: communication group is not active");
-    --h->communication_group_depth;
+    if (h->communication_group_queue != (queue ? queue : h->stream))
+        throw std::runtime_error("ddla: a communication group must use one queue");
+    if (!--h->communication_group_depth) h->communication_group_queue = nullptr;
 }
 
 } // namespace ddla

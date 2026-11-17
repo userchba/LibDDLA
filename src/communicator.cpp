@@ -23,83 +23,83 @@ public:
     DdlaCommunication mode() const noexcept override { return DdlaCommunication::HostStagedMPI; }
 
     void bcast(const DdlaHandle_t& h, CommScope scope, void* buffer, std::size_t count,
-               MPI_Datatype type, std::size_t width, int root) const override
+               MPI_Datatype type, std::size_t width, int root, void* queue) const override
     {
         const auto bytes = message_bytes(count, width);
         auto* host = h->host_buffers<std::byte>(bytes)[0];
         const auto comm = mpi_comm(h, scope);
         int rank = 0;
         MPI_CHECK(MPI_Comm_rank(comm, &rank));
-        if (rank == root) DDLA_CHECK(ddlaMemcpy(h, host, buffer, bytes));
-        DDLA_CHECK(ddlaSynchronize(h));
+        if (rank == root) DDLA_CHECK(detail::memcpy_on(h, host, buffer, bytes, queue ? queue : h->stream));
+        DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
         MPI_CHECK(MPI_Bcast(host, static_cast<int>(count), type, root, comm));
-        DDLA_CHECK(ddlaMemcpy(h, buffer, host, bytes));
-        DDLA_CHECK(ddlaSynchronize(h));
+        DDLA_CHECK(detail::memcpy_on(h, buffer, host, bytes, queue ? queue : h->stream));
+        DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
     }
     void send(const DdlaHandle_t& h, CommScope scope, const void* buffer, std::size_t count,
-              MPI_Datatype type, std::size_t width, int peer) const override
+              MPI_Datatype type, std::size_t width, int peer, void* queue) const override
     {
         const auto bytes = message_bytes(count, width);
         auto* host = h->host_buffers<std::byte>(bytes)[0];
-        DDLA_CHECK(ddlaMemcpy(h, host, buffer, bytes));
-        DDLA_CHECK(ddlaSynchronize(h));
+        DDLA_CHECK(detail::memcpy_on(h, host, buffer, bytes, queue ? queue : h->stream));
+        DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
         MPI_CHECK(MPI_Send(host, static_cast<int>(count), type, peer, 0, mpi_comm(h, scope)));
     }
     void recv(const DdlaHandle_t& h, CommScope scope, void* buffer, std::size_t count,
-              MPI_Datatype type, std::size_t width, int peer) const override
+              MPI_Datatype type, std::size_t width, int peer, void* queue) const override
     {
         const auto bytes = message_bytes(count, width);
         auto* host = h->host_buffers<std::byte>(bytes)[0];
-        DDLA_CHECK(ddlaSynchronize(h));
+        DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
         MPI_CHECK(MPI_Recv(host, static_cast<int>(count), type, peer, 0,
                            mpi_comm(h, scope), MPI_STATUS_IGNORE));
-        DDLA_CHECK(ddlaMemcpy(h, buffer, host, bytes));
-        DDLA_CHECK(ddlaSynchronize(h));
+        DDLA_CHECK(detail::memcpy_on(h, buffer, host, bytes, queue ? queue : h->stream));
+        DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
     }
     void sendrecv(const DdlaHandle_t& h, CommScope scope,
                   const void* send, std::size_t send_count, int dest,
                   void* recv, std::size_t recv_count, int source,
-                  MPI_Datatype type, std::size_t width) const override
+                  MPI_Datatype type, std::size_t width, void* queue) const override
     {
         const auto send_bytes = message_bytes(send_count, width);
         const auto recv_bytes = message_bytes(recv_count, width);
         auto [hs, hr] = h->host_buffers<std::byte>(send_bytes, recv_bytes);
-        if (send_count) DDLA_CHECK(ddlaMemcpy(h, hs, send, send_bytes));
-        DDLA_CHECK(ddlaSynchronize(h));
+        if (send_count) DDLA_CHECK(detail::memcpy_on(h, hs, send, send_bytes, queue ? queue : h->stream));
+        DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
         MPI_CHECK(MPI_Sendrecv(hs, static_cast<int>(send_count), type, dest, 0,
                                hr, static_cast<int>(recv_count), type, source, 0,
                                mpi_comm(h, scope), MPI_STATUS_IGNORE));
-        if (recv_count) DDLA_CHECK(ddlaMemcpy(h, recv, hr, recv_bytes));
-        DDLA_CHECK(ddlaSynchronize(h));
+        if (recv_count) DDLA_CHECK(detail::memcpy_on(h, recv, hr, recv_bytes, queue ? queue : h->stream));
+        DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
     }
     void allreduce(const DdlaHandle_t& h, CommScope scope, const void* send, void* recv,
-                   int count, MPI_Datatype type, std::size_t width, MPI_Op op) const override
+                   int count, MPI_Datatype type, std::size_t width, MPI_Op op, void* queue) const override
     {
         const auto bytes = message_bytes(count, width);
         auto [hs, hr] = h->host_buffers<std::byte>(bytes, bytes);
-        DDLA_CHECK(ddlaMemcpy(h, hs, send, bytes));
-        DDLA_CHECK(ddlaSynchronize(h));
+        DDLA_CHECK(detail::memcpy_on(h, hs, send, bytes, queue ? queue : h->stream));
+        DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
         MPI_CHECK(MPI_Allreduce(hs, hr, count, type, op, mpi_comm(h, scope)));
-        DDLA_CHECK(ddlaMemcpy(h, recv, hr, bytes));
-        DDLA_CHECK(ddlaSynchronize(h));
+        DDLA_CHECK(detail::memcpy_on(h, recv, hr, bytes, queue ? queue : h->stream));
+        DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
     }
     void reduce_sum(const DdlaHandle_t& h, CommScope scope, const void* send, void* recv,
-                    int count, MPI_Datatype type, std::size_t width, int root) const override
+                    int count, MPI_Datatype type, std::size_t width, int root, void* queue) const override
     {
         const auto bytes = message_bytes(count, width);
         auto [hs, hr] = h->host_buffers<std::byte>(bytes, bytes);
-        DDLA_CHECK(ddlaMemcpy(h, hs, send, bytes));
-        DDLA_CHECK(ddlaSynchronize(h));
+        DDLA_CHECK(detail::memcpy_on(h, hs, send, bytes, queue ? queue : h->stream));
+        DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
         MPI_CHECK(MPI_Reduce(hs, hr, count, type, MPI_SUM, root, mpi_comm(h, scope)));
         const int rank = scope == CommScope::Row ? h->mypcol_ :
                          scope == CommScope::Col ? h->myprow_ : h->myid;
         if (rank == root) {
-            DDLA_CHECK(ddlaMemcpy(h, recv, hr, bytes));
-            DDLA_CHECK(ddlaSynchronize(h));
+            DDLA_CHECK(detail::memcpy_on(h, recv, hr, bytes, queue ? queue : h->stream));
+            DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
         }
     }
     void allgather(const DdlaHandle_t& h, CommScope scope, const void* send, void* recv,
-                   std::size_t count, MPI_Datatype type, std::size_t width) const override
+                   std::size_t count, MPI_Datatype type, std::size_t width, void* queue) const override
     {
         const auto comm = mpi_comm(h, scope);
         int size = 0;
@@ -107,17 +107,17 @@ public:
         const auto bytes = message_bytes(count, width);
         const auto total = message_bytes(bytes, size);
         auto [hs, hr] = h->host_buffers<std::byte>(bytes, total);
-        DDLA_CHECK(ddlaMemcpy(h, hs, send, bytes));
-        DDLA_CHECK(ddlaSynchronize(h));
+        DDLA_CHECK(detail::memcpy_on(h, hs, send, bytes, queue ? queue : h->stream));
+        DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
         MPI_CHECK(MPI_Allgather(hs, static_cast<int>(count), type,
                                 hr, static_cast<int>(count), type, comm));
-        DDLA_CHECK(ddlaMemcpy(h, recv, hr, total));
-        DDLA_CHECK(ddlaSynchronize(h));
+        DDLA_CHECK(detail::memcpy_on(h, recv, hr, total, queue ? queue : h->stream));
+        DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
     }
     void alltoallv(const DdlaHandle_t& h, CommScope scope, int nprocs,
                    const void* send, const int* send_counts, const int* send_displs,
                    void* recv, const int* recv_counts, const int* recv_displs,
-                   MPI_Datatype type, std::size_t width) const override
+                   MPI_Datatype type, std::size_t width, void* queue) const override
     {
         // Callers pack contiguous regions in peer-rank order.
         const int send_total = nprocs ? send_displs[nprocs - 1] + send_counts[nprocs - 1] : 0;
@@ -126,14 +126,14 @@ public:
         const auto recv_bytes = message_bytes(recv_total, width);
         auto [hs, hr] = h->host_buffers<std::byte>(send_bytes, recv_bytes);
         if (send_total) {
-            DDLA_CHECK(ddlaMemcpy(h, hs, send, send_bytes));
-            DDLA_CHECK(ddlaSynchronize(h));
+            DDLA_CHECK(detail::memcpy_on(h, hs, send, send_bytes, queue ? queue : h->stream));
+            DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
         }
         MPI_CHECK(MPI_Alltoallv(hs, send_counts, send_displs, type,
                                 hr, recv_counts, recv_displs, type, mpi_comm(h, scope)));
         if (recv_total) {
-            DDLA_CHECK(ddlaMemcpy(h, recv, hr, recv_bytes));
-            DDLA_CHECK(ddlaSynchronize(h));
+            DDLA_CHECK(detail::memcpy_on(h, recv, hr, recv_bytes, queue ? queue : h->stream));
+            DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
         }
     }
 };
@@ -170,6 +170,13 @@ bool release_comm(void*& opaque, bool abort = false)
 }
 
 class CclCommunicator final : public Communicator {
+    static gpuStream_t work_queue(const DdlaHandle_t& h, void* queue)
+    {
+        void* const selected = queue ? queue : h->stream;
+        if (h->communication_group_depth && h->communication_group_queue != selected)
+            throw std::runtime_error("ddla: a communication group must use one queue");
+        return static_cast<gpuStream_t>(selected);
+    }
     static gpucclComm_t native(const DdlaHandle_t& h, CommScope scope)
     {
         switch (scope) {
@@ -222,81 +229,92 @@ public:
         if (collective) MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &failed, 1, MPI_INT, MPI_MAX, h->comm));
         if (failed) throw std::runtime_error("ddla: CCL communicator cleanup failed");
     }
-    void group_start(const DdlaHandle_t& h) const override
+    void group_start(const DdlaHandle_t& h, void* queue) const override
     {
-        CCL_CHECK(gpucclGroupStart());
-        Communicator::group_start(h);
+        Communicator::group_start(h, queue);
+        try { CCL_CHECK(gpucclGroupStart()); }
+        catch (...) { Communicator::group_end(h, queue); throw; }
     }
-    void group_end(const DdlaHandle_t& h) const override
+    void group_end(const DdlaHandle_t& h, void* queue) const override
     {
-        Communicator::group_end(h);
+        Communicator::group_end(h, queue);
         CCL_CHECK(gpucclGroupEnd());
     }
     void bcast(const DdlaHandle_t& h, CommScope scope, void* buffer, std::size_t count,
-               MPI_Datatype, std::size_t width, int root) const override
+               MPI_Datatype, std::size_t width, int root, void* queue) const override
     {
         CCL_CHECK(gpucclBcast(buffer, count * width, gpucclInt8, root,
-                              native(h, scope), static_cast<gpuStream_t>(h->stream)));
+                              native(h, scope), work_queue(h, queue)));
     }
     void send(const DdlaHandle_t& h, CommScope scope, const void* buffer, std::size_t count,
-              MPI_Datatype, std::size_t width, int peer) const override
+              MPI_Datatype, std::size_t width, int peer, void* queue) const override
     {
         CCL_CHECK(gpucclSend(buffer, count * width, gpucclInt8, peer,
-                             native(h, scope), static_cast<gpuStream_t>(h->stream)));
+                             native(h, scope), work_queue(h, queue)));
     }
     void recv(const DdlaHandle_t& h, CommScope scope, void* buffer, std::size_t count,
-              MPI_Datatype, std::size_t width, int peer) const override
+              MPI_Datatype, std::size_t width, int peer, void* queue) const override
     {
         CCL_CHECK(gpucclRecv(buffer, count * width, gpucclInt8, peer,
-                             native(h, scope), static_cast<gpuStream_t>(h->stream)));
+                             native(h, scope), work_queue(h, queue)));
     }
     void sendrecv(const DdlaHandle_t& h, CommScope scope,
                   const void* send, std::size_t send_count, int dest,
                   void* recv, std::size_t recv_count, int source,
-                  MPI_Datatype type, std::size_t width) const override
+                  MPI_Datatype type, std::size_t width, void* queue) const override
     {
-        group_start(h);
-        if (send_count) this->send(h, scope, send, send_count, type, width, dest);
-        if (recv_count) this->recv(h, scope, recv, recv_count, type, width, source);
-        group_end(h);
+        group_start(h, queue);
+        try {
+            if (send_count) this->send(h, scope, send, send_count, type, width, dest, queue);
+            if (recv_count) this->recv(h, scope, recv, recv_count, type, width, source, queue);
+        } catch (...) {
+            try { group_end(h, queue); } catch (...) {}
+            throw;
+        }
+        group_end(h, queue);
     }
     void allreduce(const DdlaHandle_t& h, CommScope scope, const void* send, void* recv,
-                   int count, MPI_Datatype type, std::size_t, MPI_Op op) const override
+                   int count, MPI_Datatype type, std::size_t, MPI_Op op, void* queue) const override
     {
         std::size_t components = count;
         const auto datatype = reduction_type(type, components);
         CCL_CHECK(gpucclAllReduce(send, recv, components, datatype, reduction(op),
-                                  native(h, scope), static_cast<gpuStream_t>(h->stream)));
+                                  native(h, scope), work_queue(h, queue)));
     }
     void reduce_sum(const DdlaHandle_t& h, CommScope scope, const void* send, void* recv,
-                    int count, MPI_Datatype type, std::size_t, int root) const override
+                    int count, MPI_Datatype type, std::size_t, int root, void* queue) const override
     {
         std::size_t components = count;
         const auto datatype = reduction_type(type, components);
         CCL_CHECK(gpucclReduce(send, recv, components, datatype, gpucclSum, root,
-                               native(h, scope), static_cast<gpuStream_t>(h->stream)));
+                               native(h, scope), work_queue(h, queue)));
     }
     void allgather(const DdlaHandle_t& h, CommScope scope, const void* send, void* recv,
-                   std::size_t count, MPI_Datatype, std::size_t width) const override
+                   std::size_t count, MPI_Datatype, std::size_t width, void* queue) const override
     {
         CCL_CHECK(gpucclAllGather(send, recv, count * width, gpucclInt8,
-                                  native(h, scope), static_cast<gpuStream_t>(h->stream)));
+                                  native(h, scope), work_queue(h, queue)));
     }
     void alltoallv(const DdlaHandle_t& h, CommScope scope, int nprocs,
                    const void* send, const int* send_counts, const int* send_displs,
                    void* recv, const int* recv_counts, const int* recv_displs,
-                   MPI_Datatype type, std::size_t width) const override
+                   MPI_Datatype type, std::size_t width, void* queue) const override
     {
-        group_start(h);
-        for (int p = 0; p < nprocs; ++p) {
-            if (send_counts[p] > 0)
-                this->send(h, scope, static_cast<const std::byte*>(send) + std::size_t(send_displs[p]) * width,
-                           send_counts[p], type, width, p);
-            if (recv_counts[p] > 0)
-                this->recv(h, scope, static_cast<std::byte*>(recv) + std::size_t(recv_displs[p]) * width,
-                           recv_counts[p], type, width, p);
+        group_start(h, queue);
+        try {
+            for (int p = 0; p < nprocs; ++p) {
+                if (send_counts[p] > 0)
+                    this->send(h, scope, static_cast<const std::byte*>(send) + std::size_t(send_displs[p]) * width,
+                               send_counts[p], type, width, p, queue);
+                if (recv_counts[p] > 0)
+                    this->recv(h, scope, static_cast<std::byte*>(recv) + std::size_t(recv_displs[p]) * width,
+                               recv_counts[p], type, width, p, queue);
+            }
+        } catch (...) {
+            try { group_end(h, queue); } catch (...) {}
+            throw;
         }
-        group_end(h);
+        group_end(h, queue);
     }
 };
 #endif

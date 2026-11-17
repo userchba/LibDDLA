@@ -217,6 +217,7 @@ void DdlaStream::clean()
     local_device = -1;
     initialized = false;
     communication_group_depth = 0;
+    communication_group_queue = nullptr;
 }
 
 DdlaStream::~DdlaStream()
