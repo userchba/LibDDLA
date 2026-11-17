@@ -205,8 +205,9 @@ void cpu_geam(bool ta, bool ca, bool tb, bool cb, T alpha, const T* A, std::size
         return;
     }
     const int chunk = std::max(1, kStripElems / (tm * tn));   // tiles per scheduling step
+    // The whole budget, also for fewer tiles than threads: see host_parallel_for.
 #ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic, chunk) num_threads(nt)
+#pragma omp parallel for schedule(dynamic, chunk) num_threads(std::max(1, nthreads))
 #endif
     for (long long t = 0; t < ntiles; ++t) tile(t);
 }
