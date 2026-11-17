@@ -13,6 +13,7 @@
 #include "pgeqrf_kernels.h"
 #include "ddla_stream.h"
 #include "instantiate.h"
+#include "host_parallel.h"
 
 #include <algorithm>
 
@@ -162,29 +163,38 @@ void qr_build_v(const DdlaHandle_t& handle, bool local_source, int rev, T* v, in
 {
     if (lrp <= 0 || jb <= 0) return;
     if constexpr (Backend == DdlaBackend::CPU) {
-        (void)handle;
         // Step the block-cyclic rows without division inside the element loop.
         const int cycle = nprows * mb;
         const int shift = ((nprows + myprow - rsrc) % nprows) * mb;
         const int first_offset = lr0 % mb;
         const int first_base = cycle * (lr0 / mb) + shift;
         const bool copy_values = !local_source || src != v || ldsrc != ldv;
-        for (int c = 0; c < jb; ++c) {
-            const int pivot = rev ? j0 + m_w - jb + c : j0 + c;
-            T* const column = v + std::size_t(c) * ldv;
-            const T* const source = copy_values ? src + std::size_t(c) * ldsrc : nullptr;
-            int offset = first_offset;
-            int row_base = first_base;
-            for (int i = 0; i < lrp; ++i) {
-                const int global_row = row_base + offset;
-                if (++offset == mb) {
-                    offset = 0;
-                    row_base += cycle;
+        const auto build_columns = [=](long long first, long long last) {
+            for (int c = static_cast<int>(first); c < last; ++c) {
+                const int pivot = rev ? j0 + m_w - jb + c : j0 + c;
+                T* const column = v + std::size_t(c) * ldv;
+                const T* const source = copy_values ? src + std::size_t(c) * ldsrc : nullptr;
+                int offset = first_offset;
+                int row_base = first_base;
+                for (int i = 0; i < lrp; ++i) {
+                    const int global_row = row_base + offset;
+                    if (++offset == mb) {
+                        offset = 0;
+                        row_base += cycle;
+                    }
+                    if (global_row == pivot) column[i] = T(1);
+                    else if (rev ? global_row > pivot : global_row < pivot) column[i] = T(0);
+                    else if (copy_values) column[i] = source[local_source ? i : global_row - j0];
                 }
-                if (global_row == pivot) column[i] = T(1);
-                else if (rev ? global_row > pivot : global_row < pivot) column[i] = T(0);
-                else if (copy_values) column[i] = source[local_source ? i : global_row - j0];
             }
+        };
+        const int threads = std::max(1, handle->host_threads);
+        const long long bytes = static_cast<long long>(lrp) * jb * sizeof(T);
+        // Avoid team startup for small panels, and keep every worker occupied.
+        if (threads > 1 && jb >= threads && bytes >= 1024 * 1024) {
+            host_parallel_for(jb, 1, threads, build_columns);
+        } else {
+            build_columns(0, jb);
         }
     } else {
 #if DDLA_HAS_GPU
