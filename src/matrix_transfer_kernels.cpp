@@ -130,7 +130,8 @@ void map_blocks(const DdlaHandle_t& h, bool scatter, const Block<T>* blocks, int
         const bool columns = n >= threads;
         const int extent = columns ? n : m;
         const long long step = std::max(1LL, (extent + chunks - 1) / chunks);
-        detail::host_parallel_for(extent, step, threads, [&](long long lo, long long hi) {
+        // The chunks follow `threads`; the team keeps the whole budget (see host_parallel_for).
+        detail::host_parallel_for(extent, step, h->host_threads, [&](long long lo, long long hi) {
             for (int k = 0; k < count; ++k) {
                 const Block<T>& b = blocks[k];
                 if (!b.p.rows || !b.p.cols) continue;
