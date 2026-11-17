@@ -426,9 +426,9 @@ ddlaStatus_t ddlaMemcpy(const DdlaHandle_t& handle, void* dst, const void* src, 
     return detail::memcpy_on(handle, dst, src, bytes, handle ? handle->stream : nullptr);
 }
 
-ddlaStatus_t ddlaMemcpy2D(const DdlaHandle_t& handle, void* dst, std::size_t dpitch,
+ddlaStatus_t detail::memcpy2d_on(const DdlaHandle_t& handle, void* dst, std::size_t dpitch,
                           const void* src, std::size_t spitch,
-                          std::size_t width, std::size_t height)
+                          std::size_t width, std::size_t height, void* queue)
 {
     if (handle == nullptr) return kBadHandle;
 
@@ -446,10 +446,20 @@ ddlaStatus_t ddlaMemcpy2D(const DdlaHandle_t& handle, void* dst, std::size_t dpi
     if (route == CopyRoute::Host) return host_memcpy2d(dst, dpitch, src, spitch, width, height, handle->host_threads);
 #if DDLA_HAS_GPU
     return to_status(gpuMemcpy2DAsync(dst, dpitch, src, spitch, width, height, vendor_kind(route),
-                                      static_cast<gpuStream_t>(handle->stream)));
+                                      static_cast<gpuStream_t>(queue)));
 #else
+    (void)queue;
     return kInternal;
 #endif
+}
+
+
+ddlaStatus_t ddlaMemcpy2D(const DdlaHandle_t& handle, void* dst, std::size_t dpitch,
+                          const void* src, std::size_t spitch,
+                          std::size_t width, std::size_t height)
+{
+    return detail::memcpy2d_on(handle, dst, dpitch, src, spitch, width, height,
+                               handle ? handle->stream : nullptr);
 }
 
 ddlaStatus_t ddlaMemset(const DdlaHandle_t& handle, void* ptr, int value, std::size_t bytes)

@@ -53,6 +53,9 @@ inline constexpr DdlaBackend local_backend_v = DdlaBackend::CPU;
 namespace detail {
 
 ddlaStatus_t memcpy_on(const DdlaHandle_t& handle, void* dst, const void* src, std::size_t bytes, void* queue);
+ddlaStatus_t memcpy2d_on(const DdlaHandle_t& handle, void* dst, std::size_t dpitch,
+                         const void* src, std::size_t spitch,
+                         std::size_t width, std::size_t height, void* queue);
 ddlaStatus_t synchronize_on(const DdlaHandle_t& handle, void* queue);
 ddlaStatus_t event_record_on(const DdlaHandle_t& handle, ddlaEvent_t event, void* queue);
 ddlaStatus_t event_wait_on(const DdlaHandle_t& handle, ddlaEvent_t event, void* queue);
