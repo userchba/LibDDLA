@@ -1,6 +1,7 @@
 #include "mpi_test_init.h"
 #include "pgemm_test_common.h"
 #include "ddla_stream.h"
+#include "BLAS/blas_impl.h"
 
 // A scalar oracle is independent of both real and complex vendor GEMM.
 template <typename T> std::complex<long double> extended(T z) {
@@ -39,6 +40,16 @@ void one(DdlaHandle_t h,int m,int n,int k,char ta,char tb,bool shifted,int mode,
     const AType* ap=!no_product && owns(h,ta=='N'?m:k,ta=='N'?k:m,a.d)?a.data:nullptr;
     const BType* bp=!no_product && owns(h,tb=='N'?k:n,tb=='N'?n:k,b.d)?b.data:nullptr;
     for(auto alg:{Algorithm::AB,Algorithm::AC,Algorithm::BC,Algorithm::Auto}) {
+        if (h->nprocs==1 && !no_product && m>0 && n>0) {
+            std::size_t backend_bytes=0,host_bytes=0,local_bytes=0;
+            // This is also a negative control for the previous mixed SUMMA path:
+            // one rank must reserve exactly the native local GEMM workspace.
+            pgemm_impl::pgemm_workspace_size<Z,AType,BType>(h,alg,6,false,ta,tb,m,n,k,
+                beta!=Z(0),a.d,b.d,c.d,&backend_bytes,&host_bytes);
+            blas_impl::mixed_gemm_workspace_size<R>(h,m,n,k,CR,&local_bytes);
+            if(host_bytes!=0 || backend_bytes!=local_bytes)
+                throw std::runtime_error("one-rank mixed pgemm did not use native local workspace");
+        }
         c.reset();
         Z* cp=owns(h,m,n,c.d)?c.data:nullptr;
         const int threads=h->host_threads;

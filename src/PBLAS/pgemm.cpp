@@ -326,7 +326,7 @@ void pgemm_workspace_size(
     *backend_bytes = 0;
     *host_bytes = 0;
     if (alpha_is_zero || m == 0 || n == 0 || k == 0) return;
-    if (h->nprocs == 1 && std::is_same_v<T,TA> && std::is_same_v<T,TB>) {
+    if (h->nprocs == 1) {
         local_gemm_workspace_size<T,TA,TB>(h,m,n,k,backend_bytes);
         return;
     }
@@ -387,7 +387,7 @@ void pgemm_run(
             return;
         }
 
-        if (h->nprocs == 1 && std::is_same_v<T,TA> && std::is_same_v<T,TB>) {
+        if (h->nprocs == 1) {
             local_gemm_run<Backend,T,TA,TB>(h,transa,transb,m,n,k,alpha,A,descA[DDLA_LLD_],
                 B,descB[DDLA_LLD_],beta,C,descC[DDLA_LLD_],backend_work,backend_bytes);
             return;
