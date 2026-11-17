@@ -116,9 +116,10 @@ void heevd_run(const DdlaHandle_t& h, char job, char uplo, int n, T* a, int lda,
         if(width)DDLA_CHECK(ddlaMemcpy2D(h,padding,width,a+n,std::size_t(lda)*sizeof(T),width,n));
         try {
 #if defined(DDLA_USE_CUDA)
-            // CUDA 11.8 ZHEEVD reads uninitialized caller workspace in its
-            // SYTRD kernel (reproduced at n=65), including with valid input.
-            if constexpr (std::is_same_v<T, std::complex<double>>)
+            // CUDA 11.8 standard EVD can read caller workspace before
+            // writing it (scale_max at n>1). Preserve the prior all-n ZHEEVD
+            // initialization for its separately observed SYTRD read at n=65.
+            if (n>1 || std::is_same_v<T, std::complex<double>>)
                 DDLA_CHECK(ddlaMemset(h, work, 0, std::size_t(lwork) * sizeof(T)));
 #endif
             SOLVER_CHECK(gpu_heevd_call(static_cast<gpusolverHandle_t>(h->solverH),
