@@ -8,6 +8,7 @@
 #include <cassert>
 #include <complex>
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <type_traits>
 #ifdef _OPENMP
@@ -34,20 +35,21 @@ void mixed_pack_right(char trans, int kk, int nn, const std::complex<R>* B, int 
     }
 }
 
-// CR: [Ar; Ai] B = [Cr; Ci]. Stacking rows similarly lets real BLAS reuse B.
+// CR uses interleaved real/imaginary row pairs: op(A) B = C becomes a
+// 2m-by-k real GEMM. For N, std::complex already has this scalar layout;
+// transpose/conjugate cases normalize into the same layout here.
 template <typename R>
 void mixed_pack_left(char trans, int mm, int kk, const std::complex<R>* A, int lda,
                R* packed)
 {
     const bool conjugate = trans == 'C';
     for (int l = 0; l < kk; ++l) {
-        R* re = packed + std::size_t(l)*(2*mm);
-        R* im = re + mm;
+        R* column = packed + std::size_t(l)*(2*mm);
         for (int i = 0; i < mm; ++i) {
             const auto z = trans == 'N' ? A[i + std::size_t(l)*lda]
                                        : A[l + std::size_t(i)*lda];
-            re[i] = z.real();
-            im[i] = conjugate ? -z.imag() : z.imag();
+            column[2*i] = z.real();
+            column[2*i+1] = conjugate ? -z.imag() : z.imag();
         }
     }
 }
@@ -57,7 +59,8 @@ void mixed_combine(int mm, int nn, const R* result, std::complex<R> alpha,
              std::complex<R> beta, std::complex<R>* C, int ldc)
 {
     const int ldr = CR ? 2*mm : mm;
-    const std::size_t imaginary = CR ? std::size_t(mm) : std::size_t(mm)*nn;
+    const int step = CR ? 2 : 1;
+    const std::size_t imaginary = CR ? 1 : std::size_t(mm)*nn;
     const bool unit_alpha = alpha == R(1), zero_beta = beta == R(0);
     for (int j = 0; j < nn; ++j) {
         const R* re = result + std::size_t(j)*ldr;
@@ -65,10 +68,10 @@ void mixed_combine(int mm, int nn, const R* result, std::complex<R> alpha,
         auto* out = C + std::size_t(j)*ldc;
         if (unit_alpha && zero_beta) {
             for (int i = 0; i < mm; ++i)
-                out[i] = {re[i], im[i]};
+                out[i] = {re[step*i], im[step*i]};
         } else {
             for (int i = 0; i < mm; ++i) {
-                const auto z = alpha * std::complex<R>(re[i], im[i]);
+                const auto z = alpha * std::complex<R>(re[step*i], im[step*i]);
                 // In particular, beta=0 must not read NaN-poisoned C.
                 out[i] = zero_beta ? z : z + beta*out[i];
             }
@@ -148,6 +151,10 @@ void mixed_gemm(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
     std::size_t pack_size, result_size;
     mixed_tiles(h, m, n, k, CR, threads, mb, nb, kb, nr, nc, pack_size, result_size);
     const long long tiles = static_cast<long long>(nr) * nc;
+    // The complex array's guaranteed real scalar view avoids a duplicate pack
+    // before BLAS. Keep the packed route if doubling a padded lda cannot fit
+    // the BLAS integer type; the query remains conservative for either route.
+    const bool direct_left = CR && ta == 'N' && lda <= std::numeric_limits<int>::max()/2;
     // [ worker slots: threads x (packed operand | real result) ]
     char* w = static_cast<char*>(work);
     R* const scratch = take<R>(w, static_cast<std::size_t>(threads) * (pack_size + result_size));
@@ -181,9 +188,18 @@ void mixed_gemm(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
                 const auto* bp = B + (tb == 'N' ? std::size_t(l0) + std::size_t(j0)*ldb
                                                : std::size_t(j0) + std::size_t(l0)*ldb);
                 if constexpr (CR) {
-                    mixed_pack_left(ta, mm, kk, ap, lda, packed);
+                    const R* real_a;
+                    int real_lda;
+                    if (direct_left) {
+                        real_a = reinterpret_cast<const R*>(ap);
+                        real_lda = 2*lda;
+                    } else {
+                        mixed_pack_left(ta, mm, kk, ap, lda, packed);
+                        real_a = packed;
+                        real_lda = 2*mm;
+                    }
                     blas_impl::gemm_run<DdlaBackend::CPU, R>(h, 'N', tb, 2*mm, nn, kk,
-                        R(1), packed, 2*mm, bp, ldb, accumulate, result, 2*mm);
+                        R(1), real_a, real_lda, bp, ldb, accumulate, result, 2*mm);
                 } else {
                     mixed_pack_right(tb, kk, nn, bp, ldb, packed);
                     blas_impl::gemm_run<DdlaBackend::CPU, R>(h, ta, 'N', mm, 2*nn, kk,

@@ -3,7 +3,8 @@
 #include <ddla/ddla.h>
 #include <cstddef>
 namespace ddla { namespace detail {
-// Existing planar packing/combine operations, shared with CPU mixed batches.
+// Packing/combine operations shared with CPU mixed batches: complex-left uses
+// interleaved real/imaginary row pairs; complex-right uses adjacent column planes.
 template <typename R>
 void mixed_pack_left(char trans,int m,int k,const std::complex<R>* A,int lda,R* packed);
 template <typename R>
