@@ -77,14 +77,18 @@ void host_parallel_for(long long n,long long grain,int nthreads,void* context,
     if (n <= 0) return;
     grain = std::max<long long>(1, grain);
     const long long nchunks = (n + grain - 1) / grain;
-    const int nt = static_cast<int>(std::min<long long>(std::max(1, nthreads), nchunks));
-    if (nt <= 1) {
+    const int team = std::max(1, nthreads);
+    if (team <= 1 || nchunks <= 1) {
         function(context,0,n);
         return;
     }
     std::exception_ptr first;
+    // The team is always the whole budget, also for fewer chunks than threads (the others find no
+    // chunk).  A team sized to the chunk count made libgomp retire the pool's surplus threads and
+    // create them again in the next full-size region -- every threaded BLAS call -- thousands of
+    // thread creations per solve, growing with the threads per rank.
 #ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic, 1) num_threads(nt)
+#pragma omp parallel for schedule(dynamic, 1) num_threads(team)
 #endif
     for (long long c = 0; c < nchunks; ++c) {
         try {

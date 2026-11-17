@@ -97,24 +97,23 @@ private:
 };
 
 // Calls call(i) for every product i of the batch.  With fewer than two products or two threads there is nothing to spread and the loop is
-// serial with the BLAS keeping its own threads (one big product still gets a threaded BLAS); otherwise min(nthreads, count) OpenMP threads
-// each run whole products while the BLAS is pinned to one thread.  Without OpenMP the loop stays serial and the BLAS is left alone.
+// serial with the BLAS keeping its own threads (one big product still gets a threaded BLAS); otherwise a team of nthreads OpenMP threads
+// runs whole products while the BLAS is pinned to one thread.  The team keeps its size when the batch is smaller (the extra threads get
+// no product): a team of `count` threads made libgomp retire and re-create the rest of its pool around every small batch.  Without
+// OpenMP the loop stays serial and the BLAS is left alone.
 template <typename Call>
 void for_each_product(int nthreads, int count, Call&& call)
 {
-#ifdef _OPENMP
-    const int nt = std::min(nthreads, count);
-#else
-    const int nt = 1;
-    (void)nthreads;
+#ifndef _OPENMP
+    nthreads = 1;
 #endif
-    if (nt < 2) {
+    if (nthreads < 2 || count < 2) {
         for (int i = 0; i < count; ++i) call(i);
         return;
     }
     detail::ScopedBlasThreads one_blas_thread(1);
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static) num_threads(nt)
+#pragma omp parallel for schedule(static) num_threads(nthreads)
 #endif
     for (int i = 0; i < count; ++i) call(i);
 }
