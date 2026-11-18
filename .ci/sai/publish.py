@@ -15,6 +15,7 @@ WORKFLOW = ".github/workflows/sai-validation.yml"
 BRANCHES = {"main", "develop"}
 REVIEW_ENV = "sai-libddla"
 RESULT_LABEL = "sai-libddla-results"
+MAX_TOKEN_BYTES = 8192
 
 
 def api(path):
@@ -128,8 +129,11 @@ def main():
             # This mailbox is writable by jobs. Never follow links or read special files.
             descriptor = os.open(request, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
             require(stat.S_ISREG(os.fstat(descriptor).st_mode), "Token is not a regular file")
-            token = os.read(descriptor, 257).decode("ascii")
-            require(re.fullmatch(r"[A-Za-z0-9_]{20,256}", token), "Invalid token format")
+            token = os.read(descriptor, MAX_TOKEN_BYTES + 1).decode("ascii")
+            # GitHub tokens are opaque and can use a longer, dotted format.
+            # Bound the input and reject header control characters; GitHub authenticates it.
+            require(len(token) <= MAX_TOKEN_BYTES and re.fullmatch(r"[!-~]+", token),
+                    "Invalid token format or size")
             os.environ["GH_TOKEN"] = token
             run = api(f"actions/runs/{match[1]}")
             if run["run_attempt"] != int(match[2]) or run["status"] == "completed":

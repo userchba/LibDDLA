@@ -1,3 +1,5 @@
+from contextlib import redirect_stderr
+import io
 import json
 import os
 from pathlib import Path
@@ -82,6 +84,33 @@ class AdmissionTest(unittest.TestCase):
                 (root / "secret").write_text(token)
                 site.main()
                 publish.assert_not_called()
+
+    def test_opaque_tokens_are_preserved_and_unsafe_input_is_rejected(self):
+        dotted = b"a" * 100 + b"." + b"b" * 200 + b"." + b"c" * 75
+        cases = [(b"ghs_" + b"a" * 36, True), (dotted, True),
+                 (b"a.b-c_d~e+f/g==", True), (b"a" * 8192, True),
+                 (b"a" * 8193, False), (b"", False),
+                 (dotted + b"\n", False), (b"a\r\nheader", False),
+                 (b"a b", False), (b"a\x00b", False), (b"\xff", False)]
+        for token, allowed in cases:
+            with self.subTest(size=len(token), allowed=allowed), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                for folder in ("work", "results", "requests"):
+                    (root / folder).mkdir()
+                (root / "requests/gh-17-1.token").write_bytes(token)
+                env = {"SAI_WORK": str(root / "work"), "SAI_RESULTS": str(root / "results"),
+                       "SAI_REQUESTS": str(root / "requests"), "SAI_REVIEWERS": "owner"}
+                self.api.reset_mock()
+                with patch.dict(os.environ, env), patch.object(site, "publish") as publish, \
+                        redirect_stderr(io.StringIO()):
+                    publish.side_effect = lambda *args: self.assertEqual(os.environ["GH_TOKEN"], token.decode())
+                    site.main()
+                    if allowed:
+                        publish.assert_called_once_with(self.run, {"owner"})
+                    else:
+                        self.api.assert_not_called()
+                        publish.assert_not_called()
+                    self.assertNotIn("GH_TOKEN", os.environ)
 
     def test_receipt_and_cancellation(self):
         for exit_status in (0, 1, "cancel"):
