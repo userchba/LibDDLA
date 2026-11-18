@@ -20,6 +20,11 @@ the workflow to `main` to cover pushes there and expose **Run workflow** in
 Actions. A skipped job means no GPU test was run. Failed or incomplete suites
 remain failures; the job uploads available JUnit, logs and Slurm evidence.
 
+Enabling `SAI_CI_ENABLED` does not restart previously skipped runs. Open, update
+or reopen a PR targeting `develop` to request a new validation, then approve its
+`sai-libddla` Environment for the current head SHA. Check the run's artifact and
+both Slurm stages before treating deployment acceptance as complete.
+
 ## Repository owner
 
 1. Review who can push to `develop` and `main`: their pushes are trusted to run
