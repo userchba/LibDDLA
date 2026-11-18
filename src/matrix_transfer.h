@@ -4,6 +4,7 @@
 #include <ddla/ddla.h>
 
 #include <cstddef>
+#include <array>
 
 namespace ddla::matrix_impl {
 
@@ -38,6 +39,12 @@ void scatter_check(const DdlaHandle_t& h, int m, int n, T* A, int ia, int ja,
 template <typename T>
 void transfer_workspace_size(const DdlaHandle_t& h, int m, int n, int ia, int ja,
     const int* desc, int root, std::size_t* backend_bytes, std::size_t* host_bytes);
+
+// Pure two-slot HostStagedMPI high waters, not backend packing bytes.
+std::array<std::size_t,2> transfer_staging_bytes(const DdlaHandle_t&,int m,int n,
+    int ia,int ja,const int* desc,int root,std::size_t element_bytes);
+std::array<std::size_t,2> scatter_rows_staging_bytes(const DdlaHandle_t&,int k,
+    bool transpose,int m,int n,const int* desc,std::size_t element_bytes);
 
 // Gather A(ia:ia+m-1, ja:ja+n-1) into dst on root, or scatter src on root into
 // it, on the caller's scratch: no validation, no allocation, no grid

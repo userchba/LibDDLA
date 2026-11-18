@@ -1,4 +1,5 @@
 #include "matrix_transfer.h"
+#include "PBLAS/pblas_workspace.h"
 #include "ddla_desc.h"
 #include "ddla_stream.h"
 #include "comm_traits.h"
@@ -189,6 +190,24 @@ void transfer_workspace_size(const DdlaHandle_t& h, int m, int n, int ia, int ja
     if (rank == root_peer) *host_bytes = std::size_t(peers - 1) * sizeof(Block<T>);
 }
 
+std::array<std::size_t,2> transfer_staging_bytes(const DdlaHandle_t& h,int m,int n,
+    int ia,int ja,const int* d,int root,std::size_t width)
+{
+    std::array<std::size_t,2> high{};
+    if(h->backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || !m || !n)return high;
+    --ia;--ja;
+    int root_peer,root_col,rank,peers;CommScope scope;
+    if(!transfer_scope(h,n,ja,d,root,root_peer,root_col,scope,rank,peers))return high;
+    auto include=[&](int peer) {
+        const auto count=block_size(transfer_peer(h,m,n,ia,ja,d,scope,root_col,peer));
+        // gather/scatter's send/recv helpers split at INT_MAX/sizeof(T).
+        high[0]=std::max(high[0],pblas::communication_bytes(std::min(count,std::size_t(INT_MAX)/width),width));
+    };
+    if(rank==root_peer) {for(int peer=0;peer<peers;++peer)if(peer!=root_peer)include(peer);}
+    else include(rank);
+    return high;
+}
+
 template <DdlaBackend B,typename T>
 void gather_check(const DdlaHandle_t& h,int m,int n,const T* A,int ia,int ja,
     const int* desc,int root,T* dst,int lddst)
@@ -312,13 +331,33 @@ void convert_rows(const DdlaHandle_t& h, const typename real_type<T>::type* src,
 namespace {
 // Rows of one scatter_rows panel (k > 0, more than one rank): bounds both the
 // conversion and the packing even for very large orders.
-template <typename T>
-int rows_panel(const DdlaHandle_t& h, int k)
+int rows_panel(const DdlaHandle_t& h,int k,std::size_t width)
 {
     constexpr std::size_t panel_bytes=std::size_t(32)<<20;
     const detail::RowShare share(k,h->nprocs);
-    return std::min({share.count(0),512,int(std::max<std::size_t>(1,panel_bytes/(std::size_t(k)*sizeof(T))))});
+    return std::min({share.count(0),512,int(std::max<std::size_t>(1,panel_bytes/(std::size_t(k)*width)))});
 }
+template<typename T> int rows_panel(const DdlaHandle_t& h,int k)
+{return rows_panel(h,k,sizeof(T));}
+}
+
+std::array<std::size_t,2> scatter_rows_staging_bytes(const DdlaHandle_t& h,int k,
+    bool transpose,int m,int n,const int* d,std::size_t width)
+{
+    std::array<std::size_t,2> high{};
+    if(h->backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || h->nprocs<=1 || !k)return high;
+    const int kept_rows=std::min(k,m),kept_cols=std::min(k,n);
+    if(!kept_rows||!kept_cols)return high;
+    const int panel=rows_panel(h,k,width);const detail::RowShare share(k,h->nprocs);
+    for(int root=0;root<h->nprocs;++root) {
+        const int root_rows=std::max(0,std::min(share.count(root),(transpose?kept_cols:kept_rows)-share.lo(root)));
+        for(int first=0;first<root_rows;first+=panel) {
+            const int rows=std::min(panel,root_rows-first),global=share.lo(root)+first+1;
+            pblas::staging_max(high,transfer_staging_bytes(h,transpose?kept_rows:rows,
+                transpose?rows:kept_cols,transpose?1:global,transpose?global:1,d,root,width));
+        }
+    }
+    return high;
 }
 
 // Component 2: [ converted panel | the scatter's packing ] in backend memory,
