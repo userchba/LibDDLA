@@ -2584,6 +2584,34 @@ void orgqr(const DdlaHandle_t& h,int m,int n,int k,T* A,int lda,const T* tau,int
 template <typename T>
 void porgqr(const DdlaHandle_t& h,int m,int n,int k,T* A,const int* descA,const T* tau,int& info);
 
+/**
+ * @brief Principal natural logarithm of the determinant of the diagonal of A.
+ * Reads only A(i,i), i=0..n-1; performs no factorization or pivot correction.
+ * A is column-major in the handle's memory space. result is a host complex
+ * scalar for all four real/complex scalar types, with phase in (-pi,pi].
+ * The magnitude is accumulated in log space, without forming a product.
+ * An empty diagonal returns 0; a zero diagonal entry returns (-infinity,0).
+ * Nonfinite diagonal entries throw without changing result. Off-diagonal
+ * entries and padding are ignored. The input remains unchanged; result must
+ * not overlap it. GPU execution completes the scalar reduction before return.
+ */
+template<typename T>
+void diag_logdet(const DdlaHandle_t& h, int n, const T* A, int lda,
+                 std::complex<typename real_type<T>::type>& result);
+
+/**
+ * @brief Distributed diag_logdet of the leading n-by-n block of A.
+ * Uses the handle's 2D block-cyclic grid and descA, including rectangular
+ * blocks, nonzero source coordinates and padded local leading dimensions.
+ * Every rank receives the same host result. Only scalar totals are reduced
+ * through the handle's MPI communicator; no matrix is gathered or copied.
+ * All ranks must call collectively with matching n and descriptor geometry.
+ * Other numerical/input/output semantics are those of diag_logdet.
+ */
+template<typename T>
+void pdiag_logdet(const DdlaHandle_t& h, int n, const T* A, const int* descA,
+                  std::complex<typename real_type<T>::type>& result);
+
 } // namespace ddla
 
 #endif // DDLA_H

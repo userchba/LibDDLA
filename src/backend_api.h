@@ -842,6 +842,12 @@ void orgqr(const DdlaHandle_t& h,int m,int n,int k,T* A,int lda,const T* tau,int
 template <DdlaBackend Backend, typename T>
 void porgqr(const DdlaHandle_t& h,int m,int n,int k,T* A,const int* descA,const T* tau,int& info);
 
+template <DdlaBackend Backend, typename T>
+void diag_logdet(const DdlaHandle_t& h, int n, const T* A, int lda, std::complex<typename real_type<T>::type>& result);
+
+template <DdlaBackend Backend, typename T>
+void pdiag_logdet(const DdlaHandle_t& h, int n, const T* A, const int* descA, std::complex<typename real_type<T>::type>& result);
+
 } // namespace ddla
 
 #endif // DDLA_BACKEND_API_H

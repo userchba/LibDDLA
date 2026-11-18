@@ -2320,4 +2320,34 @@ template void porgqr<double>(const DdlaHandle_t& h, int m, int n, int k, double*
 template void porgqr<std::complex<float>>(const DdlaHandle_t& h, int m, int n, int k, std::complex<float>* A, const int* descA, const std::complex<float>* tau, int& info);
 template void porgqr<std::complex<double>>(const DdlaHandle_t& h, int m, int n, int k, std::complex<double>* A, const int* descA, const std::complex<double>* tau, int& info);
 
+template <typename T>
+void diag_logdet(const DdlaHandle_t& h, int n, const T* A, int lda, std::complex<typename real_type<T>::type>& result)
+{
+#if DDLA_HAS_GPU
+    if (h && h->backend == DdlaBackend::GPU)
+        return diag_logdet<DdlaBackend::GPU, T>(h, n, A, lda, result);
+#endif
+    return diag_logdet<DdlaBackend::CPU, T>(h, n, A, lda, result);
+}
+
+template void diag_logdet<float>(const DdlaHandle_t& h, int n, const float* A, int lda, std::complex<typename real_type<float>::type>& result);
+template void diag_logdet<double>(const DdlaHandle_t& h, int n, const double* A, int lda, std::complex<typename real_type<double>::type>& result);
+template void diag_logdet<std::complex<float>>(const DdlaHandle_t& h, int n, const std::complex<float>* A, int lda, std::complex<typename real_type<std::complex<float>>::type>& result);
+template void diag_logdet<std::complex<double>>(const DdlaHandle_t& h, int n, const std::complex<double>* A, int lda, std::complex<typename real_type<std::complex<double>>::type>& result);
+
+template <typename T>
+void pdiag_logdet(const DdlaHandle_t& h, int n, const T* A, const int* descA, std::complex<typename real_type<T>::type>& result)
+{
+#if DDLA_HAS_GPU
+    if (h && h->backend == DdlaBackend::GPU)
+        return pdiag_logdet<DdlaBackend::GPU, T>(h, n, A, descA, result);
+#endif
+    return pdiag_logdet<DdlaBackend::CPU, T>(h, n, A, descA, result);
+}
+
+template void pdiag_logdet<float>(const DdlaHandle_t& h, int n, const float* A, const int* descA, std::complex<typename real_type<float>::type>& result);
+template void pdiag_logdet<double>(const DdlaHandle_t& h, int n, const double* A, const int* descA, std::complex<typename real_type<double>::type>& result);
+template void pdiag_logdet<std::complex<float>>(const DdlaHandle_t& h, int n, const std::complex<float>* A, const int* descA, std::complex<typename real_type<std::complex<float>>::type>& result);
+template void pdiag_logdet<std::complex<double>>(const DdlaHandle_t& h, int n, const std::complex<double>* A, const int* descA, std::complex<typename real_type<std::complex<double>>::type>& result);
+
 } // namespace ddla

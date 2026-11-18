@@ -489,6 +489,35 @@ with backend synchronization and the slowest-rank elapsed time. Input setup
 and correctness checks are outside the timed interval. Raw samples include
 both full-output comparisons and independent scalar-reference error checks.
 
+### Logarithm of a diagonal determinant
+
+`diag_logdet` and `pdiag_logdet` compute the principal natural logarithm of
+the product of the diagonal entries, without forming that product:
+
+```cpp
+std::complex<double> logdet;  // host output, also for real input
+ddla::diag_logdet(handle, n, A, lda, logdet);
+ddla::pdiag_logdet(handle, n, local_A, descA, logdet);
+```
+
+The handle selects CPU or GPU input storage. Both support float, double and
+their complex counterparts, ignore off-diagonal entries and preserve A.
+The complex result retains negative/complex determinant phase in `(-pi,pi]`.
+Empty input returns zero; a zero diagonal entry returns `(-infinity,0)`;
+nonfinite diagonal entries throw without changing the output.
+
+These functions perform **no factorization or permutation correction**.
+For an LU factor, they give the logarithm of the product of U's diagonal;
+the caller must additionally account for row-swap parity and wrap the phase.
+For a Cholesky factor, the positive-definite matrix's log determinant is
+twice the real part of the factor's diagonal log determinant.
+The distributed routine honors rectangular block sizes, source coordinates
+and padded leading dimensions. Every rank receives the result, using only
+four host-scalar totals; the matrix is never gathered or copied to the host.
+CPU reduction uses OpenMP. GPU reduction uses Thrust on the handle stream,
+with temporary reduction storage bounded by the local iteration range along
+the more distributed axis, plus block rounding.
+
 ### Descriptor (ScaLAPACK `int[9]`)
 
 Distributed routines describe matrix layouts with a plain length-9 int array

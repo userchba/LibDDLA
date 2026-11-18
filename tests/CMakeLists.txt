@@ -882,6 +882,8 @@ foreach(_method_test test_pheevd_methods test_pheevd_policy)
     add_test_executable(${_method_test})
 endforeach()
 
+add_test_executable(test_diag_logdet)
+
 # Explicit-queue PGEADD defaults to CPU; GPU checks use the native observer.
 if(UNIX AND NOT APPLE)
     add_test_executable(test_pgeadd_queue)

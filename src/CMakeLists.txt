@@ -59,6 +59,7 @@ endif()
 # Sources that sit directly in src/.
 target_sources(ddla_lib PRIVATE
     public_dispatch.cpp
+    diag_logdet.cpp
     write_matrix.cpp
     random_generate.cpp
     matrix_transfer.cpp
@@ -71,14 +72,16 @@ target_sources(ddla_lib PRIVATE
     punmtr.cpp
 )
 if(DDLA_HAS_GPU)
-    target_sources(ddla_lib PRIVATE memory_tri_kernels.cpp)
+    target_sources(ddla_lib PRIVATE memory_tri_kernels.cpp diag_logdet_kernels.cpp)
 endif()
+set_source_files_properties(diag_logdet.cpp TARGET_DIRECTORY ddla_lib
+    PROPERTIES COMPILE_OPTIONS "${_ddla_cpu_kernel_opts}")
 if(DDLA_USE_CUDA)
-    set_source_files_properties(matrix_transfer_kernels.cpp memory_tri_kernels.cpp TARGET_DIRECTORY ddla_lib
+    set_source_files_properties(matrix_transfer_kernels.cpp memory_tri_kernels.cpp diag_logdet_kernels.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES LANGUAGE CUDA)
 endif()
 if(DDLA_USE_HIP)
-    set_source_files_properties(matrix_transfer_kernels.cpp memory_tri_kernels.cpp TARGET_DIRECTORY ddla_lib
+    set_source_files_properties(matrix_transfer_kernels.cpp memory_tri_kernels.cpp diag_logdet_kernels.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES LANGUAGE HIP)
 endif()
 

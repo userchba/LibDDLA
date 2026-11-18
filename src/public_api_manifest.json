@@ -1,6 +1,6 @@
 {
-  "public_backend_overloads": 140,
-  "public_concrete_specializations": 510,
+  "public_backend_overloads": 142,
+  "public_concrete_specializations": 518,
   "pstedc": "already handle-only, unchanged",
   "type_policy_sources": {
     "dgmm": "src/BLAS/dgmm.cpp TYPES",
@@ -2205,6 +2205,38 @@
       ],
       "public_signature": "void phegvd(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, T* B, const int* descB, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)",
       "private_signature": "void phegvd(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, T* B, const int* descB, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)",
+      "supported_scalar_arguments": [
+        "float",
+        "double",
+        "std::complex<float>",
+        "std::complex<double>"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 140,
+      "name": "diag_logdet",
+      "scalar_parameters": [
+        "T"
+      ],
+      "public_signature": "void diag_logdet(const DdlaHandle_t& h, int n, const T* A, int lda, std::complex<typename real_type<T>::type>& result)",
+      "private_signature": "void diag_logdet(const DdlaHandle_t& h, int n, const T* A, int lda, std::complex<typename real_type<T>::type>& result)",
+      "supported_scalar_arguments": [
+        "float",
+        "double",
+        "std::complex<float>",
+        "std::complex<double>"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 141,
+      "name": "pdiag_logdet",
+      "scalar_parameters": [
+        "T"
+      ],
+      "public_signature": "void pdiag_logdet(const DdlaHandle_t& h, int n, const T* A, const int* descA, std::complex<typename real_type<T>::type>& result)",
+      "private_signature": "void pdiag_logdet(const DdlaHandle_t& h, int n, const T* A, const int* descA, std::complex<typename real_type<T>::type>& result)",
       "supported_scalar_arguments": [
         "float",
         "double",

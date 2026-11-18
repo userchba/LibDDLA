@@ -21,6 +21,9 @@ void client(ddla::DdlaHandle_t h) {
     ddla::ddlaInit(h,ddla::DdlaBackend::CPU);
     ddla::gemm<double>(h,'N','N',0,0,0,1.,p,1,p,1,0.,p,1);
     ddla::scal(h,0,1.,p,1);
+    std::complex<double> logdet;
+    ddla::diag_logdet(h,0,p,1,logdet);
+    ddla::pdiag_logdet(h,0,z,nullptr,logdet);
     ddla::gemm<double>(h,'N','N',0,0,0,std::complex<double>(1),p,1,z,1,std::complex<double>(0),z,1);
     ddla::write_matrix<double>(h,p,0,0,\"unused\");
     static_assert(std::is_same<decltype(ddla::ppotrf<double>(h,'L',0,p,1,1,nullptr,info)),void>::value,\"Cholesky status API\");

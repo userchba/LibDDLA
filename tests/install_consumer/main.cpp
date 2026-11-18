@@ -47,6 +47,15 @@ int main(int argc, char** argv)
         if (values[0] != 3.0 || values[1] != -6.0)
             throw std::runtime_error("installed handle-dispatched CPU call returned incorrect values");
         double a[] = {2., 1., 1., 2.}, w[2] = {};
+        std::complex<double> logdet;
+        ddla::diag_logdet(handle, 2, a, 2, logdet);
+        if (std::abs(logdet - std::complex<double>(std::log(4.), 0.)) > 1e-12)
+            throw std::runtime_error("installed diagonal log determinant is incorrect");
+        int diag_desc[ddla::DDLA_DLEN_];
+        ddla::DDLA_CHECK(ddla::ddlaDescInit(diag_desc,handle,2,2,1,1,0,0));
+        ddla::pdiag_logdet(handle,2,a,diag_desc,logdet);
+        if (std::abs(logdet - std::complex<double>(std::log(4.), 0.)) > 1e-12)
+            throw std::runtime_error("installed distributed diagonal log determinant is incorrect");
         int info = -1;
         ddla::syevd(handle, 'N', 'L', 2, a, 2, w, &info);
         if (info || std::abs(w[0] - 1.) > 1e-12 || std::abs(w[1] - 3.) > 1e-12)
