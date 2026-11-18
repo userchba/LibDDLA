@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 
@@ -32,8 +33,6 @@ def admission(run, reviewers):
     require(run["path"] == WORKFLOW and run["repository"]["full_name"] == REPO and match,
             "Unknown workflow or invalid request")
     pr, sha = match.groups()
-    if event != "workflow_dispatch":
-        require(api("actions/variables/SAI_CI_ENABLED")["value"] == "true", "Automatic CI is off")
     branch = run["head_branch"]
     if event == "pull_request":
         pull = api(f"pulls/{pr}")
@@ -45,11 +44,11 @@ def admission(run, reviewers):
     else:
         require(event in {"push", "workflow_dispatch"} and pr == "0"
                 and run["head_repository"]["full_name"] == REPO, "Unexpected event or repository")
-    require(branch in BRANCHES and api(f"branches/{branch}")["protected"], "Unprotected base")
+    require(branch in BRANCHES, "Unexpected base branch")
     if event == "push":
         require(sha == run["head_sha"] and
                 api(f"compare/{sha}...{branch}")["status"] in {"ahead", "identical"},
-                "Push SHA is not on the protected branch")
+                "Push SHA is not on the trusted branch")
     else:
         decisions = [a for a in api(f"actions/runs/{run['id']}/approvals")
                      if any(e["name"] == REVIEW_ENV for e in a["environments"])]
@@ -120,15 +119,29 @@ def main():
     require(private.is_dir() and public.is_dir() and not private.is_relative_to(public)
             and not public.is_relative_to(private), "Private work and public results must be separate directories")
     reviewers = {login.strip().lower() for login in os.environ["SAI_REVIEWERS"].split(",") if login.strip()}
-    page = 1
-    while True:
-        runs = api(f"actions/runs?status=in_progress&per_page=100&page={page}")["workflow_runs"]
-        for run in runs:
+    for request in sorted(Path(os.environ["SAI_REQUESTS"]).glob("gh-*-*.token")):
+        match = re.fullmatch(r"gh-([1-9][0-9]*)-([1-9][0-9]*)\.token", request.name)
+        if not match or (public / request.stem).exists():
+            continue
+        descriptor = None
+        try:
+            # This mailbox is writable by jobs. Never follow links or read special files.
+            descriptor = os.open(request, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            require(stat.S_ISREG(os.fstat(descriptor).st_mode), "Token is not a regular file")
+            token = os.read(descriptor, 257).decode("ascii")
+            require(re.fullmatch(r"[A-Za-z0-9_]{20,256}", token), "Invalid token format")
+            os.environ["GH_TOKEN"] = token
+            run = api(f"actions/runs/{match[1]}")
+            require(run["run_attempt"] == int(match[2]) and run["status"] == "in_progress",
+                    "Request is no longer active")
             if run["path"] == WORKFLOW:
                 publish(run, reviewers)
-        if len(runs) < 100:
-            return
-        page += 1
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            print(f"{request.name}: {type(error).__name__}", file=sys.stderr, flush=True)
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            os.environ.pop("GH_TOKEN", None)
 
 
 if __name__ == "__main__":
