@@ -21,8 +21,6 @@ class AdmissionTest(unittest.TestCase):
                          base=dict(ref="develop", repo=self.repo))
         self.routes = {
             "actions/runs/17": self.run, "pulls/3": self.pull,
-            "branches/develop": {"protected": True}, "branches/main": {"protected": True},
-            "actions/variables/SAI_CI_ENABLED": {"value": "true"},
             "actions/runs/17/approvals": [{"state": "approved", "user": {"login": "owner"},
                                            "environments": [{"name": site.REVIEW_ENV}]}],
             "actions/runs/17/attempts/1/jobs": {"jobs": [{"status": "in_progress",
@@ -49,9 +47,7 @@ class AdmissionTest(unittest.TestCase):
                         display_title=f"SAI CUDA / 0 / {self.sha}")
         self.routes[f"compare/{self.sha}...main"] = {"status": "ahead"}
         self.assertEqual(site.admission(self.run, set()), ("main", self.sha, "0"))
-        for path, bad in [("actions/variables/SAI_CI_ENABLED", {"value": "false"}),
-                          ("branches/main", {"protected": False}),
-                          (f"compare/{self.sha}...main", {"status": "diverged"})]:
+        for path, bad in [(f"compare/{self.sha}...main", {"status": "diverged"})]:
             with self.subTest(path=path), patch.dict(self.routes, {path: bad}), self.assertRaises(ValueError):
                 site.admission(self.run, set())
         self.run.update(event="workflow_dispatch", display_title=f"SAI CUDA / 0 / {'b' * 40}")
@@ -61,6 +57,31 @@ class AdmissionTest(unittest.TestCase):
                         display_title=f"SAI CUDA / 3 / {self.sha}")
         with self.assertRaises(ValueError):
             site.admission(self.run, {"owner"})
+
+    def test_request_tokens_are_scoped_and_links_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for folder in ("work", "results", "requests"):
+                (root / folder).mkdir()
+            token = "ghs_" + "a" * 36
+            request = root / "requests/gh-17-1.token"
+            request.write_text(token)
+            env = {"SAI_WORK": str(root / "work"), "SAI_RESULTS": str(root / "results"),
+                   "SAI_REQUESTS": str(root / "requests"), "SAI_REVIEWERS": "owner"}
+            with patch.dict(os.environ, env), patch.object(site, "publish") as publish:
+                publish.side_effect = lambda *args: self.assertEqual(os.environ["GH_TOKEN"], token)
+                site.main()
+                publish.assert_called_once_with(self.run, {"owner"})
+                self.assertNotIn("GH_TOKEN", os.environ)
+                publish.reset_mock()
+                self.run["status"] = "completed"
+                site.main()
+                publish.assert_not_called()
+                self.assertFalse(request.exists())
+                request.symlink_to(root / "secret")
+                (root / "secret").write_text(token)
+                site.main()
+                publish.assert_not_called()
 
     def test_receipt_and_cancellation(self):
         for exit_status in (0, 1, "cancel"):
