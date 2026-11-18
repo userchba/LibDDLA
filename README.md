@@ -427,7 +427,17 @@ All branches support real/complex scalars and `N`, `T`, and `C` operations.
 
 Selection uses ScaLAPACK 2.2.2's communication-volume estimates, with a preference
 for AB when estimated costs are close. There is no public branch override.
-`DDLA_PGEMM_KPANEL` continues to control K-panel batching in AB only; AC and BC
+AB defaults to a 1024-wide K target for NN and one logical A descriptor block
+when either operand is transposed/conjugated. A positive `DDLA_PGEMM_KPANEL`
+overrides either default, including wider T/C batching; an unset, empty or
+nonpositive value retains the operation-specific default. Existing descriptor
+rounding, actual-stage and rank-share limits still bound the allocated panel.
+GPU execution uses two one-share panel slots for overlap. Synchronous CPU
+execution uses one slot and may combine up to four rank shares when the grid
+and descriptor blocks permit. The requested width still caps both paths;
+CPU grouping stays below a full operand except for unavoidable single-block
+cases. Each panel shrinks with rank count up to descriptor-block rounding.
+`DDLA_PGEMM_KPANEL` controls K-panel batching in AB only; AC and BC
 use one output descriptor block per panel, bounding temporary storage.
 
 ### Products updating one triangle

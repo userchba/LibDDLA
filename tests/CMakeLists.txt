@@ -884,11 +884,19 @@ endforeach()
 
 add_test_executable(test_diag_logdet)
 
-# Explicit-queue PGEADD defaults to CPU; GPU checks use the native observer.
+# Explicit-queue correctness fixtures default to CPU even in a dual build.
 if(UNIX AND NOT APPLE)
+    add_test_executable(test_pgemm_pipeline)
+    target_link_libraries(test_pgemm_pipeline PRIVATE ${CMAKE_DL_LIBS})
+    set_tests_properties(test_pgemm_pipeline_mpi PROPERTIES LABELS cpu TIMEOUT 300)
     add_test_executable(test_pgeadd_queue)
     target_link_libraries(test_pgeadd_queue PRIVATE ${CMAKE_DL_LIBS})
     set_tests_properties(test_pgeadd_queue_mpi PROPERTIES LABELS cpu TIMEOUT 180)
+    if(TARGET workspace_trace)
+        add_dependencies(test_pgemm_pipeline workspace_trace)
+        set_tests_properties(test_pgemm_pipeline_mpi PROPERTIES ENVIRONMENT
+            "LD_PRELOAD=$<TARGET_FILE:workspace_trace>;DDLA_WORKSPACE_TRACE_REQUIRED=1;OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+    endif()
     if(DDLA_HAS_GPU)
         add_library(pgeadd_queue_trace SHARED EXCLUDE_FROM_ALL pgeadd_queue_trace.cpp)
         apply_test_connector_defs(pgeadd_queue_trace)
@@ -903,6 +911,15 @@ if(UNIX AND NOT APPLE)
         set_tests_properties(test_pgeadd_queue_gpu_mpi PROPERTIES
             LABELS gpu PROCESSORS ${DDLA_TEST_NP} TIMEOUT 180 ENVIRONMENT
             "LD_PRELOAD=$<TARGET_FILE:pgeadd_queue_trace>;OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+        if(TARGET workspace_trace)
+            add_test(NAME test_pgemm_pipeline_gpu_mpi
+                COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${DDLA_TEST_NP}
+                    ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_pgemm_pipeline> --gpu
+                    ${MPIEXEC_POSTFLAGS})
+            set_tests_properties(test_pgemm_pipeline_gpu_mpi PROPERTIES
+                LABELS gpu PROCESSORS ${DDLA_TEST_NP} TIMEOUT 300 ENVIRONMENT
+                "LD_PRELOAD=$<TARGET_FILE:workspace_trace>;DDLA_WORKSPACE_TRACE_REQUIRED=1;OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+        endif()
     endif()
 endif()
 

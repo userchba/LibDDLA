@@ -22,6 +22,7 @@
 #include <cstdlib>
 #include <complex>
 #include <new>
+#include <limits>
 
 namespace ddla {
 
@@ -34,15 +35,16 @@ namespace {
 // A local gemm is cheaper per flop when it covers a run of k-blocks instead
 // of a single one: with nb = 128 and a 1024-wide k panel that is 8 panel
 // transports (8 broadcasts) feeding ONE local gemm of k = 1024. The target
-// panel width defaults to DDLA_PGEMM_KPANEL (1024); a value below nb
-// degenerates to the classic one-block-per-gemm pipeline. The transposed
-// transport path has no multi-block gather yet, so any transposed operand
-// stays one block per gemm.
+// default is 1024 for NN and one logical A descriptor block for T/C.
+// A positive DDLA_PGEMM_KPANEL overrides either default; a value below nb
+// degenerates to the classic one-block-per-gemm pipeline. Each descriptor
+// block is normalized independently, including transposed source owners,
+// before it is appended to the local contraction panel.
 constexpr int kDefaultPanelWidth = 1024;
 
-int kpanel_width()
+int kpanel_width(int default_width)
 {
-    int panel_width = kDefaultPanelWidth;
+    int panel_width = default_width;
     const char* s = std::getenv("DDLA_PGEMM_KPANEL");
     if (s != nullptr && *s != '\0') {
         const int v = std::atoi(s);
@@ -57,13 +59,37 @@ int ab_block(char transa, const int* descA)
     return transa == 'N' ? descA[DDLA_NB_] : descA[DDLA_MB_];
 }
 
-// The k-blocks one local gemm covers.  The transposed transport path
-// (trans != 'N') has no multi-block gather yet -- it would move only the
-// first block of a run and leave the rest of the panel uninitialized -- so
-// those operands stay one block per gemm.
-int ab_blocks_per_gemm(char transa, char transb, int nb, int panel_width)
+// Descriptor-block transport is independent of the local GEMM depth. All
+// N/T/C combinations append the same consecutive logical k blocks.
+int ab_blocks_per_gemm(const DdlaHandle_t& h, int k, int nb, int panel_width)
 {
-    return transa != 'N' || transb != 'N' ? 1 : std::max(1, panel_width / nb);
+    int blocks = std::max(1, panel_width / nb);
+    // Bound total operand-panel storage by four block-rounded rank shares,
+    // including 1 x P and P x 1 grids. GPU needs two slots for overlap;
+    // synchronous CPU execution uses one larger panel to preserve GEMM depth.
+    // A descriptor block remains the lower bound for concentrated inputs.
+    const int peers = std::max(h->nprows_, h->npcols_);
+    const int owned_blocks = k / peers / nb;
+    const long long share = std::max(1, owned_blocks);
+    // CPU uses at most four shares in its single slot, still capped by the
+    // requested width. The peer bound prevents a full operand replica;
+    // block-rounded grids retain their one-block lower bound.
+    const int shares = h->backend == DdlaBackend::CPU && owned_blocks > 0
+        ? std::min(4, std::max(1, peers - 1)) : 1;
+    blocks = static_cast<int>(std::min<long long>(blocks, share * shares));
+    return blocks;
+}
+
+int ab_full_stages(int kfull, int bpg)
+{
+    return kfull / bpg + (kfull % bpg != 0);
+}
+
+int ab_panel_width(int k, int nb, int bpg)
+{
+    // The partial tail is a separate stage. Never reserve the requested
+    // panel width when the entire contraction is smaller than that target.
+    return std::max(std::min(k / nb, bpg) * nb, k % nb);
 }
 
 // The k slices of the SUMMA branch: runs of bpg whole k-blocks, then the
@@ -71,17 +97,39 @@ int ab_blocks_per_gemm(char transa, char transb, int nb, int panel_width)
 int ab_stages(int k, int nb, int bpg)
 {
     const int kfull = k / nb;
-    return (kfull + bpg - 1) / bpg + (k % nb > 0 ? 1 : 0);
+    return ab_full_stages(kfull, bpg) + (k % nb > 0 ? 1 : 0);
 }
 
 KStage ab_stage(int s, int k, int nb, int bpg)
 {
     const int kfull = k / nb;
-    if (s < (kfull + bpg - 1) / bpg) {
+    if (s < ab_full_stages(kfull, bpg)) {
         const int cnt = std::min(bpg, kfull - s * bpg);
         return KStage{s * bpg * nb, cnt, cnt * nb};
     }
     return KStage{kfull * nb, 1, k - kfull * nb};
+}
+
+std::size_t ab_elements(std::size_t rows, std::size_t columns)
+{
+    if (columns && rows > std::numeric_limits<std::size_t>::max() / columns)
+        throw std::length_error("pgemm: panel element count overflow");
+    return std::max(std::size_t(1), rows * columns);
+}
+
+template <typename T>
+std::size_t ab_bytes(std::size_t count)
+{
+    if (count > (std::numeric_limits<std::size_t>::max() - 255) / sizeof(T))
+        throw std::length_error("pgemm: panel workspace overflow");
+    return detail::padded_bytes<T>(count);
+}
+
+void ab_add_bytes(std::size_t& total, std::size_t bytes)
+{
+    if (bytes > std::numeric_limits<std::size_t>::max() - total)
+        throw std::length_error("pgemm: workspace sum overflow");
+    total += bytes;
 }
 
 // Element counts of the SUMMA branch's staging, in carving order: the A panel
@@ -97,7 +145,7 @@ void ab_counts(const DdlaHandle_t& h, char transa, char transb, int m, int n, in
 {
     const int nprows = h->nprows_, npcols = h->npcols_, myprow = h->myprow_, mypcol = h->mypcol_;
     const int nb = ab_block(transa, descA);
-    const std::size_t panel_max = std::size_t(ab_blocks_per_gemm(transa, transb, nb, panel_width)) * nb;
+    const std::size_t panel_max = ab_panel_width(k, nb, ab_blocks_per_gemm(h, k, nb, panel_width));
     const int m_loc_C = num_loc(m, descC[DDLA_MB_], myprow, descC[DDLA_RSRC_], nprows);
     const int n_loc_C = num_loc(n, descC[DDLA_NB_], mypcol, descC[DDLA_CSRC_], npcols);
     const int m_loc_A = num_loc((transa == 'N') ? m : k, descA[DDLA_MB_], myprow, descA[DDLA_RSRC_], nprows);
@@ -106,9 +154,9 @@ void ab_counts(const DdlaHandle_t& h, char transa, char transb, int m, int n, in
     const int n_loc_B = num_loc((transb == 'N') ? n : k, descB[DDLA_NB_], mypcol, descB[DDLA_CSRC_], npcols);
     const std::size_t rows_a = (transa == 'N') ? std::max(m_loc_A, m_loc_C) : std::max(n_loc_A, m_loc_C);
     const std::size_t cols_b = (transb == 'N') ? std::max(n_loc_B, n_loc_C) : std::max(m_loc_B, n_loc_C);
-    count[0] = std::max(std::size_t(1), rows_a * panel_max);
-    count[1] = std::max(std::size_t(1), panel_max * cols_b);
-    count[2] = std::max(std::size_t(1), std::size_t(nb) * cols_b);
+    count[0] = ab_elements(rows_a, panel_max);
+    count[1] = ab_elements(panel_max, cols_b);
+    count[2] = ab_elements(std::min(nb, k), cols_b);
 }
 
 // Query redistribution once for the largest A/B panel. Aligned N panels use
@@ -144,9 +192,7 @@ void ab_run(
     const int m_loc_C = num_loc(m, descC[DDLA_MB_], myprow, descC[DDLA_RSRC_], nprows);
     const int n_loc_C = num_loc(n, descC[DDLA_NB_], mypcol, descC[DDLA_CSRC_], npcols);
     const int lldC = descC[DDLA_LLD_];
-    const int m_loc_A = num_loc((transa == 'N') ? m : k, descA[DDLA_MB_], myprow, descA[DDLA_RSRC_], nprows);
-    const int n_loc_B = num_loc((transb == 'N') ? n : k, descB[DDLA_NB_], mypcol, descB[DDLA_CSRC_], npcols);
-    const int bpg = ab_blocks_per_gemm(transa, transb, nb, panel_width);
+    const int bpg = ab_blocks_per_gemm(h, k, nb, panel_width);
     const int stages = ab_stages(k, nb, bpg);
 
     // The scratch, in the order pgemm_workspace_size counts it.
@@ -155,91 +201,105 @@ void ab_run(
     ab_panel_bytes<TA, TB>(h, transa, transb, m, n, nb, descA, descB, descC, panel_a_bytes, panel_b_bytes);
     char* bw = static_cast<char*>(backend_work);
     char* hw = static_cast<char*>(host_work);
+    constexpr int buffer_max = Backend == DdlaBackend::CPU ? 1 : 2;
     TA* A_temp[2];
     TB* B_temp[2];
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < buffer_max; ++i) {
         A_temp[i] = detail::take<TA>(bw, count[0]);
         B_temp[i] = detail::take<TB>(bw, count[1]);
     }
     TB* const B_blk = detail::take<TB>(bw, count[2]);
     char* const tr_a = detail::take<char>(bw, panel_a_bytes[0]);
     char* const tr_b = detail::take<char>(bw, panel_b_bytes[0]);
-    char* const tr_a_host = detail::take<char>(hw, panel_a_bytes[1]);
-    char* const tr_b_host = detail::take<char>(hw, panel_b_bytes[1]);
+    char* const tr_a_host = panel_a_bytes[1] ? detail::take<char>(hw, panel_a_bytes[1]) : nullptr;
+    char* const tr_b_host = panel_b_bytes[1] ? detail::take<char>(hw, panel_b_bytes[1]) : nullptr;
     const std::size_t used = static_cast<std::size_t>(bw - static_cast<char*>(backend_work));
     assert(used <= backend_bytes);
-    assert(static_cast<std::size_t>(hw - static_cast<char*>(host_work)) <= host_bytes);
+    assert(host_bytes == 0 || static_cast<std::size_t>(hw - static_cast<char*>(host_work)) <= host_bytes);
     // The rest is the local gemm's (a mixed product's) scratch.
     void* const gemm_work = bw;
     const std::size_t gemm_bytes = backend_bytes - used;
-    constexpr int buffer_max = 2;
 
-    // Wait out the in-flight panel transport before the local gemm reads it
-    // (GPU only: CPU BLAS is synchronous and every MPI call in
-    // CPU panel communication is blocking).
-    auto sync_panel = [&]() {
-        if constexpr (Backend != DdlaBackend::CPU) {
-            DDLA_CHECK(ddlaSynchronize(h));
-            DDLA_CHECK(detail::synchronize_on(h, h->stream_data));
+    // stream_data is nonblocking. The input event covers preceding input
+    // uploads and async scratch allocations on the compute queue, including
+    // a caller-selected legacy default compute stream.
+    void* const queue = Backend == DdlaBackend::GPU ? h->stream_data : nullptr;
+    if constexpr (Backend == DdlaBackend::GPU) {
+        DDLA_CHECK(detail::event_record_on(h, h->summa_input, h->stream));
+        DDLA_CHECK(detail::event_wait_on(h, h->summa_input, queue));
+    }
+    bool reuse_pending[buffer_max] = {};
+
+    auto get_data = [&](int s, int slot) {
+        if (s >= stages) return;
+        if constexpr (Backend == DdlaBackend::GPU) {
+            if (reuse_pending[slot])
+                DDLA_CHECK(detail::event_wait_on(h, h->summa_reuse[slot], queue));
         }
-    };
-
-    int temp_buffer = 0;
-
-    auto get_data = [&](int s) {
-        if (s < 0 || s >= stages) return;
         const KStage stage = ab_stage(s, k, nb, bpg);
         const int ks = stage.start;
-        const int cnt = stage.cnt;
         const int kk = stage.kk;
 
-        // Gather the stage's blocks one panel copy each. The A tile
-        // (sData 'C', transa 'N') is (rows x w) with ld = rows, so it lands
-        // straight in the panel at column offset b * w; the B tile (sData 'R',
-        // transb 'N') is (w x cols) with ld = w, which only matches the panel
-        // pitch kk when the stage is one block wide -- otherwise it is staged
-        // in B_blk and copied in with the panel pitch. w = nb for every full
-        // block; the tail stage has w = ktail.
-        for (int b = 0; b < cnt; ++b) {
+        // Transport one descriptor block at a time so changing source owners
+        // and conjugation are resolved before concatenation. A is contiguous
+        // by logical k columns. B needs a pitched append because its block
+        // tile has leading dimension w, while the complete panel has ld=kk.
+        for (int b = 0; b < stage.cnt; ++b) {
             const int g = ks + b * nb;
             const int w = std::min(nb, k - g);
-
-            pblas::panel_run<Backend,TA>(handle,true,transa,
-                transa=='N'?m:w,transa=='N'?w:m,A,transa=='N'?0:g,transa=='N'?g:0,
-                descA,descC,A_temp[temp_buffer]+std::size_t(b)*w*m_loc_C,
-                tr_a,panel_a_bytes[0],tr_a_host,panel_a_bytes[1]);
-            TB* const destination = cnt==1 ? B_temp[temp_buffer] : B_blk;
-            pblas::panel_run<Backend,TB>(handle,false,transb,
-                transb=='N'?w:n,transb=='N'?n:w,B,transb=='N'?g:0,transb=='N'?0:g,
-                descB,descC,destination,tr_b,panel_b_bytes[0],tr_b_host,panel_b_bytes[1]);
-            if (cnt!=1)
-                DDLA_CHECK(ddlaMemcpy2D(h,B_temp[temp_buffer]+std::size_t(b)*w,
-                    std::size_t(kk)*sizeof(TB),B_blk,std::size_t(w)*sizeof(TB),
-                    std::size_t(w)*sizeof(TB),n_loc_C));
+            const std::size_t q = static_cast<std::size_t>(g - ks);
+            pblas::panel_run<Backend, TA>(h, true, transa,
+                transa == 'N' ? m : w, transa == 'N' ? w : m,
+                A, transa == 'N' ? 0 : g, transa == 'N' ? g : 0,
+                descA, descC, A_temp[slot] + q * m_loc_C,
+                tr_a, panel_a_bytes[0], tr_a_host, panel_a_bytes[1], queue,
+                Backend == DdlaBackend::GPU ? h->summa_metadata[0] : nullptr);
+            TB* const destination = stage.cnt == 1 ? B_temp[slot] : B_blk;
+            pblas::panel_run<Backend, TB>(h, false, transb,
+                transb == 'N' ? w : n, transb == 'N' ? n : w,
+                B, transb == 'N' ? g : 0, transb == 'N' ? 0 : g,
+                descB, descC, destination,
+                tr_b, panel_b_bytes[0], tr_b_host, panel_b_bytes[1], queue,
+                Backend == DdlaBackend::GPU ? h->summa_metadata[1] : nullptr);
+            if (stage.cnt != 1)
+                DDLA_CHECK(detail::memcpy2d_on(h, B_temp[slot] + q,
+                    std::size_t(kk) * sizeof(TB), B_blk, std::size_t(w) * sizeof(TB),
+                    std::size_t(w) * sizeof(TB), n_loc_C, queue));
         }
+        if constexpr (Backend == DdlaBackend::GPU)
+            DDLA_CHECK(detail::event_record_on(h, h->summa_ready[slot], queue));
     };
 
-    get_data(0);
+    get_data(0, 0);
     bool first_gemm = true;
     for (int s = 0; s < stages; ++s) {
+        const int slot = s % buffer_max;
         const int kb = ab_stage(s, k, nb, bpg).kk;
-        sync_panel();
+        if constexpr (Backend == DdlaBackend::GPU)
+            DDLA_CHECK(detail::event_wait_on(h, h->summa_ready[slot], h->stream));
         if (m_loc_C > 0 && n_loc_C > 0) {
             const T gemm_beta = first_gemm ? beta : static_cast<T>(1.0);
             local_gemm_run<Backend, T, TA, TB>(
-                h, 'N', 'N',
-                m_loc_C, n_loc_C, kb,
-                alpha,
-                A_temp[temp_buffer], m_loc_C,
-                B_temp[temp_buffer], kb,
-                gemm_beta,
+                h, 'N', 'N', m_loc_C, n_loc_C, kb, alpha,
+                A_temp[slot], m_loc_C, B_temp[slot], kb, gemm_beta,
                 C, lldC, gemm_work, gemm_bytes);
             first_gemm = false;
         }
-        temp_buffer = (temp_buffer + 1) % buffer_max;
-        get_data(s + 1);
+        if constexpr (Backend == DdlaBackend::GPU) {
+            // Empty-output ranks still record retirement after their ready
+            // wait, so slot reuse never depends on an unrecorded event.
+            DDLA_CHECK(detail::event_record_on(h, h->summa_reuse[slot], h->stream));
+            reuse_pending[slot] = true;
+        }
+        get_data(s + 1, (slot + 1) % buffer_max);
     }
-    sync_panel();
+    if constexpr (Backend == DdlaBackend::GPU) {
+        // The borrowed arenas and host metadata are reusable on return.
+        // No compute drain separates GEMMs; MPI and host-metadata contracts
+        // can still require a data-queue wait during panel preparation.
+        DDLA_CHECK(ddlaSynchronize(h));
+        DDLA_CHECK(detail::synchronize_on(h, queue));
+    }
 }
 
 } // namespace
@@ -291,6 +351,10 @@ Algorithm pgemm_check(
 
         panel_width = kDefaultPanelWidth;
         if (m == 0 || n == 0 || k == 0 || alpha_is_zero) return Algorithm::AB;
+        if constexpr (Backend == DdlaBackend::GPU) {
+            if (h->communication() == DdlaCommunication::CCL && h->communication_group_depth)
+                throw std::invalid_argument("pgemm: active CCL group must be closed before a GPU product");
+        }
 
         Algorithm chosen = algorithm;
         if (chosen == Algorithm::Auto) {
@@ -304,7 +368,8 @@ Algorithm pgemm_check(
                    !stationary_aligned(chosen == Algorithm::BC, transa, transb, descA, descB, descC)) {
             throw std::invalid_argument("pgemm: stationary branch requires aligned non-transposed panel owners");
         }
-        panel_width = kpanel_width();
+        panel_width = kpanel_width(transa == 'N' && transb == 'N'
+            ? kDefaultPanelWidth : ab_block(transa, descA));
         agree.mode("DDLA_PGEMM_KPANEL", panel_width);
         return chosen;
     });
@@ -312,7 +377,7 @@ Algorithm pgemm_check(
 
 
 // Component 2.  The SUMMA branch (AB): backend [ A panel (TA) | B panel (TB) ]
-// twice (double-buffered) | B tile (TB) | transport of a transposed A | of a
+// in two GPU slots or one CPU slot | B tile (TB) | transport of a transposed A | of a
 // transposed B | the local gemm's scratch for the largest of its shapes (a
 // mixed product only) ], host [ transport of a transposed A | of a transposed
 // B ].  The stationary branches: stationary_workspace_size.
@@ -338,7 +403,7 @@ void pgemm_workspace_size(
     }
 
     const int nb = ab_block(transa, descA);
-    const int bpg = ab_blocks_per_gemm(transa, transb, nb, panel_width);
+    const int bpg = ab_blocks_per_gemm(h, k, nb, panel_width);
     std::size_t count[3], panel_a_bytes[2], panel_b_bytes[2];
     ab_counts(h, transa, transb, m, n, k, descA, descB, descC, panel_width, count);
     ab_panel_bytes<TA, TB>(h, transa, transb, m, n, nb, descA, descB, descC, panel_a_bytes, panel_b_bytes);
@@ -352,11 +417,16 @@ void pgemm_workspace_size(
         local_gemm_workspace_size<T, TA, TB>(h, m_loc_C, n_loc_C, kb, &bytes);
         gemm_bytes = std::max(gemm_bytes, bytes);
     }
-    *backend_bytes = 2 * (detail::padded_bytes<TA>(count[0]) + detail::padded_bytes<TB>(count[1]))
-                   + detail::padded_bytes<TB>(count[2])
-                   + detail::padded_bytes<char>(panel_a_bytes[0]) + detail::padded_bytes<char>(panel_b_bytes[0])
-                   + gemm_bytes;
-    *host_bytes = detail::padded_bytes<char>(panel_a_bytes[1]) + detail::padded_bytes<char>(panel_b_bytes[1]);
+    for (int slot = 0; slot < (h->backend == DdlaBackend::CPU ? 1 : 2); ++slot) {
+        ab_add_bytes(*backend_bytes, ab_bytes<TA>(count[0]));
+        ab_add_bytes(*backend_bytes, ab_bytes<TB>(count[1]));
+    }
+    ab_add_bytes(*backend_bytes, ab_bytes<TB>(count[2]));
+    ab_add_bytes(*backend_bytes, ab_bytes<char>(panel_a_bytes[0]));
+    ab_add_bytes(*backend_bytes, ab_bytes<char>(panel_b_bytes[0]));
+    ab_add_bytes(*backend_bytes, gemm_bytes);
+    ab_add_bytes(*host_bytes, ab_bytes<char>(panel_a_bytes[1]));
+    ab_add_bytes(*host_bytes, ab_bytes<char>(panel_b_bytes[1]));
 }
 
 std::array<std::size_t,2> pgemm_staging_bytes(const DdlaHandle_t& h,Algorithm algorithm,
@@ -396,6 +466,14 @@ void pgemm_run(
     void* backend_work, std::size_t backend_bytes,
     void* host_work, std::size_t host_bytes)
 {
+    // Check before entering the cleanup path: an open CCL group may hold
+    // submissions that a queue drain cannot complete. Raw callers must keep
+    // the collectively prepared no-group precondition on every rank.
+    if constexpr (Backend == DdlaBackend::GPU) {
+        if (m > 0 && n > 0 && k > 0 && alpha != T(0) &&
+            h->communication() == DdlaCommunication::CCL && h->communication_group_depth)
+            throw std::invalid_argument("pgemm: active CCL group must be closed before a GPU product");
+    }
     try {
         if (m == 0 || n == 0) {
             return;
@@ -430,8 +508,10 @@ void pgemm_run(
         }
     } catch (...) {
         // Retire queued host reads before the caller reuses or releases scratch.
-        if (ddlaGetBackend(h) == DdlaBackend::GPU)
+        if (ddlaGetBackend(h) == DdlaBackend::GPU) {
             try { (void)ddlaSynchronize(h); } catch (...) {}
+            try { (void)detail::synchronize_on(h, h->stream_data); } catch (...) {}
+        }
         throw;
     }
 }
@@ -467,6 +547,7 @@ void run(
                 throw std::invalid_argument("pgemm(mixed): null local input");
         });
     }
+    if (scale_only && beta == T(1)) return;
     std::size_t backend_bytes = 0, host_bytes = 0;
     vector<char> backend_work(handle);
     std::vector<char> host_work;

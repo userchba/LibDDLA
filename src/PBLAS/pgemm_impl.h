@@ -33,7 +33,8 @@ struct KStage {
 // Auto, and read DDLA_PGEMM_KPANEL.  A null or mismatched handle throws
 // std::runtime_error, everything else std::invalid_argument.  Collective:
 // every rank throws if any rank does, and the environment-driven choice must
-// agree across ranks.
+// agree across ranks. Active CCL groups are rejected for a
+// nonzero product before panel events or copies can be submitted.
 template <DdlaBackend Backend>
 Algorithm pgemm_check(const DdlaHandle_t& h, char ta, char tb, int m, int n, int k,
                       bool alpha_is_zero, const int* da, const int* db, const int* dc,
@@ -41,8 +42,14 @@ Algorithm pgemm_check(const DdlaHandle_t& h, char ta, char tb, int m, int n, int
 
 // Component 2: the scratch of the branch pgemm_check chose, for this m, n, k
 // and these descriptors.  The SUMMA branch (AB) stages the k panels of A and B
-// double-buffered and one block tile of B, plus the transport scratch of a
-// transposed operand; the stationary branches (AC, BC) stage one panel of the
+// in two GPU slots or one CPU slot, plus one block tile of B, plus the transport scratch of a
+// transposed operand. Consecutive logical k blocks are concatenated for all
+// N/T/C combinations. GPU grouping is capped at a block-rounded rank share. A synchronous CPU
+// panel uses up to four rank shares, capped below a full operand when
+// descriptor blocks permit; block-rounded grids retain their one-block bound. Allocation covers only the
+// largest actual stage. The handle prepares its
+// GPU panel events before borrowed execution; no event creation occurs in
+// size/run. The stationary branches (AC, BC) stage one panel of the
 // thin operand and of the partial product, the transposed copies, and the
 // scratch of the two pgeadd calls of every panel.  A mixed real/complex
 // product adds the local GEMM's scratch.  beta_is_nonzero says whether the
@@ -60,9 +67,16 @@ std::array<std::size_t,2> pgemm_staging_bytes(const DdlaHandle_t& h,Algorithm al
     const int* da,const int* db,const int* dc,
     std::size_t a_bytes,std::size_t b_bytes,std::size_t c_bytes);
 
-// Component 3: C := alpha*op(A)*op(B) + beta*C. No geometry validation or
-// algorithm workspace allocation. HostStagedMPI raw borrowers can reserve
-// pgemm_staging_bytes in their owning preparation before execution.
+// Component 3: C := alpha*op(A)*op(B) + beta*C. No geometry validation or algorithm
+// allocation. GPU SUMMA transports on stream_data and computes on stream;
+// prepared input/ready/reuse events protect operands and the two panel slots.
+// Both touched queues are retired before SUMMA returns or rethrows. Existing
+// vendor initialization may still require warm-up before strict allocation
+// measurements. HostStagedMPI raw borrowers must reserve pgemm_staging_bytes
+// in their owning preparation (or accept legacy on-demand cache growth).
+// Public PGEMM reserves under its existing preparation agreement. GPU products
+// require no active CCL group, as agreed by the checker; raw callers
+// must preserve that collective precondition. Zero-product no-ops need no events.
 template <DdlaBackend Backend, typename T, typename TA = T, typename TB = T>
 void pgemm_run(const DdlaHandle_t& h, Algorithm algorithm, int panel_width, char ta, char tb,
                int m, int n, int k, const T& alpha,
