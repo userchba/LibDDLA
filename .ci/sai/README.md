@@ -11,7 +11,7 @@ neither stage requests explicit Slurm memory.
 
 | Event | Source sent to SAI | Approval |
 | --- | --- | --- |
-| Push or merge to upstream `develop` or `main` | Pushed commit | Automatic once enabled |
+| Push or merge to upstream `develop` or `main` | Pushed commit | Automatic |
 | PR opened, reopened or updated against either branch | Current PR head, including for forks | A maintainer approves that run; a new commit needs new approval |
 | Manual run on either branch | Supplied full commit SHA | A maintainer approves that run |
 
@@ -19,6 +19,11 @@ Push and PR checks work on `develop` as soon as it contains the workflow. Bring
 the workflow to `main` to cover pushes there and expose **Run workflow** in
 Actions. A skipped job means no GPU test was run. Failed or incomplete suites
 remain failures; the job uploads available JUnit, logs and Slurm evidence.
+
+Open, update or reopen a PR targeting `develop` to request a new validation,
+then approve its `sai-libddla` Environment for the current head SHA. Check the
+run's artifact and both Slurm stages before treating deployment acceptance as
+complete.
 
 ## Repository owner
 
@@ -35,10 +40,9 @@ remain failures; the job uploads available JUnit, logs and Slurm evidence.
    renewal for disposable runners and reviewer logins with SAI. Each job shares
    its automatically issued, read-only `GITHUB_TOKEN` with the site publisher;
    no separate PAT or repository-write credential is needed.
-4. Once SAI confirms isolation, set the repository Actions variable
-   `SAI_CI_ENABLED=true` for a supervised first run on `develop`. Keep it on
-   after verifying reporting and cancellation; removing it disables new
-   automatic runs. Leave this check out of required merge checks initially.
+4. Coordinate the first run on `develop` with SAI and verify reporting and
+   cancellation. No activation variable is required. Leave this check out of
+   required merge checks initially.
 
 ## SAI administrators
 
@@ -72,7 +76,7 @@ remain failures; the job uploads available JUnit, logs and Slurm evidence.
   with Slurm, then re-run with a new attempt. Retain public evidence per site
   policy and keep partial or absent results from counting as a pass.
 
-Before enabling routine runs, verify the credential boundary from an actual job,
+During deployment acceptance, verify the credential boundary from an actual job,
 check that an unapproved SHA is refused, and exercise artifact upload and
 cancellation through Actions. Keep the check informational while deployment and
 the two CUDA 12.9 Cholesky error-code failures are outstanding.
