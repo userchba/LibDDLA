@@ -29,9 +29,8 @@ jobs:
       github.repository == 'userchba/LibDDLA' &&
       ((github.event_name == 'workflow_dispatch' &&
         (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')) ||
-       (vars.SAI_CI_ENABLED == 'true' &&
-        (github.event_name == 'pull_request' ||
-         (github.event_name == 'push' && !github.event.deleted))))
+       github.event_name == 'pull_request' ||
+       (github.event_name == 'push' && !github.event.deleted))
     name: SAI V100, full CUDA suite and six-rank matrix tests
     runs-on: [self-hosted, Linux, X64, sai-libddla-results]
     environment: ${{ github.event_name == 'push' && 'sai-libddla-push' || 'sai-libddla' }}
