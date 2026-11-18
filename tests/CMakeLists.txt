@@ -882,6 +882,28 @@ foreach(_method_test test_pheevd_methods test_pheevd_policy)
     add_test_executable(${_method_test})
 endforeach()
 
+# Explicit-queue PGEADD defaults to CPU; GPU checks use the native observer.
+if(UNIX AND NOT APPLE)
+    add_test_executable(test_pgeadd_queue)
+    target_link_libraries(test_pgeadd_queue PRIVATE ${CMAKE_DL_LIBS})
+    set_tests_properties(test_pgeadd_queue_mpi PROPERTIES LABELS cpu TIMEOUT 180)
+    if(DDLA_HAS_GPU)
+        add_library(pgeadd_queue_trace SHARED EXCLUDE_FROM_ALL pgeadd_queue_trace.cpp)
+        apply_test_connector_defs(pgeadd_queue_trace)
+        target_include_directories(pgeadd_queue_trace PRIVATE
+            $<TARGET_PROPERTY:ddla_lib,INTERFACE_INCLUDE_DIRECTORIES>)
+        target_link_libraries(pgeadd_queue_trace PRIVATE ${CMAKE_DL_LIBS})
+        add_dependencies(test_pgeadd_queue pgeadd_queue_trace)
+        add_test(NAME test_pgeadd_queue_gpu_mpi
+            COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${DDLA_TEST_NP}
+                ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_pgeadd_queue> --gpu
+                ${MPIEXEC_POSTFLAGS})
+        set_tests_properties(test_pgeadd_queue_gpu_mpi PROPERTIES
+            LABELS gpu PROCESSORS ${DDLA_TEST_NP} TIMEOUT 180 ENVIRONMENT
+            "LD_PRELOAD=$<TARGET_FILE:pgeadd_queue_trace>;OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+    endif()
+endif()
+
 add_test_executable(test_stedc)
 set_tests_properties(test_stedc_mpi PROPERTIES LABELS cpu TIMEOUT 180)
 if(DDLA_HAS_GPU)

@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
+#include <limits>
 
 namespace ddla { namespace pgeadd_impl { namespace {
 
@@ -47,50 +48,72 @@ void sort_by_peer(Transfer* v, std::size_t count, Transfer* scratch, int* cursor
 }
 
 #if DDLA_HAS_GPU
-// Packing and scattering share this copy/transpose kernel.
 template <typename T> __global__ void copy_blocks(
-    const T* src, T* dst, const CopyBlock* blocks, bool transpose, bool conj)
+    const T* src, T* dst, const CopyBlock* blocks, bool transpose, bool conjugate)
 {
     const CopyBlock b = blocks[blockIdx.x];
     if (!transpose) {
-        for (int j=threadIdx.y; j<b.cols; j+=blockDim.y)
-            for (int i=threadIdx.x; i<b.rows; i+=blockDim.x)
-                dst[b.dst+i+std::size_t(j)*b.ldd] = src[b.src+i+std::size_t(j)*b.lds];
+        for (int j = threadIdx.y; j < b.cols; j += blockDim.y)
+            for (int i = threadIdx.x; i < b.rows; i += blockDim.x)
+                dst[b.dst + i + std::size_t(j) * b.ldd] = src[b.src + i + std::size_t(j) * b.lds];
         return;
     }
-    constexpr int tile_size = 16;
-    __shared__ T tile[tile_size][tile_size+1];
-    for (int j0=0; j0<b.cols; j0+=tile_size) for (int i0=0; i0<b.rows; i0+=tile_size) {
-        const int i=i0+threadIdx.x, j=j0+threadIdx.y;
-        if (i<b.rows && j<b.cols) tile[threadIdx.y][threadIdx.x]=src[b.src+i+std::size_t(j)*b.lds];
-        __syncthreads();
-        const int r=j0+threadIdx.x, c=i0+threadIdx.y;
-        if (r<b.cols && c<b.rows) dst[b.dst+r+std::size_t(c)*b.ldd]=detail::device_conj(tile[threadIdx.x][threadIdx.y],conj);
-        __syncthreads();
-    }
+    for (std::size_t j0 = 0; j0 < std::size_t(b.cols); j0 += 16)
+        for (std::size_t i0 = 0; i0 < std::size_t(b.rows); i0 += 16)
+            detail::transpose_tile(src + b.src, dst + b.dst, b.rows, b.cols,
+                b.lds, b.ldd, int(i0), int(j0), conjugate);
 }
+
 #endif
 
-// Copy the count rectangles of blocks.  A GPU handle first uploads the list
-// to device_blocks; the source list is pageable host memory, so the upload has
-// read it when ddlaMemcpy returns and the list may be refilled right away.
 template <DdlaBackend Backend, typename T>
-void copy_batch(DdlaHandle_t h, char op, const T* src, T* dst, const CopyBlock* blocks, std::size_t count,
-                [[maybe_unused]] CopyBlock* device_blocks)
+void copy_rectangle(DdlaHandle_t h, char op, const T* src, T* dst,
+                    const CopyBlock& block, [[maybe_unused]] void* queue)
 {
-    if (count==0) return;
+    if (!block.rows || !block.cols) return;
     if constexpr (Backend == DdlaBackend::CPU) {
-        for (std::size_t i=0;i<count;++i) {
-            const CopyBlock& b=blocks[i];
-            blas_impl::geam_run<Backend>(h,op,'N',op=='N'?b.rows:b.cols,op=='N'?b.cols:b.rows,
-                T(1),src+b.src,b.lds,T(0),static_cast<const T*>(nullptr),1,dst+b.dst,b.ldd);
-        }
+        blas_impl::geam_run<Backend>(h, op, 'N', op == 'N' ? block.rows : block.cols,
+            op == 'N' ? block.cols : block.rows, T(1), src + block.src, block.lds,
+            T(0), static_cast<const T*>(nullptr), 1, dst + block.dst, block.ldd);
     } else {
 #if DDLA_HAS_GPU
-        DDLA_CHECK(ddlaMemcpy(h,device_blocks,blocks,count*sizeof(CopyBlock)));
+        if (op == 'N') {
+            DDLA_CHECK(detail::memcpy2d_on(h, dst + block.dst, std::size_t(block.ldd) * sizeof(T),
+                src + block.src, std::size_t(block.lds) * sizeof(T),
+                std::size_t(block.rows) * sizeof(T), block.cols, queue));
+            return;
+        }
+        blas_impl::geam_run<Backend>(h, op, 'N', block.cols, block.rows,
+            T(1), src + block.src, block.lds, T(0), static_cast<const T*>(nullptr),
+            1, dst + block.dst, block.ldd, queue);
+#endif
+    }
+}
+
+// A metadata event is recorded after each upload and BEFORE its copy kernel.
+// The final event wait in redistribute retires every host source, without
+// waiting for the last device-copy kernel or its following panel broadcast.
+template <DdlaBackend Backend, typename T>
+void copy_batch(DdlaHandle_t h, char op, const T* src, T* dst,
+                const CopyBlock* blocks, std::size_t count,
+                [[maybe_unused]] CopyBlock* device_blocks,
+                [[maybe_unused]] void* queue, [[maybe_unused]] ddlaEvent_t metadata_event,
+                [[maybe_unused]] bool& metadata_pending)
+{
+    if (!count) return;
+    if constexpr (Backend == DdlaBackend::CPU) {
+        for (std::size_t i = 0; i < count; ++i)
+            copy_rectangle<Backend>(h, op, src, dst, blocks[i], queue);
+    } else {
+#if DDLA_HAS_GPU
+        // Set before enqueue: a failing event record or an injected post-copy
+        // error must still drain this queue before the caller releases scratch.
+        metadata_pending = true;
+        DDLA_CHECK(detail::memcpy_on(h, device_blocks, blocks, count * sizeof(CopyBlock), queue));
+        DDLA_CHECK(detail::event_record_on(h, metadata_event, queue));
         using DT = detail::DeviceScalarT<T>;
-        copy_blocks<DT><<<dim3(count),dim3(16,16),0,static_cast<gpuStream_t>(h->stream)>>>(
-            reinterpret_cast<const DT*>(src),reinterpret_cast<DT*>(dst),device_blocks,op!='N',op=='C');
+        copy_blocks<DT><<<dim3(count), dim3(16, 16), 0, static_cast<gpuStream_t>(queue)>>>(
+            reinterpret_cast<const DT*>(src), reinterpret_cast<DT*>(dst), device_blocks, op != 'N', op == 'C');
         DDLA_CHECK(ddlaGetLastError(h));
 #endif
     }
@@ -185,6 +208,31 @@ void rectangles(char op, int m, int n, const int* a, int ia, int ja,
         }
         i += rows;
     }
+}
+
+// Actual remote payload counts. The count checker and staging preparation
+// use the same rectangle partition as redistribution; local snapshots are
+// appended after MPI counts and therefore do not consume host staging slots.
+std::array<std::size_t,2> remote_counts(const DdlaHandle_t& h,char op,int m,int n,
+    const int* da,int ia,int ja,const int* dc,int ic,int jc)
+{
+    std::array<std::size_t,2> count{};
+    rectangles(op,m,n,da,ia,ja,dc,ic,jc,[&](int i,int j,int rows,int cols,int ar,int ac) {
+        const int source=h->rc_to_rank(indxg2p(ar,da[DDLA_MB_],da[DDLA_RSRC_],h->nprows_),
+                                       indxg2p(ac,da[DDLA_NB_],da[DDLA_CSRC_],h->npcols_));
+        const int target=h->rc_to_rank(indxg2p(ic+i,dc[DDLA_MB_],dc[DDLA_RSRC_],h->nprows_),
+                                       indxg2p(jc+j,dc[DDLA_NB_],dc[DDLA_CSRC_],h->npcols_));
+        const auto size=std::size_t(rows)*cols;
+        if(source!=target && source==h->myid) {
+            if(size>std::size_t(INT_MAX)-count[0])throw std::overflow_error("pgeadd: MPI send count overflow");
+            count[0]+=size;
+        }
+        if(source!=target && target==h->myid) {
+            if(size>std::size_t(INT_MAX)-count[1])throw std::overflow_error("pgeadd: MPI receive count overflow");
+            count[1]+=size;
+        }
+    });
+    return count;
 }
 
 // Bounds include arbitrary region phases when general is true. Each owned
@@ -304,7 +352,7 @@ template <DdlaBackend Backend, typename T>
 void exchange_slab(DdlaHandle_t h, T* send, T* receive, int m, int n,
     char opa, const T* a, const int* da, int ia, int ja, const T& alpha,
     bool use_b, char opb, const T* b, const int* db, int ib, int jb, const T& beta,
-    T* c, const int* dc, int ic, int jc, int ldc)
+    T* c, const int* dc, int ic, int jc, int ldc, void* queue)
 {
     const int pr=h->nprows_,pc=h->npcols_,rank=h->myid;
     int lda, ar, ac, ldb=1, br=0, bc=0;
@@ -321,8 +369,11 @@ void exchange_slab(DdlaHandle_t h, T* send, T* receive, int m, int n,
     slab_peers(h,opa,da,ia,ja,dc,ic,jc,dest,source);
     const std::size_t scount=std::size_t(ar)*ac,rcount=std::size_t(mr)*nc;
     const auto combine=[&](T* dst, int rows, int cols, int ldd) {
-        blas_impl::geam_run<Backend>(h,opa,use_b?opb:'N',rows,cols,alpha,sa,lda,
-            use_b?beta:T(0),sb,ldb,dst,ldd);
+        if (!use_b && alpha == T(1))
+            copy_rectangle<Backend>(h, opa, sa, dst, CopyBlock{ar, ac, 0, 0, lda, ldd}, queue);
+        else
+            blas_impl::geam_run<Backend>(h,opa,use_b?opb:'N',rows,cols,alpha,sa,lda,
+                use_b?beta:T(0),sb,ldb,dst,ldd);
     };
     if (dest==rank) {
         if (!rcount) return;
@@ -333,18 +384,18 @@ void exchange_slab(DdlaHandle_t h, T* send, T* receive, int m, int n,
     }
     if (scount) combine(send,transposed?ac:ar,transposed?ar:ac,transposed?ac:ar);
     if (dest==rank) {
-        DDLA_CHECK(ddlaMemcpy2D(h,c,std::size_t(ldc)*sizeof(T),send,
-            std::size_t(mr)*sizeof(T),std::size_t(mr)*sizeof(T),nc));
+        DDLA_CHECK(detail::memcpy2d_on(h,c,std::size_t(ldc)*sizeof(T),send,
+            std::size_t(mr)*sizeof(T),std::size_t(mr)*sizeof(T),nc,queue));
     } else {
         // Compact prepared operands receive directly; padded C needs one
         // contiguous receive followed by a pitched copy. Pack before
         // receiving so a same-base input/output alias is also safe.
         const bool compact=ldc==mr;
         T* dst=compact?c:receive;
-        commSendrecv<Backend>(h,CommScope::Grid,send,scount,dest,dst,rcount,source);
+        commSendrecv<Backend>(h,CommScope::Grid,send,scount,dest,dst,rcount,source,queue);
         if (!compact && rcount)
-            DDLA_CHECK(ddlaMemcpy2D(h,c,std::size_t(ldc)*sizeof(T),dst,
-                std::size_t(mr)*sizeof(T),std::size_t(mr)*sizeof(T),nc));
+            DDLA_CHECK(detail::memcpy2d_on(h,c,std::size_t(ldc)*sizeof(T),dst,
+                std::size_t(mr)*sizeof(T),std::size_t(mr)*sizeof(T),nc,queue));
     }
 }
 
@@ -355,10 +406,10 @@ template <DdlaBackend Backend, typename T>
 void redistribute(DdlaHandle_t h, T* send, T* receive, CopyBlock* device_blocks,
     char* host, [[maybe_unused]] std::size_t host_bytes, char op, int m, int n,
     const T* a, const int* da, int ia, int ja,
-    T* c, const int* dc, int ic, int jc, int ldc)
+    T* c, const int* dc, int ic, int jc, int ldc, void* queue, ddlaEvent_t metadata_event)
 {
     if (slab_route(h,op,m,n,da,ia,ja,dc,ic,jc)) {
-        exchange_slab<Backend,T>(h,send,receive,m,n,op,a,da,ia,ja,T(1),false,'N',nullptr,nullptr,0,0,T(0),c,dc,ic,jc,ldc);
+        exchange_slab<Backend,T>(h,send,receive,m,n,op,a,da,ia,ja,T(1),false,'N',nullptr,nullptr,0,0,T(0),c,dc,ic,jc,ldc,queue);
         return;
     }
     const int pr=h->nprows_,pc=h->npcols_,rank=h->myid,np=pr*pc;
@@ -449,12 +500,16 @@ void redistribute(DdlaHandle_t h, T* send, T* receive, CopyBlock* device_blocks,
     CopyBlock* const dpack=device_blocks;
     CopyBlock* const dlocal=dpack?dpack+src:nullptr;
     CopyBlock* const dscatter=dlocal?dlocal+both:nullptr;
-    copy_batch<Backend>(h,op,a,send,pack,npack,dpack);
-    if (snapshot_local) copy_batch<Backend>(h,'N',send,c,local_scatter,nlocal_scatter,dlocal);
-    else copy_batch<Backend>(h,op,a,c,local,nlocal,dlocal);
+    bool metadata_pending = false;
+    copy_batch<Backend>(h,op,a,send,pack,npack,dpack,queue,metadata_event,metadata_pending);
+    if (snapshot_local) copy_batch<Backend>(h,'N',send,c,local_scatter,nlocal_scatter,dlocal,queue,metadata_event,metadata_pending);
+    else copy_batch<Backend>(h,op,a,c,local,nlocal,dlocal,queue,metadata_event,metadata_pending);
     // All ranks participate, including those with only local or zero data.
-    commAlltoallv<Backend>(h,CommScope::Grid,np,send,sc,sd,receive,rc,rd);
-    copy_batch<Backend>(h,'N',receive,c,scatter,nscatter,dscatter);
+    commAlltoallv<Backend>(h,CommScope::Grid,np,send,sc,sd,receive,rc,rd,queue);
+    copy_batch<Backend>(h,'N',receive,c,scatter,nscatter,dscatter,queue,metadata_event,metadata_pending);
+    if constexpr (Backend == DdlaBackend::GPU) {
+        if (metadata_pending) DDLA_CHECK(ddlaEventSynchronize(h, metadata_event));
+    }
 }
 
 } // namespace
@@ -465,22 +520,7 @@ void check_mpi_counts(const DdlaHandle_t& h,char op,int m,int n,const int* da,in
 {
     if (m==0 || n==0 || local_layout(h,op,da,ia,ja,dc,ic,jc)
         || slab_route(h,op,m,n,da,ia,ja,dc,ic,jc)) return;
-    std::size_t sent=0,received=0;
-    rectangles(op,m,n,da,ia,ja,dc,ic,jc,[&](int i,int j,int rows,int cols,int ar,int ac) {
-        const int source=h->rc_to_rank(indxg2p(ar,da[DDLA_MB_],da[DDLA_RSRC_],h->nprows_),
-                                       indxg2p(ac,da[DDLA_NB_],da[DDLA_CSRC_],h->npcols_));
-        const int target=h->rc_to_rank(indxg2p(ic+i,dc[DDLA_MB_],dc[DDLA_RSRC_],h->nprows_),
-                                       indxg2p(jc+j,dc[DDLA_NB_],dc[DDLA_CSRC_],h->npcols_));
-        const auto count=std::size_t(rows)*cols;
-        if (source!=target && source==h->myid) {
-            if (count>std::size_t(INT_MAX)-sent) throw std::overflow_error("pgeadd: MPI send count overflow");
-            sent+=count;
-        }
-        if (source!=target && target==h->myid) {
-            if (count>std::size_t(INT_MAX)-received) throw std::overflow_error("pgeadd: MPI receive count overflow");
-            received+=count;
-        }
-    });
+    (void)remote_counts(h,op,m,n,da,ia,ja,dc,ic,jc);
 }
 
 template <DdlaBackend Backend>
@@ -491,6 +531,11 @@ void pgeadd_check(const DdlaHandle_t& h, char transa, char transb, int m, int n,
 {
     detail::agree_check(h, "pgeadd", [&](detail::Agree&) {
         detail::require_backend<Backend>(h,"pgeadd");
+        if constexpr (Backend == DdlaBackend::GPU) {
+            if (m && n && (use_a || use_b) && h->communication() == DdlaCommunication::CCL &&
+                h->communication_group_depth)
+                throw std::invalid_argument("pgeadd: active communication group");
+        }
         transa=operation(transa);
         transb=operation(transb);
         check_desc(da,h); check_desc(db,h); check_desc(dc,h);
@@ -509,6 +554,44 @@ void pgeadd_check(const DdlaHandle_t& h, char transa, char transb, int m, int n,
                         const int* dc, int ic, int jc)
 {
     pgeadd_check<Backend>(h,transa,transb,m,n,da,ia,ja,db,ib,jb,dc,ic,jc,true,true);
+}
+
+std::array<std::size_t,2> pgeadd_staging_bytes(const DdlaHandle_t& h,
+    char ta,char tb,bool use_a,bool use_b,int m,int n,
+    const int* da,int ia,int ja,const int* db,int ib,int jb,
+    const int* dc,int ic,int jc,std::size_t width)
+{
+    std::array<std::size_t,2> bytes{};
+    if(h->backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || !m || !n)
+        return bytes;
+    --ic;--jc;
+    const auto operand=[&](char op,bool used,const int* d,int i,int j) {
+        if(!used)return;
+        --i;--j;
+        if(local_layout(h,op,d,i,j,dc,ic,jc))return;
+        std::array<std::size_t,2> counts{};
+        if(slab_route(h,op,m,n,d,i,j,dc,ic,jc)) {
+            int dest,source;
+            slab_peers(h,op,d,i,j,dc,ic,jc,dest,source);
+            if(dest==h->myid)return; // Runtime takes a local copy, not sendrecv.
+            const int rows=op=='N'?m:n,cols=op=='N'?n:m;
+            counts[0]=std::size_t(num_loc(i+rows,d[DDLA_MB_],h->myprow_,d[DDLA_RSRC_],h->nprows_)
+                               -num_loc(i,d[DDLA_MB_],h->myprow_,d[DDLA_RSRC_],h->nprows_))
+                     *(num_loc(j+cols,d[DDLA_NB_],h->mypcol_,d[DDLA_CSRC_],h->npcols_)
+                       -num_loc(j,d[DDLA_NB_],h->mypcol_,d[DDLA_CSRC_],h->npcols_));
+            counts[1]=std::size_t(num_loc(ic+m,dc[DDLA_MB_],h->myprow_,dc[DDLA_RSRC_],h->nprows_)
+                               -num_loc(ic,dc[DDLA_MB_],h->myprow_,dc[DDLA_RSRC_],h->nprows_))
+                     *(num_loc(jc+n,dc[DDLA_NB_],h->mypcol_,dc[DDLA_CSRC_],h->npcols_)
+                       -num_loc(jc,dc[DDLA_NB_],h->mypcol_,dc[DDLA_CSRC_],h->npcols_));
+        }else counts=remote_counts(h,op,m,n,d,i,j,dc,ic,jc);
+        for(std::size_t slot=0;slot<2;++slot) {
+            if(width && counts[slot]>std::numeric_limits<std::size_t>::max()/width)
+                throw std::length_error("pgeadd: staged communication byte count overflow");
+            bytes[slot]=std::max(bytes[slot],counts[slot]*width);
+        }
+    };
+    operand(ta,use_a,da,ia,ja);operand(tb,use_b,db,ib,jb);
+    return bytes;
 }
 
 // Component 2.  Backend: [ send | receive | packed | aa | bb ]
@@ -539,12 +622,12 @@ void pgeadd_workspace_size(const DdlaHandle_t& h, char ta, char tb, bool use_a, 
 
 // Component 3.
 template <DdlaBackend Backend, typename T>
-void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
+void pgeadd_execute(const DdlaHandle_t& h, char ta, char tb, int m, int n,
     const T& alpha, const T* a, int ia, int ja, const int* da,
     const T& beta, const T* b, int ib, int jb, const int* db,
     T* c, int ic, int jc, const int* dc,
     void* backend_work, [[maybe_unused]] std::size_t backend_bytes,
-    void* host_work, std::size_t host_bytes)
+    void* host_work, std::size_t host_bytes, void* queue, ddlaEvent_t metadata_event)
 {
     try {
         if (m==0 || n==0) return;
@@ -588,9 +671,25 @@ void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
             const char op=copy_a?ta:tb;
             if (op!='N' || !local_layout(h,op,dx,ix-1,jx-1,dc,ic-1,jc-1)) {
                 redistribute<Backend>(h,send,receive,device_blocks,host,host_bytes,op,m,n,x,dx,ix-1,jx-1,
-                    cv,dc,ic-1,jc-1,dc[DDLA_LLD_]);
+                    cv,dc,ic-1,jc-1,dc[DDLA_LLD_],queue,metadata_event);
                 return;
             }
+            // A local N unit copy never needs the shared BLAS handle. Preserve
+            // shifted-overlap snapshots using the already queried operand slot.
+            if (!mr || !nc) return;
+            const int xr = num_loc(ix - 1, dx[DDLA_MB_], r, dx[DDLA_RSRC_], pr);
+            const int xc = num_loc(jx - 1, dx[DDLA_NB_], col, dx[DDLA_CSRC_], pc);
+            const T* input = x + xr + std::size_t(xc) * dx[DDLA_LLD_];
+            int ld = dx[DDLA_LLD_];
+            if (input == cv && ld == dc[DDLA_LLD_]) return;
+            if (detail::matrix_overlaps(input, ld, mr, nc, cv, dc[DDLA_LLD_], mr, nc)) {
+                T* snapshot = copy_a ? aa : bb;
+                copy_rectangle<Backend>(h, 'N', input, snapshot, CopyBlock{mr, nc, 0, 0, ld, mr}, queue);
+                input = snapshot;
+                ld = mr;
+            }
+            copy_rectangle<Backend>(h, 'N', input, cv, CopyBlock{mr, nc, 0, 0, ld, dc[DDLA_LLD_]}, queue);
+            return;
         }
         const bool square=!general && h->nprows_==h->npcols_ && std::size_t(m)*n<=INT_MAX;
         // Co-located transposed operands pre-add on the sender, so one message
@@ -598,7 +697,7 @@ void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
         if (square && ta!='N' && tb!='N' && alpha!=T(0) && beta!=T(0) &&
             colocated(h,da,ia-1,ja-1,db,ib-1,jb-1)) {
             exchange_slab<Backend>(h,send,receive,m,n,ta,a,da,ia-1,ja-1,alpha,true,tb,b,db,ib-1,jb-1,beta,
-                cv,dc,ic-1,jc-1,dc[DDLA_LLD_]);
+                cv,dc,ic-1,jc-1,dc[DDLA_LLD_],queue);
             return;
         }
         int lda=1,ldb=1;
@@ -621,8 +720,8 @@ void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
             if ((input==cv && ld==dc[DDLA_LLD_]) ||
                 !detail::matrix_overlaps(input,ld,mr,nc,cv,dc[DDLA_LLD_],mr,nc)) return input;
             // Shifted aliases must be consumed before either operand writes C.
-            DDLA_CHECK(ddlaMemcpy2D(h,buf,std::size_t(mr)*sizeof(T),input,
-                std::size_t(ld)*sizeof(T),std::size_t(mr)*sizeof(T),nc));
+            DDLA_CHECK(detail::memcpy2d_on(h,buf,std::size_t(mr)*sizeof(T),input,
+                std::size_t(ld)*sizeof(T),std::size_t(mr)*sizeof(T),nc,queue));
             ld=mr;
             return buf;
         };
@@ -637,8 +736,8 @@ void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
                 int slab_ld, slab_rows, slab_cols;
                 const T* slab_input=slab(h,x,dx,ix-1,jx-1,op=='N'?m:n,op=='N'?n:m,slab_ld,slab_rows,slab_cols);
                 const auto copy=[&](T* dst) {
-                    DDLA_CHECK(ddlaMemcpy2D(h,dst,std::size_t(slab_rows)*sizeof(T),slab_input,
-                        std::size_t(slab_ld)*sizeof(T),std::size_t(slab_rows)*sizeof(T),slab_cols));
+                    DDLA_CHECK(detail::memcpy2d_on(h,dst,std::size_t(slab_rows)*sizeof(T),slab_input,
+                        std::size_t(slab_ld)*sizeof(T),std::size_t(slab_rows)*sizeof(T),slab_cols,queue));
                 };
                 if (dest==h->myid) {
                     if (mr==0 || nc==0) return nullptr;
@@ -656,13 +755,13 @@ void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
                     copy(packed);
                     slab_send=packed;
                 }
-                commSendrecv<Backend>(h,CommScope::Grid,slab_send,scount,dest,buf,rcount,source);
+                commSendrecv<Backend>(h,CommScope::Grid,slab_send,scount,dest,buf,rcount,source,queue);
                 ld=std::max(1,op=='N'?mr:nc);
                 return buf;
             }
             ld=std::max(1,mr);
             redistribute<Backend>(h,send,receive,device_blocks,host,host_bytes,op,m,n,x,dx,ix-1,jx-1,
-                buf,dc,ic-1,jc-1,ld);
+                buf,dc,ic-1,jc-1,ld,queue,metadata_event);
             op='N';
             return buf;
         };
@@ -672,9 +771,45 @@ void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
     } catch (...) {
         // Retire queued host reads before the caller reuses or releases scratch.
         if (ddlaGetBackend(h) == DdlaBackend::GPU)
-            try { (void)ddlaSynchronize(h); } catch (...) {}
+            try { (void)detail::synchronize_on(h, queue); } catch (...) {}
         throw;
     }
+}
+
+// Ordinary GEADD retains compute-queue semantics and consumed-on-return host
+// metadata. Each operand's redistribution retires before the arena is reused.
+template <DdlaBackend Backend, typename T>
+void pgeadd_run(const DdlaHandle_t& h, char ta, char tb, int m, int n,
+    const T& alpha, const T* a, int ia, int ja, const int* da,
+    const T& beta, const T* b, int ib, int jb, const int* db,
+    T* c, int ic, int jc, const int* dc,
+    void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes)
+{
+    if (!m || !n) return;
+    // Raw callers share the checked no-active-group precondition. Do not try
+    // to drain a queue whose outer CCL group has not yet been submitted.
+    if constexpr (Backend == DdlaBackend::GPU) {
+        if ((alpha != T(0) || beta != T(0)) && h->communication() == DdlaCommunication::CCL &&
+            h->communication_group_depth)
+            throw std::invalid_argument("pgeadd: active communication group");
+    }
+    pgeadd_execute<Backend,T>(h,ta,tb,m,n,alpha,a,ia,ja,da,beta,b,ib,jb,db,c,ic,jc,dc,
+        backend_work,backend_bytes,host_work,host_bytes,h->stream,h->summa_metadata[0]);
+}
+
+template <DdlaBackend Backend, typename T>
+void pgeadd_copy_run(const DdlaHandle_t& h, char op, int m, int n,
+    const T* a, int ia, int ja, const int* da, T* c, int ic, int jc, const int* dc,
+    void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes,
+    void* queue, ddlaEvent_t metadata_event)
+{
+    if (!m || !n) return;
+    if constexpr (Backend == DdlaBackend::GPU) {
+        if (h->communication() == DdlaCommunication::CCL && h->communication_group_depth)
+            throw std::invalid_argument("pgeadd: active communication group");
+    }
+    pgeadd_execute<Backend,T>(h,op,'N',m,n,T(1),a,ia,ja,da,T(0),static_cast<const T*>(nullptr),
+        ic,jc,dc,c,ic,jc,dc,backend_work,backend_bytes,host_work,host_bytes,queue,metadata_event);
 }
 
 } // namespace pgeadd_impl
@@ -704,6 +839,13 @@ void pgeadd(const DdlaHandle_t& h, char transa, char transb, int m, int n,
                 : !pgeadd_impl::aligned_blocks(transb,db,ib-1,jb-1,dc,ic-1,jc-1))));
         backend_work.resize(backend_bytes);
         host_work.resize(host_bytes);
+        if constexpr(Backend==DdlaBackend::GPU) {
+            if(h->communication()==DdlaCommunication::HostStagedMPI) {
+                const auto staged=pgeadd_impl::pgeadd_staging_bytes(h,transa,transb,
+                    alpha!=T(0),beta!=T(0),m,n,da,ia,ja,db,ib,jb,dc,ic,jc,sizeof(T));
+                (void)h->host_buffers<std::byte>(staged[0],staged[1]);
+            }
+        }
     };
     if (h->nprocs > 1)
         detail::agree_local(h, "pgeadd workspace preparation", prepare);
@@ -719,7 +861,10 @@ void pgeadd(const DdlaHandle_t& h, char transa, char transb, int m, int n,
         const T&,const T*,int,int,const int*,const T&,const T*,int,int,const int*,T*,int,int,const int*); \
     template void pgeadd_impl::pgeadd_run<B,T>(const DdlaHandle_t&,char,char,int,int, \
         const T&,const T*,int,int,const int*,const T&,const T*,int,int,const int*,T*,int,int,const int*, \
-        void*,std::size_t,void*,std::size_t)
+        void*,std::size_t,void*,std::size_t); \
+    template void pgeadd_impl::pgeadd_copy_run<B,T>(const DdlaHandle_t&,char,int,int, \
+        const T*,int,int,const int*,T*,int,int,const int*, \
+        void*,std::size_t,void*,std::size_t,void*,ddlaEvent_t)
 #define INSTANTIATE_PGEADD_CHECK(B) \
     template void pgeadd_impl::pgeadd_check<B>(const DdlaHandle_t&,char,char,int,int, \
         const int*,int,int,const int*,int,int,const int*,int,int); \

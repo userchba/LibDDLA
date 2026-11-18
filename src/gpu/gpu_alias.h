@@ -34,6 +34,7 @@ constexpr auto gpuMemcpyDeviceToHost = DDLA_GPU_RT(MemcpyDeviceToHost);
 constexpr auto gpuMemcpyHostToDevice = DDLA_GPU_RT(MemcpyHostToDevice);
 constexpr auto gpuMemoryTypeDevice = DDLA_GPU_RT(MemoryTypeDevice);
 constexpr auto gpuMemoryTypeManaged = DDLA_GPU_RT(MemoryTypeManaged);
+constexpr auto gpuEventDisableTiming = DDLA_GPU_RT(EventDisableTiming);
 constexpr auto gpuStreamNonBlocking = DDLA_GPU_RT(StreamNonBlocking);
 constexpr auto gpuSuccess = DDLA_GPU_RT(Success);
 
@@ -98,6 +99,7 @@ constexpr auto gpucclSum = ncclSum;
 #define gpuDeviceGetStreamPriorityRange DDLA_GPU_RT(DeviceGetStreamPriorityRange)
 #define gpuDeviceSynchronize DDLA_GPU_RT(DeviceSynchronize)
 #define gpuEventCreate DDLA_GPU_RT(EventCreate)
+#define gpuEventCreateWithFlags DDLA_GPU_RT(EventCreateWithFlags)
 #define gpuEventDestroy DDLA_GPU_RT(EventDestroy)
 #define gpuEventRecord DDLA_GPU_RT(EventRecord)
 #define gpuEventSynchronize DDLA_GPU_RT(EventSynchronize)
@@ -176,6 +178,7 @@ constexpr auto gpucclSum = ncclSum;
 #define gpublasScnrm2 DDLA_GPU_BLAS(Scnrm2)
 #define gpublasSdot DDLA_GPU_BLAS(Sdot)
 #define gpublasSetPointerMode DDLA_GPU_BLAS(SetPointerMode)
+#define gpublasGetStream DDLA_GPU_BLAS(GetStream)
 #define gpublasSetStream DDLA_GPU_BLAS(SetStream)
 #define gpublasSgeam DDLA_GPU_BLAS(Sgeam)
 #define gpublasSgemm DDLA_GPU_BLAS(Sgemm)

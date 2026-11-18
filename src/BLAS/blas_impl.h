@@ -82,6 +82,21 @@ void geam_run(const DdlaHandle_t& handle, char transa, char transb, int m, int n
           const T& beta, const T* B, int ldb,
           T* C, int ldc);
 
+// Explicit queue for prechecked GEAM. Unit copies preserve source bits
+// (apart from conjugation) without binding the shared vendor BLAS handle.
+// Weighted GPU calls temporarily select this queue and restore the binding.
+template <DdlaBackend Backend, typename T>
+void geam_run(const DdlaHandle_t& handle, char transa, char transb, int m, int n,
+          const T& alpha, const T* A, int lda,
+          const T& beta, const T* B, int ldb,
+          T* C, int ldc, void* queue);
+
+#if DDLA_HAS_GPU
+template <typename T>
+void geam_transpose_gpu(const DdlaHandle_t& h, bool conjugate, int m, int n,
+                        const T* source, int lds, T* target, int ldt, void* queue);
+#endif
+
 // Prechecked matrix scaling shared by ordinary and real-coefficient calls.
 template <DdlaBackend Backend, typename T, typename Alpha = T>
 void matrix_scal_run(const DdlaHandle_t& h,int m,int n,const Alpha& alpha,T* a,int lda);

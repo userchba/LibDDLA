@@ -11,8 +11,8 @@
 // The out-of-place scaled transpose-copy that used to be `omatcopy` is the
 // special case beta == 0: `geam(h, 'T', 'N', m, n, 1, A, lda, 0, nullptr, 1, C, ldc)`.
 //
-// GPU arm: cuBLAS / hipBLAS geam.  With beta == 0 the call aliases B to A (the
-// vendor routine needs a second operand), exactly what the old omatcopy did.
+// GPU arm: ordinary GEAM retains the cuBLAS / hipBLAS implementation.
+// The private explicit-queue form provides exact unit copies for redistribution.
 // CPU arm: tiles of C (32 x 32 when an operand is read transposed, strips of whole columns otherwise), run on the
 // handle's host threads with OpenMP.
 // Every element of C is computed on its own, so the result does not depend on
@@ -271,13 +271,60 @@ void geam_run(const DdlaHandle_t& handle, char transa, char transb, int m, int n
 #if DDLA_HAS_GPU
         const gpublasOperation_t opA = blas_impl::op(ta);
         if (zero_beta) {
-            // The vendor routine always reads a second operand: alias it to A (beta == 0 makes its
-            // contribution vanish), as the old omatcopy did.
+            // Keep a valid ignored B operand for the supported vendor implementations.
             BLAS_CHECK(gpublasGeam(static_cast<gpublasHandle_t>(handle->blasH), opA, opA, m, n, alpha, A, lda, beta, A, lda, C, ldc));
         } else {
             BLAS_CHECK(gpublasGeam(static_cast<gpublasHandle_t>(handle->blasH), opA, blas_impl::op(tb), m, n,
                                    alpha, A, lda, beta, B, ldb, C, ldc));
         }
+#endif
+    }
+}
+
+
+// Internal queue-aware entry. Unit copies retain the data-movement contract
+// without touching the shared BLAS binding; ordinary public GEAM is unchanged.
+template <DdlaBackend Backend, typename T>
+void geam_run(const DdlaHandle_t& handle, char transa, char transb, int m, int n,
+          const T& alpha, const T* A, int lda,
+          const T& beta, const T* B, int ldb, T* C, int ldc, void* queue)
+{
+    if (m <= 0 || n <= 0) return;
+    if constexpr (Backend == DdlaBackend::CPU) {
+        (void)queue;
+        geam_run<Backend,T>(handle, transa, transb, m, n, alpha, A, lda, beta, B, ldb, C, ldc);
+    } else {
+#if DDLA_HAS_GPU
+        const char ta = upper(transa);
+        if (alpha == T(1) && beta == T(0)) {
+            if (A == C) {
+                if (ta != 'N' || lda != ldc)
+                    throw std::runtime_error("geam: invalid in-place transpose copy");
+                return;
+            }
+            if (ta == 'N')
+                DDLA_CHECK(detail::memcpy2d_on(handle, C, std::size_t(ldc) * sizeof(T),
+                    A, std::size_t(lda) * sizeof(T), std::size_t(m) * sizeof(T), n, queue));
+            else
+                geam_transpose_gpu(handle, ta == 'C', m, n, A, lda, C, ldc, queue);
+            return;
+        }
+        if (queue == handle->stream) {
+            geam_run<Backend,T>(handle, transa, transb, m, n, alpha, A, lda, beta, B, ldb, C, ldc);
+            return;
+        }
+        const auto blas = static_cast<gpublasHandle_t>(handle->blasH);
+        const auto selected = static_cast<gpuStream_t>(queue);
+        gpuStream_t saved = nullptr;
+        BLAS_CHECK(gpublasGetStream(blas, &saved));
+        if (saved != selected) BLAS_CHECK(gpublasSetStream(blas, selected));
+        try {
+            geam_run<Backend,T>(handle, transa, transb, m, n, alpha, A, lda, beta, B, ldb, C, ldc);
+        } catch (...) {
+            if (saved != selected) (void)gpublasSetStream(blas, saved);
+            throw;
+        }
+        if (saved != selected) BLAS_CHECK(gpublasSetStream(blas, saved));
 #endif
     }
 }
@@ -306,7 +353,8 @@ DDLA_FOR_EACH_BACKEND_TYPE(INSTANTIATE_GEAM)
 
 #define DDLA_INSTANTIATE_PHASES(BACKEND, TYPE) \
     template void blas_impl::geam_check<BACKEND, TYPE>(const DdlaHandle_t& handle, char transa, char transb, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE& beta, const TYPE* B, int ldb, TYPE* C, int ldc); \
-    template void blas_impl::geam_run<BACKEND, TYPE>(const DdlaHandle_t& handle, char transa, char transb, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE& beta, const TYPE* B, int ldb, TYPE* C, int ldc)
+    template void blas_impl::geam_run<BACKEND, TYPE>(const DdlaHandle_t& handle, char transa, char transb, int m, int n, const TYPE& alpha, const TYPE* A, int lda, const TYPE& beta, const TYPE* B, int ldb, TYPE* C, int ldc); \
+    template void blas_impl::geam_run<BACKEND, TYPE>(const DdlaHandle_t&, char, char, int, int, const TYPE&, const TYPE*, int, const TYPE&, const TYPE*, int, TYPE*, int, void*)
 DDLA_FOR_EACH_BACKEND_TYPE(DDLA_INSTANTIATE_PHASES)
 #undef DDLA_INSTANTIATE_PHASES
 } // namespace ddla

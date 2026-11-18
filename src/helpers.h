@@ -95,6 +95,24 @@ __device__ __forceinline__ thrust::complex<R> device_conj(const thrust::complex<
 {
     return conjugate ? thrust::conj(value) : value;
 }
+
+// One tile of an exact column-major transpose, shared by GEAM and batched
+// redistribution. Every thread in the 16 x 16 block must participate.
+template <typename T>
+__device__ __forceinline__ void transpose_tile(const T* source, T* target,
+    int rows, int cols, int lds, int ldt, int i0, int j0, bool conjugate)
+{
+    __shared__ T tile[16][17];
+    const int i = i0 + threadIdx.x, j = j0 + threadIdx.y;
+    if (i < rows && j < cols)
+        tile[threadIdx.y][threadIdx.x] = source[i + std::size_t(j) * lds];
+    __syncthreads();
+    const int row = j0 + threadIdx.x, column = i0 + threadIdx.y;
+    if (row < cols && column < rows)
+        target[row + std::size_t(column) * ldt] =
+            device_conj(tile[threadIdx.x][threadIdx.y], conjugate);
+    __syncthreads();
+}
 #endif
 
 } // namespace ddla::detail

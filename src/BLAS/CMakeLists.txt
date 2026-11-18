@@ -1,5 +1,5 @@
 # BLAS wrappers (the unified ddla::gemm/herk/... front ends).  The source set
-# is identical on every backend; only trtrm.cpp, gemm_mixed.cpp and
+# is identical on every backend; only trtrm.cpp, gemm_mixed.cpp, geam_kernels.cpp and
 # gemm_vbatched.cpp carry device code and switch LANGUAGE under CUDA/HIP.
 target_sources(ddla_lib PRIVATE
     dgmm.cpp
@@ -48,13 +48,13 @@ set_source_files_properties(scalBatched.cpp TARGET_DIRECTORY ddla_lib
     PROPERTIES COMPILE_OPTIONS "${_ddla_cpu_kernel_opts}")
 
 if(DDLA_USE_CUDA)
-    target_sources(ddla_lib PRIVATE gemm_vbatched.cpp)
-    set_source_files_properties(trtrm.cpp gemmt.cpp hemmt.cpp gemm_mixed.cpp gemm_vbatched.cpp TARGET_DIRECTORY ddla_lib
+    target_sources(ddla_lib PRIVATE gemm_vbatched.cpp geam_kernels.cpp)
+    set_source_files_properties(trtrm.cpp gemmt.cpp hemmt.cpp gemm_mixed.cpp gemm_vbatched.cpp geam_kernels.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES LANGUAGE CUDA)
 endif()
 if(DDLA_USE_HIP)
-    target_sources(ddla_lib PRIVATE gemm_vbatched.cpp)
-    set_source_files_properties(trtrm.cpp gemmt.cpp hemmt.cpp gemm_mixed.cpp gemm_vbatched.cpp TARGET_DIRECTORY ddla_lib
+    target_sources(ddla_lib PRIVATE gemm_vbatched.cpp geam_kernels.cpp)
+    set_source_files_properties(trtrm.cpp gemmt.cpp hemmt.cpp gemm_mixed.cpp gemm_vbatched.cpp geam_kernels.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES LANGUAGE HIP)
 endif()
 

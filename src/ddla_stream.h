@@ -38,11 +38,17 @@ public:
     void* stream_data = nullptr;
     // Private LEVEL queue of the eigensolver back-transform (Hb2stAccum), see level_queue().
     void* stream_level = nullptr;
+    // Prepared once with the GPU handle, never created inside borrowed GEMM.
+    // Metadata fences retire host reads; ready/reuse fence device panel slots.
+    ddlaEvent_t summa_ready[2] = {};
+    ddlaEvent_t summa_reuse[2] = {};
+    ddlaEvent_t summa_input = nullptr;
+    ddlaEvent_t summa_metadata[2] = {};
     void* solverH = nullptr;
     void* blasH   = nullptr;
 
-    // Pack these small flags together before the aligned backend/strategy
-    // fields, retaining the handle's previous size on the supported ABI.
+    // Pack small flags together before the aligned backend/strategy fields.
+    // This object is private; the installed handle remains an opaque pointer.
     char major = 'R';
     bool initialized = false;
     bool destroyed   = false;

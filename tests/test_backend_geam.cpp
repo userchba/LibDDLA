@@ -1,3 +1,4 @@
+#include "BLAS/blas_impl.h"
 #include "backend_api.h" // Internal-only wrong-backend implementation checks.
 // ---------------------------------------------------------------------------
 // Backend-templated coverage of ddla::geam:  C := alpha*op(A) + beta*op(B).
@@ -144,12 +145,25 @@ void report(const char* what, char ta, char tb, int m, int n, const std::string&
               << " " << detail << std::endl;
 }
 
+void check_queue_binding(const DdlaHandle_t& h, void* compute)
+{
+    if (h->stream != compute) throw std::runtime_error("GEAM changed the compute stream");
+#if DDLA_HAS_GPU
+    if (h->backend == DdlaBackend::GPU) {
+        gpuStream_t bound = nullptr;
+        BLAS_CHECK(gpublasGetStream(static_cast<gpublasHandle_t>(h->blasH), &bound));
+        if (bound != static_cast<gpuStream_t>(compute))
+            throw std::runtime_error("GEAM did not restore the BLAS stream binding");
+    }
+#endif
+}
+
 // -- one numerical case -------------------------------------------------------
 // mode 0: general (both operands used)      mode 1: B == nullptr, beta == 0
 // mode 2: beta == 0 with a non-null B that must be ignored
 template <DdlaBackend Backend, typename T>
 int check_case(const DdlaHandle_t& h, char ta, char tb, int m, int n, int mode, T alpha, T beta,
-               int pada, int padb, int padc, std::uint64_t seed)
+               int pada, int padb, int padc, std::uint64_t seed, bool data_queue = false)
 {
     typedef typename Tr<T>::real R;
     const int rowsA = ta == 'N' ? m : n, colsA = ta == 'N' ? n : m;
@@ -165,7 +179,15 @@ int check_case(const DdlaHandle_t& h, char ta, char tb, int m, int n, int mode, 
     const bool use_b = (mode == 0);
     const T b_coef = use_b ? beta : Tr<T>::make(0.0, 0.0);
     const T* pB = (mode == 1) ? nullptr : dB.p;
-    geam<T>(h, ta, tb, m, n, alpha, dA.p, lda, b_coef, pB, ldb, dC.p, ldc);
+    if (data_queue) {
+        void* const compute = h->stream;
+        blas_impl::geam_run<Backend,T>(h, ta, tb, m, n, alpha, dA.p, lda,
+            b_coef, pB, ldb, dC.p, ldc, h->stream_data);
+        DDLA_CHECK(detail::synchronize_on(h, h->stream_data));
+        check_queue_binding(h, compute);
+    } else {
+        geam<T>(h, ta, tb, m, n, alpha, dA.p, lda, b_coef, pB, ldb, dC.p, ldc);
+    }
     std::vector<T> C;
     dC.down(C);
 
@@ -256,23 +278,29 @@ std::vector<T> special_vec(std::size_t n, std::uint64_t seed)
 }
 
 template <DdlaBackend Backend, typename T>
-int check_exact_copy(const DdlaHandle_t& h, char ta, int m, int n)
+int check_exact_copy(const DdlaHandle_t& h, char ta, int m, int n,
+                     bool qr_copy = false, bool data_queue = false)
 {
     const int rowsA = ta == 'N' ? m : n, colsA = ta == 'N' ? n : m;
-    const int lda = rowsA + (Backend == DdlaBackend::CPU ? 2 : 0), ldc = m + 1;
+    const int lda = rowsA + (qr_copy ? 0 : 2), ldc = m + 1;
     const std::vector<T> A = special_vec<T>(static_cast<std::size_t>(lda) * colsA, 5);
     std::vector<T> C(static_cast<std::size_t>(ldc) * n, Tr<T>::make(1, 1));
     Buf<T> dA(h, A.size()), dC(h, C.size());
     dA.up(A); dC.up(C);
     const T zero = Tr<T>::make(0, 0);
-    if constexpr (Backend == DdlaBackend::CPU) {
-        geam<T>(h, ta, 'N', m, n, Tr<T>::make(1, 0), dA.p, lda, zero, nullptr, 1, dC.p, ldc);
-    } else {
+    if (qr_copy) {
 #if DDLA_HAS_GPU
-        // Check the actual QR T^H path. Vendor GPU GEAM has no bitwise-copy
-        // contract for signed zeros and nonfinite complex components.
         detail::qr_adjoint_T<T>(h, dC.p, ldc, dA.p, m);
 #endif
+    } else if (Backend == DdlaBackend::GPU) {
+        void* const compute = h->stream;
+        void* const queue = data_queue ? h->stream_data : h->stream;
+        blas_impl::geam_run<Backend,T>(h, ta, 'N', m, n, Tr<T>::make(1, 0),
+            dA.p, lda, zero, static_cast<const T*>(nullptr), 1, dC.p, ldc, queue);
+        DDLA_CHECK(detail::synchronize_on(h, queue));
+        check_queue_binding(h, compute);
+    } else {
+        geam<T>(h, ta, 'N', m, n, Tr<T>::make(1, 0), dA.p, lda, zero, nullptr, 1, dC.p, ldc);
     }
     dC.down(C);
     for (int j = 0; j < n; ++j)
@@ -302,6 +330,12 @@ int check_exact_copy(const DdlaHandle_t& h, char ta, int m, int n)
                 return 1;
             }
         }
+    std::vector<T> after;
+    dA.down(after);
+    if (std::memcmp(after.data(), A.data(), A.size() * sizeof(T)) != 0) {
+        report("exact copy modified input", ta, 'N', m, n, "");
+        return 1;
+    }
     return 0;
 }
 
@@ -371,10 +405,17 @@ int run_type(const DdlaHandle_t& h)
     geam<T>(h, 'T', 'C', 5, 0, alpha, nullptr, 1, beta, nullptr, 1, nullptr, 1);
 
     if constexpr (Backend == DdlaBackend::GPU) {
-        // QR retains its exact GPU copy after the vendor GEAM compatibility
-        // check showed signed-zero/nonfinite differences. Test both paths.
-        bad += check_exact_copy<Backend, T>(h, 'C', 37, 37);
-        bad += check_exact_copy<Backend, T>(h, 'C', 64, 64);
+        // Keep QR's existing coverage and test the shared GEAM copy path on
+        // compute/data queues, including rectangular and padded special values.
+        bad += check_exact_copy<Backend, T>(h, 'C', 37, 37, true);
+        bad += check_exact_copy<Backend, T>(h, 'C', 64, 64, true);
+        for (char ta : ops) {
+            bad += check_exact_copy<Backend, T>(h, ta, 37, 53);
+            bad += check_exact_copy<Backend, T>(h, ta, 64, 64, false, true);
+            bad += check_exact_copy<Backend, T>(h, ta, 700, 500, false, true);
+            bad += check_case<Backend, T>(h, ta, 'C', 37, 53, 0,
+                alpha, beta, 2, 3, 1, seed += 2, true);
+        }
     }
     if constexpr (Backend == DdlaBackend::CPU) {
         for (char ta : ops) {
@@ -399,6 +440,12 @@ int run_backend()
     failures += run_type<Backend, double>(handle);
     failures += run_type<Backend, std::complex<float>>(handle);
     failures += run_type<Backend, std::complex<double>>(handle);
+    if constexpr (Backend == DdlaBackend::GPU) {
+        DDLA_CHECK(ddlaSetStream(handle, nullptr));
+        failures += check_exact_copy<Backend, std::complex<double>>(handle, 'C', 37, 53, false, true);
+        failures += check_case<Backend, std::complex<double>>(handle, 'T', 'C', 37, 53, 0,
+            std::complex<double>(.7, -.3), std::complex<double>(-1.3, .4), 2, 3, 1, 543, true);
+    }
     ddlaSynchronize(handle);
     int sum = 0;
     MPI_Allreduce(&failures, &sum, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);

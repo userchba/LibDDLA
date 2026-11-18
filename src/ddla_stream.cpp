@@ -14,12 +14,25 @@ namespace {
 static_assert(std::is_pointer_v<gpuStream_t>);
 static_assert(std::is_pointer_v<gpublasHandle_t>);
 static_assert(std::is_pointer_v<gpusolverHandle_t>);
-void create_stream(void*& opaque)
+void create_stream(void*& opaque, bool nonblocking = false)
 {
     gpuStream_t native = nullptr;
-    const auto status = gpuStreamCreate(&native);
+    const auto status = nonblocking ? gpuStreamCreateWithFlags(&native, gpuStreamNonBlocking)
+                                    : gpuStreamCreate(&native);
     opaque = native;
     GPU_CHECK(status);
+}
+void create_fence(ddlaEvent_t& opaque)
+{
+    gpuEvent_t native = nullptr;
+    const auto status = gpuEventCreateWithFlags(&native, gpuEventDisableTiming);
+    opaque = native;
+    GPU_CHECK(status);
+}
+void destroy_fence(ddlaEvent_t& opaque)
+{
+    if (opaque) GPU_CHECK(gpuEventDestroy(static_cast<gpuEvent_t>(opaque)));
+    opaque = nullptr;
 }
 #endif
 
@@ -35,7 +48,11 @@ void init_resources(DdlaStream& s)
     } else {
 #if DDLA_HAS_GPU
         create_stream(s.stream);
-        create_stream(s.stream_data);
+        create_stream(s.stream_data, true);
+        for (auto& event : s.summa_ready) create_fence(event);
+        for (auto& event : s.summa_reuse) create_fence(event);
+        create_fence(s.summa_input);
+        for (auto& event : s.summa_metadata) create_fence(event);
         gpusolverHandle_t solver = nullptr;
         const auto solver_status = gpusolverCreate(&solver);
         s.solverH = solver;
@@ -66,6 +83,10 @@ void clean_resources(DdlaStream& s)
         if (s.stream_data) GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(s.stream_data)));
         if (s.stream_level) GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(s.stream_level)));
         s.communicator->release(&s, false);
+        for (auto& event : s.summa_ready) destroy_fence(event);
+        for (auto& event : s.summa_reuse) destroy_fence(event);
+        destroy_fence(s.summa_input);
+        for (auto& event : s.summa_metadata) destroy_fence(event);
         if (s.stream) GPU_CHECK(gpuStreamDestroy(static_cast<gpuStream_t>(s.stream)));
         s.stream = nullptr;
         if (s.stream_data) GPU_CHECK(gpuStreamDestroy(static_cast<gpuStream_t>(s.stream_data)));
@@ -81,6 +102,10 @@ void clean_resources(DdlaStream& s)
     s.stream = s.stream_data = s.stream_level = nullptr;
     s.blasH = s.solverH = nullptr;
     s.nccl_comm = s.nccl_row_comm = s.nccl_col_comm = nullptr;
+    for (auto& event : s.summa_ready) event = nullptr;
+    for (auto& event : s.summa_reuse) event = nullptr;
+    s.summa_input = nullptr;
+    for (auto& event : s.summa_metadata) event = nullptr;
 }
 
 } // namespace
