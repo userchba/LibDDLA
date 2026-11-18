@@ -11,9 +11,9 @@ neither stage requests explicit Slurm memory.
 
 | Event | Source sent to SAI | Approval |
 | --- | --- | --- |
-| Push or merge to protected `develop` or `main` | Pushed commit | Automatic once enabled |
+| Push or merge to upstream `develop` or `main` | Pushed commit | Automatic once enabled |
 | PR opened, reopened or updated against either branch | Current PR head, including for forks | A maintainer approves that run; a new commit needs new approval |
-| Manual run on either protected branch | Supplied full commit SHA | A maintainer approves that run |
+| Manual run on either branch | Supplied full commit SHA | A maintainer approves that run |
 
 Push and PR checks work on `develop` as soon as it contains the workflow. Bring
 the workflow to `main` to cover pushes there and expose **Run workflow** in
@@ -22,9 +22,9 @@ remain failures; the job uploads available JUnit, logs and Slurm evidence.
 
 ## Repository owner
 
-1. Protect `develop` and `main` with required review, including workflow changes;
-   restrict direct and force pushes. Under **Settings > Actions > General**,
-   require approval for fork workflows from **all outside collaborators**.
+1. Review who can push to `develop` and `main`: their pushes are trusted to run
+   on SAI. Branch protection is optional for this integration. PRs, including
+   forks, require a maintainer's approval for the current run.
 2. Under **Settings > Environments**, keep required maintainer reviewers on
    `sai-libddla` and allow the branch patterns `main`, `develop` and
    `refs/pull/*/merge`. Review the source SHA in the run title before approving:
@@ -32,9 +32,9 @@ remain failures; the job uploads available JUnit, logs and Slurm evidence.
    `main` and `develop` allowed and no required reviewer. Neither needs secrets.
 3. Under **Settings > Actions > Runners**, privately give SAI a short-lived
    **repository runner registration token** for the initial setup. Agree on
-   renewal for disposable runners and reviewer logins with SAI. Provide the site
-   publisher read access to Actions, Contents, Pull requests and Variables for
-   this repository. No repository-write token or SAI SSH key is needed by a job.
+   renewal for disposable runners and reviewer logins with SAI. Each job shares
+   its automatically issued, read-only `GITHUB_TOKEN` with the site publisher;
+   no separate PAT or repository-write credential is needed.
 4. Once SAI confirms isolation, set the repository Actions variable
    `SAI_CI_ENABLED=true` for a supervised first run on `develop`. Keep it on
    after verifying reporting and cancellation; removing it disables new
@@ -43,21 +43,25 @@ remain failures; the job uploads available JUnit, logs and Slurm evidence.
 ## SAI administrators
 
 - Register clean, disposable Linux x64 runners labeled `sai-libddla-results`,
-  with Bash and jq and one concurrent job to match site capacity. Give jobs
-  **only read-only access to published results** at
-  `/srv/sai-libddla/results`: no site credentials, SSH agent, controller socket,
+  with Bash and jq and one concurrent job to match site capacity. Mount published
+  results at `/srv/sai-libddla/results` read-only and a separate request mailbox
+  at `/srv/sai-libddla/requests` writable. The mailbox must be private to this
+  repository's runner and publisher, and must never be uploaded as an artifact.
+  Give the runner no site credentials, SSH agent, controller socket,
   private storage or cluster network access. Retire any credential-bearing
   runner accessible to this public repository before accepting PR workflows.
   A label or an Environment cannot stop a fork from changing workflow steps.
 - On the trusted side, install a reviewed copy of [publish.py](publish.py) and the
   existing [site controller](https://github.com/Stardust0831/LibDDLA/tree/66b2c419de961618671c9fbd99298dc6c4b2d255/.ci/sai).
   Keep SSH, the restricted endpoint and Slurm quotas there. Run one publisher
-  at a time on a short timer (e.g. every 20 seconds) with Python 3.10+ and an
-  authenticated `gh` bound to github.com. It polls GitHub directly; it does not
-  accept commands or source files from the runner.
+  at a time on a short timer (e.g. every 20 seconds) with Python 3.10+ and `gh`.
+  It reads the job's short-lived token from the mailbox and verifies the run
+  independently with GitHub. It accepts no commands or source files from jobs.
 - Configure the publisher's `SAI_RELAY` and `SAI_SSH_CONFIG` paths, a private
   `SAI_WORK` directory, the site-writable `SAI_RESULTS` directory exported
-  read-only to jobs, and comma-separated trusted `SAI_REVIEWERS` GitHub logins.
+  read-only to jobs, the `SAI_REQUESTS` mailbox, and comma-separated trusted
+  `SAI_REVIEWERS` GitHub logins. Ensure the publisher can read token files created
+  by the runner; remove stale tokens after terminated runs.
   The existing endpoint requires the exact SHA during both prepare and submit.
   For automatic admission, provide a site-owned `SAI_AUTHORIZE` executable:
   it receives `event branch sha run_id` after verification and must authorize
