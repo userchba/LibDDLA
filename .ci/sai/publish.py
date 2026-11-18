@@ -144,6 +144,8 @@ def main():
             if descriptor is not None:
                 os.close(descriptor)
             os.environ.pop("GH_TOKEN", None)
+            if (public / request.stem / "completion.json").is_file():
+                request.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
