@@ -82,7 +82,7 @@ inline void staging_max(std::array<std::size_t,2>& highwater,const std::array<st
 // needs just the broadcast.
 template <DdlaBackend Backend, typename T>
 void broadcast_panel(const DdlaHandle_t& h, bool column_panel, int m, int n,
-                     const T* input, int i, int j, const int* d, T* output)
+                     const T* input, int i, int j, const int* d, T* output, void* queue = nullptr)
 {
     if (m == 0 || n == 0) return;
     const auto region=panel_region(h,m,n,i,j,d);
@@ -97,12 +97,12 @@ void broadcast_panel(const DdlaHandle_t& h, bool column_panel, int m, int n,
     if (coordinate == root) {
         const T* source = input + row0 + std::size_t(col0) * d[DDLA_LLD_];
         if (source != output || d[DDLA_LLD_] != packed_rows)
-            DDLA_CHECK(ddlaMemcpy2D(h, output, std::size_t(packed_rows) * sizeof(T),
+            DDLA_CHECK(detail::memcpy2d_on(h, output, std::size_t(packed_rows) * sizeof(T),
                 source, std::size_t(d[DDLA_LLD_]) * sizeof(T),
-                std::size_t(packed_rows) * sizeof(T), packed_cols));
+                std::size_t(packed_rows) * sizeof(T), packed_cols, queue ? queue : h->stream));
     }
     commBcast<Backend>(h, column_panel ? CommScope::Row : CommScope::Col,
-        output, std::size_t(packed_rows) * packed_cols, root);
+        output, std::size_t(packed_rows) * packed_cols, root, queue);
 }
 
 inline bool panel_local_layout(bool column_panel, const int* source, const int* target)
@@ -176,19 +176,28 @@ inline std::array<std::size_t,2> panel_staging_bytes(const DdlaHandle_t& h,bool 
 template <DdlaBackend Backend, typename T>
 void panel_run(const DdlaHandle_t& h, bool column_panel, char op, int m, int n,
                const T* input, int i, int j, const int* source, const int* target,
-               T* output, void* work, std::size_t bytes, void* host, std::size_t host_bytes)
+               T* output, void* work, std::size_t bytes, void* host, std::size_t host_bytes,
+               void* queue = nullptr, ddlaEvent_t metadata_event = nullptr)
 {
     if (m == 0 || n == 0) return;
     if (op == 'N' && panel_local_layout(column_panel, source, target)) {
-        broadcast_panel<Backend>(h, column_panel, m, n, input, i, j, source, output);
+        broadcast_panel<Backend>(h, column_panel, m, n, input, i, j, source, output, queue);
         return;
     }
     int d[DDLA_DLEN_];
     panel_descriptor(d, h, column_panel, op, m, n, i, j, source, target);
-    pgeadd_impl::pgeadd_run<Backend,T>(h, op, 'N', d[DDLA_M_], d[DDLA_N_],
-        T(1), input, i + 1, j + 1, source, T(0), nullptr, 1, 1, d,
-        output, 1, 1, d, work, bytes, host, host_bytes);
-    broadcast_panel<Backend>(h, column_panel, d[DDLA_M_], d[DDLA_N_], output, 0, 0, d, output);
+    if (queue || metadata_event) {
+        // This private unit-copy route returns with the pageable host
+        // schedule consumed, but leaves device work ordered on queue.
+        pgeadd_impl::pgeadd_copy_run<Backend,T>(h, op, d[DDLA_M_], d[DDLA_N_],
+            input, i + 1, j + 1, source, output, 1, 1, d,
+            work, bytes, host, host_bytes, queue, metadata_event);
+    } else {
+        pgeadd_impl::pgeadd_run<Backend,T>(h, op, 'N', d[DDLA_M_], d[DDLA_N_],
+            T(1), input, i + 1, j + 1, source, T(0), nullptr, 1, 1, d,
+            output, 1, 1, d, work, bytes, host, host_bytes);
+    }
+    broadcast_panel<Backend>(h, column_panel, d[DDLA_M_], d[DDLA_N_], output, 0, 0, d, output, queue);
 }
 
 // Validate general product geometry and distinguish collective entry points.
