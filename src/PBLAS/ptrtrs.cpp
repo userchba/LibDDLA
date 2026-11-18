@@ -58,6 +58,20 @@ void ptrtrs_check(const DdlaHandle_t& handle, char side, char uplo, char trans, 
 }
 
 namespace {
+struct SolvePanel { int m,n,i,j; };
+
+// Stored far-side panel of A. Preparation and execution share only descriptor
+// geometry; solve order, pointer offsets and all BLAS calls remain unchanged.
+SolvePanel solve_panel(char side,char uplo,char trans,int order,int start,int width)
+{
+    const bool left=side=='L';
+    const bool backward=(left?uplo=='U':uplo=='L')==(trans=='N');
+    const int origin=backward?0:start+width;
+    const int length=backward?start:order-start-width;
+    const bool column=left==(trans=='N');
+    return column?SolvePanel{length,width,origin,start}:SolvePanel{width,length,start,origin};
+}
+
 // Element counts of ptrtrs's own buffers, in carving order: the diagonal
 // block (nb x nb) | the panel of A (a block column of the local rows or a
 // block row of the local columns) | the block row/column of B.
@@ -97,6 +111,30 @@ void ptrtrs_workspace_size(const DdlaHandle_t& handle, char side, char trans, in
         &transport_bytes,host_bytes);
     for (const std::size_t c : count) *backend_bytes += detail::padded_bytes<T>(c);
     *backend_bytes += transport_bytes;
+}
+
+std::array<std::size_t,2> ptrtrs_staging_bytes(const DdlaHandle_t& h,
+    char side,char uplo,char trans,int m,int n,const int* da,const int* db,std::size_t scalar_bytes)
+{
+    std::array<std::size_t,2> bytes{};
+    if(h->backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI ||
+       !m || !n || h->nprocs==1)return bytes;
+    const bool left=side=='L';
+    const int order=left?m:n,nb=da[DDLA_MB_];
+    for(int start=0;start<order;) {
+        const int width=std::min(nb,order-start);
+        const int owner=indxg2p(start,nb,da[left?DDLA_RSRC_:DDLA_CSRC_],
+            left?h->nprows_:h->npcols_);
+        if((left?h->myprow_:h->mypcol_)==owner)
+            bytes[0]=std::max(bytes[0],pblas::communication_bytes(std::size_t(width)*width,scalar_bytes));
+        pblas::staging_max(bytes,pblas::broadcast_staging_bytes(h,!left,
+            left?width:m,left?n:width,left?start:0,left?0:start,db,scalar_bytes));
+        const auto panel=solve_panel(side,uplo,trans,order,start,width);
+        pblas::staging_max(bytes,pblas::panel_staging_bytes(h,left,trans,
+            panel.m,panel.n,panel.i,panel.j,da,da,scalar_bytes));
+        start+=width;
+    }
+    return bytes;
 }
 
 // Component 3.
@@ -204,40 +242,27 @@ void ptrtrs_run(const DdlaHandle_t& handle,
                 }
                 pblas::broadcast_panel<Backend, T>(handle, false, nb_real, n, B, n_s, 0, array_descB, block_B);
                 int length_block_A;
-                int g_m, g_n;
-                int g_ia, g_ja;
                 if(trans != 'N'){
-                    g_m = nb_real;
-                    g_ia = n_s;
                     if(uplo == 'L'){
                         A_offset = mm_row_start;
                         length_block_A = mm_col_start;
-                        g_n = n_s;
-                        g_ja = 0;
                     }else{
                         // U^H solve: gather the row panel to the right of the diagonal.
                         A_offset = mm_row_start + std::size_t(mm_col_start + mm_col_step) * array_descA[DDLA_LLD_];
                         length_block_A = n_loc_A - mm_col_start - mm_col_step;
-                        g_n = n_solve - n_s - nb_real;
-                        g_ja = n_s + nb_real;
                     }
                 }else{
-                    g_ja = n_s;
-                    g_n = nb_real;
                     if(uplo == 'L'){
                         length_block_A = m_loc_A - mm_row_start - mm_row_step;
                         A_offset = mm_row_start + mm_row_step + std::size_t(mm_col_start) * array_descA[DDLA_LLD_];
-                        g_m = n_solve - n_s - nb_real;
-                        g_ia = n_s + nb_real;
                     }else{
                         // U solve: gather the column panel above the diagonal.
                         length_block_A = mm_row_start;
                         A_offset = std::size_t(mm_col_start) * array_descA[DDLA_LLD_];
-                        g_m = n_s;
-                        g_ia = 0;
                     }
                 }
-                pblas::panel_run<Backend, T>(handle, true, trans, g_m, g_n, A, g_ia, g_ja, array_descA,
+                const auto panel=solve_panel(side,uplo,trans,n_solve,n_s,nb_real);
+                pblas::panel_run<Backend, T>(handle, true, trans, panel.m, panel.n, A, panel.i, panel.j, array_descA,
                     array_descA, block_A, transport_work, transport_bytes, host_work, host_bytes);
                 if(solve_backward){
                     length_block_A = mm_row_start;
@@ -315,40 +340,27 @@ void ptrtrs_run(const DdlaHandle_t& handle,
                 // on the far side of the diagonal block; for trans!='N' the column
                 // panel of A on the far side, transposed during the gather.
                 int length_block_A;
-                int g_m, g_n;
-                int g_ia, g_ja;
                 if(trans == 'N'){
-                    g_m = nb_real;
-                    g_ia = n_s;
                     if(far_right){
-                        g_n = n_solve - n_s - nb_real;
-                        g_ja = n_s + nb_real;
                         A_offset = mm_row_start + std::size_t(mm_col_start + mm_col_step) * array_descA[DDLA_LLD_];
                         length_block_A = n_loc_A - mm_col_start - mm_col_step;
                         B_offset = std::size_t(mm_col_start + mm_col_step) * lldB;
                     }else{
-                        g_n = n_s;
-                        g_ja = 0;
                         A_offset = mm_row_start;
                         length_block_A = mm_col_start;
                         B_offset = 0;
                     }
                 }else{
-                    g_n = nb_real;
-                    g_ja = n_s;
                     if(far_right){
-                        g_m = n_solve - n_s - nb_real;
-                        g_ia = n_s + nb_real;
                         length_block_A = n_loc_A - mm_col_start - mm_col_step;
                         B_offset = std::size_t(mm_col_start + mm_col_step) * lldB;
                     }else{
-                        g_m = n_s;
-                        g_ia = 0;
                         length_block_A = mm_col_start;
                         B_offset = 0;
                     }
                 }
-                pblas::panel_run<Backend, T>(handle, false, trans, g_m, g_n, A, g_ia, g_ja, array_descA,
+                const auto panel=solve_panel(side,uplo,trans,n_solve,n_s,nb_real);
+                pblas::panel_run<Backend, T>(handle, false, trans, panel.m, panel.n, A, panel.i, panel.j, array_descA,
                     array_descA, block_A, transport_work, transport_bytes, host_work, host_bytes);
                 DDLA_CHECK(ddlaSynchronize(ddla_handle));
                 if(length_block_A > 0 && m_loc_B > 0){
@@ -391,6 +403,9 @@ void ptrtrs(
                                               &backend_bytes, &host_bytes);
         backend_work.resize(backend_bytes);
         host_work.resize(host_bytes);
+        const auto staged=ptrtrs_impl::ptrtrs_staging_bytes(handle,side,uplo,trans,m,n,
+            array_descA,array_descB,sizeof(T));
+        if(staged[0] || staged[1])handle->host_buffers<std::byte>(staged[0],staged[1]);
     };
     if (handle->nprocs > 1)
         detail::agree_local(handle, "ptrtrs workspace preparation", prepare);

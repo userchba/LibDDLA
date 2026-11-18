@@ -14,6 +14,9 @@
 #include "require_backend.h"
 
 #include <algorithm>
+#include <array>
+#include <limits>
+#include <stdexcept>
 
 namespace ddla { namespace pblas {
 
@@ -40,6 +43,40 @@ inline void describe(int* d,DdlaHandle_t h,int m,int n,int mb,int nb,int rs,int 
     d[DDLA_LLD_]=std::max(lld,std::max(1,num_loc(m,mb,h->myprow_,rs,h->nprows_)));
 }
 
+// Region geometry shared by broadcasting and its allocation-free preparation.
+struct PanelRegion { int row0, col0, rows, cols; };
+inline PanelRegion panel_region(const DdlaHandle_t& h,int m,int n,int i,int j,const int* d)
+{
+    const int row0=num_loc(i,d[DDLA_MB_],h->myprow_,d[DDLA_RSRC_],h->nprows_);
+    const int col0=num_loc(j,d[DDLA_NB_],h->mypcol_,d[DDLA_CSRC_],h->npcols_);
+    return {row0,col0,
+        num_loc(i+m,d[DDLA_MB_],h->myprow_,d[DDLA_RSRC_],h->nprows_)-row0,
+        num_loc(j+n,d[DDLA_NB_],h->mypcol_,d[DDLA_CSRC_],h->npcols_)-col0};
+}
+inline std::size_t communication_bytes(std::size_t elements,std::size_t width)
+{
+    if(width && elements>std::numeric_limits<std::size_t>::max()/width)
+        throw std::length_error("pblas: staged communication byte count overflow");
+    return elements*width;
+}
+inline std::array<std::size_t,2> broadcast_staging_bytes(const DdlaHandle_t& h,bool column_panel,
+    int m,int n,int i,int j,const int* d,std::size_t width)
+{
+    std::array<std::size_t,2> bytes{};
+    if(h->backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || !m || !n)
+        return bytes;
+    const auto region=panel_region(h,m,n,i,j,d);
+    const auto elements=column_panel?std::size_t(region.rows)*n:std::size_t(m)*region.cols;
+    // The runtime issues the broadcast even for a one-member communicator.
+    bytes[0]=communication_bytes(elements,width);
+    return bytes;
+}
+inline void staging_max(std::array<std::size_t,2>& highwater,const std::array<std::size_t,2>& next)
+{
+    highwater[0]=std::max(highwater[0],next[0]);
+    highwater[1]=std::max(highwater[1],next[1]);
+}
+
 // Replicate a one-block-wide, untransposed panel. Packing is a pitched copy
 // only on its owning process row/column. A compact panel already in place
 // needs just the broadcast.
@@ -48,10 +85,8 @@ void broadcast_panel(const DdlaHandle_t& h, bool column_panel, int m, int n,
                      const T* input, int i, int j, const int* d, T* output)
 {
     if (m == 0 || n == 0) return;
-    const int row0 = num_loc(i, d[DDLA_MB_], h->myprow_, d[DDLA_RSRC_], h->nprows_);
-    const int col0 = num_loc(j, d[DDLA_NB_], h->mypcol_, d[DDLA_CSRC_], h->npcols_);
-    const int rows = num_loc(i + m, d[DDLA_MB_], h->myprow_, d[DDLA_RSRC_], h->nprows_) - row0;
-    const int cols = num_loc(j + n, d[DDLA_NB_], h->mypcol_, d[DDLA_CSRC_], h->npcols_) - col0;
+    const auto region=panel_region(h,m,n,i,j,d);
+    const int row0=region.row0,col0=region.col0,rows=region.rows,cols=region.cols;
     const int root = column_panel
         ? indxg2p(j, d[DDLA_NB_], d[DDLA_CSRC_], h->npcols_)
         : indxg2p(i, d[DDLA_MB_], d[DDLA_RSRC_], h->nprows_);
@@ -115,6 +150,24 @@ void panel_workspace_size(const DdlaHandle_t& h, bool column_panel, char op,
         || source[op == 'N' ? DDLA_NB_ : DDLA_MB_] != d[DDLA_NB_];
     pgeadd_impl::pgeadd_workspace_size<T>(h, op, 'N', true, false,
         d[DDLA_M_], d[DDLA_N_], d, backend_bytes, host_bytes, source, d, general);
+}
+
+// A descriptor-block panel's redistribution and following broadcast share
+// these exact high-water counts. No aggregate contraction panel is reserved.
+inline std::array<std::size_t,2> panel_staging_bytes(const DdlaHandle_t& h,bool column_panel,char op,
+    int m,int n,int i,int j,const int* source,const int* target,std::size_t width)
+{
+    std::array<std::size_t,2> bytes{};
+    if(h->backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || !m || !n)
+        return bytes;
+    if(op=='N' && panel_local_layout(column_panel,source,target))
+        return broadcast_staging_bytes(h,column_panel,m,n,i,j,source,width);
+    int d[DDLA_DLEN_];
+    panel_descriptor(d,h,column_panel,op,m,n,i,j,source,target);
+    bytes=pgeadd_impl::pgeadd_staging_bytes(h,op,'N',true,false,d[DDLA_M_],d[DDLA_N_],
+        source,i+1,j+1,d,1,1,d,1,1,width);
+    staging_max(bytes,broadcast_staging_bytes(h,column_panel,d[DDLA_M_],d[DDLA_N_],0,0,d,width));
+    return bytes;
 }
 
 // Materialize op(input) into the target panel layout, then replicate its short

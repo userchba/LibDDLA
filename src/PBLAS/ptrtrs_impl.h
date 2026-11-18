@@ -4,6 +4,7 @@
 #include <ddla/ddla.h>
 
 #include <cstddef>
+#include <array>
 
 namespace ddla { namespace ptrtrs_impl {
 
@@ -31,8 +32,17 @@ void ptrtrs_workspace_size(const DdlaHandle_t& handle, char side, char trans, in
                            const int* array_descA, const int* array_descB,
                            std::size_t* backend_bytes, std::size_t* host_bytes);
 
+// Pure rank-local high waters of the two HostStagedMPI cache slots, in bytes.
+// Uses the actual diagonal, solved-B broadcast and transported-A panel shapes.
+// Zero for CPU, nonstaged transport, empty and single-rank native solves.
+std::array<std::size_t,2> ptrtrs_staging_bytes(const DdlaHandle_t& handle,
+    char side, char uplo, char trans, int m, int n,
+    const int* array_descA, const int* array_descB, std::size_t scalar_bytes);
+
 // Component 3: B := op(A)^{-1} B (side 'L') or B := B op(A)^{-1} (side 'R').
-// A is read-only. No validation, no allocation.
+// A is read-only. No validation or owning allocation. HostStagedMPI borrowers
+// reserve ptrtrs_staging_bytes under their owning agreement before raw math,
+// otherwise the legacy transport cache may grow during communication.
 template <DdlaBackend Backend, typename T>
 void ptrtrs_run(const DdlaHandle_t& handle,
                 char side, char uplo, char trans, char diag, int m, int n,
