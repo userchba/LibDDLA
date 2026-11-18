@@ -132,8 +132,10 @@ def main():
             require(re.fullmatch(r"[A-Za-z0-9_]{20,256}", token), "Invalid token format")
             os.environ["GH_TOKEN"] = token
             run = api(f"actions/runs/{match[1]}")
-            require(run["run_attempt"] == int(match[2]) and run["status"] == "in_progress",
-                    "Request is no longer active")
+            if run["run_attempt"] != int(match[2]) or run["status"] == "completed":
+                request.unlink(missing_ok=True)
+                continue
+            require(run["status"] == "in_progress", "Request is not active yet")
             if run["path"] == WORKFLOW:
                 publish(run, reviewers)
         except (OSError, ValueError, subprocess.SubprocessError) as error:
