@@ -4,6 +4,7 @@
 #include <ddla/ddla.h>
 
 #include <cstddef>
+#include <array>
 #include <type_traits>
 
 #include "BLAS/blas_impl.h"
@@ -78,6 +79,10 @@ void stationary_workspace_size(const DdlaHandle_t& h, bool keep_a, char ta, char
                                int m, int n, int k, bool beta_is_nonzero,
                                const int* da, const int* db, const int* dc,
                                std::size_t* backend_bytes, std::size_t* host_bytes);
+
+std::array<std::size_t,2> stationary_staging_bytes(const DdlaHandle_t& h,bool keep_a,
+    char ta,char tb,int m,int n,int k,bool beta_is_nonzero,
+    const int* da,const int* db,const int* dc,std::size_t thin_bytes,std::size_t result_bytes);
 
 template <DdlaBackend Backend, typename T, typename TA = T, typename TB = T>
 void stationary_run(const DdlaHandle_t& h, bool keep_a, char ta, char tb,
