@@ -74,7 +74,10 @@ class AdmissionTest(unittest.TestCase):
                 publish.assert_called_once_with(self.run, {"owner"})
                 self.assertNotIn("GH_TOKEN", os.environ)
                 publish.reset_mock()
-                request.unlink()
+                self.run["status"] = "completed"
+                site.main()
+                publish.assert_not_called()
+                self.assertFalse(request.exists())
                 request.symlink_to(root / "secret")
                 (root / "secret").write_text(token)
                 site.main()
