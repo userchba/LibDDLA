@@ -4,6 +4,7 @@
 #include "ddla_desc.h"
 #include "ddla_stream.h"
 #include "helpers.h"
+#include "host_parallel.h"
 #include "require_backend.h"
 #include "comm_traits.h"
 #include "check_agree.h"
@@ -102,6 +103,32 @@ void copy_batch(DdlaHandle_t h, char op, const T* src, T* dst,
 {
     if (!count) return;
     if constexpr (Backend == DdlaBackend::CPU) {
+        // Avoid waking a full team for fewer rectangles than workers.
+        if (h->host_threads > 1 && count >= std::size_t(h->host_threads)) {
+            const auto threshold = std::size_t(blas_impl::kGeamParallelMinElems);
+            std::size_t total = 0;
+            bool small_rectangles = true;
+            for (std::size_t i = 0; i < count; ++i) {
+                const auto elements = std::size_t(blocks[i].rows) * blocks[i].cols;
+                if (elements >= threshold) {
+                    small_rectangles = false;
+                    break;
+                }
+                total += std::min(elements, threshold - total);
+            }
+            if (small_rectangles && total >= threshold) {
+                // These GEAM calls stay serial. Destinations are disjoint, and the
+                // team joins before the next snapshot, scatter or MPI phase.
+                const auto grain = std::max(1LL,
+                    static_cast<long long>(count) / (8LL * h->host_threads));
+                detail::host_parallel_for(static_cast<long long>(count), grain,
+                    h->host_threads, [&](long long first, long long last) {
+                        for (long long i = first; i < last; ++i)
+                            copy_rectangle<Backend>(h, op, src, dst, blocks[i], queue);
+                    });
+                return;
+            }
+        }
         for (std::size_t i = 0; i < count; ++i)
             copy_rectangle<Backend>(h, op, src, dst, blocks[i], queue);
     } else {

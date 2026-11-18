@@ -110,7 +110,6 @@ namespace {
 
 constexpr int kTile = 32;                        // transposed access: kTile x kTile tiles
 constexpr int kStripElems = 1 << 14;             // plain access: strips of about this many elements
-constexpr long long kParallelMinElems = 1 << 16; // below this, a parallel region costs more than it saves
 
 // Single operand (beta == 0): C(i,j) := alpha * blas_impl::op(A)(i,j), the copy / transpose-copy path.
 template <typename T, bool TA, bool CA, bool ONE>
@@ -197,7 +196,7 @@ void cpu_geam(bool ta, bool ca, bool tb, bool cb, T alpha, const T* A, std::size
         if (single) run_copy_tile(ta, ca, a_one, alpha, A, lda, C, ldc, i0, i1, j0, j1);
         else        general_tile(ta, ca, tb, cb, has_a, has_b, alpha, A, lda, beta, B, ldb, C, ldc, i0, i1, j0, j1);
     };
-    const int nt = (static_cast<long long>(m) * n < kParallelMinElems)
+    const int nt = (static_cast<long long>(m) * n < blas_impl::kGeamParallelMinElems)
                        ? 1
                        : static_cast<int>(std::min<long long>(std::max(1, nthreads), ntiles));
     if (nt <= 1) {                       // no parallel region at all: a tiny call must stay cheap

@@ -9,6 +9,8 @@
 #include <complex>
 #include <cstddef>
 namespace ddla { namespace blas_impl {
+// Shared with rectangle batches: below this size CPU GEAM stays serial.
+constexpr long long kGeamParallelMinElems = 1LL << 16;
 // Scratch-free operations expose check/run only. Mixed GEMM, GEMMT and TRTRM
 // need scratch: a size function (backend bytes) and a run that takes them.
 // These conversions assume the caller has already checked the flags.

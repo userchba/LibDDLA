@@ -88,6 +88,82 @@ void partial_setup(int pr, int pc, const Trace& trace)
 }
 #endif
 
+// Mismatched block boundaries create many individually serial GEAM copies.
+// Compare the complete local storage across thread counts, including alias
+// snapshots, offsets, signed zeros/nonfinites and untouched padding.
+template<class T> void cpu_batch_threads(const DdlaHandle_t& h)
+{
+    constexpr int order = 1027, m = 769, n = 513;
+    constexpr int ia = 2, ja = 3, ic = 3, jc = 5;
+    const int budget = h->host_threads;
+    int da[DDLA_DLEN_], dc[DDLA_DLEN_];
+    desc(h, da, order, order, 37, 53);
+    desc(h, dc, order, order, 61, 47);
+    auto entry = [](int i, int j) {
+        using R = typename real_type<T>::type;
+        if ((i + 3 * j) % 101 == 0) return T(-R(0));
+        if ((2 * i + j) % 103 == 0) return T(std::numeric_limits<R>::infinity());
+        if ((i + j) % 107 == 0) return T(std::numeric_limits<R>::quiet_NaN());
+        return value<T>(i, j);
+    };
+    const auto original = make_local<T>(h, da, entry);
+    DeviceBuffer<T> a(h, std::max(std::size_t(1), original.size()));
+    for (bool alias : {false, true}) {
+        const int* target = alias ? da : dc;
+        const auto initial = alias ? original : make_local<T>(h, dc, [](int, int) { return T(-7); });
+        DeviceBuffer<T> c(h, std::max(std::size_t(1), initial.size()));
+        T* output = alias ? a.ptr : c.ptr;
+        for (char op : {'N', 'T', 'C'}) {
+            std::size_t bytes = 0, host_bytes = 0;
+            pgeadd_impl::pgeadd_workspace_size<T>(h, op, 'N', true, false, m, n,
+                target, &bytes, &host_bytes, da, nullptr, true);
+            ddla::vector<char> work(h, bytes);
+            std::vector<char> host(host_bytes);
+            std::vector<T> serial;
+            for (int threads : {1, budget}) {
+                h->host_threads = threads;
+                upload(h, a.ptr, original);
+                if (!alias) upload(h, c.ptr, initial);
+                pgeadd_impl::pgeadd_copy_run<DdlaBackend::CPU,T>(h, op, m, n,
+                    a.ptr, ia, ja, da, output, ic, jc, target,
+                    work.data(), bytes, host.data(), host_bytes, nullptr, nullptr);
+                const auto result = download(h, output, initial.size());
+                bool correct = true;
+                for (int j = 0; j < ddla_test::n_loc(h, target); ++j) {
+                    const int gj = indx_l2g_c(target, h, j);
+                    for (int i = 0; i < target[DDLA_LLD_]; ++i) {
+                        const auto at = i + std::size_t(j) * target[DDLA_LLD_];
+                        T expected = initial[at];
+                        if (i < ddla_test::m_loc(h, target)) {
+                            const int gi = indx_l2g_r(target, h, i);
+                            if (gi >= ic - 1 && gi < ic - 1 + m &&
+                                gj >= jc - 1 && gj < jc - 1 + n) {
+                                const int row = gi - ic + 1, col = gj - jc + 1;
+                                expected = op == 'N' ? entry(ia - 1 + row, ja - 1 + col)
+                                                     : entry(ia - 1 + col, ja - 1 + row);
+                                if (op == 'C') expected = conjugate(expected);
+                            }
+                        }
+                        correct = correct && std::memcmp(&expected, &result[at], sizeof(T)) == 0;
+                    }
+                }
+                require(correct, "CPU batch transpose/alias/padding mismatch");
+                if (threads == 1) serial = result;
+                require(result.empty() || std::memcmp(serial.data(), result.data(), result.size() * sizeof(T)) == 0,
+                        "CPU batch changed bits across thread counts");
+                if (!alias) {
+                    const auto after = download(h, a.ptr, original.size());
+                    require(original.empty() || std::memcmp(after.data(), original.data(), original.size() * sizeof(T)) == 0,
+                            "CPU batch changed input");
+                }
+            }
+        }
+    }
+    h->host_threads = budget;
+    if (!h->myid) std::cout << "PGEADD_CPU_BATCH_THREADS_PASS threads=" << budget
+                            << " scalar_bytes=" << sizeof(T) << "\n";
+}
+
 template<DdlaBackend Backend, class T>
 void cases(const DdlaHandle_t& h, const Trace& trace)
 {
@@ -317,6 +393,9 @@ int main(int argc, char** argv)
             cases<DdlaBackend::CPU,float>(h, trace); cases<DdlaBackend::CPU,double>(h, trace);
             cases<DdlaBackend::CPU,std::complex<float>>(h, trace);
             cases<DdlaBackend::CPU,std::complex<double>>(h, trace);
+            cpu_batch_threads<float>(h); cpu_batch_threads<double>(h);
+            cpu_batch_threads<std::complex<float>>(h);
+            cpu_batch_threads<std::complex<double>>(h);
         } else {
 #if DDLA_HAS_GPU
             cases<DdlaBackend::GPU,float>(h, trace); cases<DdlaBackend::GPU,double>(h, trace);
