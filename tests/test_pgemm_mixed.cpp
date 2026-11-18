@@ -49,6 +49,10 @@ void one(DdlaHandle_t h,int m,int n,int k,char ta,char tb,bool shifted,int mode,
             blas_impl::mixed_gemm_workspace_size<R>(h,m,n,k,CR,&local_bytes);
             if(host_bytes!=0 || backend_bytes!=local_bytes)
                 throw std::runtime_error("one-rank mixed pgemm did not use native local workspace");
+            const auto staged=pgemm_impl::pgemm_staging_bytes(h,alg,true,ta,tb,m,n,k,
+                beta!=Z(0),a.d,b.d,c.d,sizeof(AType),sizeof(BType),sizeof(Z));
+            if(staged[0] || staged[1])
+                throw std::runtime_error("one-rank mixed pgemm reserved unused communication staging");
         }
         c.reset();
         Z* cp=owns(h,m,n,c.d)?c.data:nullptr;
@@ -129,8 +133,9 @@ template <DdlaBackend Backend> void invalid_cases(DdlaHandle_t h) {
                          static_cast<const Z*>(nullptr),b.d,Z(1),static_cast<Z*>(nullptr),c.d);
 }
 
-template <DdlaBackend Backend> void run(int pr,int pc) {
+template <DdlaBackend Backend> void run(int pr,int pc,bool staged=false) {
     DdlaHandle_t h=nullptr;DDLA_CHECK(ddlaInit(h,Backend));DDLA_CHECK(ddlaSet(h,MPI_COMM_WORLD,pr,pc));
+    if(staged)DDLA_CHECK(ddlaSetCommunication(h,DdlaCommunication::HostStagedMPI));
     int cases=0;
     checks<Backend,float,false>(h,cases);checks<Backend,double,false>(h,cases);
     checks<Backend,float,true>(h,cases);checks<Backend,double,true>(h,cases);
@@ -147,10 +152,13 @@ int main(int argc,char**argv) {
         int np=1;MPI_Comm_size(MPI_COMM_WORLD,&np);
         const int pr=argc>2?std::stoi(argv[2]):1,pc=argc>3?std::stoi(argv[3]):np;
         if(pr*pc!=np)throw std::runtime_error("grid does not match ranks");
+        const bool staged=argc==5 && std::string(argv[4])=="staged";
+        if(argc>5 || (argc==5 && (!staged || mode!="gpu")))
+            throw std::runtime_error("optional staged transport requires gpu mode");
         setenv("DDLA_PGEMM_KPANEL","6",1);
         if(mode!="gpu")run<DdlaBackend::CPU>(pr,pc);
 #if DDLA_HAS_GPU
-        if(mode!="cpu")run<DdlaBackend::GPU>(pr,pc);
+        if(mode!="cpu")run<DdlaBackend::GPU>(pr,pc,staged);
 #endif
         MPI_Finalize();return 0;
     }catch(const std::exception&e){std::cerr<<e.what()<<'\n';MPI_Abort(MPI_COMM_WORLD,1);return 1;}

@@ -359,6 +359,33 @@ void pgemm_workspace_size(
     *host_bytes = detail::padded_bytes<char>(panel_a_bytes[1]) + detail::padded_bytes<char>(panel_b_bytes[1]);
 }
 
+std::array<std::size_t,2> pgemm_staging_bytes(const DdlaHandle_t& h,Algorithm algorithm,
+    bool product,char ta,char tb,int m,int n,int k,bool beta_is_nonzero,
+    const int* da,const int* db,const int* dc,
+    std::size_t a_bytes,std::size_t b_bytes,std::size_t c_bytes)
+{
+    std::array<std::size_t,2> bytes{};
+    if(h->backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI ||
+       !product || !m || !n || !k)return bytes;
+    // Every supported domain uses native local GEMM on one process.
+    if(h->nprocs==1)return bytes;
+    if(algorithm!=Algorithm::AB)
+        return stationary_staging_bytes(h,algorithm==Algorithm::BC,ta,tb,m,n,k,beta_is_nonzero,
+            da,db,dc,algorithm==Algorithm::BC?b_bytes:a_bytes,c_bytes);
+    const int block=ab_block(ta,da);
+    // Exactly the descriptor blocks transported by SUMMA, independent of how
+    // many such blocks a local GEMM aggregates. Only geometry is visited.
+    for(int g=0;g<k;) {
+        const int width=std::min(block,k-g);
+        pblas::staging_max(bytes,pblas::panel_staging_bytes(h,true,ta,
+            ta=='N'?m:width,ta=='N'?width:m,ta=='N'?0:g,ta=='N'?g:0,da,dc,a_bytes));
+        pblas::staging_max(bytes,pblas::panel_staging_bytes(h,false,tb,
+            tb=='N'?width:n,tb=='N'?n:width,tb=='N'?g:0,tb=='N'?0:g,db,dc,b_bytes));
+        g+=width;
+    }
+    return bytes;
+}
+
 // Component 3.
 template <DdlaBackend Backend, typename T, typename TA, typename TB>
 void pgemm_run(
@@ -448,6 +475,14 @@ void run(
                                         descA, descB, descC, &backend_bytes, &host_bytes);
         backend_work.resize(backend_bytes);
         host_work.resize(host_bytes);
+        if constexpr(Backend==DdlaBackend::GPU) {
+            if(handle->communication()==DdlaCommunication::HostStagedMPI) {
+                const auto staged=pgemm_staging_bytes(handle,algorithm,!scale_only,transa,transb,
+                    m,n,k,beta!=T(0),descA,descB,descC,
+                    sizeof(TA),sizeof(TB),sizeof(T));
+                (void)handle->host_buffers<std::byte>(staged[0],staged[1]);
+            }
+        }
     };
     if (handle->nprocs > 1)
         detail::agree_local(handle, "pgemm workspace preparation", prepare);

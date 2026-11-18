@@ -53,7 +53,16 @@ void pgemm_workspace_size(const DdlaHandle_t& h, Algorithm algorithm, int panel_
                           const int* da, const int* db, const int* dc,
                           std::size_t* backend_bytes, std::size_t* host_bytes);
 
-// Component 3: C := alpha*op(A)*op(B) + beta*C.  No validation, no allocation.
+// Exact two-slot HostStagedMPI high water for the selected branch. Pure
+// descriptor geometry, no allocation or collectives; CPU/CCL/MPI return zero.
+std::array<std::size_t,2> pgemm_staging_bytes(const DdlaHandle_t& h,Algorithm algorithm,
+    bool product,char ta,char tb,int m,int n,int k,bool beta_is_nonzero,
+    const int* da,const int* db,const int* dc,
+    std::size_t a_bytes,std::size_t b_bytes,std::size_t c_bytes);
+
+// Component 3: C := alpha*op(A)*op(B) + beta*C. No geometry validation or
+// algorithm workspace allocation. HostStagedMPI raw borrowers can reserve
+// pgemm_staging_bytes in their owning preparation before execution.
 template <DdlaBackend Backend, typename T, typename TA = T, typename TB = T>
 void pgemm_run(const DdlaHandle_t& h, Algorithm algorithm, int panel_width, char ta, char tb,
                int m, int n, int k, const T& alpha,
