@@ -153,30 +153,22 @@ void ptrtrs_run(const DdlaHandle_t& handle,
                 const_cast<T*>(A),array_descA[DDLA_LLD_],B,array_descB[DDLA_LLD_]);
             return;
         }
-        int nprows = 0, npcols = 0, myprow = -1, mypcol = -1;
-        ddlaGetGridDims(handle, nprows, npcols);
-        ddlaGetGridCoords(handle, myprow, mypcol);
+        const bool left = side == 'L';
+        const int order = left ? m : n;
+        const int nb = array_descA[DDLA_MB_];
+        const int lda = array_descA[DDLA_LLD_];
+        const int ldb = array_descB[DDLA_LLD_];
+        const int row = handle->myprow_, col = handle->mypcol_;
+        const int pr = handle->nprows_, pc = handle->npcols_;
+        const int coord = left ? row : col;
+        const int procs = left ? pr : pc;
+        const int source = array_descA[left ? DDLA_RSRC_ : DDLA_CSRC_];
+        const int local_order = num_loc(order, nb, coord, source, procs);
+        const int ml = num_loc(m, array_descB[DDLA_MB_], row, array_descB[DDLA_RSRC_], pr);
+        const int nl = num_loc(n, array_descB[DDLA_NB_], col, array_descB[DDLA_CSRC_], pc);
 
-        DdlaHandle_t ddla_handle = handle;
-        int nb = array_descA[DDLA_MB_];
-        int lldA = array_descA[DDLA_LLD_];
-        int lldB = array_descB[DDLA_LLD_];
-
-
-        // Order of the triangular system: op(A) is n_solve x n_solve, matching the
-        // rows of B for side='L' (B is m x n) and the columns of B for side='R'.
-        const int n_solve = (side == 'L') ? m : n;
-        // The descriptor may describe a matrix larger than the logical sub-matrix
-        // (leading-block, anchored at global (0,0)); all local extents below are
-        // derived from the logical dims via num_loc so nothing beyond the leading
-        // block is ever touched.
-        const int m_loc_A = num_loc(n_solve, array_descA[DDLA_MB_], myprow, array_descA[DDLA_RSRC_], nprows);
-        const int n_loc_A = num_loc(n_solve, array_descA[DDLA_NB_], mypcol, array_descA[DDLA_CSRC_], npcols);
-        const int m_loc_B = num_loc(m, array_descB[DDLA_MB_], myprow, array_descB[DDLA_RSRC_], nprows);
-        const int n_loc_B = num_loc(n, array_descB[DDLA_NB_], mypcol, array_descB[DDLA_CSRC_], npcols);
-
-        // The scratch, in the order ptrtrs_workspace_size counts it; the rest is
-        // the panel transport's.
+        // The scratch layout is shared with ptrtrs_workspace_size. The remaining
+        // space belongs to panel transport; no allocation occurs in the sweep.
         std::size_t count[3];
         scratch_counts(handle, side, m, n, array_descA, array_descB, count);
         char* w = static_cast<char*>(backend_work);
@@ -188,192 +180,60 @@ void ptrtrs_run(const DdlaHandle_t& handle,
         void* const transport_work = w;
         const std::size_t transport_bytes = backend_bytes - used;
 
-        int owner_row, owner_col;
-        int mm_row_start, mm_col_start, mm_row_step, mm_col_step;
-        int64_t A_offset, B_offset;
+        // Left solves visit lower op(A) forward and upper op(A) backward.
+        // Right solves reverse that order; both update the unsolved part of B.
+        const bool lower = (uplo == 'L') == (trans == 'N');
+        const bool backward = left ? !lower : lower;
+        const int blocks = (order - 1) / nb + 1;
+        for (int step = 0; step < blocks; ++step) {
+            const int k = (backward ? blocks - 1 - step : step) * nb;
+            const int width = std::min(nb, order - k);
+            const int ar = num_loc(k, nb, row, array_descA[DDLA_RSRC_], pr);
+            const int ac = num_loc(k, nb, col, array_descA[DDLA_CSRC_], pc);
+            const int owner_row = indxg2p(k, nb, array_descA[DDLA_RSRC_], pr);
+            const int owner_col = indxg2p(k, nb, array_descA[DDLA_CSRC_], pc);
+            const int local_k = left ? ar : ac;
+            const bool owns_block = coord == (left ? owner_row : owner_col);
+            const int local_width = owns_block ? width : 0;
 
-        if(side == 'L'){
-            // Left solve: B := op(A)^{-1} * B. Block forward/backward substitution:
-            // at each diagonal block, trsm on the owner row of B, broadcast the
-            // solved block row, then gemm-update the remaining rows of B.
-            const bool solve_backward = (uplo == 'U' && trans == 'N') || (uplo == 'L' && trans != 'N');
-            int n_s_start,n_s_end,n_s_step;
-            if(solve_backward){
-                n_s_start = n_solve % nb == 0 ? n_solve - nb : n_solve - n_solve % nb;
-                n_s_end = -nb;
-                n_s_step = -nb;
-            }else{
-                n_s_start = 0;
-                n_s_end = n_solve % nb == 0 ? n_solve : n_solve - n_solve % nb + nb;
-                n_s_step = nb;
+            if (row == owner_row && col == owner_col) {
+                DDLA_CHECK(ddlaMemcpy2D(handle, block_diag, std::size_t(width) * sizeof(T),
+                    A + ar + std::size_t(ac) * lda, std::size_t(lda) * sizeof(T),
+                    std::size_t(width) * sizeof(T), width));
             }
-            for(int n_s = n_s_start; n_s != n_s_end; n_s += n_s_step){
-                int nb_real = std::min(nb, n_solve - n_s);
-
-                mm_row_start = num_loc(n_s, nb, myprow, array_descA[DDLA_RSRC_], nprows);
-                mm_col_start = num_loc(n_s, nb, mypcol, array_descA[DDLA_CSRC_], npcols);
-
-                owner_row = indxg2p(n_s, nb, array_descA[DDLA_RSRC_], nprows);
-                owner_col = indxg2p(n_s, nb, array_descA[DDLA_CSRC_], npcols);
-
-                if(myprow == owner_row)
-                    mm_row_step = nb_real;
-                else
-                    mm_row_step = 0;
-                if(mypcol == owner_col)
-                    mm_col_step = nb_real;
-                else
-                    mm_col_step = 0;
-
-                if(myprow == owner_row && mypcol == owner_col){
-                    DDLA_CHECK(ddlaMemcpy2D(ddla_handle, block_diag, nb_real * sizeof(T),
-                                            A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA * sizeof(T),
-                                            nb_real * sizeof(T), nb_real));
-                }
-                DDLA_CHECK(ddlaSynchronize(ddla_handle));
-                // 广播当前块行
-                if(myprow == owner_row){
-                    commBcast<Backend>(ddla_handle, CommScope::Row, block_diag, (std::size_t)nb_real * nb_real, owner_col);
-                    blas_impl::trsm_run<Backend, T>(ddla_handle, 'L', uplo, trans, diag,
-                        nb_real, n_loc_B, (T)1.0,
-                        block_diag, nb_real,
-                        B + mm_row_start, lldB
-                    );
-                }
-                pblas::broadcast_panel<Backend, T>(handle, false, nb_real, n, B, n_s, 0, array_descB, block_B);
-                int length_block_A;
-                if(trans != 'N'){
-                    if(uplo == 'L'){
-                        A_offset = mm_row_start;
-                        length_block_A = mm_col_start;
-                    }else{
-                        // U^H solve: gather the row panel to the right of the diagonal.
-                        A_offset = mm_row_start + std::size_t(mm_col_start + mm_col_step) * array_descA[DDLA_LLD_];
-                        length_block_A = n_loc_A - mm_col_start - mm_col_step;
-                    }
-                }else{
-                    if(uplo == 'L'){
-                        length_block_A = m_loc_A - mm_row_start - mm_row_step;
-                        A_offset = mm_row_start + mm_row_step + std::size_t(mm_col_start) * array_descA[DDLA_LLD_];
-                    }else{
-                        // U solve: gather the column panel above the diagonal.
-                        length_block_A = mm_row_start;
-                        A_offset = std::size_t(mm_col_start) * array_descA[DDLA_LLD_];
-                    }
-                }
-                const auto panel=solve_panel(side,uplo,trans,n_solve,n_s,nb_real);
-                pblas::panel_run<Backend, T>(handle, true, trans, panel.m, panel.n, A, panel.i, panel.j, array_descA,
-                    array_descA, block_A, transport_work, transport_bytes, host_work, host_bytes);
-                if(solve_backward){
-                    length_block_A = mm_row_start;
-                    B_offset = 0;
-                }else{
-                    length_block_A = m_loc_A - mm_row_start - mm_row_step;
-                    B_offset = mm_row_start + mm_row_step;
-                }
-                DDLA_CHECK(ddlaSynchronize(ddla_handle));
-                if(length_block_A > 0){
-                    blas_impl::gemm_run<Backend, T>(ddla_handle, 'N', 'N',
-                        length_block_A, n_loc_B, nb_real,
-                        (T)-1.0,
-                        block_A, length_block_A,
-                        block_B, nb_real,
-                        (T)1.0,
-                        B + B_offset, lldB);
-                }
-                DDLA_CHECK(ddlaSynchronize(ddla_handle));
+            DDLA_CHECK(ddlaSynchronize(handle));
+            if (owns_block) {
+                commBcast<Backend>(handle, left ? CommScope::Row : CommScope::Col,
+                    block_diag, std::size_t(width) * width, left ? owner_col : owner_row);
+                blas_impl::trsm_run<Backend, T>(handle, side, uplo, trans, diag,
+                    left ? width : ml, left ? nl : width, T(1), block_diag, width,
+                    B + (left ? std::size_t(local_k) : std::size_t(local_k) * ldb), ldb);
             }
-        }else{
-            // Right solve: X := B * op(A)^{-1}, i.e. X * op(A) = B. Column-mirror of
-            // the left solve: trsm on the owner column of B, broadcast the solved
-            // block column, then gemm-update the remaining columns of B with the
-            // row panel of A on the far side of the diagonal block.
-            const bool solve_backward = (uplo == 'L' && trans == 'N') || (uplo == 'U' && trans != 'N');
-            const bool far_right = !solve_backward;
-            int n_s_start,n_s_end,n_s_step;
-            if(solve_backward){
-                n_s_start = n_solve % nb == 0 ? n_solve - nb : n_solve - n_solve % nb;
-                n_s_end = -nb;
-                n_s_step = -nb;
-            }else{
-                n_s_start = 0;
-                n_s_end = n_solve % nb == 0 ? n_solve : n_solve - n_solve % nb + nb;
-                n_s_step = nb;
+
+            // Share the solved B row/column, then pack the corresponding panel
+            // of op(A). solve_panel also supplies the host-staging prediction.
+            pblas::broadcast_panel<Backend, T>(handle, !left,
+                left ? width : m, left ? n : width, B, left ? k : 0, left ? 0 : k,
+                array_descB, block_B);
+            const auto panel = solve_panel(side, uplo, trans, order, k, width);
+            pblas::panel_run<Backend, T>(handle, left, trans, panel.m, panel.n,
+                A, panel.i, panel.j, array_descA, array_descA, block_A,
+                transport_work, transport_bytes, host_work, host_bytes);
+
+            const int first = backward ? 0 : local_k + local_width;
+            const int length = backward ? local_k : local_order - first;
+            DDLA_CHECK(ddlaSynchronize(handle));
+            if (left) {
+                if (length > 0)
+                    blas_impl::gemm_run<Backend, T>(handle, 'N', 'N', length, nl, width,
+                        T(-1), block_A, length, block_B, width, T(1), B + first, ldb);
+            } else {
+                if (length > 0 && ml > 0)
+                    blas_impl::gemm_run<Backend, T>(handle, 'N', 'N', ml, length, width,
+                        T(-1), block_B, ml, block_A, width, T(1),
+                        B + std::size_t(first) * ldb, ldb);
             }
-            for(int n_s = n_s_start; n_s != n_s_end; n_s += n_s_step){
-                int nb_real = std::min(nb, n_solve - n_s);
-
-                mm_row_start = num_loc(n_s, nb, myprow, array_descA[DDLA_RSRC_], nprows);
-                mm_col_start = num_loc(n_s, nb, mypcol, array_descA[DDLA_CSRC_], npcols);
-
-                owner_row = indxg2p(n_s, nb, array_descA[DDLA_RSRC_], nprows);
-                owner_col = indxg2p(n_s, nb, array_descA[DDLA_CSRC_], npcols);
-
-                if(myprow == owner_row)
-                    mm_row_step = nb_real;
-                else
-                    mm_row_step = 0;
-                if(mypcol == owner_col)
-                    mm_col_step = nb_real;
-                else
-                    mm_col_step = 0;
-
-                if(myprow == owner_row && mypcol == owner_col){
-                    DDLA_CHECK(ddlaMemcpy2D(ddla_handle, block_diag, nb_real * sizeof(T),
-                                            A + mm_row_start + std::size_t(mm_col_start) * lldA, lldA * sizeof(T),
-                                            nb_real * sizeof(T), nb_real));
-                }
-                DDLA_CHECK(ddlaSynchronize(ddla_handle));
-                // broadcast the diagonal block within the column, then solve the
-                // block column of B on the owner column's processes
-                if(mypcol == owner_col){
-                    commBcast<Backend>(ddla_handle, CommScope::Col, block_diag, (std::size_t)nb_real * nb_real, owner_row);
-                    blas_impl::trsm_run<Backend, T>(ddla_handle, 'R', uplo, trans, diag,
-                        m_loc_B, nb_real, (T)1.0,
-                        block_diag, nb_real,
-                        B + std::size_t(mm_col_start) * lldB, lldB
-                    );
-                }
-                // gather the solved block column of B (local part: m_loc x nb_real)
-                pblas::broadcast_panel<Backend, T>(handle, true, m, nb_real, B, 0, n_s, array_descB, block_B);
-                // gather the far-side panel of A: for trans='N' the row panel of A
-                // on the far side of the diagonal block; for trans!='N' the column
-                // panel of A on the far side, transposed during the gather.
-                int length_block_A;
-                if(trans == 'N'){
-                    if(far_right){
-                        A_offset = mm_row_start + std::size_t(mm_col_start + mm_col_step) * array_descA[DDLA_LLD_];
-                        length_block_A = n_loc_A - mm_col_start - mm_col_step;
-                        B_offset = std::size_t(mm_col_start + mm_col_step) * lldB;
-                    }else{
-                        A_offset = mm_row_start;
-                        length_block_A = mm_col_start;
-                        B_offset = 0;
-                    }
-                }else{
-                    if(far_right){
-                        length_block_A = n_loc_A - mm_col_start - mm_col_step;
-                        B_offset = std::size_t(mm_col_start + mm_col_step) * lldB;
-                    }else{
-                        length_block_A = mm_col_start;
-                        B_offset = 0;
-                    }
-                }
-                const auto panel=solve_panel(side,uplo,trans,n_solve,n_s,nb_real);
-                pblas::panel_run<Backend, T>(handle, false, trans, panel.m, panel.n, A, panel.i, panel.j, array_descA,
-                    array_descA, block_A, transport_work, transport_bytes, host_work, host_bytes);
-                DDLA_CHECK(ddlaSynchronize(ddla_handle));
-                if(length_block_A > 0 && m_loc_B > 0){
-                    blas_impl::gemm_run<Backend, T>(ddla_handle, 'N', 'N',
-                        m_loc_B, length_block_A, nb_real,
-                        (T)-1.0,
-                        block_B, m_loc_B,
-                        block_A, nb_real,
-                        (T)1.0,
-                        B + B_offset, lldB);
-                }
-                DDLA_CHECK(ddlaSynchronize(ddla_handle));
-            }
+            DDLA_CHECK(ddlaSynchronize(handle));
         }
     } catch (...) {
         // Retire queued host reads before the caller reuses or releases scratch.
