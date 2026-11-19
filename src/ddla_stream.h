@@ -94,6 +94,12 @@ public:
         return result;
     }
 
+    // Retained vector capacities in bytes; excludes allocator and vendor storage.
+    std::array<std::size_t, 2> host_buffer_capacities() const noexcept
+    {
+        return {host_buffers_[0].capacity(), host_buffers_[1].capacity()};
+    }
+
     void* level_queue();
     int getLocalDevice(MPI_Comm local_comm) const;
     void set_local_device(int dev);

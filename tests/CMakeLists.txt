@@ -202,6 +202,11 @@ add_test_executable(test_workspace_one_stage)
 add_test_executable(test_workspace_history)
 add_test_executable(test_workspace_alias_storage)
 add_test_executable(test_workspace_pheevd)
+add_test_executable(test_workspace_phegvd)
+if(TARGET test_workspace_phegvd)
+    target_link_libraries(test_workspace_phegvd PRIVATE ${CMAKE_DL_LIBS})
+    target_compile_options(test_workspace_phegvd PRIVATE -g)
+endif()
 add_test_executable(test_workspace_householder)
 add_test_executable(test_workspace_host_accum)
 add_test_executable(test_workspace_cpu_replay)
@@ -230,7 +235,7 @@ endif()
 if(TARGET workspace_trace)
     foreach(_traced_test test_workspace_core test_workspace_write_matrix test_workspace_transfer
                          test_workspace_pblas test_workspace_factorizations test_workspace_spectral
-                         test_workspace_solvers test_workspace_trace test_workspace_pgesvd
+                         test_workspace_solvers test_workspace_trace test_workspace_pgesvd test_workspace_phegvd
                          test_pstedc test_workspace_pstedc test_workspace_one_stage
                          test_workspace_history test_workspace_alias_storage test_workspace_householder
                          test_workspace_host_accum test_workspace_cpu_replay test_workspace_gpu_replay
