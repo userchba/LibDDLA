@@ -37,5 +37,19 @@ Completed remote build/source directories and local work are removed after
 collection. Raw remote evidence is retained by the controller for 30 days.
 The Mac must remain awake and connected throughout a full run.
 
-Before registration this directory is preparation only. Check the task status
-for actual registration, service and run results.
+## Starting the native runner
+
+macOS may deny a LaunchAgent access to files inside Downloads. On this Mac the
+service was removed after that denial; use the prepared foreground launcher:
+
+```sh
+/bin/bash /Users/chenhaobo/Downloads/sai-libddla-runner/mac-setup/macos-sai-20261120/start-macos.command
+```
+
+Keep that Terminal session open. The launcher prevents idle sleep only while
+the runner is active. Registration remains saved when the listener stops, but
+this setup does not provide automatic startup after login or reboot.
+
+Local setup checks, run identifiers and collected evidence are kept in
+`/Users/chenhaobo/Downloads/sai-libddla-runner/mac-setup/macos-sai-20261120`.
+No registration token is stored in those setup files.
