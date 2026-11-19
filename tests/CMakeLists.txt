@@ -923,6 +923,19 @@ if(UNIX AND NOT APPLE)
     endif()
 endif()
 
+# Isolated algorithm feasibility targets. Heavy suites are launched explicitly
+# by the task helper, not added to the production/default CTest regression list.
+foreach(_algorithm_test test_pgesvd_shape)
+    add_executable(${_algorithm_test} EXCLUDE_FROM_ALL ${_algorithm_test}.cpp)
+    target_include_directories(${_algorithm_test} PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests" "${PROJECT_SOURCE_DIR}/src")
+    target_compile_features(${_algorithm_test} PRIVATE cxx_std_17)
+    target_compile_options(${_algorithm_test} PRIVATE -g)
+    target_link_libraries(${_algorithm_test} PRIVATE ddla_lib ${CMAKE_DL_LIBS})
+    apply_test_connector_defs(${_algorithm_test})
+    add_dependencies(${_algorithm_test} workspace_trace)
+endforeach()
+
 add_test_executable(test_stedc)
 set_tests_properties(test_stedc_mpi PROPERTIES LABELS cpu TIMEOUT 180)
 if(DDLA_HAS_GPU)

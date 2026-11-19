@@ -807,6 +807,17 @@ Only QR and QL are implemented; right-side LQ and RQ forms are not provided.
 | `pgebrd` | Householder bidiagonalization `A = Q·B·P^H` (ScaLAPACK `PxGEBRD`; upper bidiagonal for m >= n, lower for m < n; LAPACK `?GEBRD` storage; host `d`, `e`, `tauq`, `taup` of global length, replicated) |
 | `punmbr` | Apply `Q`/`Q^H` from the left or `P`/`P^H` from the right (ScaLAPACK `PxUNMBR`; vect='Q' with side='L', vect='P' with side='R') |
 
+`pgesvd` uses direct bidiagonal reduction by default. `DDLA_SVD_SHAPE=direct`
+(also unset or empty) retains that path. Set `DDLA_SVD_SHAPE=qr` explicitly to
+permit the QR-based tall/wide reduction when the aspect ratio is at least four
+and the existing distributed-memory eligibility checks pass. Ineligible layouts
+and single-rank CPU calls keep the direct path. QR can change both workspace
+and performance; it is not selected automatically. All ranks must select the
+same effective route. Invalid selector values are rejected collectively before
+native workspace preparation or matrix changes. The checked route is frozen
+for private sizing and raw execution; changing the environment does not change
+an already checked plan.
+
 **Solve semantics.** For `side='L'` the right-hand side B is `n × nrhs` and
 the system is `op(A)·X = B`; for `side='R'` B is `nrhs × n` and the system is
 `X·op(A) = B`.  The LU-family solves (`pgetrs`, `pgetrs_nopiv`, `pgetrs_bpiv`,
