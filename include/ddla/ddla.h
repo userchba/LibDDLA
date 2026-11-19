@@ -2316,6 +2316,28 @@ void sygvd(const DdlaHandle_t& handle, char jobz, char uplo, int n,
            T* A, int lda, T* B, int ldb, T* w, int* info);
 
 /**
+ * @brief Distributed type-1 Hermitian/symmetric reduction using a fixed factor.
+ *
+ * factorB is a caller-owned triangular factor, such as the result of ppotrf.
+ * For UPLO='L', B=L L^H and A becomes L^-1 A L^-H. For UPLO='U',
+ * B=U^H U and A becomes U^-H A U^-1. Only the selected input triangles
+ * are read. The complete leading n-by-n A is written with real complex
+ * diagonals; factorB, its unused triangle, and all parent/padding entries
+ * remain unchanged. A and factorB must have disjoint active spans.
+ *
+ * A/factorB need matching square source-zero descriptor blocks and extents
+ * covering n-by-n. The caller supplies a valid factor with nonzero diagonal;
+ * this operation neither factors B nor tests positive definiteness. It
+ * supports only this type-1 congruence. Workspace is managed internally;
+ * matrix-sized intermediates remain distributed, with bounded block storage
+ * and descriptor-rounding overhead. n=0 accesses no matrix entries.
+ * Invalid arguments or rank-inconsistent metadata throw collectively.
+ */
+template<typename T>
+void phegst(const DdlaHandle_t& handle, char uplo, int n,
+            T* A, const int* descA, const T* factorB, const int* descB);
+
+/**
  * @brief Distributed generalized Hermitian-definite solve A Z = B Z diag(w).
  *
  * Returns all n ascending host eigenvalues and, for V, the lowest nev

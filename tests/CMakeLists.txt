@@ -936,6 +936,22 @@ foreach(_algorithm_test test_pgesvd_shape)
     add_dependencies(${_algorithm_test} workspace_trace)
 endforeach()
 
+# The public fixed-factor test explicitly selects CPU by default in dual builds.
+add_test_executable(test_phegst)
+target_link_libraries(test_phegst PRIVATE ${CMAKE_DL_LIBS})
+add_dependencies(test_phegst workspace_trace)
+set_tests_properties(test_phegst_mpi PROPERTIES LABELS cpu TIMEOUT 180
+    ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:workspace_trace>;DDLA_WORKSPACE_TRACE_REQUIRED=1;OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+if(DDLA_HAS_GPU)
+    add_test(NAME test_phegst_gpu_mpi
+        COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${DDLA_TEST_NP}
+            ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_phegst> --gpu
+            ${MPIEXEC_POSTFLAGS})
+    set_tests_properties(test_phegst_gpu_mpi PROPERTIES LABELS gpu
+        PROCESSORS ${DDLA_TEST_NP} TIMEOUT 180
+        ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:workspace_trace>;DDLA_WORKSPACE_TRACE_REQUIRED=1;OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+endif()
+
 add_test_executable(test_stedc)
 set_tests_properties(test_stedc_mpi PROPERTIES LABELS cpu TIMEOUT 180)
 if(DDLA_HAS_GPU)

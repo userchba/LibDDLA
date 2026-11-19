@@ -1,6 +1,6 @@
 {
-  "public_backend_overloads": 142,
-  "public_concrete_specializations": 518,
+  "public_backend_overloads": 143,
+  "public_concrete_specializations": 522,
   "pstedc": "already handle-only, unchanged",
   "type_policy_sources": {
     "dgmm": "src/BLAS/dgmm.cpp TYPES",
@@ -14,7 +14,8 @@
     "mixed_alpha": "src/BLAS/scal.cpp,scalBatched.cpp; src/PBLAS/pscal.cpp",
     "mixed_R": "matching explicit float/double definitions in source family",
     "sygvd": "src/Eigensolver/hegvd.cpp LOCAL",
-    "hegvd": "src/Eigensolver/hegvd.cpp LOCAL"
+    "hegvd": "src/Eigensolver/hegvd.cpp LOCAL",
+    "phegst": "src/Eigensolver/phegst.cpp PHEGST_INSTANTIATE"
   },
   "overloads": [
     {
@@ -2237,6 +2238,22 @@
       ],
       "public_signature": "void pdiag_logdet(const DdlaHandle_t& h, int n, const T* A, const int* descA, std::complex<typename real_type<T>::type>& result)",
       "private_signature": "void pdiag_logdet(const DdlaHandle_t& h, int n, const T* A, const int* descA, std::complex<typename real_type<T>::type>& result)",
+      "supported_scalar_arguments": [
+        "float",
+        "double",
+        "std::complex<float>",
+        "std::complex<double>"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 142,
+      "name": "phegst",
+      "scalar_parameters": [
+        "T"
+      ],
+      "public_signature": "void phegst(const DdlaHandle_t& handle, char uplo, int n, T* A, const int* descA, const T* factorB, const int* descB)",
+      "private_signature": "void phegst(const DdlaHandle_t& handle, char uplo, int n, T* A, const int* descA, const T* factorB, const int* descB)",
       "supported_scalar_arguments": [
         "float",
         "double",

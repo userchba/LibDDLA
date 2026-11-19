@@ -1851,6 +1851,21 @@ void sygvd(const DdlaHandle_t& handle, char jobz, char uplo, int n, T* A, int ld
 template void sygvd<float>(const DdlaHandle_t& handle, char jobz, char uplo, int n, float* A, int lda, float* B, int ldb, float* w, int* info);
 template void sygvd<double>(const DdlaHandle_t& handle, char jobz, char uplo, int n, double* A, int lda, double* B, int ldb, double* w, int* info);
 
+template <typename T>
+void phegst(const DdlaHandle_t& handle, char uplo, int n, T* A, const int* descA, const T* factorB, const int* descB)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return phegst<DdlaBackend::GPU, T>(handle, uplo, n, A, descA, factorB, descB);
+#endif
+    return phegst<DdlaBackend::CPU, T>(handle, uplo, n, A, descA, factorB, descB);
+}
+
+template void phegst<float>(const DdlaHandle_t& handle, char uplo, int n, float* A, const int* descA, const float* factorB, const int* descB);
+template void phegst<double>(const DdlaHandle_t& handle, char uplo, int n, double* A, const int* descA, const double* factorB, const int* descB);
+template void phegst<std::complex<float>>(const DdlaHandle_t& handle, char uplo, int n, std::complex<float>* A, const int* descA, const std::complex<float>* factorB, const int* descB);
+template void phegst<std::complex<double>>(const DdlaHandle_t& handle, char uplo, int n, std::complex<double>* A, const int* descA, const std::complex<double>* factorB, const int* descB);
+
 template<typename T>
 void phegvd(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, T* B, const int* descB, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)
 {
