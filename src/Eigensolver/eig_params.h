@@ -16,13 +16,14 @@ namespace ddla {
 // environment variable (same pattern as DDLA_PGEMM_KPANEL in pgemm.cpp):
 //
 //   DDLA_EIG_NBW            band block size nbw (stage 1/2); ALWAYS divides nblk
-//                           (a stage-1 panel is one block column).  Default: 16
-//                           for GPU runs (real and complex) whenever nblk
-//                           is a positive multiple of 16 (nblk >= 16);
-//                           otherwise nblk. The two-stage driver can jointly choose
-//                           Householder/band64 for its measured full-vector profiles.
-//                           Tuned for nblk = 64, 128, ...;
-//                           a small nblk runs with a small nbw (slow stage 1).
+//                           (a stage-1 panel is one block column).  GPU default: 16
+//                           (real and complex) whenever nblk is a positive multiple of
+//                           16 (nblk >= 16), otherwise nblk; the two-stage driver can
+//                           jointly choose Householder/band64 for its measured
+//                           full-vector profiles.  CPU default: eig_cpu_band(nblk), the
+//                           divisor of nblk nearest the measured optimum of 48-64 (64
+//                           for nblk = 64, 128, 256, ...; 50 for nblk = 100; nblk itself
+//                           when it is below 32 or has no usable divisor).
 //                           An override must satisfy 1 <= nbw <= nblk and
 //                           nblk % nbw == 0 (the rule phe2hb/punmtr_he2hb
 //                           enforce); anything else throws
@@ -99,10 +100,34 @@ struct EigParams {
     int stripe_width;   // stage-4 stripe width
 };
 
+// CPU band width for block size nblk: a divisor of nblk (a stage-1 panel is one block
+// column).  The band chase costs O(n^2 * band) on a few threads while stages 1 and 5 lose
+// BLAS-3 efficiency below ~32, so the total is flat between 32 and 64 and rises on both
+// sides (n=4000, 8 cores, Householder chase, real / complex seconds: band 16 5.5 / 10.7,
+// 32 4.6 / 9.3, 48 4.3 / 9.0, 64 4.4 / 9.1, 100 4.8 / 9.6, 128 5.1 / 10.2; the Givens
+// chase used outside the Householder profile gains more from a narrow band).  Preference:
+// the largest divisor in [32, 64], then the smallest in (64, 128], then the largest in
+// [16, 32), then nblk itself.
+inline int eig_cpu_band(int nblk) noexcept
+{
+    if (nblk < 32) return std::max(1, nblk);
+    int in_range = 0, above = 0, below = 0;
+    for (int d = 1; d <= nblk / d; ++d) {
+        if (nblk % d != 0) continue;
+        for (const int c : {d, nblk / d}) {
+            if (c >= 32 && c <= 64) in_range = std::max(in_range, c);
+            else if (c > 64 && c <= 128) above = above ? std::min(above, c) : c;
+            else if (c >= 16 && c < 32) below = std::max(below, c);
+        }
+    }
+    return in_range ? in_range : above ? above : below ? below : nblk;
+}
+
 /// Select the eigensolver parameters for a problem of block size @p nblk.
-/// @p on_gpu selects the GPU nbw rule (16 when nblk % 16 == 0) vs nbw = nblk; the scalar
-/// type no longer matters for nbw (@p is_complex is kept for the callers).  Throws
-/// std::invalid_argument when DDLA_EIG_NBW is set to a value that does not divide nblk.
+/// @p on_gpu selects the GPU nbw rule (16 when nblk % 16 == 0, else nblk) vs the CPU rule
+/// eig_cpu_band(nblk); the scalar type does not matter for nbw (@p is_complex is kept for
+/// the callers).  Throws std::invalid_argument when DDLA_EIG_NBW is set to a value that
+/// does not divide nblk.
 EigParams eig_select_params(bool is_complex, int nblk, bool on_gpu);
 
 // The band chase can hold the whole compact band on a rank. For a distributed

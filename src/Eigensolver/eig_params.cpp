@@ -64,11 +64,12 @@ EigParams eig_select_params(bool is_complex, int nblk, bool on_gpu)
     // (job 3599012, BASE = pre-round library at nbw=32 vs NEW at the default
     // 16, nblk=32, means of 2 rounds): n=10000 12.37 -> 8.74 s (ELPA z
     // 18.57, job 3597609, same node) and n=5000 3.50 -> 2.42 s (ELPA 4.18).
-    // CPU runs use nbw = nblk (the former ELPA2 floors, 64 real / 32 complex, rounded up to
-    // a multiple of nblk, could exceed nblk and are gone with the multi-block panels).
+    // CPU runs use eig_cpu_band(nblk): a divisor of nblk near 48-64.  nbw = nblk made the
+    // band chase the largest stage at nblk = 128 (2026-11-15, one node, n=10000, 2 ranks x
+    // 24 threads: stage 2 11.3 of 22.3 s real, 50.0 of 70.1 s complex).
     (void)is_complex;
     const int blk = (nblk > 0) ? nblk : 1;
-    int nbw = (on_gpu && nblk >= 16 && nblk % 16 == 0) ? 16 : blk;
+    int nbw = on_gpu ? ((nblk >= 16 && nblk % 16 == 0) ? 16 : blk) : eig_cpu_band(blk);
     // An env override must divide nblk (1 <= nbw <= nblk): anything else throws on every
     // rank, instead of silently falling back to the default.
     const char* nbw_s = std::getenv("DDLA_EIG_NBW");
