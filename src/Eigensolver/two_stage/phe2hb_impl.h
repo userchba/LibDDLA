@@ -81,13 +81,13 @@ void phe2hb_panel_workspace_size(const DdlaHandle_t& handle, const int* descA, i
 } // namespace spectral_impl
 
 namespace detail {
-// Private CPU stage1 policy. The measured CPU cases used NBW64 with two to
+// Private CPU stage1 policy. The measured CPU cases used NBW64 with one to
 // five ranks per owner column. Keep the whole call on one panel variant,
 // including late/partial panels and ranks with no local window rows.
 inline bool phe2hb_cpu_qr_inplace_eligible(int n,int nb,int nbw,int nprows,int npcols) noexcept
 {
     return n>=2048 && nbw==64 && nb>=nbw && nb%nbw==0 &&
-           nprows>=2 && nprows<=5 && npcols>=1;
+           nprows>=1 && nprows<=5 && npcols>=1;
 }
 
 // Requires collectively validated metadata. A recognized DDLA_QR_PANEL takes
