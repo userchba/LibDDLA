@@ -2,8 +2,10 @@
 #include "ddla_connector.h"
 
 #include <cmath>
-#include <exception>
 #include <cstdio>
+#include <cstdlib>
+#include <exception>
+#include <mutex>
 #include <stdexcept>
 #include <type_traits>
 
@@ -135,19 +137,79 @@ void* DdlaStream::level_queue()
     return stream_level;
 }
 
+#if DDLA_HAS_GPU
+namespace {
+
+// Rank of this process among the job's processes on its node, as exported by
+// the MPI launcher; -1 when the launcher exports none of these variables.
+int launcher_node_rank()
+{
+    for (const char* name : {"OMPI_COMM_WORLD_LOCAL_RANK", "MPI_LOCALRANKID", "MV2_COMM_WORLD_LOCAL_RANK",
+                             "PALS_LOCAL_RANKID"}) {
+        const char* value = std::getenv(name);
+        if (value == nullptr || *value == '\0') continue;
+        char* end = nullptr;
+        const long rank = std::strtol(value, &end, 10);
+        if (*end == '\0' && rank >= 0) return static_cast<int>(rank);
+    }
+    return -1;
+}
+
+// Node-local rank in comm, ordered by key.
+int node_rank_in(MPI_Comm comm, int key)
+{
+    int rank = 0;
+    MPI_Comm node = MPI_COMM_NULL;
+    MPI_CHECK(MPI_Comm_split_type(comm, MPI_COMM_TYPE_SHARED, key, MPI_INFO_NULL, &node));
+    MPI_CHECK(MPI_Comm_rank(node, &rank));
+    MPI_CHECK(MPI_Comm_free(&node));
+    return rank;
+}
+
+// The GPU of this process, shared by all of its GPU handles once chosen.
+std::mutex process_device_mutex;
+int process_device = -1;
+
+} // namespace
+#endif
+
+// The GPU belongs to the process, not to a handle: node-local rank among ALL
+// processes of the job (MPI_COMM_WORLD) modulo the visible devices. A handle
+// on a sub-communicator, such as one k-point pool, keeps the device that the
+// process already uses instead of picking one by its rank in the pool, which
+// would put the first rank of every pool on device 0. The node-local rank in
+// MPI_COMM_WORLD is computed collectively only when local_comm spans it;
+// otherwise it comes from the launcher, so a handle created by part of the job
+// needs no collective call outside local_comm. Without either, the node-local
+// rank in local_comm is used and the choice is not kept.
 int DdlaStream::getLocalDevice(MPI_Comm local_comm) const
 {
     if (backend == DdlaBackend::CPU) return 0;
 #if DDLA_HAS_GPU
-    int local_rank = 0;
-    MPI_Comm local = MPI_COMM_NULL;
-    MPI_CHECK(MPI_Comm_split_type(local_comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &local));
-    MPI_CHECK(MPI_Comm_rank(local, &local_rank));
-    MPI_CHECK(MPI_Comm_free(&local));
     int count = 0;
     GPU_CHECK(gpuGetDeviceCount(&count));
     if (count == 0) throw std::runtime_error("ddla: no GPU devices available");
-    return local_rank % count;
+    int world_compare = MPI_UNEQUAL;
+    MPI_CHECK(MPI_Comm_compare(local_comm, MPI_COMM_WORLD, &world_compare));
+    const bool spans_world = world_compare != MPI_UNEQUAL;
+    std::lock_guard<std::mutex> lock(process_device_mutex);
+    if (spans_world) {
+        // Every rank of the job is here, so the collective call is safe even
+        // on ranks that already chose a device. Ordering by the rank in
+        // MPI_COMM_WORLD gives the same answer for a reordered communicator.
+        int world_rank = 0;
+        MPI_CHECK(MPI_Comm_rank(MPI_COMM_WORLD, &world_rank));
+        const int world_device = node_rank_in(local_comm, world_rank) % count;
+        if (process_device < 0) process_device = world_device;
+        return process_device;
+    }
+    if (process_device >= 0) return process_device;
+    const int launcher_rank = launcher_node_rank();
+    if (launcher_rank >= 0) {
+        process_device = launcher_rank % count;
+        return process_device;
+    }
+    return node_rank_in(local_comm, 0) % count;
 #else
     (void)local_comm;
     throw std::runtime_error("ddla: GPU resources unavailable in this build");
