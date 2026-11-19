@@ -364,11 +364,11 @@ std::array<std::size_t,2> scatter_rows_staging_bytes(const DdlaHandle_t& h,int k
 // the scatter's peer list in host memory.  Every panel window has at most
 // panel_rows x k entries and nprocs - 1 peers (transfer_workspace_size).
 template <typename T>
-void scatter_rows_workspace_size(const DdlaHandle_t& h,int k,std::size_t* backend_bytes,std::size_t* host_bytes)
+void scatter_rows_workspace_size(const DdlaHandle_t& h,int k,std::size_t* backend_bytes,std::size_t* host_bytes,int column_bound)
 {
     *backend_bytes=*host_bytes=0;
     if (h->nprocs<=1 || k==0) return;
-    const std::size_t panel=std::size_t(rows_panel<T>(h,k))*k;
+    const std::size_t panel=std::size_t(rows_panel<T>(h,k))*(column_bound<0?k:std::min(k,column_bound));
     *backend_bytes=detail::padded_bytes<T>(panel)+panel*sizeof(T);
     *host_bytes=std::size_t(h->nprocs-1)*sizeof(Block<T>);
 }
@@ -402,11 +402,12 @@ void scatter_rows_check(const DdlaHandle_t& h,int k,const typename real_type<T>:
 template <DdlaBackend B,typename T>
 void scatter_rows_run(const DdlaHandle_t& h,int k,const typename real_type<T>::type* src,int lds,
     bool transpose,int m,int n,T* dst,const int* desc,
-    void* backend_work,std::size_t backend_bytes,void* host_work,std::size_t host_bytes)
+    void* backend_work,std::size_t backend_bytes,void* host_work,std::size_t host_bytes,int column_bound)
 {
     try {
         const int panel_rows=h->nprocs>1 && k>0 ? rows_panel<T>(h,k) : 0;
-        const std::size_t panel=std::size_t(panel_rows)*k;
+        assert(column_bound<0 || column_bound>=std::min(k,transpose?m:n));
+        const std::size_t panel=std::size_t(panel_rows)*(column_bound<0?k:std::min(k,column_bound));
         char* w=static_cast<char*>(backend_work);
         T* const converted=detail::take<T>(w,panel);
         const std::size_t used=w-static_cast<char*>(backend_work);
@@ -475,11 +476,11 @@ void scatter_rows(const DdlaHandle_t& h,int k,const typename real_type<T>::type*
  template void convert_rows<B,T>(const DdlaHandle_t&,const real_type<T>::type*,int,T*,int,int,int,bool); \
  template void scatter_rows<B,T>(const DdlaHandle_t&,int,const real_type<T>::type*,int,bool,int,int,T*,const int*); \
  template void scatter_rows_check<B,T>(const DdlaHandle_t&,int,const real_type<T>::type*,int,bool,int,int,T*,const int*); \
- template void scatter_rows_run<B,T>(const DdlaHandle_t&,int,const real_type<T>::type*,int,bool,int,int,T*,const int*,void*,std::size_t,void*,std::size_t)
+ template void scatter_rows_run<B,T>(const DdlaHandle_t&,int,const real_type<T>::type*,int,bool,int,int,T*,const int*,void*,std::size_t,void*,std::size_t,int)
 DDLA_FOR_EACH_BACKEND_TYPE(INST_ROWS)
 #undef INST_ROWS
 
-#define INST_ROW_SIZE(T) template void scatter_rows_workspace_size<T>(const DdlaHandle_t&,int,std::size_t*,std::size_t*)
+#define INST_ROW_SIZE(T) template void scatter_rows_workspace_size<T>(const DdlaHandle_t&,int,std::size_t*,std::size_t*,int)
 DDLA_FOR_EACH_TYPE(INST_ROW_SIZE)
 #undef INST_ROW_SIZE
 

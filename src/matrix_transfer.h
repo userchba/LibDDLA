@@ -79,10 +79,13 @@ void map_blocks(const DdlaHandle_t& h, bool scatter, const Block<T>* blocks, int
 // The scratch of scatter_rows_run: backend bytes of the converted panel, then
 // the scatter's packing of one panel (each panel_rows x k entries, panel_rows
 // = min(512, 32 MiB / (k entries), the largest share)); host bytes of the
-// scatter's peer list (nprocs - 1 blocks).  One rank or k == 0 needs nothing.
+// scatter's peer list (nprocs - 1 blocks). One rank or k == 0 needs nothing.
+// column_bound >= 0 is a prepared compact-input bound; it must cover every
+// kept column (nontranspose) or kept row (transpose). Default -1 preserves
+// the original k-wide query/run layout and schedule for existing callers.
 template <typename T>
 void scatter_rows_workspace_size(const DdlaHandle_t& h, int k,
-    std::size_t* backend_bytes, std::size_t* host_bytes);
+    std::size_t* backend_bytes, std::size_t* host_bytes, int column_bound = -1);
 template <DdlaBackend B, typename T>
 void scatter_rows_check(const DdlaHandle_t& h, int k,
     const typename real_type<T>::type* src, int lds, bool transpose,
@@ -91,7 +94,8 @@ template <DdlaBackend B, typename T>
 void scatter_rows_run(const DdlaHandle_t& h, int k,
     const typename real_type<T>::type* src, int lds, bool transpose,
     int m, int n, T* dst, const int* desc,
-    void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes);
+    void* backend_work, std::size_t backend_bytes, void* host_work, std::size_t host_bytes,
+    int column_bound = -1);
 
 template <DdlaBackend B, typename T>
 void scatter_rows(const DdlaHandle_t& h, int k,
