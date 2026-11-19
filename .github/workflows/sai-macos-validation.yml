@@ -1,0 +1,155 @@
+name: Mac to SAI GPU validation
+run-name: Mac to SAI / upstream develop
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_check:
+        description: Check the Mac and SAI connection without submitting Slurm jobs
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: libddla-macos-sai
+  cancel-in-progress: false
+
+jobs:
+  gpu:
+    if: github.repository == 'userchba/LibDDLA' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, macOS, ARM64, libddla-sai-macos]
+    environment: sai-libddla
+    timeout-minutes: 270
+    env:
+      REFERENCE_SHA: 33f6a66598ee78ed77283d0d33e8b494824f0ffa
+      ADAPTER_SHA: ${{ github.sha }}
+    steps:
+      - name: Initialize job temporary paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'LIBDDLA_MAC_ROOT=%s/libddla-macos-sai\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Checkout Mac workflow
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Checkout the controller from the reference run
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: Stardust0831/LibDDLA
+          ref: 33f6a66598ee78ed77283d0d33e8b494824f0ffa
+          path: reference-controller
+          persist-credentials: false
+
+      - name: Check native Mac and dedicated SAI account
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import platform, sys
+          if platform.system() != 'Darwin' or platform.machine() != 'arm64':
+              raise SystemExit('This workflow requires native macOS ARM64')
+          if sys.version_info < (3, 10):
+              raise SystemExit('Python 3.10 or later is required')
+          print(platform.platform(), sys.version)
+          PY
+          ssh -F "$HOME/.ssh/config" -o BatchMode=yes -o ConnectTimeout=15 \
+            libddla-ci 'test "$(id -un)" = libddla-ci && hostname && command -v sbatch && command -v python3'
+
+      - name: Prepare the pinned controller and record provenance
+        if: ${{ !inputs.runner_check }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import configparser, json, os, re, shutil, subprocess
+          from pathlib import Path
+          root = Path(os.environ['LIBDDLA_MAC_ROOT'])
+          root.mkdir(parents=True, exist_ok=False)
+          control = root / 'control'
+          shutil.copytree('reference-controller/.ci/slurm', control,
+                          ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+          cfg = configparser.ConfigParser(interpolation=None)
+          cfg.read(control / 'config.ini')
+          cfg['remote']['host_alias'] = 'libddla-ci'
+          cfg['remote']['project_root'] = '/org/org-open-sai/libddla-ci/mac-validation'
+          with (control / 'config.ini').open('w') as stream:
+              cfg.write(stream)
+          output = subprocess.check_output(
+              ['git', 'ls-remote', 'https://github.com/userchba/LibDDLA.git',
+               'refs/heads/develop'], text=True)
+          lines = output.splitlines()
+          if len(lines) != 1 or not re.fullmatch(r'[0-9a-f]{40}\trefs/heads/develop', lines[0]):
+              raise SystemExit('Cannot resolve the exact upstream develop SHA')
+          sha = lines[0].split()[0]
+          (root / 'source-sha').write_text(sha + '\n')
+          results = root / 'results'
+          results.mkdir()
+          (results / 'mac-adapter.json').write_text(json.dumps({
+              'reference_controller_sha': os.environ['REFERENCE_SHA'],
+              'mac_workflow_sha': os.environ['ADAPTER_SHA'],
+              'source_repository': 'userchba/LibDDLA', 'source_branch': 'develop',
+              'source_sha': sha, 'remote_host_alias': 'libddla-ci',
+              'remote_project_root': cfg['remote']['project_root'],
+              'configuration_changes': ['remote.host_alias', 'remote.project_root']
+          }, indent=2) + '\n')
+          print('Pinned upstream develop:', sha)
+          PY
+
+      - name: Build and run the full SAI GPU arrays
+        if: ${{ !inputs.runner_check }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec python3 -u "$LIBDDLA_MAC_ROOT/control/runner.py" \
+            --run-id "gh-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --source-sha "$(cat "$LIBDDLA_MAC_ROOT/source-sha")" \
+            --control-sha "$REFERENCE_SHA" \
+            --ssh-config "$HOME/.ssh/config" \
+            --work "$LIBDDLA_MAC_ROOT/work" \
+            --results "$LIBDDLA_MAC_ROOT/results"
+
+      - name: Publish available results and summary
+        if: ${{ always() && !inputs.runner_check }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import importlib.util, os
+          from pathlib import Path
+          path = Path('reference-controller/.ci/slurm/wait.py')
+          spec = importlib.util.spec_from_file_location('reference_wait', path)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          root = Path(os.environ['LIBDDLA_MAC_ROOT'])
+          module.collect_results(root / 'results', root / 'artifact',
+                                 Path(os.environ['GITHUB_STEP_SUMMARY']))
+          PY
+
+      - name: Upload logs, source, JUnit and structured results
+        if: ${{ always() && !inputs.runner_check }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: libddla-macos-sai-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.LIBDDLA_MAC_ROOT }}/artifact
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove this attempt's local work
+        if: ${{ always() && !inputs.runner_check }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, shutil
+          from pathlib import Path
+          root = Path(os.environ['LIBDDLA_MAC_ROOT']).resolve()
+          temporary = Path(os.environ['RUNNER_TEMP']).resolve()
+          if root.name != 'libddla-macos-sai' or not root.is_relative_to(temporary):
+              raise SystemExit('Refusing cleanup outside this job temporary directory')
+          shutil.rmtree(root / 'work', ignore_errors=True)
+          PY
