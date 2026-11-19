@@ -5,6 +5,7 @@
 // host indices, converted only at the backend boundary.
 #include <ddla/ddla.h>
 #include "pbdsdc_impl.h"
+#include "PBLAS/pblas_workspace.h"
 #include "check_agree.h"
 #include "BLAS/blas_impl.h"
 #include <ddla/ddla_vector.h>
@@ -802,6 +803,21 @@ PbdsdcPlan pbdsdc_check(const DdlaHandle_t& h,DdlaBackend backend,char uplo,int 
     pbdsdc_freeze_policy(h,p);
     return p;
 }
+
+template<class R>std::array<std::size_t,2> pbdsdc_staging_bound(const DdlaHandle_t& h,const PbdsdcPlan& p)
+{
+    std::array<std::size_t,2> high{};
+    if(p.backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || p.n<=p.leaf)return high;
+    // Every node of every value-split tree has K<=node<=n. The payload
+    // 2*K*min(global_panel,ceil(K/P)) is monotone, so the root is the tight
+    // reachable supremum; a nondeflated unsplit root attains it.
+    const int width=std::min(pbdc_panel_width(p.n,p.ranks),detail::RowShare(p.n,p.ranks).count(0));
+    high[0]=pblas::communication_bytes(2*std::size_t(p.n)*width,sizeof(R));
+    return high;
+}
+#define STAGING_BOUND(R) template std::array<std::size_t,2> pbdsdc_staging_bound<R>(const DdlaHandle_t&,const PbdsdcPlan&)
+STAGING_BOUND(float);STAGING_BOUND(double);
+#undef STAGING_BOUND
 
 // Component 2 (pbdsdc_impl.h): host [ trees | tree index | max(leaf phase, merge
 // phase) ], backend the merge arrays of PbdcRows.

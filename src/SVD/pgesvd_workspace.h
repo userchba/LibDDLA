@@ -27,6 +27,8 @@ inline int pgesvd_team_threads(const PgesvdPlan& p){return p.dc.n?p.dc.threads:0
 // (row_ld x k reals each) followed by pbdsdc' or scatter_rows' scratch.
 template<class T>
 void pgesvd_workspace_size(const DdlaHandle_t&,const PgesvdPlan&,std::size_t* backend_bytes,std::size_t* host_bytes);
+// Rank-local HostStagedMPI slots; PBDSDC contributes a deflation-independent bound.
+template<class T>std::array<std::size_t,2> pgesvd_staging_bytes(const DdlaHandle_t&,const PgesvdPlan&);
 template<DdlaBackend B,class T>
 void pgesvd_run(const DdlaHandle_t&,const PgesvdPlan&,detail::DcHostTeam*,T* A,
     typename real_type<T>::type* s,T* U,T* VT,int& info,

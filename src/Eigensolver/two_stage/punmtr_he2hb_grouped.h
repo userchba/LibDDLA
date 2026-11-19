@@ -2,6 +2,7 @@
 #define DDLA_PUNMTR_HE2HB_GROUPED_H
 #include <ddla/ddla.h>
 #include <cstddef>
+#include <array>
 #include <type_traits>
 
 namespace ddla {
@@ -77,6 +78,8 @@ template <class T>
 void grouped_stage5_workspace_size(const DdlaHandle_t&,
                                    const GroupedStage5Plan&,
                                    std::size_t* backend_bytes);
+
+template<class T>std::array<std::size_t,2> grouped_stage5_staging_bytes(const DdlaHandle_t&,const GroupedStage5Plan&);
 
 template <DdlaBackend Backend, class T>
 void grouped_stage5_run(const DdlaHandle_t&,

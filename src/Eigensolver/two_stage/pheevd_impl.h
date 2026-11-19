@@ -181,6 +181,9 @@ template <class T> class PheevdResources
             householder->release();
     }
 };
+// Pure two-slot payload high waters after topology/resources preparation.
+// Direct MPI on host band/history/tridiagonal buffers consumes no GPU cache.
+template<class T>std::array<std::size_t,2> pheevd_staging_bytes(const DdlaHandle_t&,const PheevdPlan&,const PheevdResources<T>&);
 // The solve on the caller's scratch (pheevd_workspace_size bytes). No
 // validation, no allocation.
 template <DdlaBackend B, class T>

@@ -24,6 +24,7 @@
 #include "phe2hb_impl.h"
 #include "BLAS/blas_impl.h"
 #include "QR/pgeqrf_impl.h"
+#include "PBLAS/pblas_workspace.h"
 #include "check_agree.h"
 #include "plan_util.h"
 #include "Eigensolver/pvector_redist.h"
@@ -99,6 +100,26 @@ template<class T>void phe2hb_workspace_size(const DdlaHandle_t& h,const Phe2hbPl
         +detail::padded_bytes<T>(ldc*2*nbw)+2*detail::padded_bytes<T>(ldv*nbw)
         +3*detail::padded_bytes<T>(nbw*nbw)+std::max(panel,transpose);
 }
+
+template<class T>std::array<std::size_t,2> phe2hb_staging_bytes(const DdlaHandle_t& h,const Phe2hbPlan& p)
+{
+    std::array<std::size_t,2> high{};
+    if(p.backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI)return high;
+    const auto both=[&](std::size_t count){const auto bytes=pblas::communication_bytes(std::min(count,std::size_t(INT_MAX/2)),sizeof(T));
+        high[0]=std::max(high[0],bytes);high[1]=std::max(high[1],bytes);};
+    for(int step=p.steps;step>=1;--step){
+        const int start=step*p.nbw,nc=std::min(p.n-start,p.nbw),end=start+nc-p.nbw;
+        const auto qr=qr_impl::qr_geometry(h,p.descriptor.data(),'L',end,nc,start);
+        pblas::staging_max(high,qr_impl::qr_block_staging_bytes<T>(h,qr,p.descriptor.data(),true,p.inplace,true));
+        const auto transpose=ptranspose_vectors_geometry(h,p.backend,start,nc,p.nb,p.ldv,p.ldc,false,false);
+        pblas::staging_max(high,ptranspose_vectors_staging_bytes(h,transpose,sizeof(T)));
+        both(std::size_t(p.ldv)*nc);both(std::size_t(p.nbw)*p.nbw);
+    }
+    return high;
+}
+#define STAGING_SIZE(T) template std::array<std::size_t,2> phe2hb_staging_bytes<T>(const DdlaHandle_t&,const Phe2hbPlan&)
+DDLA_FOR_EACH_TYPE(STAGING_SIZE)
+#undef STAGING_SIZE
 
 template<DdlaBackend Backend,class T>
 void phe2hb_run(const DdlaHandle_t& handle,const Phe2hbPlan& policy,T* A,T* tmat,int& info,

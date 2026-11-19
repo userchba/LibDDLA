@@ -1,4 +1,5 @@
 #include "pvector_redist.h"
+#include "PBLAS/pblas_workspace.h"
 
 #include "ddla_connector.h"
 #include "check_agree.h"
@@ -160,6 +161,19 @@ void preduce_add_vectors_workspace_size(const DdlaHandle_t& handle,int n,int nvc
     const auto packed_storage=ld_src==sum_ld?std::size_t(1):sum_storage;
     *backend_bytes=detail::padded_bytes<T>(sum_storage)+
         detail::padded_bytes<T>(std::max(packed_storage,ptranspose_vectors_work_elems(handle,n,nvc,nb)));
+}
+
+std::array<std::size_t,2> ptranspose_vectors_staging_bytes(const DdlaHandle_t& h,
+    const VectorRedistPlan& p,std::size_t width)
+{
+    std::array<std::size_t,2> high{};
+    if(p.backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || !p.n||!p.nvc)return high;
+    for(int round=0;round<p.lcm;++round) {
+        if(p.mypcol!=round%p.npcols)continue;
+        const int count=round_block_count(round,p.nblks,p.lcm);
+        high[0]=std::max(high[0],pblas::communication_bytes(std::size_t(p.nb)*count*p.nvc,width));
+    }
+    return high;
 }
 
 template <DdlaBackend Backend, typename T>

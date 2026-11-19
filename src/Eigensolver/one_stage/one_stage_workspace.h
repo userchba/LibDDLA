@@ -36,6 +36,7 @@ template<class T> OneStagePlan one_stage_check(const DdlaHandle_t&,DdlaBackend,c
 // (d | e, 2n), then the phases' host scratch, the largest of them.
 template<class T> void one_stage_workspace_size(const DdlaHandle_t&,const OneStagePlan&,
     std::size_t* backend_bytes,std::size_t* host_bytes);
+template<class T>std::array<std::size_t,2> one_stage_staging_bytes(const DdlaHandle_t&,const OneStagePlan&);
 
 // Prepare both the reduction cache policy and the row solver's upload fence.
 // Inherited reduction controls remain available to direct workspace callers.

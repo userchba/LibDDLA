@@ -28,6 +28,7 @@ Phe2hbPlan phe2hb_check(const DdlaHandle_t&,DdlaBackend,int,const void*,const in
 // with.
 template<class T>void phe2hb_workspace_size(const DdlaHandle_t& h,const Phe2hbPlan& p,T* A,T* tau,
     std::size_t* backend_bytes,std::size_t* host_bytes);
+template<class T>std::array<std::size_t,2> phe2hb_staging_bytes(const DdlaHandle_t&,const Phe2hbPlan&);
 // Stage 1 on the caller's scratch.  No validation, no allocation.
 template<DdlaBackend B,class T>void phe2hb_run(const DdlaHandle_t&,const Phe2hbPlan&,T* A,T* tmat,int& info,
     void* backend_work,std::size_t backend_bytes,void* host_work,std::size_t host_bytes);

@@ -28,6 +28,7 @@
 #include "check_agree.h"
 #include "BLAS/blas_impl.h"
 #include "comm_traits.h"
+#include "PBLAS/pblas_workspace.h"
 #include "ddla_stream.h"
 #include "ddla_desc.h"
 #include "QR/pgeqrf_kernels.h"
@@ -127,6 +128,30 @@ void punmbr_workspace_size(const DdlaHandle_t&, const PunmbrPlan& p, std::size_t
                    + (p.backend == DdlaBackend::GPU ? detail::padded_bytes<T>(p.nref) : 0)
                    + detail::padded_bytes<T>(panel) + 2 * detail::padded_bytes<T>(product);
 }
+
+template<class T> std::array<std::size_t,2> punmbr_staging_bytes(const DdlaHandle_t& h,const PunmbrPlan& p)
+{
+    std::array<std::size_t,2> high{};
+    if(p.backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || !p.m||!p.n||p.nref<=0)return high;
+    const bool left=p.vect=='Q',reduce=(left?p.nprows:p.npcols)>1;
+    const int block=left?p.mbA:p.nbA,owner_block=left?p.nbA:p.mbA;
+    const int me=left?p.myprow:p.mypcol,source=left?p.rsrcA:p.csrcA,ranks=left?p.nprows:p.npcols;
+    const int length=left?p.mlocC:p.nlocC,other=left?p.nlocC:p.mlocC;
+    for(int j=0;j<p.nref;) {
+        const int jb=std::min({p.nbp,p.nref-j,owner_block-j%owner_block});
+        const int active=length-num_loc(j+p.off,block,me,source,ranks);
+        if(active>0&&(left?p.npcols:p.nprows)>1)high[0]=std::max(high[0],pblas::communication_bytes(std::size_t(active)*jb,sizeof(T)));
+        if(reduce) {
+            const auto count=std::max(std::size_t(jb)*jb,std::size_t(jb)*other);
+            const auto bytes=pblas::communication_bytes(count,sizeof(T));high[0]=std::max(high[0],bytes);high[1]=std::max(high[1],bytes);
+        }
+        j+=jb;
+    }
+    return high;
+}
+#define STAGING_SIZE(T) template std::array<std::size_t,2> punmbr_staging_bytes<T>(const DdlaHandle_t&,const PunmbrPlan&)
+DDLA_FOR_EACH_TYPE(STAGING_SIZE)
+#undef STAGING_SIZE
 
 // Component 3.
 template <DdlaBackend Backend, typename T>

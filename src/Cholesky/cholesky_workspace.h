@@ -8,6 +8,7 @@
 #include <ddla/ddla.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <initializer_list>
 #include <limits>
@@ -93,6 +94,34 @@ void ppotrf_mirror_workspace_size(const DdlaHandle_t& h, char uplo, int n,
     const int width = std::min(n, d[DDLA_MB_]);
     pblas::panel_workspace_size<T>(h, !lower, 'C', lower ? n : width,
         lower ? width : n, d, d, backend, host);
+}
+
+// Successful-factorization two-slot high waters. A non-positive diagonal can
+// return early and use less. The query reads geometry only, including rectangular
+// panel redistribution; it does not factor B or call a vendor workspace query.
+inline std::array<std::size_t,2> ppotrf_staging_bytes(const DdlaHandle_t& h,char uplo,
+    int n,const int* d,std::size_t width)
+{
+    std::array<std::size_t,2> high{};
+    if(h->backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI ||
+       n<=0 || h->nprocs==1)return high;
+    const bool lower=uplo=='L',relay=diagonal_relay(h,d);
+    const int nb=d[DDLA_MB_],mr=h->myprow_,mc=h->mypcol_,pr=h->nprows_,pc=h->npcols_;
+    const int rows=num_loc(n,nb,mr,d[DDLA_RSRC_],pr),cols=num_loc(n,nb,mc,d[DDLA_CSRC_],pc);
+    const auto broadcast=[&](std::size_t count){high[0]=std::max(high[0],pblas::communication_bytes(count,width));};
+    for(int k=0;k<n;k+=nb){
+        const int b=std::min(nb,n-k),end=k+b;
+        const int rr=indxg2p(k,nb,d[DDLA_RSRC_],pr),cc=indxg2p(k,nb,d[DDLA_CSRC_],pc);
+        const int row0=num_loc(k,nb,mr,d[DDLA_RSRC_],pr)+(mr==rr?b:0);
+        const int col0=num_loc(k,nb,mc,d[DDLA_CSRC_],pc)+(mc==cc?b:0);
+        if(lower?mc==cc:mr==rr)broadcast(std::size_t(b)*b);
+        const int length=lower?rows-row0:cols-col0,mirror=lower?cols-col0:rows-row0;
+        if(length>0)broadcast(std::size_t(length)*b);
+        if(relay){if(mirror>0)broadcast(std::size_t(b)*mirror);}
+        else pblas::staging_max(high,pblas::panel_staging_bytes(h,!lower,'C',
+            lower?n-end:b,lower?b:n-end,lower?end:k,lower?k:end,d,d,width));
+    }
+    return high;
 }
 
 // Component 2.  Backend, in carving order: [ the left / right / target pointer lists of the batched update | the

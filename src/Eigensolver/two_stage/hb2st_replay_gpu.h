@@ -74,6 +74,10 @@ template<class T>Hb2stReplayGpuPlan hb2st_replay_gpu_check(const DdlaHandle_t&,i
 template<class T>void hb2st_replay_gpu_workspace_size(const DdlaHandle_t&,const Hb2stReplayGpuPlan&,std::size_t* backend_bytes,
     std::size_t* host_bytes);
 
+// Exact device-transport high waters; record/history exchange itself uses
+// host MPI and does not consume the handle's staging slots.
+template<class T>std::array<std::size_t,2> hb2st_replay_gpu_staging_bytes(const DdlaHandle_t&,const Hb2stReplayGpuPlan&);
+
 // Two pinned upload slots and their copy events (pipelined plans only).
 template<class T>class Hb2stReplayGpuResources {
     DdlaHandle_t h_;void* storage_=nullptr;ddlaEvent_t copied_[2]{};bool used_[2]{};

@@ -5,6 +5,7 @@
 #include "helpers.h"
 #include "instantiate.h"
 #include "check_agree.h"
+#include "PBLAS/pblas_workspace.h"
 #include <exception>
 #include <type_traits>
 #include <complex>
@@ -187,6 +188,30 @@ void Phb2stResources<T>::device_setup(const DdlaHandle_t& h,const Phb2stPlan& p)
 }
 
 template<class T>
+std::array<std::size_t,2> Phb2stResources<T>::device_staging_bytes(const DdlaHandle_t& h,const Phb2stPlan& p) const
+{
+    std::array<std::size_t,2> high{};
+    if(h->backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || !p.device_chase)return high;
+    const int n=p.input.n,b=p.input.band,ld=b+3;
+    const auto capacity=team_&&team_->available()?team_->stream().capacity:p.local.record_capacity;
+    const int batch=p.output==Phb2stOutput::History?
+        std::min(device_levels_,std::max(1,int(capacity/(n/(b+1)+2)))):device_levels_;
+    detail::ChaseCursor cursor(n,b);
+    for(int step=0;step<batch&&!cursor.done();++step)cursor.next();
+    if(cursor.done())return high; // no halo exchange after the final batch
+    const int halo=device_levels_*(b+1);
+    for(int peer=0;peer<h->nprocs;++peer){
+        if(peer==h->myid)continue;
+        const int a=int(std::int64_t(n)*peer/h->nprocs),z=int(std::int64_t(n)*(peer+1)/h->nprocs);
+        const int s0=std::max(device_core_first_,std::max(0,a-halo)),s1=std::min(device_core_last_,std::min(n,z+halo));
+        const int r0=std::max(device_first_,a),r1=std::min(device_last_,z);
+        high[0]=std::max(high[0],pblas::communication_bytes(std::size_t(std::max(0,s1-s0))*ld,sizeof(T)));
+        high[1]=std::max(high[1],pblas::communication_bytes(std::size_t(std::max(0,r1-r0))*ld,sizeof(T)));
+    }
+    return high;
+}
+
+template<class T>
 void Phb2stResources<T>::device_run(const DdlaHandle_t& h,const Phb2stPlan& p,T* band,
     hb2st_rot<T>* ring,long long capacity) {
     using D=detail::DeviceScalarT<T>;using R=typename real_type<T>::type;
@@ -265,7 +290,8 @@ void Phb2stResources<T>::device_run(const DdlaHandle_t& h,const Phb2stPlan& p,T*
     // With band<=1 there are no rotations and the input is already tridiagonal.
     MPI_CHECK(MPI_Barrier(h->comm));
 }
-#define GPU_GIVENS(T) template void Phb2stResources<T>::device_setup(const DdlaHandle_t&,const Phb2stPlan&); \
+#define GPU_GIVENS(T) template std::array<std::size_t,2> Phb2stResources<T>::device_staging_bytes(const DdlaHandle_t&,const Phb2stPlan&) const; \
+ template void Phb2stResources<T>::device_setup(const DdlaHandle_t&,const Phb2stPlan&); \
  template void Phb2stResources<T>::device_run(const DdlaHandle_t&,const Phb2stPlan&,T*,hb2st_rot<T>*,long long)
 DDLA_FOR_EACH_TYPE(GPU_GIVENS)
 #undef GPU_GIVENS

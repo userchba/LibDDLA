@@ -4,6 +4,7 @@
 #include "dc_threads.h"
 #include <algorithm>
 #include <cstddef>
+#include <array>
 
 namespace ddla { namespace spectral_impl {
 // The checked call and its frozen policy: the leaf size (DDLA_SVD_DC_LEAF, read
@@ -57,6 +58,10 @@ inline std::size_t pbdsdc_retained_bound(const PbdsdcPlan& p)
 template<class R>
 void pbdsdc_workspace_size(const DdlaHandle_t&,const PbdsdcPlan&,
     std::size_t* backend_bytes,std::size_t* host_bytes);
+// Reachable geometric supremum, NOT an exact data-dependent payload query:
+// deflation and zero off-diagonal splits can reduce K and therefore messages.
+// Uses each merge node's size and the existing panel/RowShare width bound.
+template<class R>std::array<std::size_t,2> pbdsdc_staging_bound(const DdlaHandle_t&,const PbdsdcPlan&);
 template<DdlaBackend B,class R>
 void pbdsdc_run(const DdlaHandle_t&,const PbdsdcPlan&,detail::DcHostTeam&,
     R* d,R* e,R* s,R* U,R* V,int& info,

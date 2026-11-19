@@ -46,6 +46,7 @@
 #include <ddla/ddla.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <complex>
 #include <cstddef>
@@ -240,6 +241,14 @@ template <typename T>
 void pgeqrf_workspace_size(const DdlaHandle_t& handle, char uplo, bool inplace, int m, int n,
                            T* A, const int* descA, T* tau,
                            std::size_t* backend_bytes, std::size_t* host_bytes);
+
+// The block driver is also used for band-reduction QL windows at nonzero ja.
+// Pure exact high waters of that already checked geometry.
+template<class T> std::array<std::size_t,2> qr_block_staging_bytes(const DdlaHandle_t&,
+    const QrPlan&,const int* desc,bool bcast_all,bool inplace,bool tout);
+// Pure, exact per-slot geometry; reserve in owning agreement before raw execution.
+template<class T> std::array<std::size_t,2> pgeqrf_staging_bytes(const DdlaHandle_t&,
+    char uplo,bool inplace,int m,int n,const int* desc);
 
 // Component 3: the factorization and the copy of the local taus to tau; ends with a
 // synchronize.  No validation, no allocation.

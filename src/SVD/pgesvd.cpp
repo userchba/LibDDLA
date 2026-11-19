@@ -20,6 +20,7 @@
 
 #include "ddla_connector.h"
 #include "ddla_stream.h"
+#include "PBLAS/pblas_workspace.h"
 #include "ddla_desc.h"
 #include "mpi_datatype.h"
 #include "pgesvd_workspace.h"
@@ -139,6 +140,27 @@ template<class T>PgesvdPlan pgesvd_check(const DdlaHandle_t& h,DdlaBackend backe
 }
 
 // Component 2 (pgesvd_workspace.h).
+template<class T>std::array<std::size_t,2> pgesvd_staging_bytes(const DdlaHandle_t& h,const PgesvdPlan& p)
+{
+    std::array<std::size_t,2> high{};
+    if(p.backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || !p.k)return high;
+    using R=typename real_type<T>::type;
+    pblas::staging_max(high,pgebrd_staging_bytes<T>(h,p.brd));
+    if(p.jobu=='V'||p.jobvt=='V')pblas::staging_max(high,pbdsdc_staging_bound<R>(h,p.dc));
+    if(p.jobu=='V') {
+        pblas::staging_max(high,matrix_impl::scatter_rows_staging_bytes(h,p.k,false,p.m,p.k,p.descU.data(),sizeof(T)));
+        pblas::staging_max(high,punmbr_staging_bytes<T>(h,p.unm_u));
+    }
+    if(p.jobvt=='V') {
+        pblas::staging_max(high,matrix_impl::scatter_rows_staging_bytes(h,p.k,true,p.k,p.n,p.descVT.data(),sizeof(T)));
+        pblas::staging_max(high,punmbr_staging_bytes<T>(h,p.unm_v));
+    }
+    return high;
+}
+#define STAGING_SIZE(T) template std::array<std::size_t,2> pgesvd_staging_bytes<T>(const DdlaHandle_t&,const PgesvdPlan&)
+DDLA_FOR_EACH_TYPE(STAGING_SIZE)
+#undef STAGING_SIZE
+
 template<class T>
 void pgesvd_workspace_size(const DdlaHandle_t& h,const PgesvdPlan& p,std::size_t* backend_bytes,std::size_t* host_bytes)
 {
@@ -277,6 +299,8 @@ void pgesvd(
     std::exception_ptr failure;
     try{spectral_impl::pgesvd_workspace_size<T>(handle,p,&backend_bytes,&host_bytes);
         backend_work.resize(backend_bytes);host_work.resize(host_bytes);
+        const auto slots=spectral_impl::pgesvd_staging_bytes<T>(handle,p);
+        if(slots[0]||slots[1])handle->host_buffers<std::byte>(slots[0],slots[1]);
         if(handle->nprocs!=1 || Backend==DdlaBackend::GPU)
             if(const int threads=spectral_impl::pgesvd_team_threads(p))team.emplace(threads);}
     catch(...){failure=std::current_exception();}

@@ -88,6 +88,7 @@
 #include "check_agree.h"
 #include "BLAS/blas_impl.h"
 #include "comm_traits.h"
+#include "PBLAS/pblas_workspace.h"
 #include "ddla_stream.h"
 #include "ddla_desc.h"
 #include "pgebrd_kernels.h"
@@ -230,6 +231,52 @@ void pgebrd_workspace_size(const DdlaHandle_t& h, const PgebrdPlan& p, std::size
 }
 
 // Component 3.
+template<class T>std::array<std::size_t,2> pgebrd_staging_bytes(const DdlaHandle_t& h,const PgebrdPlan& p)
+{
+    std::array<std::size_t,2> high{};
+    if(p.backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || !p.k)return high;
+    // Match pgebrd_run's local vendor path: wide GPU matrices retain the
+    // distributed schedule, even on one rank; square/tall GPU matrices do not.
+    if(h->nprocs==1 && p.m>=p.n)return high;
+    using R=typename real_type<T>::type;
+    constexpr int components=sizeof(T)/sizeof(R);
+    auto both=[&](std::size_t count,std::size_t width) {const auto b=pblas::communication_bytes(count,width);high[0]=std::max(high[0],b);high[1]=std::max(high[1],b);};
+    auto broadcast=[&](int count) {high[0]=std::max(high[0],pblas::communication_bytes(count,sizeof(T)));};
+    both(std::size_t(p.nprows)*p.npcols,sizeof(R)); // global component-maximum record
+    auto record=[&](int processes) {return (detail::brd_rec_count(processes)+(components==2?1:0))/components;};
+    auto column=[&](int g0,int gy,int ny,int nx,bool with_y,bool ride,bool carry) {
+        const int nr=p.mloc-num_loc(g0,p.mb,p.myprow,p.rsrc,p.nprows);
+        const int nq=with_y?p.nloc-num_loc(gy,p.nb,p.mypcol,p.csrc,p.npcols):0;
+        const int kw=with_y?ny+nx:0;
+        if(!ride&&p.npcols>1&&nr>0)broadcast(nr);
+        both(record(p.nprows)+2*std::size_t(nq)+2*std::size_t(kw)+(with_y&&carry?nq:0),sizeof(T));
+    };
+    auto row=[&](int g0,int gx,int nv,int nx,bool with_x,bool ride,bool carry) {
+        const int nq=p.nloc-num_loc(g0,p.nb,p.mypcol,p.csrc,p.npcols);
+        const int nr=with_x?p.mloc-num_loc(gx,p.mb,p.myprow,p.rsrc,p.nprows):0;
+        const int kw=with_x?nv+nx:0;
+        if(!ride&&p.nprows>1&&nq>0)broadcast(nq);
+        both(record(p.npcols)+2*std::size_t(nr)+2*std::size_t(kw)+(with_x&&carry?nr:0),sizeof(T));
+    };
+    for(int k0=0;k0<p.k;k0+=p.nbp) {
+        const int jb=std::min(p.nbp,p.k-k0);
+        for(int i=0;i<jb;++i) {
+            const int c=k0+i;
+            if(p.m>=p.n) {
+                column(c,c+1,i,i,c<p.n-1,i>0,c<p.n-1);
+                if(c<p.n-1)row(c+1,c+1,i+1,i,true,true,i+1<jb);
+            } else {
+                row(c,c+1,i,i,c<p.m-1,i>0,c<p.m-1);
+                if(c<p.m-1)column(c+1,c+1,i,i+1,true,true,i+1<jb);
+            }
+        }
+    }
+    return high;
+}
+#define STAGING_SIZE(T) template std::array<std::size_t,2> pgebrd_staging_bytes<T>(const DdlaHandle_t&,const PgebrdPlan&)
+DDLA_FOR_EACH_TYPE(STAGING_SIZE)
+#undef STAGING_SIZE
+
 template <DdlaBackend Backend, typename T>
 void pgebrd_run(const DdlaHandle_t& handle,const PgebrdPlan& p,T* A,const int*,
     typename real_type<T>::type* d,typename real_type<T>::type* e,T* tauq,T* taup,int& info,

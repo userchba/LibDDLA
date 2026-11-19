@@ -10,6 +10,7 @@
 #include "check_agree.h"
 #include "plan_util.h"
 #include "instantiate.h"
+#include "PBLAS/pblas_workspace.h"
 
 #include <algorithm>
 #include <cassert>
@@ -336,6 +337,35 @@ template<class T>void Hb2stReplayGpuResources<T>::record(int slot)
 {DDLA_CHECK(ddlaEventRecord(h_,copied_[slot]));used_[slot]=true;}
 template<class T>void Hb2stReplayGpuResources<T>::finish()
 {if(pending_)DDLA_CHECK(ddlaSynchronize(h_));completed();}
+
+template<class T>std::array<std::size_t,2> hb2st_replay_gpu_staging_bytes(const DdlaHandle_t& h,const Hb2stReplayGpuPlan& p)
+{
+    std::array<std::size_t,2> high{};
+    if(h->backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || !p.n || p.direct)return high;
+    using R=typename real_type<T>::type;
+    const RowShare vectors(p.nev,p.P);
+    const auto lo=[&](int rank){return p.columns?p.columns[rank]:vectors.lo(rank);};
+    const auto hi=[&](int rank){return p.columns?p.columns[rank+1]:vectors.hi(rank);};
+    const auto include=[&](std::size_t send,std::size_t receive,std::size_t width){
+        high[0]=std::max(high[0],pblas::communication_bytes(send,width));
+        high[1]=std::max(high[1],pblas::communication_bytes(receive,width));};
+    if(p.input_2d.enabled){
+        for(int root=0;root<p.P;++root)for(int first=lo(root);first<hi(root);first+=p.input_2d.width)
+            pblas::staging_max(high,matrix_impl::transfer_staging_bytes(h,p.n,
+                std::min(p.input_2d.width,hi(root)-first),1,first+1,p.input_2d.descriptor.data(),root,sizeof(R)));
+    }
+    for(int j=0;j<p.nev;j+=p.width){
+        const int end=std::min(p.nev,j+p.width),a=std::max(j,p.clo),b=std::min(end,hi(p.rank));
+        const auto count=std::size_t(std::max(0,b-a));
+        if(!p.input_2d.enabled)include(std::size_t(p.nr)*(end-j),std::size_t(p.n)*count,sizeof(R));
+        const int columns=num_loc(end,p.nb,p.pc,p.csrc,p.npc)-num_loc(j,p.nb,p.pc,p.csrc,p.npc);
+        include(std::size_t(p.n)*count,std::size_t(p.outrows)*columns,sizeof(T));
+    }
+    return high;
+}
+#define STAGING_SIZE(T) template std::array<std::size_t,2> hb2st_replay_gpu_staging_bytes<T>(const DdlaHandle_t&,const Hb2stReplayGpuPlan&)
+DDLA_FOR_EACH_TYPE(STAGING_SIZE)
+#undef STAGING_SIZE
 
 template <class T>
 void hb2st_replay_gpu_run(const DdlaHandle_t& h,const Hb2stReplayGpuPlan& p,Hb2stReplayGpuResources<T>& uploads,

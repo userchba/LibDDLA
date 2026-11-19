@@ -8,6 +8,7 @@
 #include "BLAS/blas_impl.h"
 #include "plan_util.h"
 #include "punmtr_impl.h"
+#include "PBLAS/pblas_workspace.h"
 #include "instantiate.h"
 
 #include <algorithm>
@@ -209,6 +210,38 @@ void grouped_stage5_workspace_size(
         if (count[i])
             *backend_bytes += padded_bytes<T>(count[i]);
 }
+
+template<class T>std::array<std::size_t,2> grouped_stage5_staging_bytes(const DdlaHandle_t& h,const GroupedStage5Plan& p)
+{
+    std::array<std::size_t,2> high{};
+    if(h->backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI)return high;
+    const bool single=std::min(p.options.group_cap,p.steps)==1,adjoint=p.trans!='N';
+    int cursor=adjoint?0:p.steps;
+    const auto both=[&](std::size_t count){const auto b=pblas::communication_bytes(count,sizeof(T));
+        high[0]=std::max(high[0],b);high[1]=std::max(high[1],b);};
+    while(adjoint?cursor<p.steps:cursor>0){
+        const int count=single?1:std::min(p.options.group_cap,adjoint?p.steps-cursor:cursor);
+        const int lo=adjoint?cursor:cursor-count,hi=lo+count;
+        int K=0,previous=0,rows=0;std::size_t gram=0;
+        for(int j=0;j<count;++j){
+            const int start=(lo+j+1)*p.nbw,width=std::min(p.nbw,p.n-start);
+            rows=num_loc(start+width-p.nbw,p.nb,p.mr,0,p.pr);
+            gram+=std::size_t(previous)*width;previous+=width;K+=width;
+        }
+        const auto ldv=std::size_t(std::max(1,rows));
+        for(int j=0;j<count;++j){
+            const int start=(lo+j+1)*p.nbw,width=std::min(p.nbw,p.n-start);
+            high[0]=std::max(high[0],pblas::communication_bytes(ldv*width,sizeof(T)));
+        }
+        if(single){if(p.pr>1&&p.zcols)both(std::size_t(K)*p.zcols);}
+        else {if(gram)both(gram);both(std::size_t(K)*p.zcols);}
+        cursor=adjoint?hi:lo;
+    }
+    return high;
+}
+#define STAGING_SIZE(T) template std::array<std::size_t,2> grouped_stage5_staging_bytes<T>(const DdlaHandle_t&,const GroupedStage5Plan&)
+DDLA_FOR_EACH_TYPE(STAGING_SIZE)
+#undef STAGING_SIZE
 
 namespace {
 // One sweep body, specialized once for a single-panel plan. Multi-panel plans

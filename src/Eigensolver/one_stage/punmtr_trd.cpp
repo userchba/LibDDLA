@@ -2,6 +2,7 @@
 #include <ddla/ddla_vector.h>
 #include "ddla_connector.h"
 #include "punmtr_trd_impl.h"
+#include "PBLAS/pblas_workspace.h"
 #include "punmtr_impl.h"
 #include "reflector_build_T.h"
 #include "Eigensolver/pvector_redist.h"
@@ -79,6 +80,36 @@ template<class T>void punmtr_trd_workspace_size(const DdlaHandle_t& h,const Unmt
     *bytes=detail::padded_bytes<T>(lr*cap)+3*detail::padded_bytes<T>(cap*cap)+
         2*detail::padded_bytes<T>(cap*axis)+(transpose?detail::padded_bytes<T>(lv*cap):0)+transfer;
 }
+template<class T>std::array<std::size_t,2> punmtr_trd_staging_bytes(const DdlaHandle_t& h,const UnmtrTrdPlan& p)
+{
+    std::array<std::size_t,2> high{};
+    if(p.backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || !p.m||!p.n||p.nq<2)return high;
+    const bool left=p.side=='L',lower=p.uplo=='L',transpose=left==lower,forward=left==(p.trans=='N');
+    const int nb=p.a[DDLA_NB_],logical_pr=lower?p.pc:p.pr,logical_pc=lower?p.pr:p.pc;
+    const int logical_mr=lower?p.mc:p.mr,logical_mc=lower?p.mr:p.mc;
+    const int lr=std::max(1,num_loc(p.nq,nb,left?p.mr:p.mc,0,left?p.pr:p.pc));
+    const int lv=std::max(1,num_loc(p.nq,nb,logical_mr,0,logical_pr));
+    const int cr=num_loc(p.m,p.c[DDLA_MB_],p.mr,p.c[DDLA_RSRC_],p.pr),cc=num_loc(p.n,p.c[DDLA_NB_],p.mc,p.c[DDLA_CSRC_],p.pc);
+    auto both=[&](std::size_t count) {const auto b=pblas::communication_bytes(count,sizeof(T));high[0]=std::max(high[0],b);high[1]=std::max(high[1],b);};
+    for(int first=forward?1:std::max(1,(p.nq-1)/nb*nb);first<p.nq;) {
+        const int width=std::min(nb-first%nb,p.nq-first),owner=first/nb%logical_pc;
+        if(logical_mc==owner)both(std::size_t(width)*width);
+        high[0]=std::max(high[0],pblas::communication_bytes(std::max(std::size_t(lv)*width,std::size_t(width)*width),sizeof(T)));
+        if(transpose) {
+            const auto g=ptranspose_vectors_geometry(h,p.backend,first+width-1,width,nb,lv,lr,false,left);
+            pblas::staging_max(high,ptranspose_vectors_staging_bytes(h,g,sizeof(T)));
+        }
+        if((left?p.pr:p.pc)>1 && (left?cc:cr)>0)
+            both(left?std::size_t(width)*cc:std::size_t(std::max(1,cr))*width);
+        if(forward)first+=width;
+        else {if(first==1)break;first=std::max(1,first-nb);}
+    }
+    return high;
+}
+#define STAGING_SIZE(T) template std::array<std::size_t,2> punmtr_trd_staging_bytes<T>(const DdlaHandle_t&,const UnmtrTrdPlan&)
+DDLA_FOR_EACH_TYPE(STAGING_SIZE)
+#undef STAGING_SIZE
+
 namespace {
 #if DDLA_HAS_GPU
 template <class T>

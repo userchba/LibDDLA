@@ -5,6 +5,7 @@
 #include <ddla/ddla.h>
 
 #include <cstddef>
+#include <array>
 
 namespace ddla {
 
@@ -41,6 +42,7 @@ void preduce_add_vectors_workspace_size(const DdlaHandle_t& handle,int n,int nvc
 // broadcast buffer is the front of the scratch: a caller-supplied buffer of
 // ptranspose_vectors_work_elems entries (backend_bytes = entries * sizeof(T))
 // is enough.
+std::array<std::size_t,2> ptranspose_vectors_staging_bytes(const DdlaHandle_t&,const VectorRedistPlan&,std::size_t element_bytes);
 template<DdlaBackend B,class T>
 void ptranspose_vectors_run(const DdlaHandle_t&,const VectorRedistPlan& p,const T* src,T* dst,
     void* backend_work,std::size_t backend_bytes);

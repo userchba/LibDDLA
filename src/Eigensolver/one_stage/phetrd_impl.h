@@ -29,6 +29,9 @@ HetrdPlan phetrd_geometry(const DdlaHandle_t&,DdlaBackend,char,int,const int*,bo
 template<class T>HetrdPlan phetrd_check(const DdlaHandle_t&,DdlaBackend,char,int,const T*,const int*,
     const typename real_type<T>::type*,const typename real_type<T>::type*,const T*);
 template<class T>void phetrd_workspace_size(const DdlaHandle_t&,const HetrdPlan&,std::size_t*,std::size_t*);
+// Pure fixed-geometry HostStagedMPI slot maxima. Host norm/metadata MPI
+// exchanges use their own host arrays and are not staged device payloads.
+template<class T>std::array<std::size_t,2> phetrd_staging_bytes(const DdlaHandle_t&,const HetrdPlan&);
 // Construct outside numerical runs. Cache changes are scoped to reduction.
 class HetrdResources {
     std::size_t cache_capacity_=0;

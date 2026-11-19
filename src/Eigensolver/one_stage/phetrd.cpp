@@ -2,6 +2,7 @@
 #include <ddla/ddla_vector.h>
 #include "ddla_connector.h"
 #include "phetrd_impl.h"
+#include "PBLAS/pblas_workspace.h"
 #include "BLAS/blas_impl.h"
 #include "check_agree.h"
 #include "plan_util.h"
@@ -1048,6 +1049,42 @@ template<class T>void phetrd_workspace_size(const DdlaHandle_t& h,const HetrdPla
         throw std::invalid_argument("phetrd: communication changed; check and query a new plan");
     *backend=*host=0;if(!p.n)return;detail::reduce_workspace_size<T>(h,p,backend,host);
 }
+template<class T>std::array<std::size_t,2> phetrd_staging_bytes(const DdlaHandle_t& h,const HetrdPlan& p)
+{
+    std::array<std::size_t,2> high{};
+    if(p.backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || p.n<2)return high;
+    // Full-storage reduction uses the physical grid for either input uplo.
+    // Only stored-lower reduction swaps it (same as reduce_workspace_size/run).
+    const bool lower=p.stored_only && p.uplo=='L';
+    const int pr=lower?p.pc:p.pr,pc=lower?p.pr:p.pc,mr=lower?p.mc:p.mr,mc=lower?p.mr:p.mc;
+    const int nb=p.a[DDLA_NB_],lr=std::max(1,num_loc(p.n,nb,mr,0,pr)),lc=std::max(1,num_loc(p.n,nb,mc,0,pc));
+    auto broadcast=[&](std::size_t count) {high[0]=std::max(high[0],pblas::communication_bytes(count,sizeof(T)));};
+    auto reduce=[&](std::size_t count) {const auto b=pblas::communication_bytes(count,sizeof(T));high[0]=std::max(high[0],b);high[1]=std::max(high[1],b);};
+    auto transpose=[&](int n,bool reverse) {
+        if(pr!=pc) {
+            const auto g=ptranspose_vectors_geometry(h,p.backend,n,1,nb,reverse?lc:lr,reverse?lr:lc,false,lower!=reverse);
+            pblas::staging_max(high,ptranspose_vectors_staging_bytes(h,g,sizeof(T)));
+        } else broadcast(num_loc(n,nb,reverse?mr:mc,0,pr));
+    };
+    for(int j=p.n-1;j>=1;--j) {
+        const int nr=num_loc(j,nb,mr,0,pr),nc=num_loc(j,nb,mc,0,pc);
+        broadcast(std::size_t(nr)+1); // factor_one: packed V and tau, even nr=0
+        transpose(j,false);
+        if(p.stored_only) {
+            reduce(nr);reduce(nc);transpose(j,true);reduce(1);transpose(j,false);
+        } else if(pr==pc) {
+            reduce(nc);reduce(1);
+            if(nr)broadcast(nr); // adjoint_av's reverse U broadcast
+        } else {
+            reduce(nr);reduce(1);transpose(j,false);
+        }
+    }
+    return high;
+}
+#define STAGING_SIZE(T) template std::array<std::size_t,2> phetrd_staging_bytes<T>(const DdlaHandle_t&,const HetrdPlan&)
+DDLA_FOR_EACH_TYPE(STAGING_SIZE)
+#undef STAGING_SIZE
+
 template<DdlaBackend B,class T>void phetrd_run(const DdlaHandle_t& h,const HetrdPlan& p,HetrdResources& resources,
     T* A,T* tau,typename real_type<T>::type* de,int& info,void* work,std::size_t bytes,void* host,std::size_t host_bytes) {
     if constexpr(B==DdlaBackend::GPU)

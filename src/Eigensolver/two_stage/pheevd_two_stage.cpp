@@ -1,3 +1,5 @@
+#include "PBLAS/pblas_workspace.h"
+#include "punmtr_he2hb_grouped.h"
 // ---------------------------------------------------------------------------
 // The two-stage Hermitian eigensolver driver (ELPA2-style):
 //   pherm_complete (stored triangle -> full matrix) -> phe2hb (full -> band)
@@ -526,6 +528,39 @@ PheevdResources<T>::PheevdResources(const DdlaHandle_t &h, const PheevdPlan &p,
     else
         chase.emplace(h, p.chase);
 }
+
+template<class T>std::array<std::size_t,2> pheevd_staging_bytes(const DdlaHandle_t& h,const PheevdPlan& p,const PheevdResources<T>& resources)
+{
+    std::array<std::size_t,2> high{};
+    if(p.backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || !p.n)return high;
+    std::size_t pack=0,local=0,unpack=0,diag=0,send=0,recv=0;
+    pherm_complete_geometry(p.complete,pack,local,unpack,diag,send,recv);
+    high={pblas::communication_bytes(send,sizeof(T)),pblas::communication_bytes(recv,sizeof(T))};
+    pblas::staging_max(high,phe2hb_staging_bytes<T>(h,p.reduction));
+    if(p.engine==PheevdEngine::Householder){
+        const auto bytes=pblas::communication_bytes(std::min(phb2st_band_count(p.chase.input),std::size_t(INT_MAX/2)),sizeof(T));
+        high[0]=std::max(high[0],bytes);high[1]=std::max(high[1],bytes);
+    }
+#if DDLA_HAS_GPU
+    else if(p.chase.device_chase){
+        if(!resources.chase)throw std::invalid_argument("pheevd: prepare device chase resources before staging query");
+        pblas::staging_max(high,resources.chase->device_staging_bytes(h,p.chase));
+    }
+    if(p.job=='V'){
+        pblas::staging_max(high,detail::hb2st_replay_gpu_staging_bytes<T>(h,p.gpu_replay));
+        const auto grouped=detail::grouped_stage5_geometry(p.back,detail::grouped_stage5_default_options<T>(p.backend,p.n));
+        pblas::staging_max(high,detail::grouped_stage5_staging_bytes<T>(h,grouped));
+    }
+#else
+    (void)resources;
+#endif
+    // Stages 2/3's remaining exchanges operate on caller-owned host arrays:
+    // spatial band gather, node-team/history packets and tridiagonal D&C/II.
+    return high;
+}
+#define STAGING_SIZE(T) template std::array<std::size_t,2> pheevd_staging_bytes<T>(const DdlaHandle_t&,const PheevdPlan&,const PheevdResources<T>&)
+DDLA_FOR_EACH_TYPE(STAGING_SIZE)
+#undef STAGING_SIZE
 
 template <DdlaBackend B, class T>
 void pheevd_run(const DdlaHandle_t &h, const PheevdPlan &p, PheevdResources<T> &resources, T *A,

@@ -231,6 +231,9 @@ template <class T> class Phb2stResources
     Phb2stResources(const Phb2stResources &) = delete;
     Phb2stResources &operator=(const Phb2stResources &) = delete;
 #if DDLA_HAS_GPU
+    // Pure geometry after device_setup: actual prepared temporal halo and
+    // batch/ring capacity, no history values or device reads.
+    std::array<std::size_t,2> device_staging_bytes(const DdlaHandle_t&,const Phb2stPlan&) const;
     // GPU formation/update only; reuse the native cyclic rotation history and replay.
     void device_run(const DdlaHandle_t&,const Phb2stPlan&,T* shared_band,hb2st_rot<T>* ring,long long capacity);
 #endif

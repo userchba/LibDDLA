@@ -8,6 +8,7 @@
 
 #include <ddla/ddla.h>
 #include <cstddef>
+#include <array>
 
 namespace ddla { namespace spectral_impl {
 
@@ -37,6 +38,8 @@ PgebrdPlan pgebrd_check(const DdlaHandle_t&,DdlaBackend,int,int,const void*,cons
 // partials and the device mirrors of d (k), e (max(1, k - 1)), tauq (k) and taup (k).
 template<class T>
 void pgebrd_workspace_size(const DdlaHandle_t&,const PgebrdPlan&,std::size_t* backend_bytes);
+// Pure exact device-message geometry for the GPU bidiagonalization schedule.
+template<class T>std::array<std::size_t,2> pgebrd_staging_bytes(const DdlaHandle_t&,const PgebrdPlan&);
 template<DdlaBackend B,class T>
 void pgebrd_run(const DdlaHandle_t&,const PgebrdPlan&,T* A,const int* descA,
     typename real_type<T>::type* d,typename real_type<T>::type* e,T* tauq,T* taup,int& info,
@@ -62,6 +65,7 @@ PunmbrPlan punmbr_check(const DdlaHandle_t&,DdlaBackend,bool,char,char,char,
 // CPU builds T in backend host storage; bounded GPU panels build T on device.
 template<class T>
 void punmbr_workspace_size(const DdlaHandle_t&,const PunmbrPlan&,std::size_t* backend_bytes,std::size_t* host_bytes);
+template<class T> std::array<std::size_t,2> punmbr_staging_bytes(const DdlaHandle_t&,const PunmbrPlan&);
 template<DdlaBackend B,class T>
 void punmbr_run(const DdlaHandle_t&,const PunmbrPlan&,const T* A,const int* descA,const T* tau,
     T* C,const int* descC,int& info,

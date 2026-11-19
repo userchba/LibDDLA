@@ -81,6 +81,7 @@
 
 #include "ddla_connector.h"
 #include "comm_traits.h"
+#include "PBLAS/pblas_workspace.h"
 #include "ddla_desc.h"
 #include "pgeqrf_impl.h"
 #include "punmtr_impl.h"
@@ -292,6 +293,49 @@ inline bool qr_block_trailing(const QrPlan& p, const QrPanel& q, int& lct, int& 
 }
 
 } // namespace
+
+template<class T> std::array<std::size_t,2> qr_block_staging_bytes(const DdlaHandle_t& h,
+    const QrPlan& p,const int* desc,bool bcast_all,bool inplace,bool tout)
+{
+    std::array<std::size_t,2> high{};
+    if(h->backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || p.jr_lo==p.jr_hi)return high;
+    using R=typename real_type<T>::type;
+    qr_for_each_panel(p,[&](const QrPanel& q) {
+        const int jb=q.j_hi-q.j_lo,pc=indxg2p(q.j_lo,p.nb,p.csrc,p.npcols);
+        const int lrp=num_loc(q.g0+q.m_w,p.mb,p.myprow,p.rsrc,p.nprows)-num_loc(q.g0,p.mb,p.myprow,p.rsrc,p.nprows);
+        const bool trailing=qr_has_trailing(p,q),need_T=trailing||p.nprows>1||p.npcols>1||tout;
+        auto both=[&](std::size_t count,std::size_t width) {const auto b=pblas::communication_bytes(count,width);high[0]=std::max(high[0],b);high[1]=std::max(high[1],b);};
+        if(p.mypcol==pc) {
+            if(inplace) {
+                if(p.nprows>1) {
+                    both(2+std::size_t(p.nprows)*(sizeof(T)/sizeof(R)),sizeof(R));
+                    if(need_T)both(std::size_t(jb)*jb,sizeof(T));
+                    // In-panel w has at most jb-1 entries and is dominated by
+                    // the unconditional Gram reduction when it is needed.
+                }
+            } else {
+                const int root_row=indxg2p(p.uplo=='L'?q.g0+q.m_w-1:q.g0,p.mb,p.rsrc,p.nprows);
+                pblas::staging_max(high,matrix_impl::transfer_staging_bytes(h,q.m_w,jb,q.g0+1,q.j_lo+1,
+                    desc,h->rc_to_rank(root_row,pc),sizeof(T)));
+                if(p.nprows>1&&need_T)high[0]=std::max(high[0],pblas::communication_bytes(std::size_t(jb)*jb,sizeof(T)));
+            }
+        }
+        if(p.npcols>1&&(trailing||bcast_all))high[0]=std::max(high[0],pblas::communication_bytes(std::size_t(std::max(1,lrp))*jb+std::size_t(jb)*jb,sizeof(T)));
+        int lct=0,nct=0;
+        if(p.nprows>1&&qr_block_trailing(p,q,lct,nct))both(std::size_t(jb)*nct,sizeof(T));
+    });
+    return high;
+}
+template<class T> std::array<std::size_t,2> pgeqrf_staging_bytes(const DdlaHandle_t& h,
+    char uplo,bool inplace,int m,int n,const int* desc)
+{
+    return qr_block_staging_bytes<T>(h,qr_geometry(h,desc,uplo,m,n,0),desc,false,inplace,false);
+}
+#define STAGING_SIZE(T) \
+    template std::array<std::size_t,2> qr_block_staging_bytes<T>(const DdlaHandle_t&,const QrPlan&,const int*,bool,bool,bool); \
+    template std::array<std::size_t,2> pgeqrf_staging_bytes<T>(const DdlaHandle_t&,char,bool,int,int,const int*)
+DDLA_FOR_EACH_TYPE(STAGING_SIZE)
+#undef STAGING_SIZE
 
 // ---- the loop: panel -> share -> update ----------------------------------------
 // Every grid, a 1x1 grid included.  One [V | T] slot, one stream, one larfb per panel (on a

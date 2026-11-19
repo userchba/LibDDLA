@@ -13,6 +13,7 @@ UnmtrTrdPlan punmtr_trd_geometry(const DdlaHandle_t&,DdlaBackend,char,char,char,
 template<class T>UnmtrTrdPlan punmtr_trd_check(const DdlaHandle_t&,DdlaBackend,char,char,char,int,int,
     const T*,const int*,const T*,T*,const int*);
 template<class T>void punmtr_trd_workspace_size(const DdlaHandle_t&,const UnmtrTrdPlan&,std::size_t*);
+template<class T>std::array<std::size_t,2> punmtr_trd_staging_bytes(const DdlaHandle_t&,const UnmtrTrdPlan&);
 template<DdlaBackend B,class T>void punmtr_trd_run(const DdlaHandle_t&,const UnmtrTrdPlan&,
     const T* A,const T* tau,T* C,void*,std::size_t);
 static_assert(std::is_trivially_copyable<UnmtrTrdPlan>::value,"stored-reflector plan owns no resources");

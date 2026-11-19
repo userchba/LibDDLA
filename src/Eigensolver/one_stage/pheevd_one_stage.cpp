@@ -1,3 +1,4 @@
+#include "PBLAS/pblas_workspace.h"
 #include "helpers.h"
 #include <ddla/ddla.h>
 #include <ddla/ddla_vector.h>
@@ -185,6 +186,27 @@ void one_stage_workspace_size(const DdlaHandle_t& h, const OneStagePlan& p, std:
     *backend_bytes = detail::padded_bytes<T>(std::max(1, p.n - 1)) + backup + phase;
     *host_bytes = detail::padded_bytes<R>(2 * static_cast<std::size_t>(p.n)) + phase_host;
 }
+
+template<class T>std::array<std::size_t,2> one_stage_staging_bytes(const DdlaHandle_t& h,const OneStagePlan& p)
+{
+    std::array<std::size_t,2> high{};
+    if(p.backend!=DdlaBackend::GPU || h->communication()!=DdlaCommunication::HostStagedMPI || !p.n)return high;
+    using R=typename real_type<T>::type;
+    std::size_t pack=0,local=0,unpack=0,diag=0,send=0,recv=0;
+    pherm_complete_geometry(p.complete,pack,local,unpack,diag,send,recv);
+    high={pblas::communication_bytes(send,sizeof(T)),pblas::communication_bytes(recv,sizeof(T))};
+    pblas::staging_max(high,phetrd_staging_bytes<T>(h,p));
+    if(p.job=='V') {
+        pblas::staging_max(high,matrix_impl::scatter_rows_staging_bytes(h,p.n,false,p.n,p.nev,
+            p.tridiagonal_vectors.data(),sizeof(R)));
+        const auto apply=punmtr_trd_geometry(h,p.backend,'L','U','N',p.n,p.nev,p.a.data(),p.z.data());
+        pblas::staging_max(high,punmtr_trd_staging_bytes<T>(h,apply));
+    }
+    return high;
+}
+#define STAGING_SIZE(T) template std::array<std::size_t,2> one_stage_staging_bytes<T>(const DdlaHandle_t&,const OneStagePlan&)
+DDLA_FOR_EACH_TYPE(STAGING_SIZE)
+#undef STAGING_SIZE
 
 template <DdlaBackend B, class T>
 void one_stage_run(const DdlaHandle_t& h, const OneStagePlan& p, OneStageResources& resources, T* a,
