@@ -82,6 +82,17 @@ function(add_bench_executable test_name)
 endfunction()
 
 enable_testing()
+# Generation is a development check; installed users need no Python runtime.
+find_package(Python3 QUIET COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME public_api_generated
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/generate_public_api.py --check)
+    add_test(NAME public_api_generator_regression
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_public_api_generation.py)
+    set_tests_properties(public_api_generated public_api_generator_regression
+        PROPERTIES LABELS "cpu;development")
+endif()
+
 # Fault injection remains in a test-only preload, outside the production library.
 if(UNIX AND NOT APPLE)
     add_library(pblas_alloc_failure SHARED pblas_alloc_failure.cpp)

@@ -19,6 +19,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check generated public API
+        run: |
+          python3 tools/generate_public_api.py --check
+          python3 tests/test_public_api_generation.py
+
       - name: Runner CPU
         run: lscpu | grep -E '^(Model name|CPU family|Model|CPU\(s\)):'
 

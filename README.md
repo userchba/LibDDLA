@@ -984,6 +984,23 @@ The one-rank smoke checks the installed capability header and CPU computation;
 a dual installation also links a GPU specialization without initializing a GPU.
 See [the consumer fixture](tests/install_consumer/README.md) for audit outputs.
 
+### Maintaining public API forwarding
+
+`include/ddla/ddla.h` owns the documented public signatures. The scalar and
+backend routing policies live in `src/public_api_manifest.json`. After adding
+an interface and its backend implementation, update that policy and run:
+
+```bash
+python3 tools/generate_public_api.py
+python3 tools/generate_public_api.py --check
+python3 tests/test_public_api_generation.py
+```
+
+The generator writes `src/backend_api.h`, `src/public_dispatch.cpp` and derived
+manifest metadata. Keep exceptional routes explicit in the generator; do not
+hand-edit its output. Python is needed for development checks, not for ordinary
+library compilation or installed C++ clients.
+
 ## Repository layout
 
 ```
