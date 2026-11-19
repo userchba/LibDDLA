@@ -30,12 +30,11 @@ bool two_stage_options_requested()
 }
 } // namespace
 
+namespace detail {
 template <DdlaBackend Backend, typename T>
-void pheevd(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev,
-            T* A, const int* descA, typename real_type<T>::type* w,
-            T* Z, const int* descZ, int& info)
+PheevdRoute pheevd_select(const DdlaHandle_t& handle, char jobz, int n, int nev,
+                          const int* descA, const int* descZ)
 {
-    info = 0;
     if (!handle)
         throw std::invalid_argument("pheevd: null handle");
     int prefer_one = 0;
@@ -96,17 +95,31 @@ void pheevd(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev,
         }
         return selected;
     });
-    if (!mode && handle->nprocs == 1) {
-        detail::pheevd_local<Backend,T>(handle,jobz,uplo,n,nev,A,descA,w,Z,descZ,info);
-        return;
-    }
+    if (!mode && handle->nprocs == 1)
+        return PheevdRoute::Local;
     if (!mode && automatic_shape && handle->nprocs > 1)
         MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &prefer_one, 1, MPI_INT, MPI_MIN, handle->comm));
     const bool one_stage = mode == 1 || (!mode && prefer_one);
-    if (one_stage)
-        pheevd_one_stage<Backend, T>(handle, jobz, uplo, n, nev, A, descA, w, Z, descZ, info);
+    return one_stage ? PheevdRoute::OneStage : PheevdRoute::TwoStage;
+}
+#define SELECT(B,T) template PheevdRoute pheevd_select<B,T>(const DdlaHandle_t&,char,int,int,const int*,const int*)
+DDLA_FOR_EACH_BACKEND_TYPE(SELECT)
+#undef SELECT
+} // namespace detail
+
+template <DdlaBackend Backend, typename T>
+void pheevd(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev,
+            T* A, const int* descA, typename real_type<T>::type* w,
+            T* Z, const int* descZ, int& info)
+{
+    info = 0;
+    const auto route=detail::pheevd_select<Backend,T>(handle,jobz,n,nev,descA,descZ);
+    if (route==detail::PheevdRoute::Local)
+        detail::pheevd_local<Backend,T>(handle,jobz,uplo,n,nev,A,descA,w,Z,descZ,info);
+    else if (route==detail::PheevdRoute::OneStage)
+        pheevd_one_stage<Backend,T>(handle,jobz,uplo,n,nev,A,descA,w,Z,descZ,info);
     else
-        pheevd_two_stage<Backend, T>(handle, jobz, uplo, n, nev, A, descA, w, Z, descZ, info);
+        pheevd_two_stage<Backend,T>(handle,jobz,uplo,n,nev,A,descA,w,Z,descZ,info);
 }
 
 #define INST_NEV(B,T) template void pheevd<B,T>(const DdlaHandle_t&,char,char,int,int, \
