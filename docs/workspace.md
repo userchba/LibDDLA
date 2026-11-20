@@ -160,6 +160,15 @@ Cancellation must stop workers and retire uploads before the caller reuses
 storage. Changing shape, descriptors, backend, process topology or frozen
 policy requires new sizing and preparation.
 
+The SVD checker freezes `DDLA_SVD_SHAPE`: unset, empty or `direct` selects direct
+bidiagonal reduction, while explicit `qr` permits the existing memory-eligible
+aspect-ratio-at-least-four route. Single-rank CPU and ineligible shapes remain
+direct. Invalid values and eligible route disagreements fail before native QR
+workspace preparation. The pure SVD size/staging queries and borrowed run use
+the checked route and never read this environment variable. QR workspace can
+be larger; callers must size and prepare the selected plan rather than assume
+the direct path bounds it.
+
 The runtime `HostStagedMPI` communication path uses the handle's reusable host
 staging vectors, regardless of its build-time default. They can grow on demand
 on a cold handle; this is distinct from caller-owned numerical scratch. Owning
