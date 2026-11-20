@@ -1248,3 +1248,11 @@ resources and call `phegvd_prepare_staging` before the first raw run. This
 covers cold transport caches; no numerical warmup is needed. The staging
 query is pure metadata and reports two slot requirements independently of
 the numerical arena maxima. Early numerical returns can use smaller payloads.
+
+PBDSDC coefficient broadcasts depend on numerical deflation. Its staging query
+therefore supplies a reachable geometric supremum, using each problem's bounded
+coefficient panel and largest rank share; initial splits and deflation can make
+observed messages smaller. It does not use the entire backend workspace as a
+host-cache bound. Retained cache capacity and vendor first-use allocations
+still belong in whole-call peak-memory measurements. These reservations do
+not imply a global cold-allocation or performance guarantee.
