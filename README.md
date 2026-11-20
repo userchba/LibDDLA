@@ -1124,6 +1124,19 @@ for double from n=32768. Other widths, scalar types, eigenvalues-only calls
 and GPU profiles keep their existing policy. These thresholds describe this
 scoped dispatch policy, not a performance guarantee on other hardware.
 
+For CPU two-stage solves, the default band is a divisor of the block size.
+The selector first looks for the largest divisor from 32 through 64
+(for example, 64 for blocks of 128 or 256, and 50 for blocks of 100),
+then the smallest divisor above 64 through 128, then the largest divisor
+from 16 through 31. Smaller blocks keep their own width. The distributed
+band limit can reduce the selected width.
+
+Automatic Householder chasing on CPU requires order at least 2048, a
+band of at least 16 that divides the block size, and one shared-memory
+node with at most 128 ranks and 64 host workers per rank. It applies to
+eigenvalues-only solves and solves requesting all eigenvectors. Explicit
+engine choices and legacy chase settings take precedence.
+
 `test_pheevd_householder_gpu` checks numerical and layout behavior. Private
 comparison entry points are the backend-templated `detail::pheevd_givens`,
 `detail::pheevd_householder` and `detail::pheevd_householder_stage4`, declared
@@ -1248,6 +1261,14 @@ resources and call `phegvd_prepare_staging` before the first raw run. This
 covers cold transport caches; no numerical warmup is needed. The staging
 query is pure metadata and reports two slot requirements independently of
 the numerical arena maxima. Early numerical returns can use smaller payloads.
+
+`test_workspace_phegvd --transport staged --major R` checks
+cold first execution and repeats with all four scalar types; its root-only
+staging queries make no allocation or communication. `--grid RxC` and
+`--major C` support alternate allocated-rank layouts. The direct-MPI and
+CCL staging query results are zero. Queried payload sizes and actual retained
+vector capacities are different memory quantities, particularly when public
+phase preparation grows an existing cache.
 
 PBDSDC coefficient broadcasts depend on numerical deflation. Its staging query
 therefore supplies a reachable geometric supremum, using each problem's bounded

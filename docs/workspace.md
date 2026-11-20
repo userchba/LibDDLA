@@ -169,6 +169,14 @@ the checked route and never read this environment variable. QR workspace can
 be larger; callers must size and prepare the selected plan rather than assume
 the direct path bounds it.
 
+Before raw matrix updates, `pgesvd` reserves both `HostStagedMPI` buffer
+slots during collective workspace preparation. The private
+`pgesvd_staging_bytes` query uses the checked route. Direct reduction includes
+bidiagonalization and any requested vector merges, row redistribution, and
+reflector application. The QR routes also account for QR panels, any adjoint
+copies, the square child solve, and the final reflector application. Callers of
+the borrowed run reserve these slots separately from numerical scratch.
+
 The runtime `HostStagedMPI` communication path uses the handle's reusable host
 staging vectors, regardless of its build-time default. They can grow on demand
 on a cold handle; this is distinct from caller-owned numerical scratch. Owning
