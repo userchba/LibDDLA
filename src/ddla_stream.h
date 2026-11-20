@@ -72,7 +72,9 @@ public:
     // Blocking tunnel communication reuses these two per-handle host buffers.
     // Send and receive storage must be disjoint for sendrecv/all-to-all/reduce.
     // Communication calls grow requested slots on demand and retain their
-    // high-water sizes; algorithms do not pre-size this cache. Finish GPU
+    // high-water sizes. Public PGEADD/PGEMM/PTRTRS/PHEGST reserve their exact communication
+    // high-water need in collective preparation. Legacy raw borrowers still
+    // grow on demand unless their owning algorithm reserves first. Finish GPU
     // copies before another communication call reuses them. Like the handle's
     // streams, this storage is not for concurrent host-thread use.
     template <typename T>

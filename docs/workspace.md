@@ -161,8 +161,17 @@ storage. Changing shape, descriptors, backend, process topology or frozen
 policy requires new sizing and preparation.
 
 The runtime `HostStagedMPI` communication path uses the handle's reusable host
-staging vectors, regardless of its build-time default. They can grow on demand on a cold handle; this is distinct
-from caller-owned numerical scratch. Each tunnel wrapper completes its staged
+staging vectors, regardless of its build-time default. They can grow on demand
+on a cold handle; this is distinct from caller-owned numerical scratch. Owning
+PGEADD, PGEMM, PTRTRS and PHEGST prepare the exact two-slot high waters under their
+existing allocation agreement before raw execution. Private raw borrowers must
+reserve their operation's staging query in the owning preparation as well.
+PHEGST includes initial/final completion and its two dense triangular solves;
+its private `Workspace::staging_bytes`
+reports these required host-cache bytes separately from arena bytes. CPU and
+nonstaged transports request zero staging bytes. Existing retained capacity is
+not shrunk, and a cache reservation does not establish vendor cold-allocation
+freedom or whole-call peak memory. Each tunnel wrapper completes its staged
 communication before reusing these buffers. Do not infer cold-path allocation
 freedom from allocation tests of the direct GPU collective path.
 
