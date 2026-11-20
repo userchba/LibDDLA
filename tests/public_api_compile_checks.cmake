@@ -26,6 +26,8 @@ void client(ddla::DdlaHandle_t h) {
     ddla::pdiag_logdet(h,0,z,nullptr,logdet);
     ddla::gemm<double>(h,'N','N',0,0,0,std::complex<double>(1),p,1,z,1,std::complex<double>(0),z,1);
     ddla::write_matrix<double>(h,p,0,0,\"unused\");
+    ddla::phegst<double>(h,'L',0,p,nullptr,static_cast<const double*>(p),nullptr);
+    ddla::phegst<std::complex<double>>(h,'U',0,z,nullptr,static_cast<const std::complex<double>*>(z),nullptr);
     static_assert(std::is_same<decltype(ddla::ppotrf<double>(h,'L',0,p,1,1,nullptr,info)),void>::value,\"Cholesky status API\");
 }")
     unset(DDLA_PUBLIC_SCALAR_SYNTAX CACHE)
@@ -33,7 +35,7 @@ void client(ddla::DdlaHandle_t h) {
     if(NOT DDLA_PUBLIC_SCALAR_SYNTAX)
         message(FATAL_ERROR "Public scalar-only API positive compile control failed")
     endif()
-    foreach(_case GEMM SCAL MIXED WRITER POINTER INIT DEFAULT_BACKEND)
+    foreach(_case GEMM SCAL MIXED WRITER POINTER INIT DEFAULT_BACKEND PHEGST)
         if(_case STREQUAL GEMM)
             set(_call "ddla::gemm<ddla::DdlaBackend::CPU,double>(h,'N','N',0,0,0,1.,p,1,p,1,0.,p,1);")
         elseif(_case STREQUAL SCAL)
@@ -42,6 +44,8 @@ void client(ddla::DdlaHandle_t h) {
             set(_call "ddla::gemm<ddla::DdlaBackend::GPU,double>(h,'N','N',0,0,0,std::complex<double>(1),p,1,z,1,std::complex<double>(0),z,1);")
         elseif(_case STREQUAL WRITER)
             set(_call "ddla::write_matrix<ddla::DdlaBackend::CPU,double>(p,0,0,\"unused\");")
+        elseif(_case STREQUAL PHEGST)
+            set(_call "ddla::phegst<ddla::DdlaBackend::CPU,double>(h,'L',0,p,nullptr,p,nullptr);")
         elseif(_case STREQUAL INIT)
             set(_call "ddla::ddlaInit(h);")
         elseif(_case STREQUAL DEFAULT_BACKEND)

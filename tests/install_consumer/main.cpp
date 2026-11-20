@@ -12,12 +12,16 @@
 #include <cmath>
 #include <complex>
 #include <stdexcept>
+#include <limits>
 
 // Public scalar-only function pointers require neither private declarations nor
 // vendor definitions. The same entry point dispatches from its supplied handle.
 using Syevd = void (*)(const ddla::DdlaHandle_t&, char, char, int, double*, int, double*, int*);
 using Heevd = void (*)(const ddla::DdlaHandle_t&, char, char, int, std::complex<double>*, int, double*, int*);
+using Phegst = void (*)(const ddla::DdlaHandle_t &, char, int, double *, const int *,
+                        const double *, const int *);
 using Scal = void (*)(const ddla::DdlaHandle_t&, int, const double&, double*, int);
+Phegst volatile public_phegst = &ddla::phegst<double>;
 Scal volatile public_scal = static_cast<Scal>(&ddla::scal<double>);
 Syevd volatile public_syevd = &ddla::syevd<double>;
 Heevd volatile public_heevd = &ddla::heevd<std::complex<double>>;
@@ -117,7 +121,35 @@ int main(int argc, char** argv)
                 std::abs(std::complex<double>(0., -1.) * z[2*j] + 2. * z[1+2*j] - w[j] * z[1+2*j]) > 1e-12)
                 throw std::runtime_error("installed HEEVD returned incorrect eigenvectors");
         }
-        if (!public_scal || !public_syevd || !public_heevd)
+        int desc[ddla::DDLA_DLEN_];
+        ddla::DDLA_CHECK(ddla::ddlaDescInit(desc, handle, 2, 2, 1, 1, 0, 0));
+        double metric[] = {4., 2., 2., 10.};
+        ddla::ppotrf<double>(handle, 'L', 2, metric, 1, 1, desc, info);
+        if (info)
+            throw std::runtime_error("installed factorization failed");
+        double factor_before[4];
+        for (int i = 0; i < 4; ++i)
+            factor_before[i] = metric[i];
+        double reduced[] = {16., 14., 14., 55.};
+        const double *fixed_factor = metric;
+        ddla::phegst(handle, 'L', 2, reduced, desc, fixed_factor, desc);
+        const double expected[] = {4., 1., 1., 5.};
+        const auto accepted = [&](const double* result) {
+            for (int i = 0; i < 4; ++i)
+                if (!std::isfinite(result[i]) || std::abs(result[i] - expected[i]) > 1e-12 ||
+                    metric[i] != factor_before[i])
+                    return false;
+            return true;
+        };
+        if (!accepted(reduced))
+            throw std::runtime_error("installed PHEGST changed its fixed factor or returned incorrect values");
+        double invalid[4];
+        for (int i = 0; i < 4; ++i) invalid[i] = reduced[i];
+        invalid[1] = std::numeric_limits<double>::quiet_NaN();
+        if (accepted(invalid))
+            throw std::runtime_error("installed PHEGST acceptance predicate accepted NaN");
+        std::cout << "installed PHEGST NaN rejection PASS\n";
+        if (!public_scal || !public_syevd || !public_heevd || !public_phegst)
             throw std::runtime_error("installed scalar-only public entry is unavailable");
         std::cout << "installed public-header consumer PASS DDLA_HAS_GPU=" << DDLA_HAS_GPU << '\n';
     } catch (const std::exception& error) {
