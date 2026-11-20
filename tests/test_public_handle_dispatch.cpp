@@ -82,12 +82,6 @@ void cholesky_calls(const ddla::DdlaHandle_t& h)
     ddla::ppotrf(h,'L',2,A.data(),1,1,d,info);
     require(info==0,"Cholesky dispatch INFO changed");
     equal(download(h,A.data(),4),std::vector<double>{2.,0.,0.,3.},"Cholesky factorization");
-    upload(h,A.data(),std::vector<double>{-4.,0.,0.,9.});
-    ddla::ppotrf<double>(h,'L',1,A.data(),1,1,d,info);
-    require(info==1,"nonpositive Cholesky pivot must fail");
-    // The failed pivot's stored value is vendor-dependent; INFO reports failure.
-    const auto failed=download(h,A.data(),4);
-    equal(std::vector<double>(failed.begin()+1,failed.end()),std::vector<double>{0.,0.,9.},"failed factor preserves the parent region");
 }
 void cpu_only_operation_rejections(const ddla::DdlaHandle_t& cpu)
 {

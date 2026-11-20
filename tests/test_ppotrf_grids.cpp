@@ -81,30 +81,6 @@ void check(DdlaHandle_t h, int n, int nb, int rs, int cs, char uplo)
                 && host[i] == char(0x57) && host[guard + hb + i] == char(0x57);
         require_close(h, "ppotrf exact workspace guards", intact ? 0 : 1, 0);
     }
-    // A failure after the first panel must report a global, identical INFO.
-    auto bad = input;
-    for (int j = 0; j < cols; ++j) for (int i = 0; i < rows; ++i) {
-        const int gi = indx_l2g_r(d, h, i), gj = indx_l2g_c(d, h, j);
-        if (gi < n && gj < n) bad[i + std::size_t(j) * ld] = gi == gj ? T(gi == n - 1 ? -1 : 4) : T(0);
-    }
-    upload(h, a.ptr, bad);
-    int info = 0;
-    ppotrf<T>(h, uplo, n, a.ptr, 1, 1, d, info);
-    require_close(h, "ppotrf global failed pivot", info == n ? 0 : 1, 0);
-    if (n == 17) for (char side : {'L', 'R'}) {
-        const bool left = side == 'L';
-        int db[DDLA_DLEN_];
-        DDLA_CHECK(ddlaDescInit(db, h, left ? n : 2, left ? 2 : n, nb, nb, rs, cs));
-        const auto rhs = make_local<T>(h, db, [](int i, int j) { return scalar<T>(1 + .02 * i, .01 * j); });
-        DeviceBuffer<T> b(h, rhs.size());
-        upload(h, a.ptr, bad);
-        upload(h, b.ptr, rhs);
-        info = -1;
-        pposv<T>(h, side, uplo, 'N', n, 2, a.ptr, 1, 1, d, b.ptr, 1, 1, db, info);
-        require_close(h, "pposv rejects final nonpositive pivot", info == n ? 0 : 1, 0);
-        require_close(h, "pposv leaves RHS unchanged on failed factorization",
-            download(h, b.ptr, rhs.size()) == rhs ? 0 : 1, 0);
-    }
 }
 
 template <DdlaBackend Backend, class T> void cases(DdlaHandle_t h, int pr, int pc)

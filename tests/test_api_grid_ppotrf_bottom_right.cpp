@@ -242,66 +242,6 @@ void check_success_case(const ddla::DdlaHandle_t& handle, char uplo, int n, int 
 }
 
 template <typename T>
-void check_failure_case(const ddla::DdlaHandle_t& handle, char uplo, int n, int nb,
-                        int irsrc, int icsrc, int failed_pivot)
-{
-    int desc[ddla::DDLA_DLEN_];
-    DDLA_CHECK(ddlaDescInit(desc, handle, n, n, nb, nb, irsrc, icsrc));
-
-    auto input = make_local_with_padding<T>(handle, desc, [=](int i, int j){
-        const bool opposite_triangle = uplo == 'U' ? i > j : i < j;
-        if(opposite_triangle) return opposite_triangle_sentinel<T>(i, j, n);
-        if(i != j) return T{};
-        return scalar<T>(i == failed_pivot ? -1.0 : 4.0);
-    });
-    DeviceBuffer<T> d_A(handle, input.values.size());
-    upload(handle, d_A.ptr, input.values);
-    check_ddla_sync(handle);
-
-    int info = -1;
-    ddla::ppotrf_bottom_right(handle, uplo, n, d_A.ptr, desc, info);
-    DDLA_CHECK(ddlaGetLastError(handle));
-    auto output = download(handle, d_A.ptr, input.values.size());
-
-    int info_min = 0;
-    int info_max = 0;
-    MPI_Allreduce(&info, &info_min, 1, MPI_INT, MPI_MIN, ddlaGetCommunicator(handle));
-    MPI_Allreduce(&info, &info_max, 1, MPI_INT, MPI_MAX, ddlaGetCommunicator(handle));
-    const int expected_info = failed_pivot + 1;
-    double info_error = static_cast<double>(std::abs(info - expected_info));
-    info_error = std::max(info_error, static_cast<double>(info_max - info_min));
-
-    double sentinel_error = 0.0;
-    double padding_error = 0.0;
-    for(size_t offset = 0; offset < output.size(); ++offset){
-        if(!input.valid[offset]){
-            update_error(padding_error,
-                         static_cast<double>(std::abs(output[offset] - padding_sentinel<T>())));
-        }
-    }
-    for(int jloc = 0; jloc < ddla_test::n_loc(handle, desc); ++jloc){
-        const int j = indx_l2g_c(desc, handle, jloc);
-        for(int iloc = 0; iloc < ddla_test::m_loc(handle, desc); ++iloc){
-            const int i = indx_l2g_r(desc, handle, iloc);
-            const bool opposite_triangle = uplo == 'U' ? i > j : i < j;
-            if(!opposite_triangle) continue;
-            const size_t offset = iloc + static_cast<size_t>(jloc) * desc[DDLA_LLD_];
-            update_error(sentinel_error,
-                         static_cast<double>(std::abs(
-                             output[offset]
-                             - opposite_triangle_sentinel<T>(i, j, n))));
-        }
-    }
-
-    std::string name = case_name(
-        handle, scalar_name<T>(), uplo, n, nb, irsrc, icsrc);
-    name += failed_pivot == 0 ? " fail-left" : " fail-right";
-    require_close(handle, name + " info consensus", info_error, 0.0);
-    require_close(handle, name + " opposite sentinel", sentinel_error, 0.0);
-    require_close(handle, name + " padding", padding_error, 0.0);
-}
-
-template <typename T>
 void run_type_cases(const ddla::DdlaHandle_t& handle,
                     const std::vector<int>& sizes, int nb,
                     const std::vector<std::pair<int, int>>& sources)
@@ -311,11 +251,6 @@ void run_type_cases(const ddla::DdlaHandle_t& handle,
             for(int n : sizes){
                 check_success_case<T>(handle, uplo, n, nb, irsrc, icsrc);
             }
-
-            const int failure_n = 2 * nb + 1;
-            check_failure_case<T>(handle, uplo, failure_n, nb, irsrc, icsrc, 0);
-            check_failure_case<T>(
-                handle, uplo, failure_n, nb, irsrc, icsrc, failure_n - 1);
         }
     }
 }

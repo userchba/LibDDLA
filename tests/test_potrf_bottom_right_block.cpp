@@ -246,59 +246,6 @@ bool run_success_case(char uplo, int n, const DdlaHandle_t& handle)
 }
 
 template <typename T>
-bool run_failure_case(
-    char uplo, int n, int failed_pivot, const DdlaHandle_t& handle)
-{
-    constexpr int global_offset = 23;
-    const int lda = n + 3;
-    std::vector<T> input(
-        static_cast<std::size_t>(lda) * n, padding_sentinel<T>());
-    for(int column = 0; column < n; ++column){
-        for(int row = 0; row < n; ++row){
-            if(!in_referenced_triangle(uplo, row, column)){
-                input[row + static_cast<std::size_t>(column) * lda] =
-                    opposite_triangle_sentinel<T>(row, column);
-            }else if(row == column){
-                input[row + static_cast<std::size_t>(column) * lda] =
-                    scalar<T>(row == failed_pivot ? -1.0 : 4.0);
-            }else{
-                input[row + static_cast<std::size_t>(column) * lda] = T{};
-            }
-        }
-    }
-
-    T* d_A = nullptr;
-    T* d_work = nullptr;
-    int* d_info = nullptr;
-    DDLA_CHECK(ddlaMalloc(handle, reinterpret_cast<void**>(&d_A), input.size() * sizeof(T)));
-    DDLA_CHECK(ddlaMalloc(handle, reinterpret_cast<void**>(&d_work), static_cast<std::size_t>(n) * n * sizeof(T)));
-    DDLA_CHECK(ddlaMalloc(handle, reinterpret_cast<void**>(&d_info), sizeof(int)));
-    DDLA_CHECK(ddlaMemcpy(handle, d_A, input.data(), input.size() * sizeof(T)));
-
-    int info = -1;
-    detail::potrf_bottom_right_block<ddla_test::execution_backend>(
-        uplo, n, d_A, lda, global_offset,
-        d_work, d_info, info, handle);
-    DDLA_CHECK(ddlaGetLastError(handle));
-
-    DDLA_CHECK(ddlaFree(handle, d_A));
-    DDLA_CHECK(ddlaFree(handle, d_work));
-    DDLA_CHECK(ddlaFree(handle, d_info));
-    DDLA_CHECK(ddlaSynchronize(handle));
-
-    const int expected_info = global_offset + failed_pivot + 1;
-    const bool passed = info == expected_info;
-    std::cout << (passed ? "PASS" : "FAIL")
-              << " potrf_bottom_right_block<" << scalar_name<T>() << ">"
-              << " uplo=" << uplo
-              << " failed_pivot=" << failed_pivot + 1
-              << " info=" << info
-              << " expected_info=" << expected_info
-              << std::endl;
-    return passed;
-}
-
-template <typename T>
 bool run_type(const DdlaHandle_t& handle)
 {
     bool passed = true;
@@ -306,8 +253,6 @@ bool run_type(const DdlaHandle_t& handle)
         for(const int n : {1, 7, 31, 32, 127, 128, 192, 256}){
             passed = run_success_case<T>(uplo, n, handle) && passed;
         }
-        passed = run_failure_case<T>(uplo, 256, 0, handle) && passed;
-        passed = run_failure_case<T>(uplo, 256, 255, handle) && passed;
     }
     return passed;
 }

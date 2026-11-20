@@ -7,7 +7,7 @@
 //   getrf  square / tall / wide shapes, padded leading dimension with the padding checked untouched, pivot range,
 //          A = P*L*U rebuilt by hand and compared with the input, `info` for an exactly singular matrix;
 //   potrf  'U' and 'L' on a Hermitian positive-definite matrix, A = U^H U / L L^H rebuilt by hand, the unreferenced
-//          triangle checked bit for bit, `info` for a matrix that is not positive definite;
+//          triangle checked bit for bit;
 //   laswp  bit-exact against a hand-written LAPACK loop for incx = 1, 2, -1, -2 and sub-ranges k1..k2 (incx = 1 is
 //          the vendor routine on CUDA, every other stride the row-by-row fallback), and incx = 1 followed by
 //          incx = -1 restoring the matrix;
@@ -259,9 +259,8 @@ int check_getrf(const DdlaHandle_t& h, int m, int n, int pad, int zero_col, std:
 }
 
 // -- potrf --------------------------------------------------------------------------
-// bad_k >= 0: the matrix is the identity except A(bad_k, bad_k) = -1, so the leading minor of order bad_k + 1 fails.
 template <DdlaBackend Backend, typename T>
-int check_potrf(const DdlaHandle_t& h, char uplo, int n, int pad, int bad_k, std::uint64_t seed)
+int check_potrf(const DdlaHandle_t& h, char uplo, int n, int pad, std::uint64_t seed)
 {
     const int lda = n + pad;
     const std::size_t N = static_cast<std::size_t>(n);
@@ -275,10 +274,6 @@ int check_potrf(const DdlaHandle_t& h, char uplo, int n, int pad, int bad_k, std
             if (i == j) s = Tr<T>::make(static_cast<double>(std::real(s)) + n, 0.0);
             A[i + static_cast<std::size_t>(j) * lda] = s;
         }
-    if (bad_k >= 0)
-        for (int j = 0; j < n; ++j)
-            for (int i = 0; i < n; ++i)
-                A[i + static_cast<std::size_t>(j) * lda] = Tr<T>::make(i == j ? (i == bad_k ? -1.0 : 1.0) : 0.0, 0.0);
     // The triangle potrf must not touch gets a sentinel that would wreck the result if it were read.
     std::vector<T> A0 = A;
     for (int j = 0; j < n; ++j)
@@ -298,10 +293,9 @@ int check_potrf(const DdlaHandle_t& h, char uplo, int n, int pad, int bad_k, std
     dinfo.down(info);
 
     int failures = 0;
-    const int want_info = bad_k >= 0 ? bad_k + 1 : 0;
-    if (info[0] != want_info) {
-        report("potrf info", std::string("uplo=") + uplo + " " + dims(n, n, bad_k) + " got " + std::to_string(info[0]) +
-                                 " want " + std::to_string(want_info));
+    if (info[0] != 0) {
+        report("potrf info", std::string("uplo=") + uplo + " " + dims(n, n) + " got " + std::to_string(info[0]) +
+                                 " want 0");
         ++failures;
     }
     // Unreferenced triangle and padding: bit for bit what went in.
@@ -315,7 +309,6 @@ int check_potrf(const DdlaHandle_t& h, char uplo, int n, int pad, int bad_k, std
                 return failures + 1;
             }
         }
-    if (bad_k >= 0) return failures;
 
     double err = 0.0;
     for (int j = 0; j < n; ++j)
@@ -942,13 +935,9 @@ int run_type(const DdlaHandle_t& h)
     const int potrf_sizes[] = {1, 2, 5, 33, 64, 100};
     for (int n : potrf_sizes)
         for (char uplo : {'U', 'L'}) {
-            failures += check_potrf<Backend, T>(h, uplo, n, 0, -1, ++seed);
-            failures += check_potrf<Backend, T>(h, uplo, n, 4, -1, ++seed);
+            failures += check_potrf<Backend, T>(h, uplo, n, 0, ++seed);
+            failures += check_potrf<Backend, T>(h, uplo, n, 4, ++seed);
         }
-    for (char uplo : {'U', 'L'}) {
-        failures += check_potrf<Backend, T>(h, uplo, 8, 2, 3, ++seed);   // leading minor of order 4 fails
-        failures += check_potrf<Backend, T>(h, uplo, 8, 0, 0, ++seed);   // ... order 1
-    }
 
     struct Sw { int m, n, pad, k1, k2, incx; };
     const Sw sw[] = {

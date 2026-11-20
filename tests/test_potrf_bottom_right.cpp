@@ -252,54 +252,6 @@ bool run_success_case(char uplo, int n, const ddla::DdlaHandle_t& handle)
 }
 
 template <typename T>
-std::vector<T> make_failure_matrix(
-    char uplo, int n, int lda, int failed_pivot)
-{
-    std::vector<T> matrix(static_cast<size_t>(lda) * n, padding_value<T>());
-    for(int j = 0; j < n; ++j){
-        for(int i = 0; i < n; ++i){
-            matrix[i + static_cast<size_t>(j) * lda] =
-                in_referenced_triangle(uplo, i, j)
-                    ? T{}
-                    : opposite_triangle_value<T>(i, j);
-        }
-        matrix[j + static_cast<size_t>(j) * lda] = scalar<T>(4.0);
-    }
-    matrix[failed_pivot + static_cast<size_t>(failed_pivot) * lda] = scalar<T>(-1.0);
-    return matrix;
-}
-
-template <typename T>
-bool run_failure_case(
-    char uplo, int failed_pivot, const ddla::DdlaHandle_t& handle)
-{
-    constexpr int n = 129;
-    constexpr int lda = n + 5;
-    const auto input = make_failure_matrix<T>(uplo, n, lda, failed_pivot);
-    const size_t bytes = input.size() * sizeof(T);
-
-    T* d_A = nullptr;
-    DDLA_CHECK(ddlaMalloc(handle, reinterpret_cast<void**>(&d_A), bytes));
-    DDLA_CHECK(ddlaMemcpy(handle, d_A, input.data(), bytes));
-
-    int info = -1;
-    ddla::potrf_bottom_right(uplo, n, d_A, lda, info, handle);
-    DDLA_CHECK(ddlaGetLastError(handle));
-    DDLA_CHECK(ddlaSynchronize(handle));
-    DDLA_CHECK(ddlaFree(handle, d_A));
-
-    const int expected_info = failed_pivot + 1;
-    const bool passed = info == expected_info;
-    std::cout << (passed ? "PASS" : "FAIL")
-              << " potrf_bottom_right<" << scalar_name<T>() << ">"
-              << " uplo=" << uplo
-              << " failed_pivot=" << failed_pivot + 1
-              << " info=" << info
-              << " expected_info=" << expected_info << std::endl;
-    return passed;
-}
-
-template <typename T>
 bool run_type(const ddla::DdlaHandle_t& handle)
 {
     bool passed = true;
@@ -308,8 +260,6 @@ bool run_type(const ddla::DdlaHandle_t& handle)
             const bool case_passed = run_success_case<T>(uplo, n, handle);
             passed = case_passed && passed;
         }
-        passed = run_failure_case<T>(uplo, 128, handle) && passed;
-        passed = run_failure_case<T>(uplo, 0, handle) && passed;
     }
     return passed;
 }

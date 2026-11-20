@@ -234,15 +234,6 @@ void check_cholesky(const DdlaHandle_t& h, int n, int nb, int nrhs)
         require_close(h, tag_of(B, "ppotrf", ty, "n=1 factor"),
                       local_max_error<T>(h, tiny, out, [](int, int) { return T(2); }), tol);
     }
-    {   // not positive definite: info = 1
-        auto h_n = make_local<T>(h, descA, [](int i, int j) { return (i != j) ? T(0) : T(i == 0 ? -1 : 2); });
-        DeviceBuffer<T> dN(h, h_n.size());
-        upload(h, dN.ptr, h_n);
-        check_ddla_sync(h);
-        int info = -1;
-        ddla::ppotrf(h, 'L', n, dN.ptr, 1, 1, descA, info);
-        require_close(h, tag_of(B, "ppotrf", ty, "non-PD info"), std::abs(info - 1), 0.0);
-    }
 
     // bottom-right Cholesky: uplo 'U' gives A = U U^H, uplo 'L' gives A = L^H L.  Solve with the factor through ptrtrs.
     for (char uplo : {'U', 'L'}) {

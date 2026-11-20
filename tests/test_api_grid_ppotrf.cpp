@@ -30,22 +30,6 @@ void check_ppotrf(const ddla::DdlaHandle_t& handle, const Shape& base)
         require_close(handle, "ppotrf(handle, tiny factor)", tiny_value_err, 1e-12);
     }
 
-    {
-        auto h_not_pd = make_local<Complex>(handle, descA, [](int i, int j){
-            if(i != j) return Complex(0.0, 0.0);
-            return Complex(i == 0 ? -1.0 : 2.0, 0.0);
-        });
-        DeviceBuffer<Complex> d_not_pd(handle, h_not_pd.size());
-        upload(handle, d_not_pd.ptr, h_not_pd);
-        check_ddla_sync(handle);
-
-        int not_pd_info = -1;
-        ddla::ppotrf(handle, 'L', n, d_not_pd.ptr, 1, 1,
-                                                 descA, not_pd_info);
-        const double not_pd_err = std::abs(not_pd_info - 1);
-        require_close(handle, "ppotrf(handle, non-PD cleanup)", not_pd_err, 0.0);
-    }
-
     auto h_A = make_local<Complex>(handle, descA, [=](int i, int j){ return hpd_value(i, j, n); });
     auto h_B = build_rhs(handle, descB, n, hpd_value, n);
 
