@@ -197,6 +197,31 @@ Compare the same public-API executable against baseline and candidate
 libraries when checking numerical preservation. Use restored inputs and the
 same hardware, rank/thread placement, warm-ups and repetitions for timing.
 
+### Shared fixed-factor dense congruence
+
+The private `hegst_impl::congruence_run` performs the maintained initial
+Hermitian completion and two raw PTRTRS solves on caller-owned scratch, with
+a const factor. PHEGVD calls it directly at its existing post-factor boundary;
+it adds no final completion or success synchronization there. PHEGST's raw
+entry adds the final canonical completion and required queue retirement before
+its borrowed workspace may be reused or released.
+
+`congruence_solve_workspace_size` sizes only the two solves, so PHEGVD can
+prepare factor/solve scratch before B succeeds without reading a future
+completion/eigen plan. After successful B, `congruence_workspace_size` composes
+completion and both solves by independent backend/host maxima, and
+`congruence_staging_bytes` reports the per-slot payload maxima. Initial/final
+completion use the same sequential scratch and communication geometry. The
+PHEGST workspace retains only `backend_bytes`, `host_bytes`, `staging_bytes`;
+PHEGVD's phase reporting calls this phase `congruence_backend/host`.
+
+Prepared PHEGST identity checks retain backend/transport, communicator,
+compute/data streams, process-grid coordinates/rank order and host-thread
+budget snapshots. Re-check/reprepare after changing these properties. There is
+no factorization, SPD/diagonal scan or new numerical policy in factor reuse.
+The rejected blocked experiment and its mutant tests are retained in task
+archives rather than shipped as another runtime algorithm.
+
 ### Local tridiagonal eigensolver
 
 `stedc` owns its scratch; private `spectral_impl::stedc_plan<T>` and

@@ -1208,3 +1208,33 @@ disjoint from both active matrices. `A`/`B` need matching square source-zero
 blocks, and `Z` has the existing `pheevd` distribution requirements.
 If the leading minor `i` of `B` is not positive definite, the driver returns
 `info=n+i` without starting the reduction or changing `A`.
+
+For repeated problems with a fixed positive-definite `B`, factor it once with
+`ppotrf` and reuse its triangular factor through
+`phegst(handle, uplo, n, A, descA, factorB, descB)`. This type-1 reduction
+supports all four scalar types. Lower storage produces `L^-1 A L^-H` from
+`B=L L^H`; upper storage produces `U^-H A U^-1` from `B=U^H U`.
+It writes the complete leading reduced matrix with real complex diagonals.
+The supplied factor, including its unused triangle, remains unchanged. A/factor
+parent regions and padding outside the active blocks are preserved.
+The factor must have nonzero diagonal entries, A/factor active spans must be
+disjoint, and both descriptors need matching square source-zero blocks.
+
+`phegst` manages its workspace internally and throws collectively for invalid
+arguments. The caller supplies an already valid factor; the reduction does
+not return a positive-definiteness status. After reduction, use `pheevd`
+and a triangular backsolve for the eigenvectors. The reduction shares the
+maintained dense completion and two raw triangular solves with `phegvd`.
+`phegst` additionally completes the final triangle to canonical full Hermitian
+storage; the generalized eigensolver keeps its existing subsequent phase order.
+Numerical scratch is the domain-wise maximum of sequential completion/solve
+requirements, with no packed-diagonal prefix or repeated shrinking-factor solve.
+Coarse descriptor blocks and empty local partitions retain their normal ownership
+imbalance.
+When the active matrix fits in one descriptor block, its sole owner uses local
+completion and two TRSM calls; all ranks require zero reduction workspace and
+communication-cache bytes, including ranks with no active entries.
+For `HostStagedMPI`, owning preparation reserves both communication-cache slot
+high waters before matrix updates. Private workspace queries report required
+host-cache bytes separately from numerical backend/host arenas; this
+does not cover vendor first-use allocations or whole-call peak memory.
