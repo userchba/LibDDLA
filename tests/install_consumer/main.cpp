@@ -22,6 +22,52 @@ Scal volatile public_scal = static_cast<Scal>(&ddla::scal<double>);
 Syevd volatile public_syevd = &ddla::syevd<double>;
 Heevd volatile public_heevd = &ddla::heevd<std::complex<double>>;
 
+template<class R>
+void installed_mixed_batches(ddla::DdlaHandle_t h)
+{
+    typedef std::complex<R> Z;
+    int dims[]={1};
+    R real[]={R(2)};
+    Z complex[]={Z(1,3)}, intermediate[]={Z(0)}, output[]={Z(0)};
+    const R* rp[]={real};
+    const Z* zp[]={complex};
+    Z* cp[]={output};
+    Z* tp[]={intermediate};
+    ddla::gemmVbatched<R>(h,'N','N',dims,dims,dims,Z(1),rp,dims,zp,dims,Z(0),cp,dims,1);
+    if (std::abs(output[0]-Z(2,6))>R(1e-5))
+        throw std::runtime_error("installed mixed RC variable batch is incorrect");
+    ddla::gemmVbatched<R>(h,'N','N',dims,dims,dims,Z(1),zp,dims,rp,dims,Z(0),cp,dims,1);
+    if (std::abs(output[0]-Z(2,6))>R(1e-5))
+        throw std::runtime_error("installed mixed CR variable batch is incorrect");
+    ddla::gemmVbatched2s<R>(h,'N','N',dims,dims,dims,Z(1),rp,dims,zp,dims,Z(0),tp,dims,
+        'N','N',dims,dims,dims,Z(1),rp,dims,dims,Z(0),cp,dims,true,1,dims,1);
+    if (std::abs(output[0]-Z(4,12))>R(1e-5))
+        throw std::runtime_error("installed mixed RC two-stage batch is incorrect");
+    ddla::gemmVbatched2s<R>(h,'N','N',dims,dims,dims,Z(1),zp,dims,rp,dims,Z(0),tp,dims,
+        'N','N',dims,dims,dims,Z(1),rp,dims,dims,Z(0),cp,dims,false,1,dims,1);
+    if (std::abs(output[0]-Z(4,12))>R(1e-5))
+        throw std::runtime_error("installed mixed CR two-stage batch is incorrect");
+    ddla::gemmVbatched2s<R>(h,'N','N',dims,dims,dims,Z(1),rp,dims,zp,dims,Z(0),tp,dims,
+        'N','N',dims,dims,dims,Z(1),zp,dims,dims,Z(0),cp,dims,true,1,dims,1);
+    if (std::abs(output[0]-Z(-16,12))>R(1e-5))
+        throw std::runtime_error("installed RCC two-stage batch is incorrect");
+    ddla::gemmVbatched2s<R>(h,'N','N',dims,dims,dims,Z(1),zp,dims,rp,dims,Z(0),tp,dims,
+        'N','N',dims,dims,dims,Z(1),zp,dims,dims,Z(0),cp,dims,false,1,dims,1);
+    if (std::abs(output[0]-Z(-16,12))>R(1e-5))
+        throw std::runtime_error("installed CRC two-stage batch is incorrect");
+    ddla::gemmVbatched2s<R>(h,'N','N',dims,dims,dims,Z(1),zp,dims,zp,dims,Z(0),tp,dims,
+        'N','N',dims,dims,dims,Z(1),rp,dims,dims,Z(0),cp,dims,true,1,dims,1);
+    if (std::abs(output[0]-Z(-16,12))>R(1e-5))
+        throw std::runtime_error("installed CCR two-stage batch is incorrect");
+    R real_intermediate[1]={R(0)};
+    R* rtp[]={real_intermediate};
+    ddla::gemmVbatched2s<R>(h,'N','N',dims,dims,dims,R(1),rp,dims,rp,dims,R(0),rtp,dims,
+        'N','N',dims,dims,dims,Z(1),zp,dims,dims,Z(0),cp,dims,false,1,dims,1);
+    if (std::abs(output[0]-Z(4,12))>R(1e-5))
+        throw std::runtime_error("installed RRC two-stage batch is incorrect");
+
+}
+
 int main(int argc, char** argv)
 {
     int provided = MPI_THREAD_SINGLE;
@@ -42,6 +88,8 @@ int main(int argc, char** argv)
             throw std::runtime_error("installed header/library capability mismatch");
         ddla::DDLA_CHECK(ddla::ddlaInit(handle, ddla::DdlaBackend::CPU));
         ddla::DDLA_CHECK(ddla::ddlaSet(handle, MPI_COMM_WORLD, 1, 1));
+        installed_mixed_batches<float>(handle);
+        installed_mixed_batches<double>(handle);
         double values[] = {1.0, -2.0};
         ddla::scal(handle, 2, 3.0, values, 1);
         if (values[0] != 3.0 || values[1] != -6.0)
