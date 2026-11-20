@@ -197,6 +197,34 @@ Compare the same public-API executable against baseline and candidate
 libraries when checking numerical preservation. Use restored inputs and the
 same hardware, rank/thread placement, warm-ups and repetitions for timing.
 
+### Prepared generalized eigensolver transport
+
+The private `PhegvdWorkspace` still reports the domain-wise maximum of the
+factor/solve, shared dense congruence and selected eigen arenas. It excludes retained
+transport cache storage. After all method/topology/resources are prepared,
+`phegvd_staging_bytes<T>(handle, plan, eigen_plan, eigen_resources)` is a pure,
+rank-local query of the two HostStagedMPI slot high waters; it can run on root
+alone. It reuses existing transfer, triangular-solve and OneStage geometry,
+plus the actual PPOTRF and TwoStage phase schedules. CPU, CCL and direct MPI
+request zero staging bytes. Host MPI band/history/tridiagonal arrays are not
+counted again as device staging.
+
+Call `phegvd_prepare_staging(handle, bytes)` outside the raw run. This reserves
+both slots under allocation agreement before factorization can modify B.
+There is no first-run host-allocation exemption. The public owner preserves
+its phased behavior: factor cache before B mutation; completion/congruence
+cache after successful B; selected eigen/backsolve cache after the existing
+method check and resource preparation. Failed B does not inspect future
+method settings. The pure complete query is intended for callers that have
+already prepared those future plans; it is not used to change public order.
+
+A successful solve attains the fixed transport geometry; non-positive B or
+other early numerical returns can use less. Report slot payload requirements,
+actual `host_buffer_capacities()`, retained route resources and numerical arena
+maxima separately. Standard-vector growth can retain more capacity than the
+most recent payload request. Native vendor first-use allocations and allocator
+overhead are outside the raw DDLA-allocation assertion.
+
 ### Shared fixed-factor dense congruence
 
 The private `hegst_impl::congruence_run` performs the maintained initial

@@ -1238,3 +1238,13 @@ For `HostStagedMPI`, owning preparation reserves both communication-cache slot
 high waters before matrix updates. Private workspace queries report required
 host-cache bytes separately from numerical backend/host arenas; this
 does not cover vendor first-use allocations or whole-call peak memory.
+
+The generalized `phegvd` owner reserves the factorization transport before B
+is modified. After B succeeds it separately prepares completion/congruence,
+then the selected eigen route and vector backsolve. A non-positive B still
+returns before future eigensolver method options/resources are read. Private
+fully prepared callers query `phegvd_staging_bytes` after creating all route
+resources and call `phegvd_prepare_staging` before the first raw run. This
+covers cold transport caches; no numerical warmup is needed. The staging
+query is pure metadata and reports two slot requirements independently of
+the numerical arena maxima. Early numerical returns can use smaller payloads.
