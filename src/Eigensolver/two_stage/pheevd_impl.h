@@ -18,13 +18,19 @@
 #include <cstdint>
 #include <optional>
 namespace ddla { namespace detail {
-// Initial CPU policy is deliberately limited to the tested block size,
-// MPI/thread layouts and large problems. Other calls retain their engine.
+// CPU Householder band chase: one shared-memory node, at most 128 ranks and 64 workers per
+// rank, problems of at least 2048, any block size whose band (a divisor of nb, see
+// eig_cpu_band) is at least 16.  The chase has no rank limit of its own; 65, 72, 96, 100
+// and 128 ranks pass (2026-11-15, real and complex, bands 16-64), larger counts are
+// untested.  Measured 2026-11-15 on 8 cores at n=4000, forced through the private entry:
+// bands 16, 32, 48, 50, 64, 100 and 128 all pass and beat the Givens chase (stage 2
+// 0.3-1.3 s against 4.3 s real, 0.6-2.5 s against 9.4 s complex).  Smaller bands and
+// problems keep the Givens engine.
 inline bool pheevd_cpu_householder_shape(int n,int nb,int nbw,int pr,int pc,int workers=1) noexcept
 {
     const long long ranks=static_cast<long long>(pr)*pc;
-    return n>=2048 && nb==64 && nbw==64 && pr>=1 && pc>=1 &&
-           ranks<=64 && workers>=1 && workers<=64;
+    return n>=2048 && nbw>=16 && nb>=nbw && nb%nbw==0 && pr>=1 && pc>=1 &&
+           ranks<=128 && workers>=1 && workers<=64;
 }
 
 // Conservative full-solve policy from the matched eight-V100 measurements.
