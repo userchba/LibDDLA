@@ -909,8 +909,6 @@ foreach(_method_test test_pheevd_methods test_pheevd_policy)
     add_test_executable(${_method_test})
 endforeach()
 
-add_test_executable(test_diag_logdet)
-
 # Explicit-queue correctness fixtures default to CPU even in a dual build.
 if(UNIX AND NOT APPLE)
     add_test_executable(test_pgemm_pipeline)
@@ -978,6 +976,8 @@ if(DDLA_HAS_GPU)
         PROCESSORS ${DDLA_TEST_NP} TIMEOUT 180
         ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:workspace_trace>;DDLA_WORKSPACE_TRACE_REQUIRED=1;OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
 endif()
+
+add_test_executable(test_diag_logdet)
 
 add_test_executable(test_stedc)
 set_tests_properties(test_stedc_mpi PROPERTIES LABELS cpu TIMEOUT 180)

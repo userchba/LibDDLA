@@ -3,6 +3,7 @@
 //   tests/workspace_trace.cpp -o libworkspace_trace.so -ldl
 // Add the matching CUDA definition/include paths for the CUDA profile.
 #include "workspace_trace_api.h"
+#include "allocation_frame_classifier.h"
 #include <ddla/ddla_handle_t.h>
 
 #include <atomic>
@@ -60,20 +61,10 @@ bool managed_caller()
 {
     if(resolving)return false;
     ResolutionGuard guard;
-    void* frames[32];const int count=backtrace(frames,32);
-    for(int i=1;i<count;++i) {
-        Dl_info info{};
-        if(!dladdr(frames[i],&info) || !info.dli_fname)continue;
-        if(own_path && std::strcmp(info.dli_fname,own_path)==0)continue;
-        const char* file=basename(info.dli_fname);
-        if(std::strstr(file,"libstdc++") || std::strstr(file,"libc++") ||
-           std::strstr(file,"libgcc_s") || std::strstr(file,"libunwind") ||
-           std::strncmp(file,"libc.so",7)==0 || std::strncmp(file,"ld-linux",8)==0)continue;
-        if(std::strstr(file,"libddla.") || std::strstr(file,"libddla-") ||
-           (executable[0] && std::strcmp(file,basename(executable))==0))return true;
-        return false;
-    }
-    return false;
+    const auto owner=allocation_test::inspect(own_path,executable);
+    // Workspace scopes intentionally include the fixture itself; the fault
+    // interposer accepts DDLA only. Both stop at the same semantic boundary.
+    return owner==AllocationProbeOwner::Library||owner==AllocationProbeOwner::Fixture;
 }
 void count(Counter which,bool managed=false)
 {
