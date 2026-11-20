@@ -1832,6 +1832,154 @@ void gemmVbatched2s(
 
 
 /**
+ * @brief Native mixed variable-size GEMM with complex alpha, beta and output.
+ *
+ * Arrays and matrix data use handle-selected memory (host for CPU, device for GPU).
+ * Leading dimensions and N/T/C modes have GEMM semantics; C on a real operand is T.
+ * Metadata is validated before output writes. A zero product does not read input
+ * matrices; beta zero does not read old output. An empty batch is a no-op.
+ */
+template <typename R>
+void gemmVbatched(const DdlaHandle_t& handle, char transA, char transB,
+    int* m, int* n, int* k, std::complex<R> alpha,
+    const R* const* A, int* lda, const std::complex<R>* const* B, int* ldb,
+    std::complex<R> beta, std::complex<R>** C, int* ldc, int batch_count);
+
+/**
+ * @brief Two dependent native mixed GEMM stages with a complex intermediate.
+ *
+ * Stage zero uses the typed inputs below. The other stage-one operand is real;
+ * C0_left selects C0*AB1 or AB1*C0. Its logical shape and leading dimension must
+ * match C0. Stage-zero beta must be zero. Positive host segment sizes must sum
+ * to batch_count. Different segments may reuse C0 storage; each segment's two
+ * stages finish in stream order before the next segment starts. Within one
+ * segment, matrix output regions must be disjoint. Backend and zero-product
+ * rules are those of the mixed gemmVbatched overload.
+ */
+template <typename R>
+void gemmVbatched2s(const DdlaHandle_t& handle,
+    char transA_0, char transB_0, int* m_0, int* n_0, int* k_0,
+    std::complex<R> alpha_0, const R* const* A_0, int* lda_0,
+    const std::complex<R>* const* B_0, int* ldb_0, std::complex<R> beta_0,
+    std::complex<R>** C_0, int* ldc_0,
+    char transA_1, char transB_1, int* m_1, int* n_1, int* k_1,
+    std::complex<R> alpha_1, const R* const* AB_1, int* lda_1, int* ldb_1,
+    std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1,
+    bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+
+/**
+ * @brief Native mixed variable-size GEMM with complex alpha, beta and output.
+ *
+ * Arrays and matrix data use handle-selected memory (host for CPU, device for GPU).
+ * Leading dimensions and N/T/C modes have GEMM semantics; C on a real operand is T.
+ * Metadata is validated before output writes. A zero product does not read input
+ * matrices; beta zero does not read old output. An empty batch is a no-op.
+ */
+template <typename R>
+void gemmVbatched(const DdlaHandle_t& handle, char transA, char transB,
+    int* m, int* n, int* k, std::complex<R> alpha,
+    const std::complex<R>* const* A, int* lda, const R* const* B, int* ldb,
+    std::complex<R> beta, std::complex<R>** C, int* ldc, int batch_count);
+
+/**
+ * @brief Two dependent native mixed GEMM stages with a complex intermediate.
+ *
+ * Stage zero uses the typed inputs below. The other stage-one operand is real;
+ * C0_left selects C0*AB1 or AB1*C0. Its logical shape and leading dimension must
+ * match C0. Stage-zero beta must be zero. Positive host segment sizes must sum
+ * to batch_count. Different segments may reuse C0 storage; each segment's two
+ * stages finish in stream order before the next segment starts. Within one
+ * segment, matrix output regions must be disjoint. Backend and zero-product
+ * rules are those of the mixed gemmVbatched overload.
+ */
+template <typename R>
+void gemmVbatched2s(const DdlaHandle_t& handle,
+    char transA_0, char transB_0, int* m_0, int* n_0, int* k_0,
+    std::complex<R> alpha_0, const std::complex<R>* const* A_0, int* lda_0,
+    const R* const* B_0, int* ldb_0, std::complex<R> beta_0,
+    std::complex<R>** C_0, int* ldc_0,
+    char transA_1, char transB_1, int* m_1, int* n_1, int* k_1,
+    std::complex<R> alpha_1, const R* const* AB_1, int* lda_1, int* ldb_1,
+    std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1,
+    bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+
+/**
+ * @brief Two dependent variable-size stages with native operand domains.
+ *
+ * This overload uses R by std::complex<R> in stage zero and a std::complex<R> external stage-one
+ * operand. C0_left selects intermediate*external or external*intermediate.
+ * Metadata residence, zero-product rules, segment ordering, nonoverlap and
+ * leading-dimension contracts are those of the mixed two-stage overloads above.
+ */
+template <typename R>
+void gemmVbatched2s(const DdlaHandle_t& handle,
+    char transA_0, char transB_0, int* m_0, int* n_0, int* k_0,
+    std::complex<R> alpha_0, const R* const* A_0, int* lda_0,
+    const std::complex<R>* const* B_0, int* ldb_0, std::complex<R> beta_0,
+    std::complex<R>** C_0, int* ldc_0,
+    char transA_1, char transB_1, int* m_1, int* n_1, int* k_1,
+    std::complex<R> alpha_1, const std::complex<R>* const* AB_1, int* lda_1, int* ldb_1,
+    std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1,
+    bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+
+/**
+ * @brief Two dependent variable-size stages with native operand domains.
+ *
+ * This overload uses std::complex<R> by R in stage zero and a std::complex<R> external stage-one
+ * operand. C0_left selects intermediate*external or external*intermediate.
+ * Metadata residence, zero-product rules, segment ordering, nonoverlap and
+ * leading-dimension contracts are those of the mixed two-stage overloads above.
+ */
+template <typename R>
+void gemmVbatched2s(const DdlaHandle_t& handle,
+    char transA_0, char transB_0, int* m_0, int* n_0, int* k_0,
+    std::complex<R> alpha_0, const std::complex<R>* const* A_0, int* lda_0,
+    const R* const* B_0, int* ldb_0, std::complex<R> beta_0,
+    std::complex<R>** C_0, int* ldc_0,
+    char transA_1, char transB_1, int* m_1, int* n_1, int* k_1,
+    std::complex<R> alpha_1, const std::complex<R>* const* AB_1, int* lda_1, int* ldb_1,
+    std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1,
+    bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+
+/**
+ * @brief Two dependent variable-size stages with native operand domains.
+ *
+ * This overload uses std::complex<R> by std::complex<R> in stage zero and a R external stage-one
+ * operand. C0_left selects intermediate*external or external*intermediate.
+ * Metadata residence, zero-product rules, segment ordering, nonoverlap and
+ * leading-dimension contracts are those of the mixed two-stage overloads above.
+ */
+template <typename R>
+void gemmVbatched2s(const DdlaHandle_t& handle,
+    char transA_0, char transB_0, int* m_0, int* n_0, int* k_0,
+    std::complex<R> alpha_0, const std::complex<R>* const* A_0, int* lda_0,
+    const std::complex<R>* const* B_0, int* ldb_0, std::complex<R> beta_0,
+    std::complex<R>** C_0, int* ldc_0,
+    char transA_1, char transB_1, int* m_1, int* n_1, int* k_1,
+    std::complex<R> alpha_1, const R* const* AB_1, int* lda_1, int* ldb_1,
+    std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1,
+    bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+
+/**
+ * @brief Two dependent variable-size stages with native operand domains.
+ *
+ * This overload uses R by R in stage zero and a std::complex<R> external stage-one
+ * operand. C0_left selects intermediate*external or external*intermediate.
+ * Metadata residence, zero-product rules, segment ordering, nonoverlap and
+ * leading-dimension contracts are those of the mixed two-stage overloads above.
+ */
+template <typename R>
+void gemmVbatched2s(const DdlaHandle_t& handle,
+    char transA_0, char transB_0, int* m_0, int* n_0, int* k_0,
+    R alpha_0, const R* const* A_0, int* lda_0,
+    const R* const* B_0, int* ldb_0, R beta_0,
+    R** C_0, int* ldc_0,
+    char transA_1, char transB_1, int* m_1, int* n_1, int* k_1,
+    std::complex<R> alpha_1, const std::complex<R>* const* AB_1, int* lda_1, int* ldb_1,
+    std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1,
+    bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+
+/**
  * @brief Fill a buffer with independent uniform random values in [0, 1) on a CPU handle and
  * (0, 1] on a GPU handle (the vendor generators exclude 0 and include 1).
  *

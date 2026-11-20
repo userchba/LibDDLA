@@ -11,12 +11,15 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <limits>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 
 #include "gemm_mixed_cpu.h"
 #include "instantiate.h"
 #include "require_backend.h"
+#include "vbatched_impl.h"
 
 namespace ddla {
 namespace {
@@ -111,8 +114,27 @@ template <typename R, bool TA, bool TB, bool CONJ, bool Batched = false,
 __global__ void mixed_tiled(int m, int n, int k, const R* A, int lda,
                             const R* B, int ldb, R ar, R ai, R br, R bi,
                             R* C, int ldc, const void* const* aa = nullptr, const void* const* ba = nullptr,
-                            void* const* ca = nullptr)
+                            void* const* ca = nullptr,
+                            const int* vm = nullptr, const int* vn = nullptr,
+                            const int* vk = nullptr, const int* vlda = nullptr,
+                            const int* vldb = nullptr, const int* vldc = nullptr)
 {
+    if (vm) {
+        const int q = blockIdx.z;
+        m = vm[q]; n = vn[q]; k = vk[q];
+        lda = vlda[q]; ldb = vldb[q]; ldc = vldc[q];
+        if (m == 0 || n == 0) return;
+        // No operand is read for a zero product. Still apply beta to C.
+        if ((ar == R(0) && ai == R(0)) || k == 0) {
+            if (br == R(1) && bi == R(0)) return;
+            C = static_cast<R*>(ca[q]);
+            for (int j = blockIdx.y * BN + threadIdx.y; j < n && j < (blockIdx.y + 1) * BN; j += 8)
+                for (int i = blockIdx.x * BM + threadIdx.x; i < m && i < (blockIdx.x + 1) * BM; i += 16)
+                    mixed_store(C, TransposeC ? j + std::size_t(i)*ldc : i + std::size_t(j)*ldc,
+                                R(0), R(0), R(0), R(0), br, bi);
+            return;
+        }
+    }
     if constexpr (Batched) {
         A=static_cast<const R*>(aa[blockIdx.z]); B=static_cast<const R*>(ba[blockIdx.z]);
         C=static_cast<R*>(ca[blockIdx.z]);
@@ -197,6 +219,66 @@ __global__ void mixed_batch_pointers(const void* const* aa,const void* const* ba
         bp[q]=static_cast<const R*>(ba[q])+(tb=='N'?std::size_t(j0)*ldb:std::size_t(j0));
     } else { ap[q]=static_cast<const R*>(aa[q]); bp[q]=p; }
     cp[q]=p+packed;
+}
+
+__global__ void mixed_vbatched_pointer_check(
+    const int* m, const int* n, const int* k, const void* const* a,
+    const void* const* b, void* const* c, bool alpha_zero, bool beta_one,
+    int count, int* bad)
+{
+    const int q = blockIdx.x * blockDim.x + threadIdx.x;
+    if (q >= count || m[q] == 0 || n[q] == 0) return;
+    const bool product = !alpha_zero && k[q] != 0;
+    if ((!product && beta_one)) return;
+    if (!c[q] || (product && (!a[q] || !b[q]))) atomicCAS(bad, 0, q + 1);
+}
+
+__global__ void mixed_vbatched_stage_check(const int* m0, const int* n0, const int* ldc0,
+    const int* m1, const int* n1, const int* k1, const int* ld1,
+    bool left, bool trans, int count, int* bad)
+{
+    const int q = blockIdx.x * blockDim.x + threadIdx.x;
+    if (q >= count || m1[q] == 0 || n1[q] == 0 || k1[q] == 0) return;
+    const int rows = left ? (trans ? k1[q] : m1[q]) : (trans ? n1[q] : k1[q]);
+    const int cols = left ? (trans ? m1[q] : k1[q]) : (trans ? k1[q] : n1[q]);
+    if (rows != m0[q] || cols != n0[q] || ld1[q] != ldc0[q]) atomicCAS(bad,0,q+1);
+}
+
+template <typename R, bool ComplexLeft>
+void mixed_vbatched_gpu(const DdlaHandle_t& h, char ta, char tb,
+    int max_m, int max_n, int* m, int* n, int* k, std::complex<R> alpha,
+    const void* const* a, int* lda, const void* const* b, int* ldb,
+    std::complex<R> beta, std::complex<R>** c, int* ldc, int count)
+{
+    if (max_m == 0 || max_n == 0) return;
+    const auto stream = static_cast<gpuStream_t>(h->stream);
+    const bool at = ComplexLeft ? tb == 'N' : ta != 'N';
+    const bool bt = ComplexLeft ? ta == 'N' : tb != 'N';
+    const bool cj = ComplexLeft ? ta == 'C' : tb == 'C';
+    const int rows = ComplexLeft ? max_n : max_m;
+    const int cols = ComplexLeft ? max_m : max_n;
+    for (int first = 0; first < count;) {
+        const int batch = std::min(count - first, 65535);
+        const dim3 grid((rows - 1)/32 + 1, (cols - 1)/16 + 1, batch), block(16, 8);
+#define MIXED_VARIABLE_LAUNCH(A,B,C) \
+        mixed_tiled<R,A,B,C,true,ComplexLeft><<<grid,block,0,stream>>>( \
+            rows, cols, 0, nullptr, 0, nullptr, 0, alpha.real(), alpha.imag(), \
+            beta.real(), beta.imag(), nullptr, 0, \
+            (ComplexLeft ? b : a) + first, (ComplexLeft ? a : b) + first, \
+            reinterpret_cast<void* const*>(c) + first, \
+            (ComplexLeft ? n : m) + first, (ComplexLeft ? m : n) + first, k + first, \
+            (ComplexLeft ? ldb : lda) + first, (ComplexLeft ? lda : ldb) + first, ldc + first)
+        if (!at) {
+            if (!bt) { if (cj) { MIXED_VARIABLE_LAUNCH(false,false,true); } else { MIXED_VARIABLE_LAUNCH(false,false,false); } }
+            else { if (cj) { MIXED_VARIABLE_LAUNCH(false,true,true); } else { MIXED_VARIABLE_LAUNCH(false,true,false); } }
+        } else {
+            if (!bt) { if (cj) { MIXED_VARIABLE_LAUNCH(true,false,true); } else { MIXED_VARIABLE_LAUNCH(true,false,false); } }
+            else { if (cj) { MIXED_VARIABLE_LAUNCH(true,true,true); } else { MIXED_VARIABLE_LAUNCH(true,true,false); } }
+        }
+#undef MIXED_VARIABLE_LAUNCH
+        GPU_CHECK(gpuGetLastError());
+        first += batch;
+    }
 }
 
 unsigned mixed_blocks(std::size_t n)
@@ -700,4 +782,213 @@ DDLA_FOR_EACH_TYPE(MATRIX_SCAL_GPU)
 template void blas_impl::matrix_scal_gpu_run<std::complex<float>,float>(const DdlaHandle_t&,int,int,const float&,std::complex<float>*,int,std::complex<float>* const*,int);
 template void blas_impl::matrix_scal_gpu_run<std::complex<double>,double>(const DdlaHandle_t&,int,int,const double&,std::complex<double>*,int,std::complex<double>* const*,int);
 #endif
+namespace {
+template <DdlaBackend Backend, typename T, typename TA, typename TB>
+void mixed_vbatched_check(const DdlaHandle_t& h, char ta, char tb,
+    int* m, int* n, int* k, T alpha, const TA* const* a, int* lda,
+    const TB* const* b, int* ldb, T beta,
+    T** c, int* ldc, int count, int& max_m, int& max_n, int& max_k)
+{
+    detail::require_backend<Backend>(h, "gemmVbatched(mixed)");
+    if (count < 0) throw std::invalid_argument("gemmVbatched(mixed): negative batch count");
+    max_m = max_n = max_k = 0;
+    if (count == 0) return;
+    ta = mixed_trans(ta); tb = mixed_trans(tb);
+    if (!m || !n || !k || !lda || !ldb || !ldc || !a || !b || !c)
+        throw std::invalid_argument("gemmVbatched(mixed): null metadata array");
+    if constexpr (Backend == DdlaBackend::CPU) {
+        for (int q = 0; q < count; ++q) {
+            if (m[q]<0 || n[q]<0 || k[q]<0 || lda[q]<std::max(1,ta=='N'?m[q]:k[q]) ||
+                ldb[q]<std::max(1,tb=='N'?k[q]:n[q]) || ldc[q]<std::max(1,m[q]))
+                throw std::invalid_argument("gemmVbatched(mixed): invalid dimensions or leading dimension");
+            const bool product=alpha!=T(0) && k[q]!=0;
+            if (m[q]!=0 && n[q]!=0 && (product || beta!=T(1)) &&
+                (!c[q] || (product && (!a[q] || !b[q]))))
+                throw std::invalid_argument("gemmVbatched(mixed): null matrix entry");
+            if constexpr (std::is_same_v<T,TA> && std::is_same_v<T,TB>)
+                blas_impl::gemm_check<Backend,T>(h,ta,tb,m[q],n[q],k[q],alpha,a[q],lda[q],b[q],ldb[q],beta,c[q],ldc[q]);
+            else
+                blas_impl::gemm_check<Backend,typename real_type<T>::type>(h,ta,tb,m[q],n[q],k[q],alpha,a[q],lda[q],b[q],ldb[q],beta,c[q],ldc[q]);
+            max_m = std::max(max_m, m[q]); max_n = std::max(max_n, n[q]);
+            max_k = std::max(max_k, k[q]);
+        }
+    } else {
+#if DDLA_HAS_GPU
+        vector<int> summary(h, detail::padded_bytes<int>(4)/sizeof(int));
+        blas_impl::vbatched_dimensions_check(h,ta,tb,m,n,k,lda,ldb,ldc,count,
+                                            summary.data(),detail::padded_bytes<int>(4),max_m,max_n,max_k);
+        DDLA_CHECK(ddlaMemset(h, summary.data(), 0, sizeof(int)));
+        mixed_vbatched_pointer_check<<<(count-1)/256+1,256,0,static_cast<gpuStream_t>(h->stream)>>>(
+            m,n,k,reinterpret_cast<const void* const*>(a),reinterpret_cast<const void* const*>(b),
+            reinterpret_cast<void* const*>(c),alpha == T(0),beta == T(1),count,summary.data());
+        GPU_CHECK(gpuGetLastError());
+        int bad = 0;
+        DDLA_CHECK(ddlaMemcpy(h,&bad,summary.data(),sizeof(int)));
+        DDLA_CHECK(ddlaSynchronize(h));
+        if (bad) throw std::invalid_argument("gemmVbatched(mixed): null matrix at batch " + std::to_string(bad-1));
+#endif
+    }
+}
+
+template <DdlaBackend Backend, typename T, typename TA, typename TB>
+void mixed_vbatched_run(const DdlaHandle_t& h, char ta, char tb,
+    int max_m, int max_n, int max_k, int* m, int* n, int* k, T alpha,
+    const TA* const* a, int* lda, const TB* const* b, int* ldb,
+    T beta, T** c, int* ldc, int count)
+{
+    if (count == 0 || max_m == 0 || max_n == 0) return;
+    if constexpr (Backend == DdlaBackend::CPU) {
+        for (int q = 0; q < count; ++q) {
+            if constexpr (std::is_same_v<T,TA> && std::is_same_v<T,TB>)
+                gemm<Backend,T>(h,ta,tb,m[q],n[q],k[q],alpha,a[q],lda[q],b[q],ldb[q],beta,c[q],ldc[q]);
+            else
+                gemm<Backend,typename real_type<T>::type>(h,ta,tb,m[q],n[q],k[q],alpha,a[q],lda[q],b[q],ldb[q],beta,c[q],ldc[q]);
+        }
+    } else {
+#if DDLA_HAS_GPU
+        if constexpr (std::is_same_v<T,TA> && std::is_same_v<T,TB>) {
+            blas_impl::gemmVbatched_run<Backend,T>(h,max_m,max_n,max_k,
+                ta,tb,m,n,k,alpha,a,lda,b,ldb,beta,c,ldc,count);
+        } else {
+            using R=typename real_type<T>::type;
+            mixed_vbatched_gpu<R,std::is_same_v<TA,T>>(h,ta,tb,max_m,max_n,m,n,k,alpha,
+                reinterpret_cast<const void* const*>(a),lda,reinterpret_cast<const void* const*>(b),ldb,beta,c,ldc,count);
+        }
+#endif
+    }
+}
+} // namespace
+
+#define DDLA_MIXED_VBATCHED_BODY(TA,TB) \
+template <DdlaBackend Backend, typename R> \
+void gemmVbatched(const DdlaHandle_t& h, char ta, char tb, int* m, int* n, int* k, \
+    std::complex<R> alpha, const TA* const* a, int* lda, const TB* const* b, int* ldb, \
+    std::complex<R> beta, std::complex<R>** c, int* ldc, int count) \
+{ \
+    int max_m, max_n, max_k; \
+    mixed_vbatched_check<Backend,std::complex<R>>(h,ta,tb,m,n,k,alpha,a,lda,b,ldb,beta,c,ldc,count,max_m,max_n,max_k); \
+    if (count == 0) return; \
+    mixed_vbatched_run<Backend,std::complex<R>>(h,mixed_trans(ta),mixed_trans(tb),max_m,max_n,max_k,m,n,k,alpha,a,lda,b,ldb,beta,c,ldc,count); \
+}
+DDLA_MIXED_VBATCHED_BODY(R,std::complex<R>)
+DDLA_MIXED_VBATCHED_BODY(std::complex<R>,R)
+#undef DDLA_MIXED_VBATCHED_BODY
+
+namespace {
+template <DdlaBackend Backend, typename R, typename TA, typename TB, typename T0, typename TX>
+void mixed_vbatched_2s(const DdlaHandle_t& h,
+    char ta0, char tb0, int* m0, int* n0, int* k0, T0 alpha0,
+    const TA* const* a0, int* lda0, const TB* const* b0, int* ldb0,
+    T0 beta0, T0** c0, int* ldc0,
+    char ta1, char tb1, int* m1, int* n1, int* k1, std::complex<R> alpha1,
+    const TX* const* ab1, int* lda1, int* ldb1, std::complex<R> beta1,
+    std::complex<R>** c1, int* ldc1, bool left, int count, const int* segments, int segment_count)
+{
+    detail::require_backend<Backend>(h,"gemmVbatched2s(mixed)");
+    if (count < 0) throw std::invalid_argument("gemmVbatched2s(mixed): negative batch count");
+    if (count == 0) return;
+    if (beta0 != R(0)) throw std::invalid_argument("gemmVbatched2s(mixed): stage-zero beta must be zero");
+    if (!segments || segment_count <= 0) throw std::invalid_argument("gemmVbatched2s(mixed): missing segments");
+    long long total = 0;
+    for (int s = 0; s < segment_count; ++s) {
+        if (segments[s] <= 0) throw std::invalid_argument("gemmVbatched2s(mixed): nonpositive segment");
+        total += segments[s];
+    }
+    if (total != count) throw std::invalid_argument("gemmVbatched2s(mixed): segment total mismatch");
+    ta0=mixed_trans(ta0); tb0=mixed_trans(tb0); ta1=mixed_trans(ta1); tb1=mixed_trans(tb1);
+    int mm0, nn0, kk0, mm1, nn1, kk1;
+    mixed_vbatched_check<Backend,T0>(h,ta0,tb0,m0,n0,k0,alpha0,a0,lda0,b0,ldb0,beta0,c0,ldc0,count,mm0,nn0,kk0);
+    if (left)
+        mixed_vbatched_check<Backend,std::complex<R>>(h,ta1,tb1,m1,n1,k1,alpha1,c0,lda1,ab1,ldb1,beta1,c1,ldc1,count,mm1,nn1,kk1);
+    else
+        mixed_vbatched_check<Backend,std::complex<R>>(h,ta1,tb1,m1,n1,k1,alpha1,ab1,lda1,c0,ldb1,beta1,c1,ldc1,count,mm1,nn1,kk1);
+    // Validate the actual intermediate footprint before either stage writes.
+    if (alpha1 != R(0)) {
+        const bool trans = (left ? ta1 : tb1) != 'N';
+        const int* ld1 = left ? lda1 : ldb1;
+        if constexpr (Backend == DdlaBackend::CPU) {
+            for (int q=0; q<count; ++q) {
+                if (m1[q]==0 || n1[q]==0 || k1[q]==0) continue;
+                const int rows=left ? (trans?k1[q]:m1[q]) : (trans?n1[q]:k1[q]);
+                const int cols=left ? (trans?m1[q]:k1[q]) : (trans?k1[q]:n1[q]);
+                if (rows!=m0[q] || cols!=n0[q] || ld1[q]!=ldc0[q])
+                    throw std::invalid_argument("gemmVbatched2s(mixed): incompatible intermediate dimensions");
+            }
+        } else {
+#if DDLA_HAS_GPU
+            vector<int> summary(h,1);
+            DDLA_CHECK(ddlaMemset(h,summary.data(),0,sizeof(int)));
+            mixed_vbatched_stage_check<<<(count-1)/256+1,256,0,static_cast<gpuStream_t>(h->stream)>>>(
+                m0,n0,ldc0,m1,n1,k1,ld1,left,trans,count,summary.data());
+            GPU_CHECK(gpuGetLastError());
+            int bad=0;
+            DDLA_CHECK(ddlaMemcpy(h,&bad,summary.data(),sizeof(int)));
+            DDLA_CHECK(ddlaSynchronize(h));
+            if (bad) throw std::invalid_argument("gemmVbatched2s(mixed): incompatible intermediate dimensions");
+#endif
+        }
+    }
+    int first=0;
+    for (int s=0; s<segment_count; ++s) {
+        const int batch=segments[s];
+        mixed_vbatched_run<Backend,T0>(h,ta0,tb0,mm0,nn0,kk0,m0+first,n0+first,k0+first,
+            alpha0,a0+first,lda0+first,b0+first,ldb0+first,beta0,c0+first,ldc0+first,batch);
+        if (left)
+            mixed_vbatched_run<Backend,std::complex<R>>(h,ta1,tb1,mm1,nn1,kk1,m1+first,n1+first,k1+first,
+                alpha1,c0+first,lda1+first,ab1+first,ldb1+first,beta1,c1+first,ldc1+first,batch);
+        else
+            mixed_vbatched_run<Backend,std::complex<R>>(h,ta1,tb1,mm1,nn1,kk1,m1+first,n1+first,k1+first,
+                alpha1,ab1+first,lda1+first,c0+first,ldb1+first,beta1,c1+first,ldc1+first,batch);
+        first+=batch;
+    }
+}
+} // namespace
+
+#define DDLA_MIXED_VBATCHED_2S_BODY(TA,TB,T0,TX) \
+template <DdlaBackend Backend, typename R> \
+void gemmVbatched2s(const DdlaHandle_t& h, \
+    char ta0,char tb0,int* m0,int* n0,int* k0,T0 alpha0, \
+    const TA* const* a0,int* lda0,const TB* const* b0,int* ldb0, \
+    T0 beta0,T0** c0,int* ldc0, \
+    char ta1,char tb1,int* m1,int* n1,int* k1,std::complex<R> alpha1, \
+    const TX* const* ab1,int* lda1,int* ldb1,std::complex<R> beta1, \
+    std::complex<R>** c1,int* ldc1,bool left,int count,const int* segments,int segment_count) \
+{ \
+    mixed_vbatched_2s<Backend,R>(h,ta0,tb0,m0,n0,k0,alpha0,a0,lda0,b0,ldb0,beta0,c0,ldc0, \
+        ta1,tb1,m1,n1,k1,alpha1,ab1,lda1,ldb1,beta1,c1,ldc1,left,count,segments,segment_count); \
+}
+DDLA_MIXED_VBATCHED_2S_BODY(R,std::complex<R>,std::complex<R>,R)
+DDLA_MIXED_VBATCHED_2S_BODY(std::complex<R>,R,std::complex<R>,R)
+DDLA_MIXED_VBATCHED_2S_BODY(R,std::complex<R>,std::complex<R>,std::complex<R>)
+DDLA_MIXED_VBATCHED_2S_BODY(std::complex<R>,R,std::complex<R>,std::complex<R>)
+DDLA_MIXED_VBATCHED_2S_BODY(std::complex<R>,std::complex<R>,std::complex<R>,R)
+DDLA_MIXED_VBATCHED_2S_BODY(R,R,R,std::complex<R>)
+#undef DDLA_MIXED_VBATCHED_2S_BODY
+
+#define DDLA_MIXED_VBATCHED_INST(B,R,TA,TB) \
+template void gemmVbatched<B,R>(const DdlaHandle_t&,char,char,int*,int*,int*,std::complex<R>, \
+    const TA* const*,int*,const TB* const*,int*,std::complex<R>,std::complex<R>**,int*,int)
+#define DDLA_MIXED_VBATCHED_TYPES(B,R) \
+    DDLA_MIXED_VBATCHED_INST(B,R,R,std::complex<R>); \
+    DDLA_MIXED_VBATCHED_INST(B,R,std::complex<R>,R); \
+    DDLA_MIXED_VBATCHED_2S_INST(B,R,R,std::complex<R>,std::complex<R>,R); \
+    DDLA_MIXED_VBATCHED_2S_INST(B,R,std::complex<R>,R,std::complex<R>,R); \
+    DDLA_MIXED_VBATCHED_2S_INST(B,R,R,std::complex<R>,std::complex<R>,std::complex<R>); \
+    DDLA_MIXED_VBATCHED_2S_INST(B,R,std::complex<R>,R,std::complex<R>,std::complex<R>); \
+    DDLA_MIXED_VBATCHED_2S_INST(B,R,std::complex<R>,std::complex<R>,std::complex<R>,R); \
+    DDLA_MIXED_VBATCHED_2S_INST(B,R,R,R,R,std::complex<R>);
+#define DDLA_MIXED_VBATCHED_2S_INST(B,R,TA,TB,T0,TX) \
+template void gemmVbatched2s<B,R>(const DdlaHandle_t&,char,char,int*,int*,int*,T0, \
+    const TA* const*,int*,const TB* const*,int*,T0,T0**,int*, \
+    char,char,int*,int*,int*,std::complex<R>,const TX* const*,int*,int*,std::complex<R>, \
+    std::complex<R>**,int*,bool,int,const int*,int)
+DDLA_MIXED_VBATCHED_TYPES(DdlaBackend::CPU,float)
+DDLA_MIXED_VBATCHED_TYPES(DdlaBackend::CPU,double)
+#if DDLA_HAS_GPU
+DDLA_MIXED_VBATCHED_TYPES(DdlaBackend::GPU,float)
+DDLA_MIXED_VBATCHED_TYPES(DdlaBackend::GPU,double)
+#endif
+#undef DDLA_MIXED_VBATCHED_TYPES
+#undef DDLA_MIXED_VBATCHED_INST
+#undef DDLA_MIXED_VBATCHED_2S_INST
 } // namespace ddla

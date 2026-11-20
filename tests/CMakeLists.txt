@@ -446,6 +446,16 @@ add_test_executable(test_api_grid_pgebrd)
 add_test_executable(test_api_grid_pgesvd)
 add_test_executable(test_api_grid_pbdsdc)
 
+add_test_executable(test_gemm_vbatched_mixed)
+set_tests_properties(test_gemm_vbatched_mixed_mpi PROPERTIES LABELS cpu)
+if(DDLA_HAS_GPU)
+    add_test(NAME test_gemm_vbatched_mixed_gpu_mpi
+        COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1
+                ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_gemm_vbatched_mixed> --gpu
+                ${MPIEXEC_POSTFLAGS})
+    set_tests_properties(test_gemm_vbatched_mixed_gpu_mpi PROPERTIES LABELS gpu
+        PROCESSORS 1 ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+endif()
 if(DDLA_HAS_GPU)
     add_test_executable(test_pzgemm)
     add_test_executable(test_pdam)

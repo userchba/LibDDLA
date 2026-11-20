@@ -1,6 +1,6 @@
 {
-  "public_backend_overloads": 143,
-  "public_concrete_specializations": 522,
+  "public_backend_overloads": 151,
+  "public_concrete_specializations": 538,
   "pstedc": "already handle-only, unchanged",
   "type_policy_sources": {
     "dgmm": "src/BLAS/dgmm.cpp TYPES",
@@ -1289,6 +1289,126 @@
     },
     {
       "index": 76,
+      "name": "gemmVbatched",
+      "header_overload": 1,
+      "scalar_parameters": [
+        "R"
+      ],
+      "public_signature": "void gemmVbatched(const DdlaHandle_t& handle, char transA, char transB, int* m, int* n, int* k, std::complex<R> alpha, const R* const* A, int* lda, const std::complex<R>* const* B, int* ldb, std::complex<R> beta, std::complex<R>** C, int* ldc, int batch_count)",
+      "private_signature": "void gemmVbatched(const DdlaHandle_t& handle, char transA, char transB, int* m, int* n, int* k, std::complex<R> alpha, const R* const* A, int* lda, const std::complex<R>* const* B, int* ldb, std::complex<R> beta, std::complex<R>** C, int* ldc, int batch_count)",
+      "supported_scalar_arguments": [
+        "float",
+        "double"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 77,
+      "name": "gemmVbatched2s",
+      "header_overload": 1,
+      "scalar_parameters": [
+        "R"
+      ],
+      "public_signature": "void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<R> alpha_0, const R* const* A_0, int* lda_0, const std::complex<R>* const* B_0, int* ldb_0, std::complex<R> beta_0, std::complex<R>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const R* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)",
+      "private_signature": "void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<R> alpha_0, const R* const* A_0, int* lda_0, const std::complex<R>* const* B_0, int* ldb_0, std::complex<R> beta_0, std::complex<R>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const R* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)",
+      "supported_scalar_arguments": [
+        "float",
+        "double"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 78,
+      "name": "gemmVbatched",
+      "header_overload": 2,
+      "scalar_parameters": [
+        "R"
+      ],
+      "public_signature": "void gemmVbatched(const DdlaHandle_t& handle, char transA, char transB, int* m, int* n, int* k, std::complex<R> alpha, const std::complex<R>* const* A, int* lda, const R* const* B, int* ldb, std::complex<R> beta, std::complex<R>** C, int* ldc, int batch_count)",
+      "private_signature": "void gemmVbatched(const DdlaHandle_t& handle, char transA, char transB, int* m, int* n, int* k, std::complex<R> alpha, const std::complex<R>* const* A, int* lda, const R* const* B, int* ldb, std::complex<R> beta, std::complex<R>** C, int* ldc, int batch_count)",
+      "supported_scalar_arguments": [
+        "float",
+        "double"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 79,
+      "name": "gemmVbatched2s",
+      "header_overload": 2,
+      "scalar_parameters": [
+        "R"
+      ],
+      "public_signature": "void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<R> alpha_0, const std::complex<R>* const* A_0, int* lda_0, const R* const* B_0, int* ldb_0, std::complex<R> beta_0, std::complex<R>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const R* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)",
+      "private_signature": "void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<R> alpha_0, const std::complex<R>* const* A_0, int* lda_0, const R* const* B_0, int* ldb_0, std::complex<R> beta_0, std::complex<R>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const R* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)",
+      "supported_scalar_arguments": [
+        "float",
+        "double"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 80,
+      "name": "gemmVbatched2s",
+      "header_overload": 3,
+      "scalar_parameters": [
+        "R"
+      ],
+      "public_signature": "void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<R> alpha_0, const R* const* A_0, int* lda_0, const std::complex<R>* const* B_0, int* ldb_0, std::complex<R> beta_0, std::complex<R>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const std::complex<R>* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)",
+      "private_signature": "void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<R> alpha_0, const R* const* A_0, int* lda_0, const std::complex<R>* const* B_0, int* ldb_0, std::complex<R> beta_0, std::complex<R>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const std::complex<R>* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)",
+      "supported_scalar_arguments": [
+        "float",
+        "double"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 81,
+      "name": "gemmVbatched2s",
+      "header_overload": 4,
+      "scalar_parameters": [
+        "R"
+      ],
+      "public_signature": "void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<R> alpha_0, const std::complex<R>* const* A_0, int* lda_0, const R* const* B_0, int* ldb_0, std::complex<R> beta_0, std::complex<R>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const std::complex<R>* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)",
+      "private_signature": "void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<R> alpha_0, const std::complex<R>* const* A_0, int* lda_0, const R* const* B_0, int* ldb_0, std::complex<R> beta_0, std::complex<R>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const std::complex<R>* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)",
+      "supported_scalar_arguments": [
+        "float",
+        "double"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 82,
+      "name": "gemmVbatched2s",
+      "header_overload": 5,
+      "scalar_parameters": [
+        "R"
+      ],
+      "public_signature": "void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<R> alpha_0, const std::complex<R>* const* A_0, int* lda_0, const std::complex<R>* const* B_0, int* ldb_0, std::complex<R> beta_0, std::complex<R>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const R* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)",
+      "private_signature": "void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<R> alpha_0, const std::complex<R>* const* A_0, int* lda_0, const std::complex<R>* const* B_0, int* ldb_0, std::complex<R> beta_0, std::complex<R>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const R* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)",
+      "supported_scalar_arguments": [
+        "float",
+        "double"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 83,
+      "name": "gemmVbatched2s",
+      "header_overload": 6,
+      "scalar_parameters": [
+        "R"
+      ],
+      "public_signature": "void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, R alpha_0, const R* const* A_0, int* lda_0, const R* const* B_0, int* ldb_0, R beta_0, R** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const std::complex<R>* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)",
+      "private_signature": "void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, R alpha_0, const R* const* A_0, int* lda_0, const R* const* B_0, int* ldb_0, R beta_0, R** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const std::complex<R>* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)",
+      "supported_scalar_arguments": [
+        "float",
+        "double"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 84,
       "name": "random_generate",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1305,7 +1425,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 77,
+      "index": 85,
       "name": "write_matrix",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1322,7 +1442,7 @@
       "policy": "handle_stream_writer"
     },
     {
-      "index": 78,
+      "index": 86,
       "name": "scal",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1339,7 +1459,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 79,
+      "index": 87,
       "name": "scal",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1356,7 +1476,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 80,
+      "index": 88,
       "name": "pscal",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1373,7 +1493,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 81,
+      "index": 89,
       "name": "scalBatched",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1390,7 +1510,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 82,
+      "index": 90,
       "name": "scal",
       "header_overload": 2,
       "scalar_parameters": [
@@ -1406,7 +1526,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 83,
+      "index": 91,
       "name": "pscal",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1422,7 +1542,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 84,
+      "index": 92,
       "name": "scalBatched",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1438,7 +1558,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 85,
+      "index": 93,
       "name": "axpy",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1455,7 +1575,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 86,
+      "index": 94,
       "name": "iamax",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1472,7 +1592,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 87,
+      "index": 95,
       "name": "swap",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1489,7 +1609,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 88,
+      "index": 96,
       "name": "geru",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1506,7 +1626,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 89,
+      "index": 97,
       "name": "gerc",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1523,7 +1643,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 90,
+      "index": 98,
       "name": "getrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1540,7 +1660,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 91,
+      "index": 99,
       "name": "potrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1557,7 +1677,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 92,
+      "index": 100,
       "name": "laswp",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1574,7 +1694,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 93,
+      "index": 101,
       "name": "geqrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1591,7 +1711,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 94,
+      "index": 102,
       "name": "larft",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1608,7 +1728,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 95,
+      "index": 103,
       "name": "pgemm",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1623,7 +1743,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 96,
+      "index": 104,
       "name": "pgemm",
       "header_overload": 2,
       "scalar_parameters": [
@@ -1638,7 +1758,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 97,
+      "index": 105,
       "name": "phe2hb",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1655,7 +1775,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 98,
+      "index": 106,
       "name": "punmtr_he2hb",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1672,7 +1792,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 99,
+      "index": 107,
       "name": "herm_complete",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1689,7 +1809,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 100,
+      "index": 108,
       "name": "syrm_complete",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1706,7 +1826,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 101,
+      "index": 109,
       "name": "psyrm_complete",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1723,7 +1843,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 102,
+      "index": 110,
       "name": "pherm_complete",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1740,7 +1860,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 103,
+      "index": 111,
       "name": "phetrd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1757,7 +1877,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 104,
+      "index": 112,
       "name": "punmtr",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1774,7 +1894,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 105,
+      "index": 113,
       "name": "punmtr",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1791,7 +1911,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 106,
+      "index": 114,
       "name": "gemm",
       "header_overload": 2,
       "scalar_parameters": [
@@ -1806,7 +1926,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 107,
+      "index": 115,
       "name": "stedc",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1823,7 +1943,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 108,
+      "index": 116,
       "name": "syevd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1838,7 +1958,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 109,
+      "index": 117,
       "name": "heevd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1853,7 +1973,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 110,
+      "index": 118,
       "name": "hegvd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1868,7 +1988,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 111,
+      "index": 119,
       "name": "sygvd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1883,7 +2003,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 112,
+      "index": 120,
       "name": "phegst",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1900,7 +2020,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 113,
+      "index": 121,
       "name": "phegvd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1917,7 +2037,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 114,
+      "index": 122,
       "name": "pheevd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1934,7 +2054,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 115,
+      "index": 123,
       "name": "pheevd_two_stage",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1951,7 +2071,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 116,
+      "index": 124,
       "name": "pheevd_one_stage",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1968,7 +2088,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 117,
+      "index": 125,
       "name": "gemmt",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1985,7 +2105,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 118,
+      "index": 126,
       "name": "gemmt",
       "header_overload": 1,
       "scalar_parameters": [
@@ -2000,7 +2120,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 119,
+      "index": 127,
       "name": "gemmt",
       "header_overload": 2,
       "scalar_parameters": [
@@ -2015,7 +2135,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 120,
+      "index": 128,
       "name": "ptrtrm",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2032,7 +2152,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 121,
+      "index": 129,
       "name": "sytrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2049,7 +2169,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 122,
+      "index": 130,
       "name": "sytrs",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2066,7 +2186,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 123,
+      "index": 131,
       "name": "sytrf_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2083,7 +2203,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 124,
+      "index": 132,
       "name": "sytrs_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2100,7 +2220,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 125,
+      "index": 133,
       "name": "hetrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2117,7 +2237,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 126,
+      "index": 134,
       "name": "hetrs",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2134,7 +2254,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 127,
+      "index": 135,
       "name": "hetrf_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2151,7 +2271,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 128,
+      "index": 136,
       "name": "hetrs_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2168,7 +2288,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 129,
+      "index": 137,
       "name": "psytrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2185,7 +2305,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 130,
+      "index": 138,
       "name": "psytrs",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2202,7 +2322,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 131,
+      "index": 139,
       "name": "psytrf_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2219,7 +2339,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 132,
+      "index": 140,
       "name": "psytrs_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2236,7 +2356,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 133,
+      "index": 141,
       "name": "phetrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2253,7 +2373,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 134,
+      "index": 142,
       "name": "phetrs",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2270,7 +2390,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 135,
+      "index": 143,
       "name": "phetrf_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2287,7 +2407,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 136,
+      "index": 144,
       "name": "phetrs_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2304,7 +2424,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 137,
+      "index": 145,
       "name": "ormqr",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2321,7 +2441,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 138,
+      "index": 146,
       "name": "pormqr",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2338,7 +2458,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 139,
+      "index": 147,
       "name": "orgqr",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2355,7 +2475,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 140,
+      "index": 148,
       "name": "porgqr",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2372,7 +2492,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 141,
+      "index": 149,
       "name": "diag_logdet",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2389,7 +2509,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 142,
+      "index": 150,
       "name": "pdiag_logdet",
       "header_overload": 0,
       "scalar_parameters": [

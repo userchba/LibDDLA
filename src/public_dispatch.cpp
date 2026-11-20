@@ -1130,6 +1130,110 @@ template void gemmVbatched2s<double>(const DdlaHandle_t& handle, char transA_0, 
 template void gemmVbatched2s<std::complex<float>>(const DdlaHandle_t& handle, char transA_0, char transB_0, int* d_m_0, int* d_n_0, int* d_k_0, std::complex<float> alpha_0, const std::complex<float>* const* d_A_array_0, int* d_lda_0, const std::complex<float>* const* d_B_array_0, int* d_ldb_0, std::complex<float> beta_0, std::complex<float>** d_C_array_0, int* d_ldc_0, char transA_1, char transB_1, int* d_m_1, int* d_n_1, int* d_k_1, std::complex<float> alpha_1, const std::complex<float>* const* d_AB_array_1, int* d_lda_1, int* d_ldb_1, std::complex<float> beta_1, std::complex<float>** d_C_array_1, int* d_ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
 template void gemmVbatched2s<std::complex<double>>(const DdlaHandle_t& handle, char transA_0, char transB_0, int* d_m_0, int* d_n_0, int* d_k_0, std::complex<double> alpha_0, const std::complex<double>* const* d_A_array_0, int* d_lda_0, const std::complex<double>* const* d_B_array_0, int* d_ldb_0, std::complex<double> beta_0, std::complex<double>** d_C_array_0, int* d_ldc_0, char transA_1, char transB_1, int* d_m_1, int* d_n_1, int* d_k_1, std::complex<double> alpha_1, const std::complex<double>* const* d_AB_array_1, int* d_lda_1, int* d_ldb_1, std::complex<double> beta_1, std::complex<double>** d_C_array_1, int* d_ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
 
+template <typename R>
+void gemmVbatched(const DdlaHandle_t& handle, char transA, char transB, int* m, int* n, int* k, std::complex<R> alpha, const R* const* A, int* lda, const std::complex<R>* const* B, int* ldb, std::complex<R> beta, std::complex<R>** C, int* ldc, int batch_count)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return gemmVbatched<DdlaBackend::GPU, R>(handle, transA, transB, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc, batch_count);
+#endif
+    return gemmVbatched<DdlaBackend::CPU, R>(handle, transA, transB, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc, batch_count);
+}
+
+template void gemmVbatched<float>(const DdlaHandle_t& handle, char transA, char transB, int* m, int* n, int* k, std::complex<float> alpha, const float* const* A, int* lda, const std::complex<float>* const* B, int* ldb, std::complex<float> beta, std::complex<float>** C, int* ldc, int batch_count);
+template void gemmVbatched<double>(const DdlaHandle_t& handle, char transA, char transB, int* m, int* n, int* k, std::complex<double> alpha, const double* const* A, int* lda, const std::complex<double>* const* B, int* ldb, std::complex<double> beta, std::complex<double>** C, int* ldc, int batch_count);
+
+template <typename R>
+void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<R> alpha_0, const R* const* A_0, int* lda_0, const std::complex<R>* const* B_0, int* ldb_0, std::complex<R> beta_0, std::complex<R>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const R* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return gemmVbatched2s<DdlaBackend::GPU, R>(handle, transA_0, transB_0, m_0, n_0, k_0, alpha_0, A_0, lda_0, B_0, ldb_0, beta_0, C_0, ldc_0, transA_1, transB_1, m_1, n_1, k_1, alpha_1, AB_1, lda_1, ldb_1, beta_1, C_1, ldc_1, C0_left, batch_count, segment_sizes, segment_count);
+#endif
+    return gemmVbatched2s<DdlaBackend::CPU, R>(handle, transA_0, transB_0, m_0, n_0, k_0, alpha_0, A_0, lda_0, B_0, ldb_0, beta_0, C_0, ldc_0, transA_1, transB_1, m_1, n_1, k_1, alpha_1, AB_1, lda_1, ldb_1, beta_1, C_1, ldc_1, C0_left, batch_count, segment_sizes, segment_count);
+}
+
+template void gemmVbatched2s<float>(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<float> alpha_0, const float* const* A_0, int* lda_0, const std::complex<float>* const* B_0, int* ldb_0, std::complex<float> beta_0, std::complex<float>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<float> alpha_1, const float* const* AB_1, int* lda_1, int* ldb_1, std::complex<float> beta_1, std::complex<float>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+template void gemmVbatched2s<double>(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<double> alpha_0, const double* const* A_0, int* lda_0, const std::complex<double>* const* B_0, int* ldb_0, std::complex<double> beta_0, std::complex<double>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<double> alpha_1, const double* const* AB_1, int* lda_1, int* ldb_1, std::complex<double> beta_1, std::complex<double>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+
+template <typename R>
+void gemmVbatched(const DdlaHandle_t& handle, char transA, char transB, int* m, int* n, int* k, std::complex<R> alpha, const std::complex<R>* const* A, int* lda, const R* const* B, int* ldb, std::complex<R> beta, std::complex<R>** C, int* ldc, int batch_count)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return gemmVbatched<DdlaBackend::GPU, R>(handle, transA, transB, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc, batch_count);
+#endif
+    return gemmVbatched<DdlaBackend::CPU, R>(handle, transA, transB, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc, batch_count);
+}
+
+template void gemmVbatched<float>(const DdlaHandle_t& handle, char transA, char transB, int* m, int* n, int* k, std::complex<float> alpha, const std::complex<float>* const* A, int* lda, const float* const* B, int* ldb, std::complex<float> beta, std::complex<float>** C, int* ldc, int batch_count);
+template void gemmVbatched<double>(const DdlaHandle_t& handle, char transA, char transB, int* m, int* n, int* k, std::complex<double> alpha, const std::complex<double>* const* A, int* lda, const double* const* B, int* ldb, std::complex<double> beta, std::complex<double>** C, int* ldc, int batch_count);
+
+template <typename R>
+void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<R> alpha_0, const std::complex<R>* const* A_0, int* lda_0, const R* const* B_0, int* ldb_0, std::complex<R> beta_0, std::complex<R>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const R* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return gemmVbatched2s<DdlaBackend::GPU, R>(handle, transA_0, transB_0, m_0, n_0, k_0, alpha_0, A_0, lda_0, B_0, ldb_0, beta_0, C_0, ldc_0, transA_1, transB_1, m_1, n_1, k_1, alpha_1, AB_1, lda_1, ldb_1, beta_1, C_1, ldc_1, C0_left, batch_count, segment_sizes, segment_count);
+#endif
+    return gemmVbatched2s<DdlaBackend::CPU, R>(handle, transA_0, transB_0, m_0, n_0, k_0, alpha_0, A_0, lda_0, B_0, ldb_0, beta_0, C_0, ldc_0, transA_1, transB_1, m_1, n_1, k_1, alpha_1, AB_1, lda_1, ldb_1, beta_1, C_1, ldc_1, C0_left, batch_count, segment_sizes, segment_count);
+}
+
+template void gemmVbatched2s<float>(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<float> alpha_0, const std::complex<float>* const* A_0, int* lda_0, const float* const* B_0, int* ldb_0, std::complex<float> beta_0, std::complex<float>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<float> alpha_1, const float* const* AB_1, int* lda_1, int* ldb_1, std::complex<float> beta_1, std::complex<float>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+template void gemmVbatched2s<double>(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<double> alpha_0, const std::complex<double>* const* A_0, int* lda_0, const double* const* B_0, int* ldb_0, std::complex<double> beta_0, std::complex<double>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<double> alpha_1, const double* const* AB_1, int* lda_1, int* ldb_1, std::complex<double> beta_1, std::complex<double>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+
+template <typename R>
+void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<R> alpha_0, const R* const* A_0, int* lda_0, const std::complex<R>* const* B_0, int* ldb_0, std::complex<R> beta_0, std::complex<R>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const std::complex<R>* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return gemmVbatched2s<DdlaBackend::GPU, R>(handle, transA_0, transB_0, m_0, n_0, k_0, alpha_0, A_0, lda_0, B_0, ldb_0, beta_0, C_0, ldc_0, transA_1, transB_1, m_1, n_1, k_1, alpha_1, AB_1, lda_1, ldb_1, beta_1, C_1, ldc_1, C0_left, batch_count, segment_sizes, segment_count);
+#endif
+    return gemmVbatched2s<DdlaBackend::CPU, R>(handle, transA_0, transB_0, m_0, n_0, k_0, alpha_0, A_0, lda_0, B_0, ldb_0, beta_0, C_0, ldc_0, transA_1, transB_1, m_1, n_1, k_1, alpha_1, AB_1, lda_1, ldb_1, beta_1, C_1, ldc_1, C0_left, batch_count, segment_sizes, segment_count);
+}
+
+template void gemmVbatched2s<float>(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<float> alpha_0, const float* const* A_0, int* lda_0, const std::complex<float>* const* B_0, int* ldb_0, std::complex<float> beta_0, std::complex<float>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<float> alpha_1, const std::complex<float>* const* AB_1, int* lda_1, int* ldb_1, std::complex<float> beta_1, std::complex<float>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+template void gemmVbatched2s<double>(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<double> alpha_0, const double* const* A_0, int* lda_0, const std::complex<double>* const* B_0, int* ldb_0, std::complex<double> beta_0, std::complex<double>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<double> alpha_1, const std::complex<double>* const* AB_1, int* lda_1, int* ldb_1, std::complex<double> beta_1, std::complex<double>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+
+template <typename R>
+void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<R> alpha_0, const std::complex<R>* const* A_0, int* lda_0, const R* const* B_0, int* ldb_0, std::complex<R> beta_0, std::complex<R>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const std::complex<R>* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return gemmVbatched2s<DdlaBackend::GPU, R>(handle, transA_0, transB_0, m_0, n_0, k_0, alpha_0, A_0, lda_0, B_0, ldb_0, beta_0, C_0, ldc_0, transA_1, transB_1, m_1, n_1, k_1, alpha_1, AB_1, lda_1, ldb_1, beta_1, C_1, ldc_1, C0_left, batch_count, segment_sizes, segment_count);
+#endif
+    return gemmVbatched2s<DdlaBackend::CPU, R>(handle, transA_0, transB_0, m_0, n_0, k_0, alpha_0, A_0, lda_0, B_0, ldb_0, beta_0, C_0, ldc_0, transA_1, transB_1, m_1, n_1, k_1, alpha_1, AB_1, lda_1, ldb_1, beta_1, C_1, ldc_1, C0_left, batch_count, segment_sizes, segment_count);
+}
+
+template void gemmVbatched2s<float>(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<float> alpha_0, const std::complex<float>* const* A_0, int* lda_0, const float* const* B_0, int* ldb_0, std::complex<float> beta_0, std::complex<float>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<float> alpha_1, const std::complex<float>* const* AB_1, int* lda_1, int* ldb_1, std::complex<float> beta_1, std::complex<float>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+template void gemmVbatched2s<double>(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<double> alpha_0, const std::complex<double>* const* A_0, int* lda_0, const double* const* B_0, int* ldb_0, std::complex<double> beta_0, std::complex<double>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<double> alpha_1, const std::complex<double>* const* AB_1, int* lda_1, int* ldb_1, std::complex<double> beta_1, std::complex<double>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+
+template <typename R>
+void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<R> alpha_0, const std::complex<R>* const* A_0, int* lda_0, const std::complex<R>* const* B_0, int* ldb_0, std::complex<R> beta_0, std::complex<R>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const R* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return gemmVbatched2s<DdlaBackend::GPU, R>(handle, transA_0, transB_0, m_0, n_0, k_0, alpha_0, A_0, lda_0, B_0, ldb_0, beta_0, C_0, ldc_0, transA_1, transB_1, m_1, n_1, k_1, alpha_1, AB_1, lda_1, ldb_1, beta_1, C_1, ldc_1, C0_left, batch_count, segment_sizes, segment_count);
+#endif
+    return gemmVbatched2s<DdlaBackend::CPU, R>(handle, transA_0, transB_0, m_0, n_0, k_0, alpha_0, A_0, lda_0, B_0, ldb_0, beta_0, C_0, ldc_0, transA_1, transB_1, m_1, n_1, k_1, alpha_1, AB_1, lda_1, ldb_1, beta_1, C_1, ldc_1, C0_left, batch_count, segment_sizes, segment_count);
+}
+
+template void gemmVbatched2s<float>(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<float> alpha_0, const std::complex<float>* const* A_0, int* lda_0, const std::complex<float>* const* B_0, int* ldb_0, std::complex<float> beta_0, std::complex<float>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<float> alpha_1, const float* const* AB_1, int* lda_1, int* ldb_1, std::complex<float> beta_1, std::complex<float>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+template void gemmVbatched2s<double>(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, std::complex<double> alpha_0, const std::complex<double>* const* A_0, int* lda_0, const std::complex<double>* const* B_0, int* ldb_0, std::complex<double> beta_0, std::complex<double>** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<double> alpha_1, const double* const* AB_1, int* lda_1, int* ldb_1, std::complex<double> beta_1, std::complex<double>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+
+template <typename R>
+void gemmVbatched2s(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, R alpha_0, const R* const* A_0, int* lda_0, const R* const* B_0, int* ldb_0, R beta_0, R** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<R> alpha_1, const std::complex<R>* const* AB_1, int* lda_1, int* ldb_1, std::complex<R> beta_1, std::complex<R>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return gemmVbatched2s<DdlaBackend::GPU, R>(handle, transA_0, transB_0, m_0, n_0, k_0, alpha_0, A_0, lda_0, B_0, ldb_0, beta_0, C_0, ldc_0, transA_1, transB_1, m_1, n_1, k_1, alpha_1, AB_1, lda_1, ldb_1, beta_1, C_1, ldc_1, C0_left, batch_count, segment_sizes, segment_count);
+#endif
+    return gemmVbatched2s<DdlaBackend::CPU, R>(handle, transA_0, transB_0, m_0, n_0, k_0, alpha_0, A_0, lda_0, B_0, ldb_0, beta_0, C_0, ldc_0, transA_1, transB_1, m_1, n_1, k_1, alpha_1, AB_1, lda_1, ldb_1, beta_1, C_1, ldc_1, C0_left, batch_count, segment_sizes, segment_count);
+}
+
+template void gemmVbatched2s<float>(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, float alpha_0, const float* const* A_0, int* lda_0, const float* const* B_0, int* ldb_0, float beta_0, float** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<float> alpha_1, const std::complex<float>* const* AB_1, int* lda_1, int* ldb_1, std::complex<float> beta_1, std::complex<float>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+template void gemmVbatched2s<double>(const DdlaHandle_t& handle, char transA_0, char transB_0, int* m_0, int* n_0, int* k_0, double alpha_0, const double* const* A_0, int* lda_0, const double* const* B_0, int* ldb_0, double beta_0, double** C_0, int* ldc_0, char transA_1, char transB_1, int* m_1, int* n_1, int* k_1, std::complex<double> alpha_1, const std::complex<double>* const* AB_1, int* lda_1, int* ldb_1, std::complex<double> beta_1, std::complex<double>** C_1, int* ldc_1, bool C0_left, int batch_count, const int* segment_sizes, int segment_count);
+
 template <typename T>
 void random_generate(const DdlaHandle_t& handle, T* data, const int64_t& lengthOfData)
 {

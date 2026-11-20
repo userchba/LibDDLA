@@ -839,8 +839,8 @@ factorization succeeds. The factor passed to `ppotrs` is read-only.
 | `laswp` | Local row interchanges from a `getrf` pivot array (LAPACK `?laswp`; any nonzero `incx`) |
 | `geqrf(handle, uplo, m, n, A, lda, tau)` | Local QR / QL factorization, `uplo` = `'U'` (`A = Q·R`, LAPACK `?geqrf`) or `'L'` (`A = Q·L`, LAPACK `?geqlf`; cuSOLVER / hipSOLVER have no QL, so the GPU runs the vendor `geqrf` on the reversed matrix `J A J`); `tau` lives with the data |
 | `larft(handle, direct, storev, n, k, V, ldv, tau, T, ldt)` | Local triangular factor `T` of a block reflector (LAPACK `?larft`, `storev` = `'C'`): `H = I - V·T·V^H` for `k` reflectors stored as `geqrf` / `geqlf` leave them, `direct` = `'F'` (`T` upper, `H = H(1)…H(k)`) or `'B'` (`T` lower, `H = H(k)…H(1)`); `T` is written whole (zeros in the other triangle).  The GPU needs no vendor routine (cuSOLVER has `Xlarft` only from CUDA 12.4, hipSOLVER none): `herk` forms `V^H V` and one small kernel runs the column recurrence |
-| `gemmVbatched(handle, ...)` | Batch of GEMMs with variable dimensions (device-resident dim arrays; GPU only) |
-| `gemmVbatched2s(handle, ...)` | Two-stage variable-batch GEMM with reusable temporary (GPU only) |
+| `gemmVbatched(handle, ...)` | Batch of GEMMs with variable dimensions; homogeneous GPU calls and mixed real/complex CPU/GPU overloads |
+| `gemmVbatched2s(handle, ...)` | Two-stage variable-batch GEMM with reusable temporary; homogeneous GPU calls and mixed-domain CPU/GPU overloads |
 | `random_generate(handle, data, n)` | Fill a buffer with uniform random values |
 
 `swap`, `getrf`, `potrf`, `laswp`, `geqrf`, `larft`, `random_generate`,
@@ -858,8 +858,10 @@ buffers live with the handle's backend -- host memory on CPU, device memory on
 GPU -- including local `ipiv` and `info`. GPU calls are asynchronous on the
 handle's stream, so read `info` after `ddlaSynchronize`. Distributed routines
 may document host metadata separately. `gemmVbatched` / `gemmVbatched2s` also
-use the handle-driven scalar interface but require a GPU handle; a CPU handle
-is rejected with `std::invalid_argument`.
+use the handle-driven scalar interface. Homogeneous overloads require a GPU
+handle and reject CPU handles with `std::invalid_argument`. Mixed-domain
+overloads support CPU and GPU; dimension and pointer arrays live in the
+handle-selected memory domain.
 
 ### Fortran bindings
 
