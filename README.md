@@ -22,9 +22,9 @@ selection per handle at runtime. All functions live in the `ddla` namespace.
   `pgetrf(handle, ...)` call uses host BLAS/LAPACK and MPI on a CPU handle
   or the GPU implementation on a GPU handle. Scalar types are inferred from
   arguments or supplied explicitly, such as `pgetrf<double>(handle, ...)`.
-  Only the variable-size batched GEMMs
-  (`gemmVbatched`, `gemmVbatched2s`) need `DDLA_USE_CUDA` or `DDLA_USE_HIP`
-  in a CPU+GPU build.
+  Homogeneous variable-size batched GEMMs require a GPU build. The mixed
+  real/complex `gemmVbatched` and mixed-domain `gemmVbatched2s` overloads
+  also support CPU execution with host metadata.
   `DDLA_USE_CCL` is not supported with a
   CPU-only build, since there is no GPU backend to communicate with.
 - **Supported scalar types** are `float`, `double`, `std::complex<float>`, and
