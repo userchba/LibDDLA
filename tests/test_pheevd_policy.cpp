@@ -23,7 +23,12 @@ void local_policy() {
                 expected=n>=(job=='N'?1536:1024)&&n<=16384;
             else expected=n>=1024&&n<=16384;
             check((detail::pheevd_one_stage_shape<DdlaBackend::GPU,T>(job,n,64,2,4,'R')==expected));
-            check((!detail::pheevd_one_stage_shape<DdlaBackend::CPU,T>(job,n,64,2,2,'R')));
+            for(int block:{1,32,64,128})for(auto grid:{std::pair<int,int>{1,1},{2,2},{1,8},{6,8}})
+                check((detail::pheevd_one_stage_shape<DdlaBackend::CPU,T>(job,n,block,grid.first,grid.second,'R')==
+                       (job=='V'&&n>=1&&n<(grid.first*grid.second==1?4096:2048))));
+            check((!detail::pheevd_one_stage_shape<DdlaBackend::CPU,T>(job,n,64,2,2,'C')));
+            check((!detail::pheevd_one_stage_shape<DdlaBackend::CPU,T>(job,n,0,2,2,'R')));
+            check((!detail::pheevd_one_stage_shape<DdlaBackend::CPU,T>(job,n,64,0,2,'R')));
             for(int block:{0,32,128})check((!detail::pheevd_one_stage_shape<DdlaBackend::GPU,T>(job,n,block,2,4,'R')));
             check((!detail::pheevd_one_stage_shape<DdlaBackend::GPU,T>(job,n,64,2,4,'C')));
             for(auto grid:{std::pair<int,int>{1,8},{4,2},{8,1},{1,1},{0,4}})

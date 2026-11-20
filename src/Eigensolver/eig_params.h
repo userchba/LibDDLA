@@ -159,18 +159,31 @@ inline int eig_distributed_bandwidth(int n,int block,int band,int ranks) noexcep
 bool eig_profile_enabled();
 
 namespace detail {
-// No CPU one-stage profile is enabled until full-node calibration is available.
-inline constexpr int pheevd_method_cpu_threads = 0;
+// CPU one-stage profile: a rank whose BLAS threads equal its host budget (0 = a BLAS that
+// cannot be queried).  The public dispatcher still requires every rank to agree.
+inline bool pheevd_one_stage_cpu_workers(int host_threads, int blas_threads) noexcept
+{
+    return host_threads >= 1 && (blas_threads == 0 || blas_threads == host_threads);
+}
 template <DdlaBackend Backend, class T>
 inline bool pheevd_one_stage_shape(char job, int n, int block, int pr, int pc,
                                    char major) noexcept
 {
-    // Matched eight-V100 measurements, NB64, one host/BLAS worker per rank.
-    // Retain two-stage outside the measured range and for close real-values cases.
-    if (block != 64 || major != 'R' || n > 16384) return false;
     if constexpr (Backend == DdlaBackend::CPU) {
-        return false;
+        // All vectors of a problem below the Householder two-stage threshold (2048), any
+        // block size and grid, row-major.  2026-11-15, one node, seconds one-stage against
+        // two-stage: n=2000 on 40-96 cores (2 and 4 ranks) 0.32-0.50 against 0.79-1.02 real
+        // and 0.43-0.85 against 1.35-1.78 complex; on 8 cores (2, 4 and 8 ranks) the
+        // one-stage path wins through n=2000 and loses from n=2500 (real 1.0-2.0 against
+        // 1.0-1.5, complex 2.5-5.3 against 2.5-3.2).  One rank keeps one-stage below 4096
+        // (2026-11-18, n=4000: 2.12 against 2.72 real and 4.39 against 4.90 complex on 40
+        // threads; 3.24 against 3.80 and 8.11 against 8.46 on 8).
+        const int limit = pr == 1 && pc == 1 ? 4096 : 2048;
+        return job == 'V' && major == 'R' && block >= 1 && pr >= 1 && pc >= 1 && n >= 1 && n < limit;
     } else {
+        // Matched eight-V100 measurements, NB64, one host/BLAS worker per rank.
+        // Retain two-stage outside the measured range and for close real-values cases.
+        if (block != 64 || major != 'R' || n > 16384) return false;
         if (pr != 2 || pc != 4) return false;
         if constexpr (std::is_same_v<T,float>)
             return job == 'V' && n >= 4096;

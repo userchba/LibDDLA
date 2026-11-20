@@ -165,9 +165,14 @@ limits; these are heuristics, not a promise that one method always wins.
 These one-stage ranges require one shared-memory domain, eight CUDA SM70 GPUs
 with NCCL (without host staging), a row-major 2×4 grid, square blocks of64,
 source coordinates zero, matching output blocks, and one configured host and
-recognized BLAS worker per rank. Other cases retain two-stage, including CPU,
+recognized BLAS worker per rank. Other GPU cases retain two-stage, including
 HIP, host-staged transport, and orders above16384. CPU thresholds are not
-inferred from GPU timings. Manual method choices remain available everywhere.
+inferred from GPU timings: on one shared-memory node, CPU handles use one-stage
+for full eigenvectors of order below 2048 (any block size, row-major grid,
+recognized BLAS threads equal to the host budget on every rank; at n=2000 on
+40–96 cores it measured 0.3–0.5 s against 0.8–1.0 s real and 0.4–0.9 s against
+1.4–1.8 s complex) and two-stage otherwise. Manual method choices remain
+available everywhere.
 
 For example, `export DDLA_EIGEN_METHOD=one_stage` selects the one-stage solver
 on CPU or GPU. All MPI ranks must select the same method; invalid values and

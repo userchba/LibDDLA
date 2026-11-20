@@ -34,7 +34,7 @@ namespace {
 template<DdlaBackend B,class T>void test(DdlaHandle_t h,bool device) {
     using R=typename real_type<T>::type;
     const int original_workers=h->host_threads,original_node=h->node_ranks;
-    const int workers=B==DdlaBackend::CPU?detail::pheevd_method_cpu_threads:1;
+    const int workers=1;
     detail::ScopedBlasThreads blas(std::max(1,workers));
     h->host_threads=workers;
     T a{},z{};R w{};int d[DDLA_DLEN_];int info=-1;

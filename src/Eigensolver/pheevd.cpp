@@ -58,6 +58,7 @@ PheevdRoute pheevd_select(const DdlaHandle_t& handle, char jobz, int n, int nev,
         }
         agreement.mode("DDLA_EIGEN_METHOD", selected);
         agreement.mode("pheevd backend", int(Backend));
+        agreement.mode("pheevd block", descA ? descA[DDLA_MB_] : -1);
         // Existing automatic thresholds were measured for all vectors.
         automatic_shape = !selected && (jobz != 'V' || nev == n) && descA && descA[DDLA_MB_] == descA[DDLA_NB_] &&
             descA[DDLA_RSRC_] == 0 && descA[DDLA_CSRC_] == 0 &&
@@ -79,8 +80,7 @@ PheevdRoute pheevd_select(const DdlaHandle_t& handle, char jobz, int n, int nev,
             !two_stage_options_requested()) {
             const int threads = detail::ScopedBlasThreads::current();
             if constexpr (Backend == DdlaBackend::CPU) {
-                prefer_one = handle->host_threads == detail::pheevd_method_cpu_threads &&
-                             threads == detail::pheevd_method_cpu_threads;
+                prefer_one = detail::pheevd_one_stage_cpu_workers(handle->host_threads, threads);
             } else {
                 prefer_one = handle->host_threads == 1 && threads == 1;
 #if defined(DDLA_USE_CUDA) && defined(DDLA_USE_CCL)
