@@ -16,6 +16,7 @@
 #include "comm_traits.h"
 #include "plan_util.h"
 #include "dc_threads.h"
+#include <cstdlib>
 #include "instantiate.h"
 #include "check_agree.h"
 
@@ -162,7 +163,11 @@ void chase_barrier(ChaseControl* control,int ranks) noexcept {
 Hb2stHouseholderCpuPlan hh_cpu_geometry(const DdlaHandle_t& h,int n,int band,bool keep,const Hb2stHouseholderCpuOptions& options,int threads)
 {
     Hb2stHouseholderCpuPlan p;p.n=n;p.band=std::max(1,std::min(band,std::max(n-1,1)));p.rank=h->myid;p.ranks=h->nprocs;p.threads=threads;p.keep_history=keep;p.options=options;
-    p.chase_threads=std::max(1,std::min(threads,8/std::max(1,p.ranks)));
+    // One dependency level holds at most n/(3*band) independent events (level_bounds), so that many
+    // participants (ranks * local workers) can make progress; more would only wait at the barrier.
+    int target=std::max(8,n/(3*p.band));
+    if(const char* e=std::getenv("DDLA_EIG_CHASE_WORKERS"))if(std::atoi(e)>0)target=std::atoi(e);
+    p.chase_threads=std::max(1,std::min(threads,target/std::max(1,p.ranks)));
     return p;
 }
 Hb2stHouseholderCpuPlan hh_cpu_check(const DdlaHandle_t& h,int n,int band,bool keep,const Hb2stHouseholderCpuOptions& options)
