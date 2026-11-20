@@ -172,6 +172,19 @@ def pgeqlf(A: DistributedMatrix, tau: Optional[np.ndarray] = None) -> Tuple[Dist
     """
     return _qr_factor(A, tau, "pgeqlf", A.n_loc)
 
+def pgelqf(A: DistributedMatrix, tau: Optional[np.ndarray] = None) -> Tuple[DistributedMatrix, np.ndarray, int]:
+    """Distributed LQ, A=L*Q; host tau uses A.m_loc local-row entries."""
+    return _qr_factor(A, tau, "pgelqf", A.m_loc)
+
+
+def pgerqf(A: DistributedMatrix, tau: Optional[np.ndarray] = None) -> Tuple[DistributedMatrix, np.ndarray, int]:
+    """Distributed RQ, A=R*Q; host tau uses A.m_loc local-row entries.
+
+    Only the final min(A.m,A.n) rows carry scalars; earlier entries are preserved.
+    """
+    return _qr_factor(A, tau, "pgerqf", A.m_loc)
+
+
 def ptrtrs(A: DistributedMatrix, B: DistributedMatrix, side: str = 'L',
            uplo: str = 'U', trans: str = 'N', diag: str = 'N') -> DistributedMatrix:
     """Solve triangular distributed system with multiple right-hand sides."""

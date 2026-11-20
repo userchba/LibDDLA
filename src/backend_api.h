@@ -135,6 +135,12 @@ template <DdlaBackend Backend, typename T>
 void pgeqlf(const DdlaHandle_t& handle, int m, int n, T* A, const int* descA, T* tau, int& info);
 
 template <DdlaBackend Backend, typename T>
+void pgelqf(const DdlaHandle_t& handle, int m, int n, T* A, const int* descA, T* tau, int& info);
+
+template <DdlaBackend Backend, typename T>
+void pgerqf(const DdlaHandle_t& handle, int m, int n, T* A, const int* descA, T* tau, int& info);
+
+template <DdlaBackend Backend, typename T>
 void pgeadd(const DdlaHandle_t& handle, char transa, char transb, int m, int n, const T& alpha, const T* A, int ia, int ja, const int* descA, const T& beta, const T* B, int ib, int jb, const int* descB, T* C, int ic, int jc, const int* descC);
 
 template <DdlaBackend Backend, typename T1, typename T2>
@@ -313,6 +319,12 @@ void laswp(const DdlaHandle_t& handle, int n, T* A, int lda, int k1, int k2, con
 
 template <DdlaBackend Backend, typename T>
 void geqrf(const DdlaHandle_t& handle, char uplo, int m, int n, T* A, int lda, T* tau);
+
+template <DdlaBackend Backend, typename T>
+void gelqf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, T* tau);
+
+template <DdlaBackend Backend, typename T>
+void gerqf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, T* tau);
 
 template <DdlaBackend Backend, typename T>
 void larft(const DdlaHandle_t& handle, char direct, char storev, int n, int k, T* V, int ldv, const T* tau, T* Tmat, int ldt);

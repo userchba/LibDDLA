@@ -1,6 +1,8 @@
 # Distributed QR (p?geqrf), backend reflector construction and host LAPACK arms.
 target_sources(ddla_lib PRIVATE
     geqrf.cpp
+    gelqf.cpp
+    pgelqf.cpp
     larft.cpp
     pgeqrf.cpp
     pgeqrs.cpp

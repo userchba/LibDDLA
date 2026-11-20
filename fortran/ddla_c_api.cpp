@@ -1002,6 +1002,78 @@ extern "C" int ddla_z_pgeqlf(void* handle, int m, int n, void* A, const int* des
     });
 }
 
+extern "C" int ddla_s_pgelqf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
+{
+    return ddla_c_run(handle, [&]() -> int {
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::pgelqf<float>(hh, m, n, static_cast<float*>(A), descA, static_cast<float*>(tau), *info);
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_d_pgelqf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
+{
+    return ddla_c_run(handle, [&]() -> int {
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::pgelqf<double>(hh, m, n, static_cast<double*>(A), descA, static_cast<double*>(tau), *info);
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_c_pgelqf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
+{
+    return ddla_c_run(handle, [&]() -> int {
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::pgelqf<std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(tau), *info);
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_z_pgelqf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
+{
+    return ddla_c_run(handle, [&]() -> int {
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::pgelqf<std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(tau), *info);
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_s_pgerqf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
+{
+    return ddla_c_run(handle, [&]() -> int {
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::pgerqf<float>(hh, m, n, static_cast<float*>(A), descA, static_cast<float*>(tau), *info);
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_d_pgerqf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
+{
+    return ddla_c_run(handle, [&]() -> int {
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::pgerqf<double>(hh, m, n, static_cast<double*>(A), descA, static_cast<double*>(tau), *info);
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_c_pgerqf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
+{
+    return ddla_c_run(handle, [&]() -> int {
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::pgerqf<std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), descA, static_cast<std::complex<float>*>(tau), *info);
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_z_pgerqf(void* handle, int m, int n, void* A, const int* descA, void* tau, int* info)
+{
+    return ddla_c_run(handle, [&]() -> int {
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::pgerqf<std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), descA, static_cast<std::complex<double>*>(tau), *info);
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
 extern "C" int ddla_s_pgeadd(void* handle, char transa, char transb, int m, int n, const float* alpha, const void* A, int ia, int ja, const int* descA, const float* beta, const void* B, int ib, int jb, const int* descB, void* C, int ic, int jc, const int* descC)
 {
     return ddla_c_run(handle, [&]() -> int {
@@ -2178,6 +2250,78 @@ extern "C" int ddla_z_geqrf(void* handle, char uplo, int m, int n, void* A, int 
     return ddla_c_run(handle, [&]() -> int {
         const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
         ddla::geqrf<std::complex<double>>(hh, uplo, m, n, static_cast<std::complex<double>*>(A), lda, static_cast<std::complex<double>*>(tau));
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_s_gelqf(void* handle, int m, int n, void* A, int lda, void* tau)
+{
+    return ddla_c_run(handle, [&]() -> int {
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::gelqf<float>(hh, m, n, static_cast<float*>(A), lda, static_cast<float*>(tau));
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_d_gelqf(void* handle, int m, int n, void* A, int lda, void* tau)
+{
+    return ddla_c_run(handle, [&]() -> int {
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::gelqf<double>(hh, m, n, static_cast<double*>(A), lda, static_cast<double*>(tau));
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_c_gelqf(void* handle, int m, int n, void* A, int lda, void* tau)
+{
+    return ddla_c_run(handle, [&]() -> int {
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::gelqf<std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), lda, static_cast<std::complex<float>*>(tau));
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_z_gelqf(void* handle, int m, int n, void* A, int lda, void* tau)
+{
+    return ddla_c_run(handle, [&]() -> int {
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::gelqf<std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), lda, static_cast<std::complex<double>*>(tau));
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_s_gerqf(void* handle, int m, int n, void* A, int lda, void* tau)
+{
+    return ddla_c_run(handle, [&]() -> int {
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::gerqf<float>(hh, m, n, static_cast<float*>(A), lda, static_cast<float*>(tau));
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_d_gerqf(void* handle, int m, int n, void* A, int lda, void* tau)
+{
+    return ddla_c_run(handle, [&]() -> int {
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::gerqf<double>(hh, m, n, static_cast<double*>(A), lda, static_cast<double*>(tau));
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_c_gerqf(void* handle, int m, int n, void* A, int lda, void* tau)
+{
+    return ddla_c_run(handle, [&]() -> int {
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::gerqf<std::complex<float>>(hh, m, n, static_cast<std::complex<float>*>(A), lda, static_cast<std::complex<float>*>(tau));
+        return DDLA_C_STATUS_SUCCESS;
+    });
+}
+
+extern "C" int ddla_z_gerqf(void* handle, int m, int n, void* A, int lda, void* tau)
+{
+    return ddla_c_run(handle, [&]() -> int {
+        const ddla::DdlaHandle_t hh = static_cast<ddla::DdlaHandle_t>(handle);
+        ddla::gerqf<std::complex<double>>(hh, m, n, static_cast<std::complex<double>*>(A), lda, static_cast<std::complex<double>*>(tau));
         return DDLA_C_STATUS_SUCCESS;
     });
 }

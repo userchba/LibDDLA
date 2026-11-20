@@ -1,6 +1,6 @@
 {
-  "public_backend_overloads": 151,
-  "public_concrete_specializations": 538,
+  "public_backend_overloads": 155,
+  "public_concrete_specializations": 554,
   "pstedc": "already handle-only, unchanged",
   "type_policy_sources": {
     "dgmm": "src/BLAS/dgmm.cpp TYPES",
@@ -722,6 +722,40 @@
     },
     {
       "index": 42,
+      "name": "pgelqf",
+      "header_overload": 0,
+      "scalar_parameters": [
+        "T"
+      ],
+      "public_signature": "void pgelqf(const DdlaHandle_t& handle, int m, int n, T* A, const int* descA, T* tau, int& info)",
+      "private_signature": "void pgelqf(const DdlaHandle_t& handle, int m, int n, T* A, const int* descA, T* tau, int& info)",
+      "supported_scalar_arguments": [
+        "float",
+        "double",
+        "std::complex<float>",
+        "std::complex<double>"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 43,
+      "name": "pgerqf",
+      "header_overload": 0,
+      "scalar_parameters": [
+        "T"
+      ],
+      "public_signature": "void pgerqf(const DdlaHandle_t& handle, int m, int n, T* A, const int* descA, T* tau, int& info)",
+      "private_signature": "void pgerqf(const DdlaHandle_t& handle, int m, int n, T* A, const int* descA, T* tau, int& info)",
+      "supported_scalar_arguments": [
+        "float",
+        "double",
+        "std::complex<float>",
+        "std::complex<double>"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 44,
       "name": "pgeadd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -738,7 +772,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 43,
+      "index": 45,
       "name": "pdam",
       "header_overload": 0,
       "scalar_parameters": [
@@ -758,7 +792,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 44,
+      "index": 46,
       "name": "ppotrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -775,7 +809,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 45,
+      "index": 47,
       "name": "potrf_bottom_right",
       "header_overload": 0,
       "scalar_parameters": [
@@ -792,7 +826,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 46,
+      "index": 48,
       "name": "ppotrf_bottom_right",
       "header_overload": 0,
       "scalar_parameters": [
@@ -809,7 +843,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 47,
+      "index": 49,
       "name": "ppotrs",
       "header_overload": 0,
       "scalar_parameters": [
@@ -826,7 +860,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 48,
+      "index": 50,
       "name": "pposv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -843,7 +877,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 49,
+      "index": 51,
       "name": "gemm",
       "header_overload": 0,
       "scalar_parameters": [
@@ -860,7 +894,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 50,
+      "index": 52,
       "name": "gemm",
       "header_overload": 1,
       "scalar_parameters": [
@@ -875,7 +909,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 51,
+      "index": 53,
       "name": "herk",
       "header_overload": 0,
       "scalar_parameters": [
@@ -892,7 +926,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 52,
+      "index": 54,
       "name": "her2k",
       "header_overload": 0,
       "scalar_parameters": [
@@ -909,7 +943,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 53,
+      "index": 55,
       "name": "hemv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -926,7 +960,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 54,
+      "index": 56,
       "name": "hemm",
       "header_overload": 0,
       "scalar_parameters": [
@@ -943,7 +977,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 55,
+      "index": 57,
       "name": "hemm",
       "header_overload": 1,
       "scalar_parameters": [
@@ -958,7 +992,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 56,
+      "index": 58,
       "name": "hemm",
       "header_overload": 2,
       "scalar_parameters": [
@@ -973,7 +1007,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 57,
+      "index": 59,
       "name": "hemmt",
       "header_overload": 0,
       "scalar_parameters": [
@@ -990,7 +1024,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 58,
+      "index": 60,
       "name": "hemmt",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1005,7 +1039,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 59,
+      "index": 61,
       "name": "hemmt",
       "header_overload": 2,
       "scalar_parameters": [
@@ -1020,7 +1054,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 60,
+      "index": 62,
       "name": "symmt",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1037,7 +1071,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 61,
+      "index": 63,
       "name": "her2",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1054,7 +1088,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 62,
+      "index": 64,
       "name": "gemv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1071,7 +1105,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 63,
+      "index": 65,
       "name": "trmv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1088,7 +1122,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 64,
+      "index": 66,
       "name": "nrm2",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1105,7 +1139,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 65,
+      "index": 67,
       "name": "dotc",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1122,7 +1156,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 66,
+      "index": 68,
       "name": "trsm",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1139,7 +1173,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 67,
+      "index": 69,
       "name": "syrk",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1156,7 +1190,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 68,
+      "index": 70,
       "name": "trmm",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1173,7 +1207,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 69,
+      "index": 71,
       "name": "trtrm",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1190,7 +1224,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 70,
+      "index": 72,
       "name": "gemmBatched",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1207,7 +1241,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 71,
+      "index": 73,
       "name": "gemmBatched",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1222,7 +1256,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 72,
+      "index": 74,
       "name": "gemmBatched",
       "header_overload": 2,
       "scalar_parameters": [
@@ -1237,7 +1271,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 73,
+      "index": 75,
       "name": "geam",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1254,7 +1288,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 74,
+      "index": 76,
       "name": "gemmVbatched",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1271,7 +1305,7 @@
       "policy": "cpu_only_rejection_without_backend_symbol"
     },
     {
-      "index": 75,
+      "index": 77,
       "name": "gemmVbatched2s",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1288,7 +1322,7 @@
       "policy": "cpu_only_rejection_without_backend_symbol"
     },
     {
-      "index": 76,
+      "index": 78,
       "name": "gemmVbatched",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1303,7 +1337,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 77,
+      "index": 79,
       "name": "gemmVbatched2s",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1318,7 +1352,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 78,
+      "index": 80,
       "name": "gemmVbatched",
       "header_overload": 2,
       "scalar_parameters": [
@@ -1333,7 +1367,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 79,
+      "index": 81,
       "name": "gemmVbatched2s",
       "header_overload": 2,
       "scalar_parameters": [
@@ -1348,7 +1382,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 80,
+      "index": 82,
       "name": "gemmVbatched2s",
       "header_overload": 3,
       "scalar_parameters": [
@@ -1363,7 +1397,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 81,
+      "index": 83,
       "name": "gemmVbatched2s",
       "header_overload": 4,
       "scalar_parameters": [
@@ -1378,7 +1412,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 82,
+      "index": 84,
       "name": "gemmVbatched2s",
       "header_overload": 5,
       "scalar_parameters": [
@@ -1393,7 +1427,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 83,
+      "index": 85,
       "name": "gemmVbatched2s",
       "header_overload": 6,
       "scalar_parameters": [
@@ -1408,7 +1442,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 84,
+      "index": 86,
       "name": "random_generate",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1425,7 +1459,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 85,
+      "index": 87,
       "name": "write_matrix",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1442,7 +1476,7 @@
       "policy": "handle_stream_writer"
     },
     {
-      "index": 86,
+      "index": 88,
       "name": "scal",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1459,7 +1493,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 87,
+      "index": 89,
       "name": "scal",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1476,7 +1510,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 88,
+      "index": 90,
       "name": "pscal",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1493,7 +1527,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 89,
+      "index": 91,
       "name": "scalBatched",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1510,7 +1544,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 90,
+      "index": 92,
       "name": "scal",
       "header_overload": 2,
       "scalar_parameters": [
@@ -1526,7 +1560,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 91,
+      "index": 93,
       "name": "pscal",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1542,7 +1576,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 92,
+      "index": 94,
       "name": "scalBatched",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1558,7 +1592,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 93,
+      "index": 95,
       "name": "axpy",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1575,7 +1609,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 94,
+      "index": 96,
       "name": "iamax",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1592,7 +1626,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 95,
+      "index": 97,
       "name": "swap",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1609,7 +1643,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 96,
+      "index": 98,
       "name": "geru",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1626,7 +1660,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 97,
+      "index": 99,
       "name": "gerc",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1643,7 +1677,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 98,
+      "index": 100,
       "name": "getrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1660,7 +1694,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 99,
+      "index": 101,
       "name": "potrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1677,7 +1711,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 100,
+      "index": 102,
       "name": "laswp",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1694,7 +1728,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 101,
+      "index": 103,
       "name": "geqrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1711,7 +1745,41 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 102,
+      "index": 104,
+      "name": "gelqf",
+      "header_overload": 0,
+      "scalar_parameters": [
+        "T"
+      ],
+      "public_signature": "void gelqf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, T* tau)",
+      "private_signature": "void gelqf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, T* tau)",
+      "supported_scalar_arguments": [
+        "float",
+        "double",
+        "std::complex<float>",
+        "std::complex<double>"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 105,
+      "name": "gerqf",
+      "header_overload": 0,
+      "scalar_parameters": [
+        "T"
+      ],
+      "public_signature": "void gerqf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, T* tau)",
+      "private_signature": "void gerqf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, T* tau)",
+      "supported_scalar_arguments": [
+        "float",
+        "double",
+        "std::complex<float>",
+        "std::complex<double>"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 106,
       "name": "larft",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1728,7 +1796,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 103,
+      "index": 107,
       "name": "pgemm",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1743,7 +1811,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 104,
+      "index": 108,
       "name": "pgemm",
       "header_overload": 2,
       "scalar_parameters": [
@@ -1758,7 +1826,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 105,
+      "index": 109,
       "name": "phe2hb",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1775,7 +1843,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 106,
+      "index": 110,
       "name": "punmtr_he2hb",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1792,7 +1860,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 107,
+      "index": 111,
       "name": "herm_complete",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1809,7 +1877,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 108,
+      "index": 112,
       "name": "syrm_complete",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1826,7 +1894,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 109,
+      "index": 113,
       "name": "psyrm_complete",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1843,7 +1911,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 110,
+      "index": 114,
       "name": "pherm_complete",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1860,7 +1928,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 111,
+      "index": 115,
       "name": "phetrd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1877,7 +1945,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 112,
+      "index": 116,
       "name": "punmtr",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1894,7 +1962,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 113,
+      "index": 117,
       "name": "punmtr",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1911,7 +1979,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 114,
+      "index": 118,
       "name": "gemm",
       "header_overload": 2,
       "scalar_parameters": [
@@ -1926,7 +1994,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 115,
+      "index": 119,
       "name": "stedc",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1943,7 +2011,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 116,
+      "index": 120,
       "name": "syevd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1958,7 +2026,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 117,
+      "index": 121,
       "name": "heevd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1973,7 +2041,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 118,
+      "index": 122,
       "name": "hegvd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1988,7 +2056,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 119,
+      "index": 123,
       "name": "sygvd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2003,7 +2071,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 120,
+      "index": 124,
       "name": "phegst",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2020,7 +2088,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 121,
+      "index": 125,
       "name": "phegvd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2037,7 +2105,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 122,
+      "index": 126,
       "name": "pheevd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2054,7 +2122,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 123,
+      "index": 127,
       "name": "pheevd_two_stage",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2071,7 +2139,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 124,
+      "index": 128,
       "name": "pheevd_one_stage",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2088,7 +2156,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 125,
+      "index": 129,
       "name": "gemmt",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2105,7 +2173,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 126,
+      "index": 130,
       "name": "gemmt",
       "header_overload": 1,
       "scalar_parameters": [
@@ -2120,7 +2188,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 127,
+      "index": 131,
       "name": "gemmt",
       "header_overload": 2,
       "scalar_parameters": [
@@ -2135,7 +2203,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 128,
+      "index": 132,
       "name": "ptrtrm",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2152,7 +2220,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 129,
+      "index": 133,
       "name": "sytrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2169,7 +2237,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 130,
+      "index": 134,
       "name": "sytrs",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2186,7 +2254,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 131,
+      "index": 135,
       "name": "sytrf_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2203,7 +2271,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 132,
+      "index": 136,
       "name": "sytrs_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2220,7 +2288,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 133,
+      "index": 137,
       "name": "hetrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2237,7 +2305,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 134,
+      "index": 138,
       "name": "hetrs",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2254,7 +2322,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 135,
+      "index": 139,
       "name": "hetrf_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2271,7 +2339,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 136,
+      "index": 140,
       "name": "hetrs_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2288,7 +2356,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 137,
+      "index": 141,
       "name": "psytrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2305,7 +2373,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 138,
+      "index": 142,
       "name": "psytrs",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2322,7 +2390,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 139,
+      "index": 143,
       "name": "psytrf_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2339,7 +2407,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 140,
+      "index": 144,
       "name": "psytrs_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2356,7 +2424,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 141,
+      "index": 145,
       "name": "phetrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2373,7 +2441,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 142,
+      "index": 146,
       "name": "phetrs",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2390,7 +2458,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 143,
+      "index": 147,
       "name": "phetrf_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2407,7 +2475,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 144,
+      "index": 148,
       "name": "phetrs_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2424,7 +2492,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 145,
+      "index": 149,
       "name": "ormqr",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2441,7 +2509,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 146,
+      "index": 150,
       "name": "pormqr",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2458,7 +2526,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 147,
+      "index": 151,
       "name": "orgqr",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2475,7 +2543,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 148,
+      "index": 152,
       "name": "porgqr",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2492,7 +2560,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 149,
+      "index": 153,
       "name": "diag_logdet",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2509,7 +2577,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 150,
+      "index": 154,
       "name": "pdiag_logdet",
       "header_overload": 0,
       "scalar_parameters": [

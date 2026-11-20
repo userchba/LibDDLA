@@ -156,11 +156,11 @@ QrPlan qr_geometry(const DdlaHandle_t& handle, const int* descA, char uplo,
     p.jr_hi = uplo == 'L' ? ja + n : ja + k;
     // Workspace panel width (it fixes buffer offsets, and with them operand alignment): QR
     // sizes every call by the descriptor nb, QL by the widest actual panel.
-    p.nbws = 1;
-    if (uplo == 'U') {
-        p.nbws = p.nb;
-    } else {
-        qr_for_each_panel(p, [&](const QrPanel& q) { p.nbws = std::max(p.nbws, q.j_hi - q.j_lo); });
+    p.nbws = p.nb;
+    if (uplo == 'L') {
+        int widest = 1;
+        qr_for_each_panel(p, [&](const QrPanel& q) { widest = std::max(widest, q.j_hi - q.j_lo); });
+        p.nbws = widest;
     }
     return p;
 }

@@ -625,6 +625,36 @@ template void pgeqlf<std::complex<float>>(const DdlaHandle_t& handle, int m, int
 template void pgeqlf<std::complex<double>>(const DdlaHandle_t& handle, int m, int n, std::complex<double>* A, const int* descA, std::complex<double>* tau, int& info);
 
 template <typename T>
+void pgelqf(const DdlaHandle_t& handle, int m, int n, T* A, const int* descA, T* tau, int& info)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return pgelqf<DdlaBackend::GPU, T>(handle, m, n, A, descA, tau, info);
+#endif
+    return pgelqf<DdlaBackend::CPU, T>(handle, m, n, A, descA, tau, info);
+}
+
+template void pgelqf<float>(const DdlaHandle_t& handle, int m, int n, float* A, const int* descA, float* tau, int& info);
+template void pgelqf<double>(const DdlaHandle_t& handle, int m, int n, double* A, const int* descA, double* tau, int& info);
+template void pgelqf<std::complex<float>>(const DdlaHandle_t& handle, int m, int n, std::complex<float>* A, const int* descA, std::complex<float>* tau, int& info);
+template void pgelqf<std::complex<double>>(const DdlaHandle_t& handle, int m, int n, std::complex<double>* A, const int* descA, std::complex<double>* tau, int& info);
+
+template <typename T>
+void pgerqf(const DdlaHandle_t& handle, int m, int n, T* A, const int* descA, T* tau, int& info)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return pgerqf<DdlaBackend::GPU, T>(handle, m, n, A, descA, tau, info);
+#endif
+    return pgerqf<DdlaBackend::CPU, T>(handle, m, n, A, descA, tau, info);
+}
+
+template void pgerqf<float>(const DdlaHandle_t& handle, int m, int n, float* A, const int* descA, float* tau, int& info);
+template void pgerqf<double>(const DdlaHandle_t& handle, int m, int n, double* A, const int* descA, double* tau, int& info);
+template void pgerqf<std::complex<float>>(const DdlaHandle_t& handle, int m, int n, std::complex<float>* A, const int* descA, std::complex<float>* tau, int& info);
+template void pgerqf<std::complex<double>>(const DdlaHandle_t& handle, int m, int n, std::complex<double>* A, const int* descA, std::complex<double>* tau, int& info);
+
+template <typename T>
 void pgeadd(const DdlaHandle_t& handle, char transa, char transb, int m, int n, const T& alpha, const T* A, int ia, int ja, const int* descA, const T& beta, const T* B, int ib, int jb, const int* descB, T* C, int ic, int jc, const int* descC)
 {
 #if DDLA_HAS_GPU
@@ -1484,6 +1514,36 @@ template void geqrf<float>(const DdlaHandle_t& handle, char uplo, int m, int n, 
 template void geqrf<double>(const DdlaHandle_t& handle, char uplo, int m, int n, double* A, int lda, double* tau);
 template void geqrf<std::complex<float>>(const DdlaHandle_t& handle, char uplo, int m, int n, std::complex<float>* A, int lda, std::complex<float>* tau);
 template void geqrf<std::complex<double>>(const DdlaHandle_t& handle, char uplo, int m, int n, std::complex<double>* A, int lda, std::complex<double>* tau);
+
+template <typename T>
+void gelqf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, T* tau)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return gelqf<DdlaBackend::GPU, T>(handle, m, n, A, lda, tau);
+#endif
+    return gelqf<DdlaBackend::CPU, T>(handle, m, n, A, lda, tau);
+}
+
+template void gelqf<float>(const DdlaHandle_t& handle, int m, int n, float* A, int lda, float* tau);
+template void gelqf<double>(const DdlaHandle_t& handle, int m, int n, double* A, int lda, double* tau);
+template void gelqf<std::complex<float>>(const DdlaHandle_t& handle, int m, int n, std::complex<float>* A, int lda, std::complex<float>* tau);
+template void gelqf<std::complex<double>>(const DdlaHandle_t& handle, int m, int n, std::complex<double>* A, int lda, std::complex<double>* tau);
+
+template <typename T>
+void gerqf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, T* tau)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return gerqf<DdlaBackend::GPU, T>(handle, m, n, A, lda, tau);
+#endif
+    return gerqf<DdlaBackend::CPU, T>(handle, m, n, A, lda, tau);
+}
+
+template void gerqf<float>(const DdlaHandle_t& handle, int m, int n, float* A, int lda, float* tau);
+template void gerqf<double>(const DdlaHandle_t& handle, int m, int n, double* A, int lda, double* tau);
+template void gerqf<std::complex<float>>(const DdlaHandle_t& handle, int m, int n, std::complex<float>* A, int lda, std::complex<float>* tau);
+template void gerqf<std::complex<double>>(const DdlaHandle_t& handle, int m, int n, std::complex<double>* A, int lda, std::complex<double>* tau);
 
 template <typename T>
 void larft(const DdlaHandle_t& handle, char direct, char storev, int n, int k, T* V, int ldv, const T* tau, T* Tmat, int ldt)

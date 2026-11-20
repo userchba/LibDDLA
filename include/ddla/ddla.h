@@ -918,6 +918,50 @@ void pgeqlf(const DdlaHandle_t& handle, int m, int n,
             T* A, const int* descA, T* tau, int& info);
 
 /**
+ * @brief Distributed Householder LQ factorization, A = L * Q.
+ *
+ * Factorizes the leading m-by-n block. L occupies the lower trapezoid;
+ * reflector tails occupy the remaining part of each of the first k rows,
+ * k=min(m,n), with implicit unit entries. For complex T the stored tails are
+ * conjugated. Q = H(k)^H ... H(1)^H, H(i)=I-tau(i)*v(i)*v(i)^H.
+ *
+ * A uses backend memory. tau is HOST memory indexed by local row, replicated
+ * across process columns; provide LOCr(m) entries. Entries for rows without
+ * reflectors, parent-matrix entries and LLD padding are preserved. Unequal
+ * block sizes, arbitrary valid sources and both grid orderings are supported.
+ * DDLA_QR_PANEL selects the same gathered/inplace policy as pgeqrf.
+ * The extra matrix-sized adjoint buffer has the input's local ownership;
+ * QR uses bounded panels; no scratch grows as a replicated global matrix.
+ *
+ * @param handle Handle owning the process grid and stream.
+ * @param m Rows of the leading block, 0 <= m <= descA[M_].
+ * @param n Columns of the leading block, 0 <= n <= descA[N_].
+ * @param A Distributed matrix, overwritten with L and reflector vectors.
+ * @param descA ScaLAPACK int[9] descriptor for A.
+ * @param tau HOST scalars, local-row indexed, storage for LOCr(m).
+ * @param info HOST status, zero on success; invalid arguments throw collectively.
+ */
+template <typename T>
+void pgelqf(const DdlaHandle_t& handle, int m, int n,
+            T* A, const int* descA, T* tau, int& info);
+
+/**
+ * @brief Distributed Householder RQ factorization, A = R * Q.
+ *
+ * R occupies the upper trapezoid, with diagonal column n-m+i in row i.
+ * Reflector tails precede that diagonal in the final k=min(m,n) rows;
+ * complex tails are conjugated. Q = H(1)^H ... H(k)^H.
+ * tau is HOST, local-row indexed (LOCr(m) entries). For m>n only the final
+ * k rows carry scalars; entries for earlier rows are preserved.
+ * Memory placement, descriptor/parent-storage rules, panel policy and
+ * collective error behavior otherwise follow pgelqf.
+ */
+template <typename T>
+void pgerqf(const DdlaHandle_t& handle, int m, int n,
+            T* A, const int* descA, T* tau, int& info);
+
+
+/**
  * @brief Distributed addition: C(ic:ic+m-1,jc:jc+n-1) = alpha*op(A) + beta*op(B).
  *
  * Inputs and output may use different block sizes, source coordinates and
@@ -2146,6 +2190,33 @@ void laswp(const DdlaHandle_t& handle, int n, T* A, int lda, int k1, int k2, con
  */
 template <typename T>
 void geqrf(const DdlaHandle_t& handle, char uplo, int m, int n, T* A, int lda, T* tau);
+
+/**
+ * @brief Local Householder LQ factorization, A = L * Q.
+ *
+ * A is column-major, lda>=max(1,m), and is overwritten in LAPACK GELQF
+ * storage: L on/below the diagonal, row reflector tails above it.
+ * tau contains k=min(m,n) compact scalars. A and tau both use backend memory.
+ * For complex T, Q=H(k)^H...H(1)^H and stored vector tails are conjugated.
+ * CPU uses native LAPACK; GPU uses the QR of A^H and retains its sign convention.
+ * Empty factorizations access neither A nor tau. Padding is preserved.
+ */
+template <typename T>
+void gelqf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, T* tau);
+
+/**
+ * @brief Local Householder RQ factorization, A = R * Q.
+ *
+ * A and compact tau (min(m,n) entries) use backend memory. R is the upper
+ * trapezoid with diagonal column n-m+i in row i. Row reflector tails precede
+ * the diagonal in the final k=min(m,n) rows, in LAPACK GERQF storage.
+ * Q=H(1)^H...H(k)^H; complex vector tails are conjugated.
+ * CPU uses native LAPACK; GPU reuses QL of A^H. Padding and empty-call rules
+ * follow gelqf.
+ */
+template <typename T>
+void gerqf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, T* tau);
+
 
 /**
  * @brief Handle-driven triangular factor of a block reflector (LAPACK ?larft, STOREV = 'C'): the T of the compact-WY

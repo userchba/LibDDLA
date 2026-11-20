@@ -157,6 +157,7 @@ struct QrPlan {
 // One panel: global columns [j_lo, j_hi) and its window rows [g0, g0 + m_w).
 struct QrPanel { int j_lo, j_hi, g0, m_w; };
 
+// nbws may additionally cap the logical panel width within a physical block.
 // The panels in execution order, handed to f one by one: QR left to right, QL right to
 // left, each one the intersection of a block column [b*nb, (b+1)*nb) with the reflector
 // range.  The QL window rows [0, m_w): the reflector of the panel's LAST column has its
@@ -167,13 +168,14 @@ inline void qr_for_each_panel(const QrPlan& p, F&& f)
     if (p.uplo == 'U') {
         for (int j = p.jr_lo; j < p.jr_hi;) {
             const int j_hi = static_cast<int>(std::min<long long>(
-                (static_cast<long long>(j) / p.nb + 1) * p.nb, p.jr_hi));   // end of this block column
+                std::min((static_cast<long long>(j) / p.nb + 1) * p.nb,
+                         static_cast<long long>(j) + p.nbws), p.jr_hi));   // end of this block column
             f(QrPanel{j, j_hi, j - p.ja, p.m - (j - p.ja)});
             j = j_hi;
         }
     } else {
         for (int j_hi = p.jr_hi; j_hi > p.jr_lo;) {
-            const int j_lo = std::max(p.jr_lo, ((j_hi - 1) / p.nb) * p.nb);
+            const int j_lo = std::max({p.jr_lo, ((j_hi - 1) / p.nb) * p.nb, j_hi - p.nbws});
             f(QrPanel{j_lo, j_hi, 0, p.m - p.n + (j_hi - p.ja)});
             j_hi = j_lo;
         }
