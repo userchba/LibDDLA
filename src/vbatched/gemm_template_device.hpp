@@ -223,7 +223,8 @@ void gemm_template_device_prefetch_nn (
                 T &regC = rC[n][m];
                 T &memC = C[offsC];
 
-                memC = add(mul(alpha, regC), mul(beta, memC));
+                memC = beta == make_FloatingPoint(0.,0.) ? mul(alpha,regC)
+                     : add(mul(alpha,regC),mul(beta,memC));
             }
         }
     }
@@ -404,7 +405,8 @@ void gemm_template_device_prefetch_nt (
                 T &regC = rC[n][m];
                 T &memC = C[offsC];
 
-                memC = add(mul(alpha, regC), mul(beta, memC));
+                memC = beta == make_FloatingPoint(0.,0.) ? mul(alpha,regC)
+                     : add(mul(alpha,regC),mul(beta,memC));
             }
         }
     }
@@ -586,7 +588,8 @@ void gemm_template_device_prefetch_tn (
                 T &regC = rC[n][m];
                 T &memC = C[offsC];
 
-                memC = add(mul(alpha, regC), mul(beta, memC));
+                memC = beta == make_FloatingPoint(0.,0.) ? mul(alpha,regC)
+                     : add(mul(alpha,regC),mul(beta,memC));
             }
         }
     }
@@ -767,7 +770,8 @@ void gemm_template_device_prefetch_tt (
                 T &regC = rC[n][m];
                 T &memC = C[offsC];
 
-                memC = add(mul(alpha, regC), mul(beta, memC));
+                memC = beta == make_FloatingPoint(0.,0.) ? mul(alpha,regC)
+                     : add(mul(alpha,regC),mul(beta,memC));
             }
         }
     }

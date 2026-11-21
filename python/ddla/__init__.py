@@ -1,4 +1,4 @@
-"""LibDDLA -- Distributed Dense Linear Algebra Python Bindings.
+"""LibDDLA -- Dense Distributed Linear Algebra Python Bindings.
 
 A high-performance library for ScaLAPACK-style 2D block-cyclic distributed dense
 linear algebra with CPU and GPU backends, designed with native NumPy array

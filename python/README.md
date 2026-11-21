@@ -1,6 +1,6 @@
 # LibDDLA Python Bindings (`ddla`)
 
-High-performance Python bindings for **LibDDLA** (Distributed Dense Linear Algebra).
+High-performance Python bindings for **LibDDLA** (Dense Distributed Linear Algebra).
 Designed with native **NumPy** array interoperability and **mpi4py** integration, following the architectural paradigms of **ELPA (pyelpa in LibRPA)** and ScaLAPACK.
 
 ## Key Features

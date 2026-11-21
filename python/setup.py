@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 setup(
     name="ddla",
     version="0.1.0",
-    description="Python bindings for LibDDLA distributed dense linear algebra",
+    description="Python bindings for LibDDLA dense distributed linear algebra",
     author="userchba",
     packages=find_packages(),
     install_requires=[

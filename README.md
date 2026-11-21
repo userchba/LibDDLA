@@ -1,11 +1,23 @@
-# LibDDLA — Distributed Dense Linear Algebra
+# LibDDLA — Dense Distributed Linear Algebra
 
-LibDDLA 0.0.6 is a library for **distributed dense linear algebra**.
+LibDDLA 0.0.7 is a library for **dense distributed linear algebra**.
 Building LibDDLA requires C++17; applications using its public headers need C++11 or newer.
 It provides ScaLAPACK-style APIs with 2D block-cyclic data distribution over an
 MPI process grid. Every build includes the CPU backend (OpenBLAS/vendor
 BLAS). CUDA or HIP can add GPU support to the same library, with backend
 selection per handle at runtime. All functions live in the `ddla` namespace.
+
+Version 0.0.7 is in preparation. It includes source-incompatible API changes;
+rebuild applications and follow the [0.0.7 migration guide](docs/releases/0.0.7.md).
+See the [changelog](CHANGELOG.md) for changes since 0.0.6.
+
+## Documentation
+
+- [Build and prerequisites](#prerequisites), [runtime backend selection](#runtime-backend-selection), and [communication modes](#communication-modes)
+- [Data model and lifecycle](#data-model-and-lifecycle) and [API overview](#api-overview)
+- [Hermitian and tridiagonal eigensolvers](#hermitian-and-tridiagonal-eigensolvers), including partial and generalized problems
+- [Internal workspace interfaces](docs/workspace.md) for library developers
+- [Testing](#testing) and [0.0.7 release checks](docs/releases/0.0.7.md#release-checklist)
 
 ## Key facts and caveats
 
@@ -814,16 +826,21 @@ uses small host metadata; no global matrix replica is introduced.
 | `potrf_bottom_right` | Local bottom-right Cholesky (all four scalar types) |
 | `ppotrf_bottom_right` | Distributed bottom-right Cholesky (all four scalar types) |
 
-### QR / QL factorization
+### QR / QL / LQ / RQ factorization
 
 | Function | Description |
 |----------|-------------|
 | `pgeqrf(handle, m, n, ...)` | Distributed Householder QR, `A = Q·R`; all four scalar types, with host `tau` indexed by local column |
 | `pgeqlf(handle, m, n, ...)` | Distributed Householder QL, `A = Q·L`; host `tau` uses local-column indices, including the final reflector columns of wide matrices |
+| `pgelqf(handle, m, n, ...)` | Distributed Householder LQ, `A = L·Q`; host `tau` indexed by local row |
+| `pgerqf(handle, m, n, ...)` | Distributed Householder RQ, `A = R·Q`; host `tau` indexed by local row, including the final reflector rows of tall matrices |
 
 Panels use a gathered local `geqrf` by default (`DDLA_QR_PANEL=gather`),
 or the distributed `inplace` variant. All ranks must use the same selector.
-Only QR and QL are implemented; right-side LQ and RQ forms are not provided.
+Local `geqrf` (QR/QL selected by `uplo`), `gelqf` and `gerqf` are also
+available. Local reflector scalars reside in the handle-selected backend, while distributed reflector
+scalars are host arrays. LQ/RQ use an additional distributed adjoint buffer;
+they do not gather or replicate a full global matrix.
 
 ### Singular value decomposition
 
@@ -1071,14 +1088,7 @@ library build supplies exactly one. CPU-only builds use no dummy GPU types
 or no-op vendor calls. Consumers use the public headers and can select the
 CPU backend of a GPU-enabled library without vendor definitions.
 
-## Version
-
-**0.0.6** — defined in `src/version.h`.  The shared library SONAME tracks the
-major version.
-
-## License
-
-LGPL v3.  See [LICENSE](./LICENSE).
+## Hermitian and tridiagonal eigensolvers
 
 For an independent local tridiagonal solve, use
 `stedc<T>(handle, compz, n, d, e, Z, ldz, info)` with real or complex
@@ -1357,3 +1367,14 @@ ordering. Run with both diagnostic preloads, `libpblas_alloc_failure.so` and
 `libworkspace_trace.so`, on MPI ranks. The suite distinguishes exact fixed
 geometry from PBDSDC's data-dependent bound, and includes actual one-rank
 cache-allocation failures with collective rejection and same-handle retries.
+
+## Version
+
+**0.0.7 (in preparation)** — defined in `src/version.h`. The shared library
+SONAME tracks the major version. An unchanged major/SONAME does not imply API
+or ABI compatibility for this release; rebuild downstream applications.
+See the [changelog](CHANGELOG.md) and [migration guide](docs/releases/0.0.7.md).
+
+## License
+
+LGPL v3. See [LICENSE](LICENSE).
