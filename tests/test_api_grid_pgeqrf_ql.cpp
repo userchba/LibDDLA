@@ -730,6 +730,7 @@ void check_pgeqlf(const ddla::DdlaHandle_t& handle)
         {11,  11,  0, 4,  2,  0,  0,  11,  11, FILL_HASH},   // late (shrinking) windows on ranks with no rows
         {9,    9,  0, 1,  3,  0,  0,   9,   9, FILL_HASH},   // mb = 1: the root rotates every row block
         {700, 300, 0, 16, 32, 0,  0, 700, 300, FILL_HASH},
+        {521, 535, 0, 16, 535, pr, pc, 526, 542, FILL_HASH}, // split a physical block from the right
     };
     for (const CaseGeom& g : cases)
         run_case<T>(handle, g, std::string(type_tag<T>()) + " " + geom_tag(g) + fill_tag(g.fill)

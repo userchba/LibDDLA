@@ -5,7 +5,7 @@
 // the same machinery run right to left.  Classic right-looking structure, the same
 // loop on every grid (a 1x1 grid included):
 //
-//     for each block column j0 (width jb <= nb):
+//     for each logical panel at j0 within its physical block column:
 //         gathered panel -- the owner process column sends its window rows
 //                           to ONE rank (the process row owning global row
 //                           j0), the root factors the whole window there with
@@ -60,9 +60,9 @@
 // Source layout: this file holds the shared block driver qr_impl::qr_block_run
 // (panel -> Row broadcast -> update) and its scratch size, plan / panel list, and
 // the public pgeqrf / pgeqlf entries (checks, scratch, driver, tau copy-out).
-// Every panel is one block column of the descriptor or the part inside the
-// reflector range.  Its gather/scatter stays on the owner column's communicator;
-// a wider panel on a 1x1 grid is obtained by passing a larger descriptor nb.
+// A logical panel stays within one descriptor block column, so its gather
+// and scatter stay on that owner column's communicator. The public blocked
+// path caps the logical width independently of the descriptor block size.
 // The panel implementations live in pgeqr2_panel.cpp and the BLAS-3 trailing
 // shared update in punmtr.cpp; both use matrix arguments and QrWorkspace from pgeqrf_impl.h.
 //
@@ -123,6 +123,8 @@ bool qr_panel_inplace_env()
 
 // ---- plan ---------------------------------------------------------------------
 
+constexpr int kQrPanelWidth = 128;
+
 void qr_check_args(const DdlaHandle_t& handle, const int* descA,
                    int m, int n, int ja, const char* who)
 {
@@ -142,7 +144,7 @@ QrPlan qr_make_plan(const DdlaHandle_t& handle, const int* descA, char uplo,
 }
 
 QrPlan qr_geometry(const DdlaHandle_t& handle, const int* descA, char uplo,
-                   int m, int n, int ja)
+                   int m, int n, int ja, int panel_width_limit)
 {
     QrPlan p;
     p.uplo = uplo;
@@ -154,9 +156,14 @@ QrPlan qr_geometry(const DdlaHandle_t& handle, const int* descA, char uplo,
     const int k = std::min(m, n);
     p.jr_lo = uplo == 'L' ? ja + n - k : ja;
     p.jr_hi = uplo == 'L' ? ja + n : ja + k;
-    // Workspace panel width (it fixes buffer offsets, and with them operand alignment): QR
-    // sizes every call by the descriptor nb, QL by the widest actual panel.
     p.nbws = p.nb;
+    if (panel_width_limit > 0) {
+        // Bound the logical width by a rounded-up rank share of the reflector
+        // columns. A wide physical block still belongs to the same process column.
+        const int ranks = handle->nprocs;
+        const int share = k / ranks + (k % ranks != 0);
+        p.nbws = std::min({p.nb, panel_width_limit, std::max(1, share)});
+    }
     if (uplo == 'L') {
         int widest = 1;
         qr_for_each_panel(p, [&](const QrPanel& q) { widest = std::max(widest, q.j_hi - q.j_lo); });
@@ -329,7 +336,7 @@ template<class T> std::array<std::size_t,2> qr_block_staging_bytes(const DdlaHan
 template<class T> std::array<std::size_t,2> pgeqrf_staging_bytes(const DdlaHandle_t& h,
     char uplo,bool inplace,int m,int n,const int* desc)
 {
-    return qr_block_staging_bytes<T>(h,qr_geometry(h,desc,uplo,m,n,0),desc,false,inplace,false);
+    return qr_block_staging_bytes<T>(h,qr_geometry(h,desc,uplo,m,n,0,kQrPanelWidth),desc,false,inplace,false);
 }
 #define STAGING_SIZE(T) \
     template std::array<std::size_t,2> qr_block_staging_bytes<T>(const DdlaHandle_t&,const QrPlan&,const int*,bool,bool,bool); \
@@ -487,7 +494,7 @@ bool pgeqrf_check(const DdlaHandle_t& handle, char uplo, int m, int n, const int
         uplo = normalize_uplo(uplo, name);
         agree.mode("QR/QL factorization", int(uplo));
         qr_check_args(handle, descA, m, n, /*ja=*/0, name);
-        const QrPlan p = qr_geometry(handle, descA, uplo, m, n, /*ja=*/0);
+        const QrPlan p = qr_geometry(handle, descA, uplo, m, n, /*ja=*/0, kQrPanelWidth);
         const int k = p.jr_hi - p.jr_lo;   // min(m, n) reflectors
         // Ranks that own no reflector column never write tau, so a caller sizing tau as
         // exactly the owned columns may hand them a null pointer.
@@ -507,10 +514,9 @@ bool pgeqrf_check(const DdlaHandle_t& handle, char uplo, int m, int n, const int
 
 // Component 2: the block driver's scratch over A(0:m, 0:n) (qr_block_workspace_size: backend
 // Wg | S | [V|T] | tau | the in-place panel's buffers | the root's geqrf / larft scratch
-// overlaid by W | Wp; host the peer list or the in-place panel's host state).  The panel is one
-// block column of the descriptor (jb <= nb on every grid; on a 1x1 grid pass a larger
-// descriptor nb for a wider panel).  The LAPACK / vendor queries of the gathered root are made
-// with A (leading dimension LLD) and tau.
+// overlaid by W | Wp; host the peer list or the in-place panel's host state).
+// A logical panel stays within one physical block column. The LAPACK / vendor
+// queries of the gathered root are made with A and tau.
 template <typename T>
 void pgeqrf_workspace_size(const DdlaHandle_t& handle, char uplo, bool inplace, int m, int n,
                            T* A, const int* descA, T* tau,
@@ -524,7 +530,7 @@ void pgeqrf_workspace_size(const DdlaHandle_t& handle, char uplo, bool inplace, 
             *backend_bytes += detail::padded_bytes<T>(std::min(m,n));
         return;
     }
-    qr_block_workspace_size<T>(handle, qr_geometry(handle, descA, uplo, m, n, /*ja=*/0), false, false, inplace,
+    qr_block_workspace_size<T>(handle, qr_geometry(handle, descA, uplo, m, n, /*ja=*/0, kQrPanelWidth), false, false, inplace,
                                A, descA[DDLA_LLD_], tau, backend_bytes, host_bytes);
 }
 
@@ -554,7 +560,7 @@ void pgeqrf_run(const DdlaHandle_t& handle, char uplo, bool inplace, int m, int 
             }
             return;
         }
-        const QrPlan p = qr_geometry(handle, descA, uplo, m, n, /*ja=*/0);
+        const QrPlan p = qr_geometry(handle, descA, uplo, m, n, /*ja=*/0, kQrPanelWidth);
 
         const T* const taus = qr_block_run<Backend, T>(handle, A, descA, p, false, false, inplace, nullptr, 0, nullptr, 0,
                                                        backend_work, backend_bytes, host_work, host_bytes);

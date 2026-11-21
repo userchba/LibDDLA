@@ -116,6 +116,26 @@ template<DdlaBackend B,class T> void cases(DdlaHandle_t h)
     for(int repeat=0;repeat<2;++repeat){workspace_test::Scope run;random_impl::random_generate_run<B,T>(h,rng,random.ptr,count);run_clean(h,run.finish());auto values=download(h,random.ptr,count);double bad=0;for(auto x:values)if(!std::isfinite(double(std::abs(x))))bad=1;require_close(h,"prepared random generator produces finite values",bad,0);}
     rng.reset();
 }
+void qr_coarse_block_workspace(DdlaHandle_t h)
+{
+    if (h->nprocs == 1) return;
+    constexpr int n = 1024;
+    int d[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(d, h, n, n, 16, n, 0, 0));
+    double placeholder = 0;
+    const std::size_t full_matrix_bytes = std::size_t(n) * n * sizeof(double);
+    for (char uplo : {'U', 'L'}) {
+        for (bool inplace : {false, true}) {
+            std::size_t backend_bytes = 0, host_bytes = 0;
+            qr_impl::pgeqrf_workspace_size<double>(
+                h, uplo, inplace, n, n, &placeholder, d, &placeholder,
+                &backend_bytes, &host_bytes);
+            require_close(h, "coarse QR/QL scratch fits below one full matrix",
+                backend_bytes + host_bytes >= full_matrix_bytes ? 1 : 0, 0);
+        }
+    }
+}
+
 template<DdlaBackend B,class T>void tiny_case(DdlaHandle_t h)
 {
     int d[DDLA_DLEN_];DDLA_CHECK(ddlaDescInit(d,h,1,1,3,3,h->nprows_-1,h->npcols_-1));
@@ -131,7 +151,7 @@ template<DdlaBackend B,class T>void tiny_case(DdlaHandle_t h)
         for(int pass=0;pass<2;++pass){upload(h,a.ptr,input);workspace_test::Scope run;qr_impl::pgeqrf_run<B,T>(h,'L',inplace,1,1,a.ptr,d,tau.data(),w.backend(),bb,w.host(),hb);run_clean(h,run.finish());same(h,input,download(h,a.ptr,input.size()));w.verify();}
     }
 }
-template<DdlaBackend B>void run(MPI_Comm comm,int pr,int pc,char major){DdlaHandle_t h=nullptr;ddlaInit(h,B);ddlaSet(h,comm,pr,pc,major);cases<B,float>(h);cases<B,double>(h);cases<B,std::complex<float>>(h);cases<B,std::complex<double>>(h);tiny_case<B,float>(h);tiny_case<B,double>(h);tiny_case<B,std::complex<float>>(h);tiny_case<B,std::complex<double>>(h);if(h->myid==0)std::cout<<"workspace factorizations PASS backend="<<int(B)<<" grid="<<pr<<"x"<<pc<<" major="<<major<<std::endl;ddlaDestroy(h);}
+template<DdlaBackend B>void run(MPI_Comm comm,int pr,int pc,char major){DdlaHandle_t h=nullptr;ddlaInit(h,B);ddlaSet(h,comm,pr,pc,major);cases<B,float>(h);cases<B,double>(h);cases<B,std::complex<float>>(h);cases<B,std::complex<double>>(h);tiny_case<B,float>(h);tiny_case<B,double>(h);tiny_case<B,std::complex<float>>(h);tiny_case<B,std::complex<double>>(h);if constexpr(B==DdlaBackend::CPU)qr_coarse_block_workspace(h);if(h->myid==0)std::cout<<"workspace factorizations PASS backend="<<int(B)<<" grid="<<pr<<"x"<<pc<<" major="<<major<<std::endl;ddlaDestroy(h);}
 }
 int main(int argc,char** argv){ddla_test_mpi_init(&argc,&argv);int size;MPI_Comm_size(MPI_COMM_WORLD,&size);TestOptions opts;std::string error;if(!parse_options(argc,argv,size,opts,error)){std::cerr<<error<<std::endl;MPI_Abort(MPI_COMM_WORLD,2);}for(auto grid:opts.grids)for(char major:{'R','C'}){
 run<DdlaBackend::CPU>(MPI_COMM_WORLD,grid.first,grid.second,major);

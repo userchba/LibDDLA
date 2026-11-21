@@ -106,11 +106,7 @@ void factorize(const DdlaHandle_t& h, bool rq, int m, int n, T* a, const int* da
                 T(0), static_cast<const T*>(nullptr), nl, adjoint.data(), ld, h->stream);
         {
             TransposedGrid grid(h);
-            auto plan = qr_impl::qr_geometry(h, dt, rq ? 'L' : 'U', n, m, 0);
-            // A physical block may span the whole matrix. Bound the logical
-            // panels so gathered windows, V/T and update scratch remain linear
-            // in the matrix dimension even for such descriptors.
-            plan.nbws = std::min(plan.nbws, 64);
+            const auto plan = qr_impl::qr_geometry(h, dt, rq ? 'L' : 'U', n, m, 0, /*panel_width_limit=*/64);
             std::size_t backend_bytes = 0, host_bytes = 0;
             vector<char> work(h);
             std::vector<char> host;

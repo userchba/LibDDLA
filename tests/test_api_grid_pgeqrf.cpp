@@ -774,9 +774,9 @@ void check_pgeqrf(const ddla::DdlaHandle_t& handle)
         {4500, 24, 8, 8, 0, 0, 4500, 24, FILL_HASH},      // long panel columns, many block rows
         {4500, 24, 8, 8, 0, 0, 4500, 24, FILL_SUBNORMAL}, // denormal x across block rows
         {900, 24, 8, 32, 0, 0, 900, 24, FILL_MIXED_SCALE},      // one panel: tiny+zero+O(1) and tiny+zero+tiny columns
-        {1000, 300, 8, 300, 0, 0, 1000, 300, FILL_HASH},      // nb=300: one very wide panel
-        {512, 256, 16, 256, 0, 0, 512, 256, FILL_HASH},       // panel = 256 columns of 512 rows
-        {512, 512, 16, 512, 0, 0, 512, 512, FILL_HASH},       // jb == n == m_w: the last column has no x and no columns to update
+        {1000, 300, 8, 300, 0, 0, 1000, 300, FILL_HASH},      // split one physical block into logical panels
+        {512, 256, 16, 256, 0, 0, 512, 256, FILL_HASH},       // tall factor with a single physical block column
+        {512, 512, 16, 512, 0, 0, 512, 512, FILL_HASH},       // square factor with distributed rows and coarse columns
         {41, 37, 3, 8, pr, pc, 41, 37, FILL_HASH},        // mb < jb with nonzero sources
         {40, 30, 7, 4, pr, 0, 40, 30, FILL_HASH},         // mb > nb, panel starts cut mb blocks
         {11, 11, 4, 2, 0, 0, 11, 11, FILL_HASH},          // late panels on ranks with no rows

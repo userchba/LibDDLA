@@ -150,17 +150,16 @@ struct QrPlan {
     int nprows = 1, npcols = 1, myprow = 0, mypcol = 0;
     int jr_lo = 0, jr_hi = 0;                 // global reflector columns [jr_lo, jr_hi):
                                               // QR [ja, ja+k), QL [ja+n-k, ja+n), k = min(m, n)
-    int nbws = 1;                             // widest panel the buffers are sized for:
-                                              // QR the descriptor nb, QL the widest actual panel
+    int nbws = 1;                             // logical panel width and scratch capacity
 };
 
 // One panel: global columns [j_lo, j_hi) and its window rows [g0, g0 + m_w).
 struct QrPanel { int j_lo, j_hi, g0, m_w; };
 
 // nbws may additionally cap the logical panel width within a physical block.
-// The panels in execution order, handed to f one by one: QR left to right, QL right to
-// left, each one the intersection of a block column [b*nb, (b+1)*nb) with the reflector
-// range.  The QL window rows [0, m_w): the reflector of the panel's LAST column has its
+// QR traverses panels from left to right and QL from right to left. Each panel
+// fits in one physical block column and in the reflector range. The QL
+// window is [0, m_w): the reflector of the panel's LAST column has its
 // unit entry at row m_w - 1 (= m - n + (j_hi - 1 - ja)).
 template <class F>
 inline void qr_for_each_panel(const QrPlan& p, F&& f)
@@ -191,8 +190,10 @@ QrPlan qr_make_plan(const DdlaHandle_t& handle, const int* descA, char uplo,
                     int m, int n, int ja, const char* who);
 void qr_check_args(const DdlaHandle_t& handle, const int* descA,
                    int m, int n, int ja, const char* who);
+// A positive limit bounds public factorization panels. A zero limit lets
+// the band reduction use the full width of its prescribed reflector block.
 QrPlan qr_geometry(const DdlaHandle_t& handle, const int* descA, char uplo,
-                   int m, int n, int ja);
+                   int m, int n, int ja, int panel_width_limit = 0);
 
 // The panels of qr_for_each_panel as a list.
 std::vector<QrPanel> qr_panels(const QrPlan& p);
