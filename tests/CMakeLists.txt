@@ -952,7 +952,7 @@ endif()
 
 # Isolated algorithm feasibility targets. Heavy suites are launched explicitly
 # by the task helper, not added to the production/default CTest regression list.
-foreach(_algorithm_test test_pgesvd_shape)
+foreach(_algorithm_test test_pgesvd_shape test_chebyshev)
     add_executable(${_algorithm_test} EXCLUDE_FROM_ALL ${_algorithm_test}.cpp)
     target_include_directories(${_algorithm_test} PRIVATE
         "${PROJECT_SOURCE_DIR}/tests" "${PROJECT_SOURCE_DIR}/src")
@@ -962,6 +962,18 @@ foreach(_algorithm_test test_pgesvd_shape)
     apply_test_connector_defs(${_algorithm_test})
     add_dependencies(${_algorithm_test} workspace_trace)
 endforeach()
+
+# Same analytic data/oracles as the borrowed test; this target calls only the
+# public owning entry and therefore makes no raw no-allocation assertion.
+add_executable(test_pheevd_chebyshev EXCLUDE_FROM_ALL test_chebyshev.cpp)
+target_compile_definitions(test_pheevd_chebyshev PRIVATE DDLA_CHEBYSHEV_PUBLIC_TEST)
+target_include_directories(test_pheevd_chebyshev PRIVATE
+    "${PROJECT_SOURCE_DIR}/tests" "${PROJECT_SOURCE_DIR}/src")
+target_compile_features(test_pheevd_chebyshev PRIVATE cxx_std_17)
+target_compile_options(test_pheevd_chebyshev PRIVATE -g)
+target_link_libraries(test_pheevd_chebyshev PRIVATE ddla_lib ${CMAKE_DL_LIBS})
+apply_test_connector_defs(test_pheevd_chebyshev)
+add_dependencies(test_pheevd_chebyshev workspace_trace)
 
 # The public fixed-factor test explicitly selects CPU by default in dual builds.
 add_test_executable(test_phegst)

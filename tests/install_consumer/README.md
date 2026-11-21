@@ -20,8 +20,10 @@ Expected output includes `installed public-header consumer PASS
 DDLA_HAS_GPU=0` for CPU-only or `=1` for dual builds and a passing one-rank CTest.
 Only CPU computations execute, including when linked against a dual library.
 Scalar-only function pointers are resolved without a Backend template argument.
-A positive compile control and five negative compile checks verify that the
-former public Backend syntax is hidden. No private headers or vendor macros
+A C++11 positive compile control and negative compile checks verify that the
+former public Backend syntax is hidden and Chebyshev controls have no defaults.
+Actual CPU Chebyshev cold/warm solves exercise all four scalar types, checking
+finite eigenpairs, independent residuals, orthogonality and nev-sized guards. No private headers or vendor macros
 are used. `installed-target.txt` reports the imported library path,
 includes, link providers, compile definitions and C++ standard requirement;
 `compile_commands.json` records the standalone consumer's actual compile line.

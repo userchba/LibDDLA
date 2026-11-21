@@ -1182,6 +1182,48 @@ route; an explicit one-stage request remains available. Single-rank automatic
 calls retain the local vendor solver.
 
 
+### Partial iterative Hermitian eigenproblems
+
+```cpp
+ddla::pheevd_chebyshev(handle, uplo, n, nev, nex, A, descA, w, Z, descZ,
+                       tolerance, max_iterations, degree, warm_start,
+                       iterations, converged, info);
+```
+
+This separate scalar-only entry supports real/complex float/double and manages
+workspace internally. It returns **nev host eigenvalues**, rather than the
+all-n eigenvalue contract of `pheevd`, with an `n × nev` distributed output.
+`q=nev+nex` must not exceed `n`; `nev=0` does no matrix-data work. All controls
+are required, and `pheevd` never selects this method automatically.
+
+Only `uplo` of A is read, ignoring imaginary complex diagonals. A is destroyed
+by binary scaling and full Hermitian completion. A needs square source-zero
+blocks; Z may use any valid distribution covering its leading output block.
+A/Z may alias: warm vectors are copied before A changes, and final vectors
+are written after the final operator application. Cold output is never read.
+The host `w` array and active Z must be disjoint; parent regions and padding
+outside active blocks are preserved. Warm mode reads the first `nev` columns,
+perturbs every warm column and generates the `nex` extra directions randomly.
+
+The fixed-degree filter uses distributed QR and Rayleigh–Ritz. Convergence
+requires the normwise residual
+`||Ax-λx||₂ / ((||A||∞+|λ|)||x||₂) <= tolerance`, tested with each returned,
+rounded eigenvalue. Adequate randomized overlap with the wanted subspace is
+assumed: this residual criterion alone does not certify lowest eigenvalue
+indices. `iterations` counts completed filter/Ritz sweeps; `converged` counts
+requested pairs passing the residual criterion. `info=0` means all requested
+pairs passed, and `info=1` returns the available approximations at the limit.
+Other positive codes are 2 numerical/rank breakdown, 3 nonfinite input/warm
+vectors, 4 irreversible scaling, 5 projected-solve failure, and 6 eigenvalues
+unrepresentable at the requested tolerance. Invalid options throw collectively.
+
+All matrix-sized storage stays distributed: three `n × q` basis matrices,
+two `q × q` projected matrices, and maximum phase scratch. Descriptor/block
+rounding and linear panel overhead remain when `q` is below the process count.
+This opt-in method makes no unconditional convergence or performance promise.
+The `test_pheevd_chebyshev` target reuses the private analytic fixture through
+the public entry; CPU is default and `--gpu` explicitly selects GPU execution.
+
 ### Completing a matrix from one stored triangle
 
 ```cpp

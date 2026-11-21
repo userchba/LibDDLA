@@ -1832,6 +1832,21 @@ template void phegvd<std::complex<float>>(const DdlaHandle_t& handle, char jobz,
 template void phegvd<std::complex<double>>(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, std::complex<double>* A, const int* descA, std::complex<double>* B, const int* descB, typename real_type<std::complex<double>>::type* w, std::complex<double>* Z, const int* descZ, int& info);
 
 template <typename T>
+void pheevd_chebyshev(const DdlaHandle_t& handle, char uplo, int n, int nev, int nex, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, double tolerance, int max_iterations, int degree, bool warm_start, int& iterations, int& converged, int& info)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return pheevd_chebyshev<DdlaBackend::GPU, T>(handle, uplo, n, nev, nex, A, descA, w, Z, descZ, tolerance, max_iterations, degree, warm_start, iterations, converged, info);
+#endif
+    return pheevd_chebyshev<DdlaBackend::CPU, T>(handle, uplo, n, nev, nex, A, descA, w, Z, descZ, tolerance, max_iterations, degree, warm_start, iterations, converged, info);
+}
+
+template void pheevd_chebyshev<float>(const DdlaHandle_t& handle, char uplo, int n, int nev, int nex, float* A, const int* descA, typename real_type<float>::type* w, float* Z, const int* descZ, double tolerance, int max_iterations, int degree, bool warm_start, int& iterations, int& converged, int& info);
+template void pheevd_chebyshev<double>(const DdlaHandle_t& handle, char uplo, int n, int nev, int nex, double* A, const int* descA, typename real_type<double>::type* w, double* Z, const int* descZ, double tolerance, int max_iterations, int degree, bool warm_start, int& iterations, int& converged, int& info);
+template void pheevd_chebyshev<std::complex<float>>(const DdlaHandle_t& handle, char uplo, int n, int nev, int nex, std::complex<float>* A, const int* descA, typename real_type<std::complex<float>>::type* w, std::complex<float>* Z, const int* descZ, double tolerance, int max_iterations, int degree, bool warm_start, int& iterations, int& converged, int& info);
+template void pheevd_chebyshev<std::complex<double>>(const DdlaHandle_t& handle, char uplo, int n, int nev, int nex, std::complex<double>* A, const int* descA, typename real_type<std::complex<double>>::type* w, std::complex<double>* Z, const int* descZ, double tolerance, int max_iterations, int degree, bool warm_start, int& iterations, int& converged, int& info);
+
+template <typename T>
 void pheevd(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info)
 {
 #if DDLA_HAS_GPU

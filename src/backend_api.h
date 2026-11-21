@@ -387,6 +387,9 @@ template <DdlaBackend Backend, typename T>
 void phegvd(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, T* B, const int* descB, typename real_type<T>::type* w, T* Z, const int* descZ, int& info);
 
 template <DdlaBackend Backend, typename T>
+void pheevd_chebyshev(const DdlaHandle_t& handle, char uplo, int n, int nev, int nex, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, double tolerance, int max_iterations, int degree, bool warm_start, int& iterations, int& converged, int& info);
+
+template <DdlaBackend Backend, typename T>
 void pheevd(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev, T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ, int& info);
 
 template <DdlaBackend Backend, typename T>

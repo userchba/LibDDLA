@@ -2574,6 +2574,52 @@ void phegvd(const DdlaHandle_t& handle, char jobz, char uplo, int n, int nev,
             T* A, const int* descA, T* B, const int* descB,
             typename real_type<T>::type* w, T* Z, const int* descZ, int& info);
 
+/**
+ * @brief Opt-in Chebyshev-filtered partial Hermitian eigensolver.
+ *
+ * Returns nev ascending Ritz values in HOST w[0:nev] on every rank and the
+ * corresponding leading n-by-nev block of distributed Z. Unlike pheevd,
+ * w has length nev, not n; nev=0 performs no matrix-data operations and ignores
+ * Z/descZ. The explicit controls have no defaults. This method is never
+ * selected automatically by pheevd or DDLA_EIGEN_METHOD.
+ *
+ * q=nev+nex must satisfy 0<=nev<=n and 0<=nex<=n-nev. A needs square
+ * source-zero descriptor blocks and an n-by-n leading extent; Z needs n rows
+ * and nev columns, with any valid descriptor distribution. Only UPLO of A is
+ * read; imaginary complex diagonals and the other triangle are ignored.
+ * A is mutable/destroyed by binary scaling and full Hermitian completion.
+ * Outside active blocks, parent regions and LLD padding are preserved.
+ * A and Z may alias: warm Z is copied before any A write, and final Z is
+ * written after the final A application. Host w and active Z must be disjoint.
+ * warm_start=true reads the first nev columns of Z; false never reads Z.
+ * Extra directions and small perturbations of every warm column are random.
+ *
+ * Uses fixed-degree filtering, distributed QR/Rayleigh-Ritz and internally
+ * managed workspace. All matrix-sized storage stays distributed, subject to
+ * descriptor/block rounding and linear panel overhead when q is below the
+ * process count. Adequate randomized overlap with the wanted invariant
+ * subspace is assumed. The normwise residual test does not independently
+ * certify that no lower eigenvalue was missed.
+ *
+ * tolerance must be finite and positive, max_iterations>=0 and degree>=1.
+ * Success tests ||Ax-lambda*x||_2 / ((||A||_inf+|lambda|)*||x||_2) <= tolerance
+ * using the returned, rounded eigenvalue; the zero/zero residual is zero.
+ * iterations counts completed filter/Ritz sweeps. converged counts requested
+ * pairs satisfying that criterion, not a locked prefix. info=0 means all
+ * requested pairs passed; info=1 returns the available Ritz approximations
+ * at the iteration limit. Other positive codes: 2 rank/numerical breakdown,
+ * 3 nonfinite stored input or warm vectors, 4 irreversible binary scaling,
+ * 5 projected eigensolve failure, 6 eigenvalues unrepresentable at tolerance.
+ * A/Z outputs are not promised for codes 2--5; scaling/nonfinite checks precede
+ * A mutation. Argument/backend/rank-inconsistent metadata errors throw
+ * collectively. The handle selects CPU or GPU; no backend template is public.
+ */
+template <typename T>
+void pheevd_chebyshev(const DdlaHandle_t& handle, char uplo, int n, int nev, int nex,
+    T* A, const int* descA, typename real_type<T>::type* w, T* Z, const int* descZ,
+    double tolerance, int max_iterations, int degree, bool warm_start,
+    int& iterations, int& converged, int& info);
+
 // Hermitian eigensolver interfaces; shared by CPU and GPU backends.
 // The eigensolvers below follow ELPA: return all n ascending eigenvalues and
 // the eigenvectors for the lowest nev eigenvalues (0 <= nev <= n). For V,
