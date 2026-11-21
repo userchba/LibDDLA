@@ -1294,6 +1294,14 @@ high waters before matrix updates. Private workspace queries report required
 host-cache bytes separately from numerical backend/host arenas; this
 does not cover vendor first-use allocations or whole-call peak memory.
 
+The opt-in `pheevd_chebyshev` owner and the distributed/shape `pgesvd` owner
+also reserve their two `HostStagedMPI` cache slots during agreed preparation,
+before raw matrix work. The private staging queries compose actual panel
+origins and frozen routes, including QR, reflector application, projected
+one-stage solves and real-row redistribution. Slot requirements are reported
+separately from backend and host numerical arenas; raw workspace callers must
+reserve them before entering the communication schedule.
+
 The generalized `phegvd` owner reserves the factorization transport before B
 is modified. After B succeeds it separately prepares completion/congruence,
 then the selected eigen route and vector backsolve. A non-positive B still
