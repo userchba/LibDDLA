@@ -1,10 +1,10 @@
-#include "PBLAS/pblas_workspace.h"
 #include "helpers.h"
 #include <ddla/ddla.h>
 #include <ddla/ddla_vector.h>
 #include "ddla_connector.h"
 #include "pheevd_one_stage.h"
 #include "one_stage_workspace.h"
+#include "PBLAS/pblas_workspace.h"
 #include "phetrd_impl.h"
 #include "punmtr_trd_impl.h"
 #include "check_agree.h"
@@ -121,6 +121,8 @@ OneStagePlan one_stage_check(const DdlaHandle_t& h, DdlaBackend backend, char jo
     if (job == 'V')
         detail::descriptor_signature(sig + 13, dz);
     detail::agree_signature(h, "pheevd_one_stage", sig);
+    const detail::RowShare row_share(n,h->nprocs);
+    p.selected_plan=selected_rows_policy<R>(h,job,n,nev,std::max(1,row_share.count(h->myid)));
     if (!n)
         return p;
     p.complete = pherm_complete_check(h, backend, uplo, n, a, da);
@@ -128,7 +130,7 @@ OneStagePlan one_stage_check(const DdlaHandle_t& h, DdlaBackend backend, char jo
         int overlap = p.backup ? 1 : 0;
         MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &overlap, 1, MPI_INT, MPI_MAX, h->comm));
         p.backup = overlap != 0;
-        p.vectors = pstedc_policy<R>(h, n, da[DDLA_MB_]);
+        if (!p.selected_plan.n) p.vectors = pstedc_policy<R>(h, n, da[DDLA_MB_]);
         const detail::RowShare rows(n,h->nprocs);
         p.vectors.ldy = std::max(1,rows.count(h->myid));
         // The driver owns a separate, tightly packed row slab, disjoint from d/e/w.
@@ -167,10 +169,10 @@ void one_stage_workspace_size(const DdlaHandle_t& h, const OneStagePlan& p, std:
                 ? 0
                 : detail::padded_bytes<R>(static_cast<std::size_t>(p.tridiagonal_vectors[DDLA_LLD_]) *
                                           num_loc(p.nev, p.z[DDLA_NB_], p.mc, p.z[DDLA_CSRC_], p.pc));
-        const std::size_t rows=detail::padded_bytes<R>(std::size_t(p.vectors.ldy)*p.n);
-        pstedc_workspace_size<R>(h, p.vectors, &bytes, &host);
+        const std::size_t rows=detail::padded_bytes<R>(std::size_t(p.vectors.ldy)*(p.selected_plan.n?p.nev:p.n));
+        tridiagonal_rows_workspace_size<R>(h,p.selected_plan,p.vectors,&bytes,&host);
         stage(rows + bytes, host);
-        matrix_impl::scatter_rows_workspace_size<R>(h,p.n,&bytes,&host);
+        matrix_impl::scatter_rows_workspace_size<R>(h,p.n,&bytes,&host,p.selected_plan.n?p.nev:-1);
         stage(rows + y + bytes,host);
         const auto apply=punmtr_trd_geometry(h,p.backend,'L','U','N',p.n,p.nev,p.a.data(),p.z.data());
         punmtr_trd_workspace_size<T>(h,apply,&bytes);host=0;
@@ -290,10 +292,10 @@ void one_stage_run(const DdlaHandle_t& h, const OneStagePlan& p, OneStageResourc
         // Keep the row slab until the existing bounded transfer has read it.
         // Real panels are communicated before any local complex widening.
         char* solve = static_cast<char*>(phase);
-        R* const rows=detail::take<R>(solve,std::size_t(p.vectors.ldy)*n);
+        R* const rows=detail::take<R>(solve,std::size_t(p.vectors.ldy)*(p.selected_plan.n?p.nev:n));
         const std::size_t solve_bytes=phase_bytes-std::size_t(solve-static_cast<char*>(phase));
-        assert(resources.vectors);
-        pstedc_run<B,R>(h,p.vectors,*resources.vectors,de,de+n,eval,rows,nullptr,
+        tridiagonal_rows_run<B,R>(h,p.selected_plan,p.vectors,
+            resources.vectors?&*resources.vectors:nullptr,de,de+n,eval,rows,
             solve,solve_bytes,phase_host,phase_host_bytes);
         mark(times ? &times->solve : nullptr);
         const int zr = num_loc(n, dz[DDLA_MB_], p.mr, dz[DDLA_RSRC_], p.pr);
@@ -306,7 +308,8 @@ void one_stage_run(const DdlaHandle_t& h, const OneStagePlan& p, OneStageResourc
             y = detail::take<R>(solve, static_cast<std::size_t>(ldq) * zc);
         matrix_impl::scatter_rows_run<B,R>(h,n,rows,p.vectors.ldy,false,n,p.nev,y,
             p.tridiagonal_vectors.data(),solve,
-            phase_bytes-std::size_t(solve-static_cast<char*>(phase)),phase_host,phase_host_bytes);
+            phase_bytes-std::size_t(solve-static_cast<char*>(phase)),phase_host,phase_host_bytes,
+            p.selected_plan.n?p.nev:-1);
         if constexpr (!std::is_same<T, R>::value) {
             matrix_impl::convert_rows<B,T>(h, y, ldq, z, dz[DDLA_LLD_], zr, zc, false);
             // The next stage reuses the real input storage.

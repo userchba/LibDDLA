@@ -5,7 +5,7 @@
 #include "pheevd_one_stage.h"
 #include "phetrd_impl.h"
 #include "Eigensolver/eig_workspace.h"
-#include "Eigensolver/pstedc_impl.h"
+#include "Eigensolver/tridiagonal_rows.h"
 #include <optional>
 #include <array>
 #include <cstddef>
@@ -21,6 +21,7 @@ struct OneStagePlan : HetrdPlan {
     std::size_t output_scratch=0;
     HermitianPlan complete{};
     PstedcVectorPlan vectors{};PstedcPlan values{};
+    selected::Plan selected_plan{};
 };
 template<class T> OneStagePlan one_stage_check(const DdlaHandle_t&,DdlaBackend,char,char,int,
     const T*,const int*,const typename real_type<T>::type*,const T*,const int*,int nev);
@@ -29,22 +30,27 @@ template<class T> OneStagePlan one_stage_check(const DdlaHandle_t&,DdlaBackend,c
 // The scratch of one_stage_run on this rank (none for n == 0).  Backend, in carving
 // order: the reflector scalars tau (n - 1), the copy of the reflectors when Z overlaps A,
 // then one region that the phases take in turn: the Hermitian completion (full storage),
-// the reduction, then the eigenvalue-only D&C, or row-slab D&C followed by
+// the reduction, then eigenvalue-only D&C, or the prepared row solver followed by
 // redistribution (plus a compact real 2D tile for complex output), then the
 // back-transform. The row slab stays live through redistribution; their scratch
 // regions are reused. Host: the tridiagonal
-// (d | e, 2n), then the phases' host scratch, the largest of them.
+// (d | e, 2n), then the phases' host scratch, the largest of them. Selected
+// vectors keep nev columns; DC keeps n. GPU selected host scratch additionally
+// holds a compact upload slab until its source reads have been retired.
 template<class T> void one_stage_workspace_size(const DdlaHandle_t&,const OneStagePlan&,
     std::size_t* backend_bytes,std::size_t* host_bytes);
+
+// Pure staged-device payload maxima of completion, reduction, real row
+// redistribution and stored-reflector back-transform. DC uses host MPI arrays.
 template<class T>std::array<std::size_t,2> one_stage_staging_bytes(const DdlaHandle_t&,const OneStagePlan&);
 
-// Prepare both the reduction cache policy and the row solver's upload fence.
+// Prepare the reduction cache and, only for DC, the row solver upload fence.
 // Inherited reduction controls remain available to direct workspace callers.
 class OneStageResources : public HetrdResources {
 public:
     std::optional<PstedcResources> vectors;
     OneStageResources(const DdlaHandle_t& h,const OneStagePlan& p):HetrdResources(h,p) {
-        if(p.n&&p.job=='V')vectors.emplace(h,p.vectors);
+        if(p.n&&p.job=='V'&&!p.selected_plan.n)vectors.emplace(h,p.vectors);
     }
 };
 // The solve on the caller's scratch; times (may be null) receives the phase timings.

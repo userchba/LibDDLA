@@ -187,6 +187,24 @@ Both read only the selected input triangle and destroy A. The one-stage solver
 completes the other triangle, then uses both halves as workspace for full-matrix
 GEMV/GEMM; `uplo` selects the input triangle, not a separate reduction method.
 
+For partial eigenvectors, `DDLA_EIG_TRIDIAGONAL=selected` explicitly selects
+bisection and distributed inverse iteration during the tridiagonal stage of
+both methods. The default is `dc` (divide and conquer). All ranks must choose
+the same policy. Selected applies only to vector calls with `0 < nev < n`;
+values-only, full-vector and local vendor solves retain their existing routes.
+All `n` eigenvalues remain available. The selected stage stores only the
+requested row-distributed vectors, requiring O(n*nev/P + n + P) storage per
+rank, including linear tridiagonal scratch and distribution padding. The dense
+reduction and backtransform retain their existing distributed storage.
+
+The selected method has bounded iteration and explicitly reports convergence
+or representability failures; it does not silently allocate a full-vector
+fallback. Host BLAS work follows the handle's thread budget on CPU and GPU
+handles, using recognized OpenBLAS/MKL controls and restoring their previous
+setting. These controls are process-global, so do not overlap unrelated BLAS
+calls in the same process. Select the method explicitly according to the
+matrix and requested vector count; no universal speed advantage is assumed.
+
 #### MPI thread support
 
 Initialize MPI with `MPI_Init_thread(..., MPI_THREAD_FUNNELED, &provided)` and

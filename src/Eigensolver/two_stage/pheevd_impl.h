@@ -3,7 +3,7 @@
 #include "Eigensolver/eig_workspace.h"
 #include "phe2hb_impl.h"
 #include "phb2st_impl.h"
-#include "Eigensolver/pstedc_impl.h"
+#include "Eigensolver/tridiagonal_rows.h"
 #include "hb2st_host_workspace.h"
 #include "hb2st_cpu_replay_workspace.h"
 #if DDLA_HAS_GPU
@@ -111,6 +111,7 @@ struct PheevdPlan
     Phe2hbPlan reduction{};
     Phb2stPlan chase{};
     PstedcVectorPlan vectors{};
+    selected::Plan selected_plan{};
     PstedcPlan values{};
     UnmtrHe2hbPlan back{};
     detail::Hb2stAccumHostPlan accum{};
@@ -150,7 +151,9 @@ inline char *pheevd_align(void *p)
 //    scratch goes to the backend region, as it has no backend scratch there;
 //  - backend: the reflector backup (Z overlapping A), live until stage 5 read
 //    it, then one region: eigenvalues only: pstedc_run's scratch; vectors: a
-//    compact real row slab and the row D&C's scratch. Stage 4 consumes that
+//    real row slab and its prepared solver scratch (DC: n columns; selected:
+//    nev columns and linear host II scratch). GPU selected host upload rows
+//    are retired before that arena is reused. Stage 4 consumes the backend
 //    slab directly in its existing replay/Householder input path or contracts
 //    row panels with Q_band. The final output retains its 2D descriptor.
 //    Afterwards stage 5 reuses the region. Host: the largest scratch required

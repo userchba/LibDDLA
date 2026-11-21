@@ -1,5 +1,3 @@
-#include "PBLAS/pblas_workspace.h"
-#include "punmtr_he2hb_grouped.h"
 // ---------------------------------------------------------------------------
 // The two-stage Hermitian eigensolver driver (ELPA2-style):
 //   pherm_complete (stored triangle -> full matrix) -> phe2hb (full -> band)
@@ -35,6 +33,8 @@
 #include "Eigensolver/pheevd_alias.h"
 #include "Eigensolver/pherm_complete_workspace.h"
 #include "phe2hb_impl.h"
+#include "punmtr_he2hb_grouped.h"
+#include "PBLAS/pblas_workspace.h"
 #include "Eigensolver/eig_cpu_kernels.h"
 #include "QR/pgeqrf_impl.h"
 #include "check_agree.h"
@@ -181,6 +181,8 @@ PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, ch
     signature[26] = int(reduction_backend);
     signature[27] = nev;
     detail::agree_signature(h, "pheevd", signature);
+    p.ldy=std::max(1,detail::RowShare(n,h->nprocs).count(h->myid));
+    p.selected_plan=selected_rows_policy<R>(h,job,n,nev,p.ldy);
     if (!n)
         return p;
     if (reduction_backend == DdlaBackend::GPU &&
@@ -334,7 +336,7 @@ PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, ch
     dz = p.destination.data();
     const detail::RowShare rows(n, h->nprocs);
     p.ldy = std::max(1, rows.count(h->myid));
-    p.vectors = pstedc_policy<R>(h, n, da[DDLA_MB_]);
+    if (!p.selected_plan.n) p.vectors = pstedc_policy<R>(h, n, da[DDLA_MB_]);
     p.vectors.ldy = p.ldy;
     // The composite owns Y separately from the replicated d/e/w arrays.
     p.vectors.borrow_q2 = rows.count(h->myid) > 0;
@@ -387,7 +389,7 @@ PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, ch
     if (p.engine == PheevdEngine::ReplayCpu)
     {
         std::size_t solver = 0, host = 0, input = 0;
-        pstedc_workspace_size<R>(h, p.vectors, &solver, &host);
+        tridiagonal_rows_workspace_size<R>(h,p.selected_plan,p.vectors,&solver,&host);
         detail::hb2st_cpu_replay_input_workspace_size<T>(h, p.cpu_replay, &input);
         p.replay_solve_bytes = std::max(pheevd_round(solver), pheevd_round(input));
     }
@@ -450,9 +452,9 @@ void pheevd_workspace_size(const DdlaHandle_t &h, const PheevdPlan &p, T *query_
         pstedc_workspace_size<R>(h, p.values, &later, &later_host);
     else
     {
-        const std::size_t y = padded_bytes<R>(std::size_t(p.ldy) * p.n);
+        const std::size_t y = padded_bytes<R>(std::size_t(p.ldy) * (p.selected_plan.n?p.nev:p.n));
         std::size_t rows = 0;
-        pstedc_workspace_size<R>(h, p.vectors, &rows, &later_host);
+        tridiagonal_rows_workspace_size<R>(h,p.selected_plan,p.vectors,&rows,&later_host);
         rows = pheevd_round(rows);
         if (p.engine == PheevdEngine::ReplayCpu)
         {
@@ -509,7 +511,7 @@ PheevdResources<T>::PheevdResources(const DdlaHandle_t &h, const PheevdPlan &p,
                 profile = &*owned_profile_;
             }
         }
-        if (p.job == 'V')
+        if (p.job == 'V' && !p.selected_plan.n)
             vectors.emplace(h, p.vectors);
         if (p.engine == PheevdEngine::AccumHost)
             accum = detail::hb2st_accum_host_prepare<T>(h, p.accum);
@@ -670,7 +672,7 @@ void pheevd_run(const DdlaHandle_t &h, const PheevdPlan &p, PheevdResources<T> &
             std::size_t solve_bytes = later_bytes;
             if (p.job == 'V')
             {
-                const std::size_t y = std::size_t(p.ldy) * p.n;
+                const std::size_t y = std::size_t(p.ldy) * (p.selected_plan.n?p.nev:p.n);
                 if (p.engine == PheevdEngine::ReplayCpu)
                 {
                     // Keep the row source behind both D&C scratch and replay input;
@@ -684,9 +686,9 @@ void pheevd_run(const DdlaHandle_t &h, const PheevdPlan &p, PheevdResources<T> &
                     Y = take<R>(solve, y);
                     solve_bytes = later_bytes - static_cast<std::size_t>(solve - later);
                 }
-                assert(resources.vectors);
-                pstedc_run<B, R>(h, p.vectors, *resources.vectors, d, e, values, Y, nullptr, solve,
-                                 solve_bytes, host_region, host_region_bytes);
+                tridiagonal_rows_run<B,R>(h,p.selected_plan,p.vectors,
+                    resources.vectors?&*resources.vectors:nullptr,d,e,values,Y,
+                    solve,solve_bytes,host_region,host_region_bytes);
             }
             else
                 pstedc_run<B, R>(h, p.values, d, e, values, nullptr, later, later_bytes, host_region,

@@ -247,6 +247,14 @@ add_test_executable(test_workspace_one_stage)
 add_test_executable(test_workspace_history)
 add_test_executable(test_workspace_alias_storage)
 add_test_executable(test_workspace_pheevd)
+add_test_executable(test_selected_eigensolver)
+target_link_libraries(test_selected_eigensolver PRIVATE ${CMAKE_DL_LIBS})
+if(UNIX)
+    add_test_executable(test_selected_threads)
+    target_link_libraries(test_selected_threads PRIVATE ${CMAKE_DL_LIBS})
+    set_target_properties(test_selected_threads PROPERTIES ENABLE_EXPORTS ON)
+    set_tests_properties(test_selected_threads_mpi PROPERTIES SKIP_RETURN_CODE 77)
+endif()
 add_test_executable(test_workspace_phegvd)
 if(TARGET test_workspace_phegvd)
     target_link_libraries(test_workspace_phegvd PRIVATE ${CMAKE_DL_LIBS})
@@ -287,7 +295,7 @@ if(TARGET workspace_trace)
                          test_pstedc test_workspace_pstedc test_workspace_one_stage
                          test_workspace_history test_workspace_alias_storage test_workspace_householder
                          test_workspace_host_accum test_workspace_cpu_replay test_workspace_gpu_replay
-                         test_workspace_pheevd)
+                         test_workspace_pheevd test_selected_eigensolver)
         if(TARGET ${_traced_test})
             add_dependencies(${_traced_test} workspace_trace)
             set_tests_properties(${_traced_test}_mpi PROPERTIES ENVIRONMENT
