@@ -144,7 +144,12 @@ to the local solver; eigenvalues still return in host memory, and eigenvectors
 are copied to `Z` when necessary. Padding is preserved unless it overlaps active
 `Z`. Exact in-place output needs no matrix copy; other overlapping A/Z layouts
 use one compact temporary matrix. Explicit one-stage/two-stage choices retain
-their algorithms, including on one rank.
+their algorithms, including on one rank. In automatic single-rank CPU mode,
+full-vector problems of order 512 or more can use the existing one-/two-stage
+paths. Real problems below order 4096 retain the local solver if the one-stage
+profile is ineligible. Complex eigenvalues-only calls use the two-stage path
+from order 2048. Smaller problems, partial-vector CPU calls and GPU calls keep
+the local solver. These are routing policies, not a universal speed guarantee.
 
 Automatic selection on multiple ranks is conservative: it considers the scalar type, matrix order,
 eigenvalues/eigenvectors request, block/grid layout, cached host thread budget,
@@ -1179,7 +1184,7 @@ no `nev` argument. LibDDLA retains its own handle/workspace interface.
 Automatic thresholds calibrated for full eigenvectors are applied only to
 `nev=n`. Partial-vector multi-rank calls retain the conservative two-stage
 route; an explicit one-stage request remains available. Single-rank automatic
-calls retain the local vendor solver.
+calls use the single-rank policy described above.
 
 
 ### Partial iterative Hermitian eigenproblems

@@ -159,6 +159,33 @@ inline int eig_distributed_bandwidth(int n,int block,int band,int ranks) noexcep
 bool eig_profile_enabled();
 
 namespace detail {
+// A single rank solves with the vendor routine (host LAPACK or the local GPU solver), except
+// CPU problems of order >= 512 with all vectors, and complex ones >= 2048 with none: host
+// ?HEEVD is several times slower there than the distributed paths on the rank's threads
+// (2026-11-15, complex double, one rank: n=5000 30.2 against 8.4 s on 40 threads and 31.7
+// against 7.3 s on 48; n=2000 7.1 against 2.4 s on 8).  Real ?SYEVD is never faster than
+// the one-stage path below 4096 nor than two-stage above (2026-11-18, double, one rank,
+// LAPACK / one-stage / two-stage seconds: 40 threads n=2000 0.60/0.51/1.15, n=4000
+// 2.57/2.12/2.72, n=6000 7.58/7.51/6.75, n=10000 35.1/28.1/19.2; 8 threads n=4000
+// 3.84/3.24/3.80, n=6000 12.0/9.96/9.75; 1 thread n=2000 1.80/1.76/2.92).
+template <DdlaBackend Backend, class T>
+inline bool pheevd_local_shape(char job, int n, int nev) noexcept
+{
+    if constexpr (Backend == DdlaBackend::CPU && !std::is_arithmetic_v<T>)
+        return n < 512 || (job == 'V' ? nev != n : n < 2048);
+    else if constexpr (Backend == DdlaBackend::CPU)
+        return n < 512 || job != 'V' || nev != n;
+    else
+        return true;
+}
+// A real CPU problem below 4096 that loses the one-stage profile (worker budgets, tuning
+// options, descriptor shape) keeps ?SYEVD rather than the two-stage path, which is up to
+// twice as slow there.
+template <DdlaBackend Backend, class T>
+inline bool pheevd_local_fallback(int n) noexcept
+{
+    return Backend == DdlaBackend::CPU && std::is_arithmetic_v<T> && n < 4096;
+}
 // CPU one-stage profile: a rank whose BLAS threads equal its host budget (0 = a BLAS that
 // cannot be queried).  The public dispatcher still requires every rank to agree.
 inline bool pheevd_one_stage_cpu_workers(int host_threads, int blas_threads) noexcept

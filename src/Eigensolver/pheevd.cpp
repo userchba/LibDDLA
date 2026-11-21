@@ -95,7 +95,8 @@ PheevdRoute pheevd_select(const DdlaHandle_t& handle, char jobz, int n, int nev,
         }
         return selected;
     });
-    if (!mode && handle->nprocs == 1)
+    if (!mode && handle->nprocs == 1 && (pheevd_local_shape<Backend,T>(jobz, n, nev) ||
+                                         (!prefer_one && pheevd_local_fallback<Backend,T>(n))))
         return PheevdRoute::Local;
     if (!mode && automatic_shape && handle->nprocs > 1)
         MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &prefer_one, 1, MPI_INT, MPI_MIN, handle->comm));

@@ -46,7 +46,9 @@ template<DdlaBackend B,class T>void test(DdlaHandle_t h,bool device) {
         require_close(h,"public dispatcher collective rejection",caught==reject?0:1,0);
         if(reject){require_close(h,"rejection before algorithm",calls,0);return;}
         const char* mode=std::getenv("DDLA_EIGEN_METHOD");
-        if(h->nprocs==1 && (!mode || !*mode || std::strcmp(mode,"auto")==0)) expected=3;
+        if(h->nprocs==1 && (!mode || !*mode || std::strcmp(mode,"auto")==0) &&
+           (detail::pheevd_local_shape<B,T>(job,n,nev<0?n:nev) ||
+            (expected!=1 && detail::pheevd_local_fallback<B,T>(n)))) expected=3;
         bool same=calls==1&&called==expected&&info==17&&numbers[0]==job&&numbers[1]==uplo&&numbers[2]==n&&numbers[3]==(nev<0?n:nev);
         const void* wanted[6]={h,&a,d,&w,out,dz};
         for(int i=0;i<6;++i)same=same&&pointers[i]==wanted[i];
