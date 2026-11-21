@@ -8,6 +8,9 @@ target_sources(ddla_lib PRIVATE
     pdgmm.cpp
     pscal.cpp
     pgemm.cpp
+    pgemm_check.cpp
+    pgemm_workspace_size.cpp
+    pgemm_run.cpp
     pgemmt.cpp
     pherk.cpp
     pher2k.cpp
@@ -15,7 +18,6 @@ target_sources(ddla_lib PRIVATE
     psyr2k.cpp
     prankk_impl.cpp
     pgemm_select.cpp
-    pgemm_stationary.cpp
     ptrtrs.cpp
     ptrmm.cpp
     phemm.cpp

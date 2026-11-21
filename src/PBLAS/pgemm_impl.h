@@ -15,11 +15,22 @@ namespace ddla { namespace pgemm_impl {
 // pgemm always selects Auto; there is no process-wide algorithm setting.
 enum class Algorithm { Auto, AB, AC, BC };
 
+// ---- k-panel blocking: one local gemm per run of consecutive k-blocks ---
+// A local gemm is cheaper per flop when it covers a run of k-blocks instead
+// of a single one: with nb = 128 and a 1024-wide k panel that is 8 panel
+// transports (8 broadcasts) feeding ONE local gemm of k = 1024. The target
+// default is 1024 for NN and one logical A descriptor block for T/C.
+// A positive DDLA_PGEMM_KPANEL overrides either default; a value below nb
+// degenerates to the classic one-block-per-gemm pipeline. Each descriptor
+// block is normalized independently, including transposed source owners,
+// before it is appended to the local contraction panel.
+constexpr int kDefaultPanelWidth = 1024;
+
 Algorithm select(char ta, char tb, int m, int n, int k,
                  const int* da, const int* db, const int* dc, int pr, int pc);
 
-// pgemm split into the three components of plan_util.h: check, workspace
-// size, run.
+// Component implementations: pgemm_check.cpp, pgemm_workspace_size.cpp,
+// and pgemm_run.cpp. pgemm.cpp owns the allocating driver and public entries.
 
 // One run of consecutive k-blocks of the SUMMA branch: [start, start+kk) of k.
 struct KStage {
