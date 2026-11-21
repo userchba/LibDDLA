@@ -1312,7 +1312,10 @@ covers cold transport caches; no numerical warmup is needed. The staging
 query is pure metadata and reports two slot requirements independently of
 the numerical arena maxima. Early numerical returns can use smaller payloads.
 
-`test_workspace_phegvd --transport staged --major R` checks
+`test_staging_preparation --gpu --composite-only --transport staged` checks
+these phases and the complete prepared composition with the native observers,
+including U/L, selected Local/One/Two routes and allocation-failure/retry
+boundaries. `test_workspace_phegvd --transport staged --major R` also checks
 cold first execution and repeats with all four scalar types; its root-only
 staging queries make no allocation or communication. `--grid RxC` and
 `--major C` support alternate allocated-rank layouts. The direct-MPI and
@@ -1327,3 +1330,11 @@ observed messages smaller. It does not use the entire backend workspace as a
 host-cache bound. Retained cache capacity and vendor first-use allocations
 still belong in whole-call peak-memory measurements. These reservations do
 not imply a global cold-allocation or performance guarantee.
+
+The diagnostic `test_staging_preparation --gpu --spectral-only --transport staged`
+checks cold reserved raw execution with actual native MPI payload observers.
+`--grid RxC` must match the allocated ranks, and `--major R|C` selects the grid
+ordering. Run with both diagnostic preloads, `libpblas_alloc_failure.so` and
+`libworkspace_trace.so`, on MPI ranks. The suite distinguishes exact fixed
+geometry from PBDSDC's data-dependent bound, and includes actual one-rank
+cache-allocation failures with collective rejection and same-handle retries.

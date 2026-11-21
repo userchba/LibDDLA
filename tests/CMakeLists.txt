@@ -105,6 +105,23 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(test_pblas_alloc_failure PRIVATE ddla_lib ${CMAKE_DL_LIBS})
     add_dependencies(test_pblas_alloc_failure pblas_alloc_failure)
     target_include_directories(test_pblas_alloc_failure PRIVATE "${PROJECT_SOURCE_DIR}/src")
+    # Explicit native cold-cache/failure suite, outside default CTest runs.
+    add_executable(test_staging_preparation EXCLUDE_FROM_ALL test_staging_preparation.cpp)
+    target_compile_features(test_staging_preparation PRIVATE cxx_std_17)
+    target_include_directories(test_staging_preparation PRIVATE "${PROJECT_SOURCE_DIR}/src")
+    target_link_libraries(test_staging_preparation PRIVATE ddla_lib ${CMAKE_DL_LIBS})
+    apply_test_connector_defs(test_staging_preparation)
+    add_dependencies(test_staging_preparation pblas_alloc_failure)
+    # Focused cold OneStage diagnostic can also link the frozen baseline DSO;
+    # it excludes only new composite-query references, never warms raw math.
+    add_executable(test_staging_one_stage EXCLUDE_FROM_ALL test_staging_preparation.cpp)
+    target_compile_features(test_staging_one_stage PRIVATE cxx_std_17)
+    target_compile_definitions(test_staging_one_stage PRIVATE DDLA_STAGING_ONE_STAGE_DIAGNOSTIC_ONLY)
+    target_include_directories(test_staging_one_stage PRIVATE "${PROJECT_SOURCE_DIR}/src")
+    target_link_libraries(test_staging_one_stage PRIVATE ddla_lib ${CMAKE_DL_LIBS})
+    apply_test_connector_defs(test_staging_one_stage)
+    add_dependencies(test_staging_one_stage pblas_alloc_failure workspace_trace)
+
 
     # Focused native ELF attribution controls; explicitly built, never default CTest.
     if(DDLA_USE_CUDA)
@@ -252,6 +269,9 @@ foreach(_workspace_test test_workspace_write_matrix test_workspace_core test_wor
 endforeach()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/workspace_trace.cpp")
     add_library(workspace_trace SHARED EXCLUDE_FROM_ALL workspace_trace.cpp)
+    if(TARGET test_staging_preparation)
+        add_dependencies(test_staging_preparation workspace_trace)
+    endif()
     apply_test_connector_defs(workspace_trace)
     target_compile_definitions(workspace_trace PRIVATE DDLA_USE_CPU)
     target_include_directories(workspace_trace PRIVATE $<TARGET_PROPERTY:ddla_lib,INTERFACE_INCLUDE_DIRECTORIES>)
