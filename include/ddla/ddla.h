@@ -2641,13 +2641,17 @@ struct hb2st_rot {
 /**
  * @brief Distributed Hermitian eigensolver with runtime method selection.
  *
- * When DDLA_EIGEN_METHOD is unset, empty or auto, a single-rank call uses
- * host LAPACK or the local GPU vendor eigensolver.
- * Multiple ranks use a policy choosing one-stage or two-stage from scalar type, order, job,
+ * When DDLA_EIGEN_METHOD is unset, empty or auto, single-rank GPU calls use
+ * the local vendor solver. Single-rank CPU calls keep the local solver for
+ * partial vectors and orders below 512. Full-vector CPU problems from order
+ * 512 can use the existing one-/two-stage methods; real problems below 4096
+ * retain the local fallback when the one-stage profile is ineligible.
+ * Complex eigenvalues-only CPU calls use two-stage from order 2048.
+ * Multiple ranks choose one-stage or two-stage from scalar type, order, job,
  * block/grid layout, cached host budget, shared-node topology and GPU support.
- * Multi-rank calls outside measured profiles retain two-stage. On multiple
- * ranks, nonempty two-stage tuning options (for example DDLA_EIG_NBW) retain
- * their two-stage meaning.
+ * Eligible multi-rank CPU grids on one node use one-stage for full vectors
+ * below order 2048; other multi-rank calls retain two-stage. Nonempty two-stage
+ * tuning options (for example DDLA_EIG_NBW) retain their two-stage meaning.
  * DDLA_EIGEN_METHOD=one_stage or two_stage forces that explicit method.
  * The selector is read on every call and must agree across the process grid.
  * Invalid values or inconsistent selections throw collectively before either
@@ -2681,7 +2685,14 @@ void pheevd(
  * explicit band64 also permits complex-double from8192, while explicit band16
  * selects Householder only for double from32768. Other widths retain Givens.
  * Eigenvalues-only, other devices/grids/thread budgets and float types retain
- * their existing GPU policy. Both algorithms keep quadratic storage distributed.
+ * their existing GPU policy. CPU band selection prefers the largest block-size
+ * divisor in [32,64], then the smallest in (64,128], then the largest in
+ * [16,32); smaller blocks keep their own width. The distributed storage limit
+ * can reduce that width. Automatic CPU Householder chasing requires order
+ * at least 2048, a band of at least 16 dividing the block size, one shared-memory
+ * node, at most 128 ranks and 64 host workers per rank, and either eigenvalues
+ * only or all eigenvectors. Explicit engine and legacy chase settings take
+ * precedence. Both algorithms keep quadratic storage distributed.
  */
 
 
