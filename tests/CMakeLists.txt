@@ -122,7 +122,6 @@ if(UNIX AND NOT APPLE)
     apply_test_connector_defs(test_staging_one_stage)
     add_dependencies(test_staging_one_stage pblas_alloc_failure workspace_trace)
 
-
     # Focused native ELF attribution controls; explicitly built, never default CTest.
     if(DDLA_USE_CUDA)
         add_library(allocator_vendor_probe SHARED EXCLUDE_FROM_ALL allocator_vendor_probe.cpp)
@@ -1007,7 +1006,6 @@ foreach(_algorithm_test test_pgesvd_shape test_chebyshev)
     apply_test_connector_defs(${_algorithm_test})
     add_dependencies(${_algorithm_test} workspace_trace)
 endforeach()
-
 # Same analytic data/oracles as the borrowed test; this target calls only the
 # public owning entry and therefore makes no raw no-allocation assertion.
 add_executable(test_pheevd_chebyshev EXCLUDE_FROM_ALL test_chebyshev.cpp)

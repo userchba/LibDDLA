@@ -2612,9 +2612,6 @@
       "policy": "direct_backend_forward"
     }
   ],
-  "manual_public_templates": [
-    "pstedc"
-  ],
   "signature_source": "include/ddla/ddla.h",
   "generated_fields": [
     "index",
@@ -2623,5 +2620,8 @@
     "private_signature",
     "public_backend_overloads",
     "public_concrete_specializations"
+  ],
+  "manual_public_templates": [
+    "pstedc"
   ]
 }
