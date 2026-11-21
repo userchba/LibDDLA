@@ -64,9 +64,9 @@ void solve_case(DdlaHandle_t h,char jobz,int n,bool split_e=false)
     const std::vector<R> initial(std::size_t(ld)*n+2,sentinel);
     DeviceBuffer<R> z(h,initial.size()),reference(h,initial.size());upload(h,z.ptr,initial);upload(h,reference.ptr,initial);
     auto refd=diag,refe=off,refw=values;int info=0;
-    pstedc<R>(h,jobz,n,refd.data()+1,refe.data()+1,refw.data()+1,jobz=='V'?reference.ptr+1:nullptr,ld,info);
+    pstedc<R>(h,jobz,n, 128,refd.data()+1,refe.data()+1,refw.data()+1,jobz=='V'?reference.ptr+1:nullptr,ld,info);
     const auto expected=download(h,reference.ptr,initial.size());
-    const auto plan=pstedc_check<R>(h,jobz,n,diag.data()+1,off.data()+1,values.data()+1,jobz=='V'?z.ptr+1:nullptr,ld);
+    const auto plan=pstedc_check<R>(h,jobz,n, 128,diag.data()+1,off.data()+1,values.data()+1,jobz=='V'?z.ptr+1:nullptr,ld);
     if(n>0)require_close(h,"pstedc workspace plan retains configured two-worker budget",plan.rows.threads==2?0:1,0);
     MPI_Barrier(h->comm);bool local=true;
     if(h->myid==0){
@@ -141,6 +141,7 @@ template<class R>void check_scaling(DdlaHandle_t h)
         std::size_t single=0;
         for(int ranks:{1,2,4}){
             p.rows.n=n;p.rows.ranks=ranks;p.rows.rank=0;
+            p.rows.nblk=128;p.rows.rank_leaf=ranks>1;p.rows.block_leaf=false;p.rows.scalar_bytes=sizeof(R);
             p.rows.ldy=(n+ranks-1)/ranks;
             std::size_t backend=0,host=0;pstedc_workspace_size<R>(h,p,&backend,&host);
             const auto total=backend+host;
@@ -157,14 +158,22 @@ template<DdlaBackend B,class R>void cases(DdlaHandle_t h)
 {
     check_scaling<R>(h);
     {
+        PstedcVectorPlan p;
+        p.n=1000;p.nblk=128;p.ranks=2;p.rank_leaf=true;p.block_leaf=true;
+        int start=0;
+        require_close(h,"nblk128 divides n1000 into 512/488",
+            pstedc_leaf_geometry(p,0)!=512 || pstedc_leaf_geometry(p,1,&start)!=488 || start!=512?1:0,0);
+    }
+
+    {
         // A large override must not revert a multi-rank eigenvector solve to
         // a single n-by-n leaf (including dimensions smaller than P).
         Env leaves("DDLA_EIG_DC_LEAF","4096");
         Env strips("DDLA_EIG_DC_STRIP","4096");
         for(int n:{2,3,4,73,1024,1025}) {
-            const auto plan=pstedc_policy<R>(h,n);
-            const int leaves=pstedc_leaves(n,plan.leaf);
-            const int largest=pstedc_leaf_geometry(n,leaves,leaves-1);
+            const auto plan=pstedc_policy<R>(h,n, 128);
+            const int leaves=pstedc_leaves(plan);
+            const int largest=pstedc_max_leaf(plan);
             require_close(h,"distributed pstedc has no full-matrix leaf",
                 h->nprocs>1 && (leaves<2 || largest>=n) ? 1 : 0,0);
             require_close(h,"distributed pstedc uses bounded secular strips",
@@ -177,11 +186,10 @@ template<DdlaBackend B,class R>void cases(DdlaHandle_t h)
         // Ranks without eigenvector rows may provide no output allocation.
         std::vector<R> d(1,R(2)),e(1,R(0)),w(1);
         DeviceBuffer<R> local(h,h->myid==0?1:0);int info=0;
-        pstedc<R>(h,'V',1,d.data(),e.data(),w.data(),h->myid==0?local.ptr:nullptr,1,info);
+        pstedc<R>(h,'V',1, 128,d.data(),e.data(),w.data(),h->myid==0?local.ptr:nullptr,1,info);
         require_close(h,"pstedc zero-row null output",info||w[0]!=R(2)?1:0,0);
     }
-    for(const char* leaf:{"256","8"}){
-        Env leaves("DDLA_EIG_DC_LEAF",leaf);
+    {
         for(const char* keep:{"0","64"}){Env cache("DDLA_EIG_DC_KEEP_MB",keep);solve_case<B,R>(h,'N',73);}
         for(const char* split:{"0","1","2"}){Env splitting("DDLA_EIG_DC_SPLIT",split);solve_case<B,R>(h,'V',73);}
         solve_case<B,R>(h,'V',73);
@@ -190,7 +198,7 @@ template<DdlaBackend B,class R>void cases(DdlaHandle_t h)
         Env default_leaves("DDLA_EIG_DC_LEAF",nullptr);
         if constexpr (B == DdlaBackend::GPU) {
             for (int n : {129,257,512,1024}) {
-                auto p=pstedc_policy<R>(h,n);
+                auto p=pstedc_policy<R>(h,n, 128);
                 p.ldy=n;p.borrow_q2=true;
                 std::size_t backend=0,host=0;
                 pstedc_workspace_size<R>(h,p,&backend,&host);
@@ -206,11 +214,10 @@ template<DdlaBackend B,class R>void cases(DdlaHandle_t h)
         }
         solve_case<B,R>(h,'V',129);
         solve_case<B,R>(h,'V',257);
-        // An explicit smaller-leaf policy must still prepare the merge fence.
-        Env merging("DDLA_EIG_DC_LEAF","128");
-        solve_case<B,R>(h,'V',129);
+        // The automatic local GPU policy enters its merge engine above 1024.
+        solve_case<B,R>(h,'V',1025);
     }
-    Env leaves("DDLA_EIG_DC_LEAF","8");
+
     solve_case<B,R>(h,'N',131);solve_case<B,R>(h,'N',33,true);
     solve_case<B,R>(h,'V',33,true);solve_case<B,R>(h,'V',1);
     solve_case<B,R>(h,'N',0);solve_case<B,R>(h,'V',0);solve_case<B,R>(h,'V',2);

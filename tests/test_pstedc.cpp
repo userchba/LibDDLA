@@ -37,7 +37,7 @@ public:
 };
 
 template<DdlaBackend B,class R>
-void solve(DdlaHandle_t h,int n,int padding,const char* kind,bool borrowed,R scale=R(1))
+void solve(DdlaHandle_t h,int n,int padding,const char* kind,bool borrowed,R scale=R(1),int nblk=128)
 {
     const ddla::detail::RowShare share(n,h->nprocs);
     const int nr=share.count(h->myid),lo=share.lo(h->myid);
@@ -57,10 +57,10 @@ void solve(DdlaHandle_t h,int n,int padding,const char* kind,bool borrowed,R sca
     const auto original_d=d,original_e=e;
     const std::vector<R> initial(std::size_t(ld)*parentcols+2,sentinel);
     DeviceBuffer<R> output(h,initial.size());upload(h,output.ptr,initial);
-    const auto plan=pstedc_check<R>(h,'V',n,d.data()+1,e.data()+1,w.data()+1,nr?output.ptr+1:nullptr,ld);
+    const auto plan=pstedc_check<R>(h,'V',n,nblk,d.data()+1,e.data()+1,w.data()+1,nr?output.ptr+1:nullptr,ld);
     if(n>0)require_close(h,"pstedc plan retains configured two-worker budget",plan.rows.threads==2?0:1,0);
     if(h->nprocs>1&&n>1)
-        require_close(h,"pstedc nontrivial multi-rank solve never has a full-size leaf",pstedc_leaves(n,plan.rows.leaf)>1&&plan.rows.leaf<n?0:1,0);
+        require_close(h,"pstedc nontrivial multi-rank solve never has a full-size leaf",pstedc_leaves(plan.rows)>1&&pstedc_max_leaf(plan.rows)<n?0:1,0);
     if(h->nprocs>1&&n>1){
         const int share=n/h->nprocs+(n%h->nprocs!=0);
         require_close(h,"secular strips fit a rank share",plan.rows.strip<=std::max(2,share)?0:1,0);
@@ -80,7 +80,7 @@ void solve(DdlaHandle_t h,int n,int padding,const char* kind,bool borrowed,R sca
         if(borrowed){workspace_test::Scope run;
             pstedc_run<B,R>(h,plan,d.data()+1,e.data()+1,w.data()+1,nr?output.ptr+1:nullptr,scratch.backend(),bytes,scratch.host(),hostbytes,&resources);
             const auto snapshot=run.finish();require_close(h,"pstedc borrowed run has no scratch growth or query",no_growth(snapshot)?0:1,0);
-        }else pstedc<R>(h,'V',n,d.data()+1,e.data()+1,w.data()+1,nr?output.ptr+1:nullptr,ld,info);
+        }else pstedc<R>(h,'V',n,nblk,d.data()+1,e.data()+1,w.data()+1,nr?output.ptr+1:nullptr,ld,info);
         require_close(h,"pstedc solver info",info,0);
         const auto local=download(h,output.ptr,initial.size());std::vector<double> full(std::size_t(n)*n,0);
         bool padding=local.front()==sentinel&&local.back()==sentinel;
@@ -117,30 +117,32 @@ void solve(DdlaHandle_t h,int n,int padding,const char* kind,bool borrowed,R sca
         scratch.check();
     }
     if(h->myid==0)std::cout<<"PSTEDC_CASE type="<<(std::is_same<R,float>::value?"s":"d")<<" n="<<n<<" padding="<<padding<<" case="<<kind
-        <<" borrowed_run="<<borrowed<<" leaves="<<pstedc_leaves(n,plan.rows.leaf)<<" backend_bytes="<<bytes<<" host_bytes="<<hostbytes<<" PASS"<<std::endl;
+        <<" borrowed_run="<<borrowed<<" leaves="<<pstedc_leaves(plan.rows)<<" backend_bytes="<<bytes<<" host_bytes="<<hostbytes<<" PASS"<<std::endl;
 }
 
 template<DdlaBackend B,class R>void cases(DdlaHandle_t h)
 {
-    Env leaf("DDLA_EIG_DC_LEAF","8");
+
     for(int n:{0,1,2,3,7,33})solve<B,R>(h,n,3,"random",true);
     solve<B,R>(h,2,0,"random",true);solve<B,R>(h,7,0,"random",true);
     solve<B,R>(h,73,5,"random",true);solve<B,R>(h,73,3,"split",true);
     solve<B,R>(h,33,3,"zero",true);solve<B,R>(h,33,3,"diagonal",true);
     solve<B,R>(h,73,3,"cluster",true);solve<B,R>(h,131,3,"toeplitz",false);
     solve<B,R>(h,257,3,"toeplitz",true);
+    solve<B,R>(h,257,0,"random",true,R(1),64);
+    solve<B,R>(h,513,0,"random",true,R(1),512);
     {Env wider_leaves("DDLA_EIG_DC_LEAF","64");solve<B,R>(h,36,0,"random",true);}
     solve<B,R>(h,33,3,"random",false,std::is_same<R,float>::value?R(1e25):R(1e200));
     solve<B,R>(h,33,5,"random",true,std::is_same<R,float>::value?R(1e-25):R(1e-200));
     // A large leaf override must not create replicated full-size matrices.
     {Env large("DDLA_EIG_DC_LEAF","20000");
         const int ld=std::max(1,ddla::detail::RowShare(20000,h->nprocs).count(h->myid));
-        auto plan=pstedc_policy<R>(h,'V',20000,ld);std::size_t b=0,hb=0;pstedc_workspace_size<R>(h,plan,&b,&hb);
+        auto plan=pstedc_policy<R>(h,'V',20000,128,ld);std::size_t b=0,hb=0;pstedc_workspace_size<R>(h,plan,&b,&hb);
         require_close(h,"nontrivial multi-rank leaf smaller than matrix",h->nprocs==1||plan.rows.leaf<20000?0:1,0);
         if(h->myid==0)std::cout<<"PSTEDC_WORKSPACE n=20000 scalar="<<sizeof(R)<<" ranks="<<h->nprocs<<" backend_bytes="<<b<<" host_bytes="<<hb<<std::endl;}
     // The public values-only call ignores z and ldz.
     {std::vector<R> d(7,R(2)),e(7,R(-1)),w(7),ref=d,off=e,work(1);int iw=0,info=0;
-        pstedc<R>(h,'N',7,d.data(),e.data(),w.data(),nullptr,0,info);
+        pstedc<R>(h,'N',7, 128,d.data(),e.data(),w.data(),nullptr,0,info);
         stedc('N',7,ref.data(),off.data(),static_cast<R*>(nullptr),1,work.data(),1,&iw,1,info);
         double error=0;for(int i=0;i<7;++i)error=std::max(error,workspace_test::finite_error(std::abs(double(w[i]-ref[i]))));
         require_close(h,"values-only reference",error,100*std::numeric_limits<R>::epsilon());}
@@ -152,14 +154,19 @@ template<DdlaBackend B,class R>void cases(DdlaHandle_t h)
         bool caught=false;try{call();}catch(const std::invalid_argument&){caught=true;}
         require_close(h,label,caught?0:1,0);
     };
-    reject([&]{(void)pstedc_check<R>(h,'V',7,d.data(),e.data(),w.data(),output.ptr,h->myid==0?0:ld);},
+    reject([&]{(void)pstedc_check<R>(h,'V',7,h->myid==0?0:128,d.data(),e.data(),w.data(),output.ptr,ld);},
+        "pstedc invalid nblk rejected collectively");
+    if(h->nprocs>1)
+        reject([&]{(void)pstedc_check<R>(h,'V',7,h->myid==0?64:128,d.data(),e.data(),w.data(),output.ptr,ld);},
+            "pstedc nblk disagreement rejected");
+    reject([&]{(void)pstedc_check<R>(h,'V',7, 128,d.data(),e.data(),w.data(),output.ptr,h->myid==0?0:ld);},
         "pstedc one-rank invalid row stride agreed");
-    reject([&]{(void)pstedc_check<R>(h,'V',7,d.data(),e.data(),w.data(),h->myid==0?nullptr:output.ptr,ld);},
+    reject([&]{(void)pstedc_check<R>(h,'V',7, 128,d.data(),e.data(),w.data(),h->myid==0?nullptr:output.ptr,ld);},
         "pstedc one-rank missing row output agreed");
     if(h->nprocs>1){
-        reject([&]{(void)pstedc_check<R>(h,'V',h->myid==0?6:7,d.data(),e.data(),w.data(),output.ptr,7);},
+        reject([&]{(void)pstedc_check<R>(h,'V',h->myid==0?6:7, 128,d.data(),e.data(),w.data(),output.ptr,7);},
             "pstedc dimension disagreement rejected");
-        reject([&]{(void)pstedc_check<R>(h,h->myid==0?'N':'V',7,d.data(),e.data(),w.data(),output.ptr,ld);},
+        reject([&]{(void)pstedc_check<R>(h,h->myid==0?'N':'V',7,128,d.data(),e.data(),w.data(),output.ptr,ld);},
             "pstedc mode disagreement rejected");
     }
 

@@ -314,7 +314,7 @@ void check_pstedc_ldz(const ddla::DdlaHandle_t& handle, int n, int kind)
         std::vector<rt> dd(d0), ee(e0);
         w.assign(n, rt(0));
         int info = 0;
-        ddla::pstedc<rt>(handle, 'V', n, dd.data(), ee.data(), w.data(),
+        ddla::pstedc<rt>(handle, 'V', n, 128, dd.data(), ee.data(), w.data(),
                          d_z.ptr, ldz, info);
         check_ddla_sync(handle);
         require_close(handle, tag + " info", info, 0.5);
@@ -426,7 +426,7 @@ void check_pstedc_n(const ddla::DdlaHandle_t& handle, int n, int kind)
         DeviceBuffer<rt> d_z(handle, static_cast<std::size_t>(ld) * n);
         std::vector<rt> dd(d0), ee(e0);
         int info = 0;
-        ddla::pstedc<rt>(handle, 'V', n, dd.data(), ee.data(), wV.data(), d_z.ptr, ld, info);
+        ddla::pstedc<rt>(handle, 'V', n, 128, dd.data(), ee.data(), wV.data(), d_z.ptr, ld, info);
         check_ddla_sync(handle);
         require_close(handle, tag + " 'V' info", info, 0.5);
     }
@@ -440,7 +440,7 @@ void check_pstedc_n(const ddla::DdlaHandle_t& handle, int n, int kind)
             else unsetenv("DDLA_EIG_DC_KEEP_MB");
             std::vector<rt> dd(d0), ee(e0), wN(n, rt(0));
             int info = 0;
-            ddla::pstedc<rt>(handle, 'N', n, dd.data(), ee.data(), wN.data(),
+            ddla::pstedc<rt>(handle, 'N', n, 128, dd.data(), ee.data(), wN.data(),
                              static_cast<rt*>(nullptr), n, info);
             require_close(handle, tag + " 'N' info", info, 0.5);
             if (w0.empty()) {
@@ -556,7 +556,7 @@ void check_body_t(const ddla::DdlaHandle_t& handle, const Shape& base)
     if constexpr (std::is_same<T, float>::value || std::is_same<T, double>::value) {
         const int nbw16 = 16;
         const int n_dc = (2 * nbw16 - 1) * (nbw16 + 1) + 64 + 7;
-        setenv("DDLA_EIG_DC_LEAF", "32", 1);
+
         check_pheevd<T>(handle, n_dc, 32, true);
         for (const char* split : {"1", "0", "2"}) {
             setenv("DDLA_EIG_DC_SPLIT", split, 1);
@@ -568,12 +568,12 @@ void check_body_t(const ddla::DdlaHandle_t& handle, const Shape& base)
         // the deepest trees on tiny n (leaf 2: blocks of size 1), then the
         // default leaves (CPU 'N' tree at leaf 128 vs the single-leaf 'V')
         for (int kind = 0; kind <= 5; ++kind) check_pstedc_n<rt>(handle, n_dc, kind);
-        setenv("DDLA_EIG_DC_LEAF", "2", 1);
+
         for (const int nn : {1, 2, 3, 5, 33}) {
             check_pstedc_n<rt>(handle, nn, 0);
             check_pstedc_n<rt>(handle, nn, 1);
         }
-        unsetenv("DDLA_EIG_DC_LEAF");
+
         check_pstedc_n<rt>(handle, n_dc, 0);
         check_pstedc_n<rt>(handle, n_dc, 2);
     }
@@ -628,10 +628,10 @@ void check_body_t(const ddla::DdlaHandle_t& handle, const Shape& base)
     {
         const int nbw16 = 16;
         const int n_dcN = (2 * nbw16 - 1) * (nbw16 + 1) + 64 + 7;
-        setenv("DDLA_EIG_DC_LEAF", "32", 1);
+
         check_pheevd_N(n_dcN, true);
         check_pheevd_N(n_dcN, false);
-        unsetenv("DDLA_EIG_DC_LEAF");
+
     }
 }
 

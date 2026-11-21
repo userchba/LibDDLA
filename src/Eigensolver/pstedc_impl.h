@@ -5,6 +5,7 @@
 // on CPU and GPU handles). Public <ddla/ddla.h> is included first.
 #include <ddla/ddla.h>
 #include <cstddef>
+#include <memory>
 
 namespace ddla
 {
@@ -18,7 +19,7 @@ namespace ddla
 /// secular eigenvector strips are generated on the fly from O(K) data, so nothing of size n^2 is ever
 /// replicated or communicated).  Collective over the handle's communicator.  Throws on a failed leaf solve or
 /// secular root (consistently on all ranks).
-template <typename rt> void pstedc(const DdlaHandle_t &handle, int n, rt *d, rt *e, rt *w, rt *Y, int ldy);
+template <typename rt> void pstedc(const DdlaHandle_t &handle, int n, int nblk, rt *d, rt *e, rt *w, rt *Y, int ldy);
 
 /// Optional workspace for the private driver. The caller owns scratch, a contiguous
 /// span of scratch_elements real entries in the handle's backend memory. All entries
@@ -32,13 +33,14 @@ template <typename rt> void pstedc(const DdlaHandle_t &handle, int n, rt *d, rt 
 /// this function returns. Collective over the grid;
 /// the pointer and capacity may differ between ranks.
 template <typename rt>
-void pstedc(const DdlaHandle_t &handle, int n, rt *d, rt *e, rt *w, rt *Y, int ldy, rt *scratch,
+void pstedc(const DdlaHandle_t &handle, int n, int nblk, rt *d, rt *e, rt *w, rt *Y, int ldy, rt *scratch,
             std::size_t scratch_elements);
 
 } // namespace ddla
 
 #include <ddla/ddla.h>
 #include "row_share.h"
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <mpi.h>
@@ -58,16 +60,17 @@ struct PstedcVectorPlan
 {
     DdlaBackend backend{};
     int n = 0, ranks = 1, rank = 0, threads = 1, leaf = 1024, split = 0, strip = 16, root_chunk = 32;
-    int ldy = 1;
+    int ldy = 1, nblk = 1, scalar_bytes = 0;
+    bool rank_leaf = false, block_leaf = false;
     bool borrow_q = false, borrow_q2 = false, profile = false;
 };
 template <class R>
-PstedcVectorPlan pstedc_check(const DdlaHandle_t &, int, const R *, const R *, const R *, const R *, int,
+PstedcVectorPlan pstedc_check(const DdlaHandle_t &, int, int, const R *, const R *, const R *, const R *, int,
                               const R * = nullptr, std::size_t = 0);
 // Collective policy extraction for already-validated composite geometry.
 // No input/output pointer is inspected; alias/borrow decisions remain with
 // the enclosing checker. Never call this from the size function or the run.
-template <class R> PstedcVectorPlan pstedc_policy(const DdlaHandle_t &, int);
+template <class R> PstedcVectorPlan pstedc_policy(const DdlaHandle_t &, int, int);
 
 // Reproduce LAED0's recursive integer subdivision without an owning tree.
 inline int pstedc_leaf_geometry(int n, int leaves, int index, int *start = nullptr) noexcept
@@ -102,6 +105,42 @@ inline int pstedc_my_leaves(int leaves, int rank, int ranks) noexcept
     return rank < leaves ? 1 + (leaves - 1 - rank) / ranks : 0;
 }
 
+// Outer PSTEDC assigns one contiguous problem to each nonempty rank. The
+// local GPU STEDC engine retains its own bounded, recursive leaf geometry.
+inline int pstedc_leaves(const PstedcVectorPlan& p) noexcept
+{
+    return p.rank_leaf ? std::min(p.n, p.ranks) : pstedc_leaves(p.n, p.leaf);
+}
+inline int pstedc_leaf_geometry(const PstedcVectorPlan& p, int index, int* start = nullptr) noexcept
+{
+    if (!p.rank_leaf)
+        return pstedc_leaf_geometry(p.n, pstedc_leaves(p), index, start);
+    const int count = pstedc_leaves(p);
+    int lo, hi;
+    if (p.block_leaf) {
+        const int blocks = p.n / p.nblk + (p.n % p.nblk != 0);
+        const long long first = static_cast<long long>(index) * (blocks / count) + std::min(index, blocks % count);
+        const int owned = blocks / count + (index < blocks % count);
+        lo = static_cast<int>(std::min<long long>(p.n, first * p.nblk));
+        hi = static_cast<int>(std::min<long long>(p.n, (first + owned) * p.nblk));
+    } else {
+        const detail::RowShare rows(p.n, count);
+        lo = rows.lo(index);
+        hi = lo + rows.count(index);
+    }
+    if (start) *start = lo;
+    return hi - lo;
+}
+inline int pstedc_max_leaf(const PstedcVectorPlan& p) noexcept
+{
+    if (!p.rank_leaf)
+        return pstedc_leaf_geometry(p.n, pstedc_leaves(p), pstedc_leaves(p) - 1);
+    int maximum = 0;
+    for (int i = 0; i < pstedc_leaves(p); ++i)
+        maximum = std::max(maximum, pstedc_leaf_geometry(p, i));
+    return maximum;
+}
+
 // The scratch of pstedc_run on this rank (none for n == 0), in carving order.
 // Backend: Q (this rank's rows of all n columns, unless the caller lends it) and, with more
 // than one leaf, Q2 (the same, unless it is Y), the strip of S (n x strip) and on a GPU handle
@@ -133,9 +172,10 @@ inline int stedc_gpu_leaf_size(int n) noexcept
     return n <= 4096 ? 128 : 1024;
 }
 
-// Owns the reusable GPU copy fence and its pending-source-read state.
+// Owns the reusable GPU copy fence, plus the prepared rank-local plan/fence.
 // Construct/destroy outside check, size and run. No event is needed
 // for CPU or a single-leaf problem.
+struct PstedcLocalResources;
 class PstedcResources
 {
     DdlaHandle_t handle_ = nullptr;
@@ -143,30 +183,9 @@ class PstedcResources
     bool pending_ = false;
 
   public:
-    PstedcResources(const DdlaHandle_t &handle, const PstedcVectorPlan &p) : handle_(handle)
-    {
-        if (p.n && p.backend == DdlaBackend::GPU && pstedc_leaves(p.n, p.leaf) > 1)
-            DDLA_CHECK(ddlaEventCreate(handle_, &uploaded_));
-    }
-    ~PstedcResources()
-    {
-        if (pending_)
-            try
-            {
-                (void)ddlaEventSynchronize(handle_, uploaded_);
-            }
-            catch (...)
-            {
-            }
-        if (uploaded_)
-            try
-            {
-                (void)ddlaEventDestroy(handle_, uploaded_);
-            }
-            catch (...)
-            {
-            }
-    }
+    std::unique_ptr<PstedcLocalResources> local;
+    PstedcResources(const DdlaHandle_t &handle, const PstedcVectorPlan &p);
+    ~PstedcResources();
     PstedcResources(const PstedcResources &) = delete;
     PstedcResources &operator=(const PstedcResources &) = delete;
     void wait()
@@ -212,13 +231,13 @@ struct PstedcPlan
 };
 // Policy-only helper for validated composite dimensions. Public check also
 // validates actual pointers/strides and agrees the operation signature.
-template <class R> PstedcPlan pstedc_policy(const DdlaHandle_t &, char, int, int);
-template <class R> PstedcPlan pstedc_values_policy(const DdlaHandle_t &h, int n)
+template <class R> PstedcPlan pstedc_policy(const DdlaHandle_t &, char, int, int, int);
+template <class R> PstedcPlan pstedc_values_policy(const DdlaHandle_t &h, int n, int nblk)
 {
-    return pstedc_policy<R>(h, 'N', n, 1);
+    return pstedc_policy<R>(h, 'N', n, nblk, 1);
 }
 template <class R>
-PstedcPlan pstedc_check(const DdlaHandle_t &, char, int, const R *, const R *, const R *, const R *, int);
+PstedcPlan pstedc_check(const DdlaHandle_t &, char, int, int, const R *, const R *, const R *, const R *, int);
 // Vectors use pstedc_workspace_size directly. Eigenvalues only retain
 // O(n) boundary rows and a bounded root-delta cache, plus leaf scratch.
 template <class R>

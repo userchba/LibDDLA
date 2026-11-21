@@ -285,14 +285,23 @@ back as LRWORK. The same conversion also protects single-precision LWORK if its 
 down; modern LAPACK normally rounds that query up already. LP64 counts are
 clamped to INT_MAX only when the checked documented minimum still fits.
 
-For a one-rank vector `pstedc`, private local `stedc` execution and shared row-engine workspace sizing are
-used, preserving padded output and accepted borrowed Q scratch. A shared
-row-engine entry avoids dispatch recursion. Its final eigenvalue permutation
-can overwrite D using dead merge scratch, so local GPU STEDC no longer needs
-an additional host eigenvalue vector. Multi-rank row-slab factors, bounded
-strips and GPU values-only boundary-row execution retain their existing
-ownership and schedule. Prepare the local GPU merge fence using its own leaf
-policy, including orders 129–1024.
-Single-rank GPU PSTEDC retains one default leaf through order 1024, avoiding
-an additional device secular strip in that range. Orders 1025–4096 use the
-shared 128-row leaf default. The explicit PSTEDC leaf override remains honored.
+For a one-rank vector `pstedc`, private local `stedc` execution and shared
+row-engine sizing preserve padded output and accepted borrowed Q scratch.
+The shared numerical entry avoids dispatch recursion. GPU local STEDC uses
+its own automatic bounded leaves, independent of the outer `nblk` argument.
+Single-rank GPU PSTEDC retains one leaf through order 1024, and uses the
+128-row local policy for orders 1025–4096.
+
+With multiple ranks, PSTEDC solves one contiguous local problem per nonempty
+rank before the global merges. The required `nblk` balances contiguous blocks;
+when a block-aligned factor would not fit the existing row slabs, equal
+contiguous row cuts are used. Local output occupies idle Q2, and local STEDC's
+Q/native work reuses idle Q. Its remaining work shares the outer strip and
+host phase. Host publication is bounded to at most `max_leaf × strip` elements plus O(P) metadata;
+owning-rank rows are copied directly on the backend, and only remote row intersections are scattered.
+no whole local factor is replicated on the host. Query sizes include the
+maximum of local, publication and merge phases, including tiny native-work
+cases that do not fit Q. Plans and GPU copy fences are prepared before raw
+execution, which performs no scratch allocation or vendor workspace query.
+The eigenvalues-only tree continues to retain boundary rows and bounded
+leaf scratch; `DDLA_EIG_DC_LEAF` is no longer a runtime policy.

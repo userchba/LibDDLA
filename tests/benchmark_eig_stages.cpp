@@ -170,7 +170,7 @@ void bench_type(const ddla::DdlaHandle_t& handle, int n, int nb, int niter,
         ddla::phb2st_node<ddla_test::execution_backend,T>(handle, n, nbw, d_A.ptr, desc, d_eigs.data(), e_off.data(),
                      history, phases, true, info);
         if (info != 0) { MPI_Abort(comm, 1); }
-        ddla::pstedc<rt>(handle,'V',n,d_eigs.data(),e_off.data(),teigs.data(),d_Y.ptr,ldy,info);
+        ddla::pstedc<rt>(handle,'V',n, 128,d_eigs.data(),e_off.data(),teigs.data(),d_Y.ptr,ldy,info);
         if (info != 0) MPI_Abort(comm,1);
         if(ddlaGetBackend(handle)==ddla::DdlaBackend::CPU) {
             ddla::detail::hb2st_replay_rows_cpu<T>(handle,n,d_Y.ptr,ldy,history,phases,d_Z.ptr,descZ,info);

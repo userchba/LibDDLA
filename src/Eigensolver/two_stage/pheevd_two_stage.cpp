@@ -328,13 +328,13 @@ PheevdPlan pheevd_check(const DdlaHandle_t &h, DdlaBackend backend, char job, ch
     }
     if (job == 'N')
     {
-        p.values = pstedc_values_policy<R>(h, n);
+        p.values = pstedc_values_policy<R>(h, n, da[DDLA_MB_]);
         return p;
     }
     dz = p.destination.data();
     const detail::RowShare rows(n, h->nprocs);
     p.ldy = std::max(1, rows.count(h->myid));
-    p.vectors = pstedc_policy<R>(h, n);
+    p.vectors = pstedc_policy<R>(h, n, da[DDLA_MB_]);
     p.vectors.ldy = p.ldy;
     // The composite owns Y separately from the replicated d/e/w arrays.
     p.vectors.borrow_q2 = rows.count(h->myid) > 0;

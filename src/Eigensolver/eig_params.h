@@ -35,11 +35,6 @@ namespace ddla {
 //   DDLA_EIG_STRIPE_WIDTH   stage-4 stripe width (rows of the transposed
 //                           eigenvector workspace per process column).
 //                           Default 1024.
-//   DDLA_EIG_DC_LEAF        pstedc (stage 3) leaf size: subproblems are
-//                           halved until the largest is <= this, then solved
-//                           by host ?STEDC.  Default 1024 (128 for the CPU
-//                           eigenvalues-only tree); values < 2 fall back to
-//                           the default.  Read on rank 0, broadcast.
 //   DDLA_EIG_DC_KEEP_MB     CPU eigenvalues-only pstedc: MiB per rank of
 //                           secular-root deltas a merge may keep; larger
 //                           merges recompute them in a second ?LAED4 pass

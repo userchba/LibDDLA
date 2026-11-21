@@ -86,7 +86,7 @@ void check_rows(const ddla::DdlaHandle_t& h, int n, int kind)
         upload(h, Y.ptr, std::vector<rt>(count, sentinel));
         std::vector<rt> d(d0), e(e0);
         w.assign(n, std::numeric_limits<rt>::quiet_NaN());
-        ddla::pstedc(h, n, d.data(), e.data(), w.data(), Y.ptr, ldy);
+        ddla::pstedc(h, n, 128, d.data(), e.data(), w.data(), Y.ptr, ldy);
         return download(h, Y.ptr, count);
     };
     std::vector<rt> wc, wp;
@@ -407,7 +407,7 @@ void check_standalone_column_layout(const ddla::DdlaHandle_t& h)
 template <ddla::DdlaBackend B>
 void run_checks(const ddla::DdlaHandle_t& h)
 {
-    EnvGuard leaf("DDLA_EIG_DC_LEAF", "32");
+
     check_row_layout_rejections<B,float>(h);check_row_layout_rejections<B,double>(h);
     check_row_layout_rejections<B,std::complex<float>>(h);check_row_layout_rejections<B,std::complex<double>>(h);
     check_standalone_column_layout<B,float>(h);check_standalone_column_layout<B,double>(h);

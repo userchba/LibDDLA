@@ -31,9 +31,10 @@ int main(int argc,char** argv)
     ddla_test_mpi_init(&argc,&argv);
     try {
         int rank=0,P=1;MPI_Comm_rank(MPI_COMM_WORLD,&rank);MPI_Comm_size(MPI_COMM_WORLD,&P);
-        int kind=0,reps=3,check_max=6000;std::vector<int> sizes;
+        int kind=0,reps=3,check_max=6000,nblk=128;std::vector<int> sizes;
         for(int i=1;i<argc;++i){const std::string arg=argv[i];
-            if(arg=="--kind"&&i+1<argc)kind=std::stoi(argv[++i]);
+            if(arg=="--nblk"&&i+1<argc)nblk=std::stoi(argv[++i]);
+            else if(arg=="--kind"&&i+1<argc)kind=std::stoi(argv[++i]);
             else if(arg=="--reps"&&i+1<argc)reps=std::stoi(argv[++i]);
             else if(arg=="--check-max"&&i+1<argc)check_max=std::stoi(argv[++i]);
             else if(arg.rfind("--",0)==0)throw std::invalid_argument("unknown benchmark option: "+arg);
@@ -54,7 +55,7 @@ int main(int argc,char** argv)
             for(int i=0;i<n;++i)normT=std::max(normT,std::abs(d0[i])+std::abs(e0[i])+(i?std::abs(e0[i-1]):0));
             for(int rep=-1;rep<reps;++rep){
                 d=d0;e=e0;check_ddla_sync(h);MPI_Barrier(MPI_COMM_WORLD);const double t0=MPI_Wtime();
-                int info=0;ddla::pstedc<double>(h,'V',n,d.data(),e.data(),w.data(),Y.ptr,ld,info);
+                int info=0;ddla::pstedc<double>(h,'V',n, nblk,d.data(),e.data(),w.data(),Y.ptr,ld,info);
                 check_ddla_sync(h);const double dt=MPI_Wtime()-t0;double maximum=0;
                 MPI_Allreduce(&dt,&maximum,1,MPI_DOUBLE,MPI_MAX,MPI_COMM_WORLD);
                 if(info)throw std::runtime_error("pstedc returned nonzero info");
@@ -95,7 +96,7 @@ int main(int argc,char** argv)
             const double scaled_residual=residual/(normT*eps*n),scaled_ortho=orthogonal/(eps*n);
             if(bad||scaled_residual>50||scaled_ortho>50||norm_error/(eps*n)>50||eigen_error/(eps*normT)>100)
                 throw std::runtime_error("distributed eigenpair validation failed");
-            const auto plan=ddla::spectral_impl::pstedc_check<double>(h,'V',n,d0.data(),e0.data(),w.data(),Y.ptr,ld);
+            const auto plan=ddla::spectral_impl::pstedc_check<double>(h,'V',n, nblk,d0.data(),e0.data(),w.data(),Y.ptr,ld);
             std::size_t backend=0,host=0;ddla::spectral_impl::pstedc_workspace_size<double>(h,plan,&backend,&host);
             unsigned long long bytes[3]={std::size_t(ld)*n*sizeof(double),backend,host};
             MPI_Allreduce(MPI_IN_PLACE,bytes,3,MPI_UNSIGNED_LONG_LONG,MPI_MAX,MPI_COMM_WORLD);

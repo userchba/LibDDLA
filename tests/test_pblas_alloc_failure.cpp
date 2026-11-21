@@ -167,7 +167,7 @@ int main(int argc, char** argv)
                 else if (op == "ppotrf_bottom_right")
                     ppotrf_bottom_right<double>(h, 'L', n, a.data(), a.d, info);
                 else if (op == "pstedc")
-                    pstedc<double>(h, 'V', n, dc_d.data(), dc_e.data(), dc_w.data(), dc_y.data() + 8, dc_ld, info);
+                    pstedc<double>(h, 'V', n, 128, dc_d.data(), dc_e.data(), dc_w.data(), dc_y.data() + 8, dc_ld, info);
                 else throw std::invalid_argument("unknown operation");
             };
             if (!prewarm()) throw std::runtime_error("allocator preload failed to resolve ddlaMalloc");

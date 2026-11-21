@@ -133,9 +133,9 @@ template<class T> void cases(const DdlaHandle_t& h) {
         run<T>(h,method,2,1,uplo,false,false);
         run<T>(h,method,0,0,uplo,false,false);
     }
-    setenv("DDLA_EIG_DC_LEAF","8",1);
+
     for(int method:{1,2})run<T>(h,method,65,5,'U',false,false);
-    unsetenv("DDLA_EIG_DC_LEAF");
+
     for(char uplo:{'U','L'}) {
         run<T>(h,3,65,5,uplo,false,false);
         run<T>(h,3,17,1,uplo,true,true);

@@ -89,16 +89,16 @@ void check_case(const ddla::DdlaHandle_t& h,int n,int kind,int padding) {
         if(mode==Mode::Unaligned)
             scratch=reinterpret_cast<R*>(reinterpret_cast<unsigned char*>(scratch)+1);
         const auto checked=ddla::spectral_impl::pstedc_check<R>(
-            h,n,d.data(),e.data(),w.data(),Y.ptr,ldy,
+            h,n, 128,d.data(),e.data(),w.data(),Y.ptr,ldy,
             mode==Mode::Owned?nullptr:scratch,mode==Mode::Owned?0:available);
         const bool native_cpu=ddla::ddlaGetBackend(h)==ddla::DdlaBackend::CPU && P==1 &&
             std::size_t(n)*(std::size_t(n)+4)+1<=std::size_t(std::numeric_limits<int>::max());
         require_close(h,"pstedc planner reports actual factor borrowing",
             checked.borrow_q==(mode==Mode::Adequate && nr>0 && !native_cpu)?0:1,0);
         if(mode==Mode::Owned)
-            ddla::pstedc(h,n,d.data(),e.data(),w.data(),Y.ptr,ldy);
+            ddla::pstedc(h,n, 128,d.data(),e.data(),w.data(),Y.ptr,ldy);
         else
-            ddla::pstedc(h,n,d.data(),e.data(),w.data(),Y.ptr,ldy,scratch,available);
+            ddla::pstedc(h,n, 128,d.data(),e.data(),w.data(),Y.ptr,ldy,scratch,available);
         check_ddla_sync(h);
         const auto actual=download(h,Y.ptr,count+guard);
         const auto scratch_after=download(h,storage_ptr,scratch_count);
@@ -162,7 +162,7 @@ void check_case(const ddla::DdlaHandle_t& h,int n,int kind,int padding) {
     }
 }
 template<class R> void run(const ddla::DdlaHandle_t& h) {
-    EnvGuard leaf("DDLA_EIG_DC_LEAF","16");
+
     for(int padding:{0,3}) {
         for(int n:{0,1,2,37,67}) check_case<R>(h,n,0,padding);
         check_case<R>(h,67,1,padding);

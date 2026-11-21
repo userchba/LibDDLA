@@ -179,7 +179,7 @@ template<class R>void run(const Options& o,int rank,int P)
     for(int i=0;i<o.n;++i){d0[i]=R(o.kind=="toeplitz"?2:hash01(i,1));if(i+1<o.n)e0[i]=R(o.kind=="toeplitz"?-1:hash01(i,2));}
     std::size_t workspace_backend=0,workspace_host=0;bool workspace_known=false;
     ddla::spectral_impl::PstedcPlan plan{};
-    if(!reference){plan=ddla::spectral_impl::pstedc_check<R>(h,'V',o.n,d0.data(),e0.data(),w.data(),output,ld);
+    if(!reference){plan=ddla::spectral_impl::pstedc_check<R>(h,'V',o.n, 128,d0.data(),e0.data(),w.data(),output,ld);
         ddla::spectral_impl::pstedc_workspace_size<R>(h,plan,&workspace_backend,&workspace_host);workspace_known=true;}
     std::unique_ptr<DeviceBuffer<unsigned char>> backend_arena;
     std::vector<std::max_align_t> host_arena;
@@ -261,7 +261,7 @@ template<class R>void run(const Options& o,int rank,int P)
             }
         }
         else if(o.method=="pstedc"){
-            ddla::pstedc<R>(h,'V',o.n,d.data(),e.data(),w.data(),output,ld,info);
+            ddla::pstedc<R>(h,'V',o.n, 128,d.data(),e.data(),w.data(),output,ld,info);
         }
 #ifdef DDLA_COMPARE_HAVE_SCALAPACK
         else if(o.method=="scalapack"){

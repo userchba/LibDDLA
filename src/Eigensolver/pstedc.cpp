@@ -93,8 +93,8 @@ StedcPlan pstedc_local_plan(const DdlaHandle_t& h, const PstedcVectorPlan& p, ch
 {
     if (p.backend == DdlaBackend::GPU) {
         // Real I output already has the checked row geometry and borrowing
-        // decisions. Use STEDC execution without changing those decisions or
-        // discarding an explicit PSTEDC leaf/strip override.
+        // decisions. Use STEDC execution without changing the checked
+        // small-problem footprint or the explicit strip policy.
         StedcPlan local;
         local.compz = job;
         local.n = p.n;
@@ -141,6 +141,57 @@ void pstedc_local_run(const DdlaHandle_t& h, const PstedcVectorPlan& p, char job
     if (info)
         throw std::runtime_error("pstedc: local STEDC failed, info=" + std::to_string(info));
 }
+}
+
+namespace {
+// A local factor uses the two idle outer row slabs for its output and Q.
+// The remaining local workspace shares the outer strip and host phase.
+template<class R>
+StedcPlan pstedc_rank_plan(const DdlaHandle_t& h, const PstedcVectorPlan& p)
+{
+    if (!p.rank_leaf || p.rank >= pstedc_leaves(p)) return {};
+    const int m = pstedc_leaf_geometry(p, p.rank);
+    if (p.backend == DdlaBackend::CPU) {
+        PstedcVectorPlan local;
+        local.n = m;
+        if (std::size_t(m) * (std::size_t(m) + 4) + 1 > std::size_t(INT_MAX))
+            throw std::length_error("pstedc: local LAPACK workspace exceeds integer range");
+        return pstedc_local_plan<R>(h, local, 'I');
+    }
+    auto local = stedc_plan<R>(h, 'I', m, m);
+    local.rows.borrow_q = true;
+    stedc_rows_workspace_size<R>(h, local.rows, &local.engine_backend, &local.engine_host);
+    local.backend_bytes = local.engine_backend;
+    local.host_bytes = local.engine_host;
+    return local;
+}
+}
+
+struct PstedcLocalResources
+{
+    StedcPlan plan;
+    PstedcResources resources;
+    PstedcLocalResources(const DdlaHandle_t& h, const PstedcVectorPlan& p)
+        : plan(p.scalar_bytes == sizeof(float) ? pstedc_rank_plan<float>(h,p)
+                                              : pstedc_rank_plan<double>(h,p)),
+          resources(h, plan.rows) {}
+};
+
+PstedcResources::PstedcResources(const DdlaHandle_t& h, const PstedcVectorPlan& p) : handle_(h)
+{
+    // Prepare nested resources before creating our own event, so a failed
+    // local preparation cannot leave an outer event behind.
+    if (p.rank_leaf && p.rank < pstedc_leaves(p))
+        local = std::make_unique<PstedcLocalResources>(h,p);
+    if (p.n && p.backend == DdlaBackend::GPU && pstedc_leaves(p) > 1)
+        DDLA_CHECK(ddlaEventCreate(handle_, &uploaded_));
+}
+PstedcResources::~PstedcResources()
+{
+    if (pending_)
+        try { (void)ddlaEventSynchronize(handle_, uploaded_); } catch (...) {}
+    if (uploaded_)
+        try { (void)ddlaEventDestroy(handle_, uploaded_); } catch (...) {}
 }
 
 // ?LAED8 with ICOMPQ = 0: Q and Q2 are not referenced (a dummy is passed),
@@ -232,10 +283,6 @@ inline void pstedc_agree_deflation(MPI_Comm comm, int info, int K)
                                  std::to_string(K) + ", max " + std::to_string(tri[1]) + ")");
 }
 
-
-// Leaf size: subproblems are halved exactly as ?LAED0 does until the largest
-// is <= this (default 1024; override with DDLA_EIG_DC_LEAF >= 2); the leaves
-// are solved by host ?STEDC.  Read on rank 0 only and broadcast (dc_common.h).
 
 // CPU merges only: 1 = split the merge GEMM by the children's row support
 // (the dlaed2/dlaed3 trick; default), 0 = one dense GEMM (the phase-1 port,
@@ -570,12 +617,21 @@ __global__ void pstedc_fill_s_kernel(rt* __restrict__ S, int lds, const rt* __re
 
 namespace spectral_impl {
 template <class R>
-PstedcVectorPlan pstedc_policy(const DdlaHandle_t& h, int n)
+PstedcVectorPlan pstedc_policy(const DdlaHandle_t& h, int n, int nblk)
 {
     PstedcVectorPlan p;
     p.backend = h->backend;
     p.n = n;
+    p.nblk = nblk;
+    p.scalar_bytes = sizeof(R);
     p.ranks = h->nprocs;
+    p.rank_leaf = h->nprocs > 1 && n > 1;
+    p.block_leaf = p.rank_leaf && (n / nblk + (n % nblk != 0)) >= std::min(n, h->nprocs);
+    // Oversized blocks must not concentrate a quadratic factor on one rank.
+    if (p.block_leaf) {
+        const std::size_t m = pstedc_max_leaf(p);
+        p.block_leaf = m * m <= std::size_t(std::max(1, n / h->nprocs)) * n;
+    }
     p.rank = h->myid;
     if (!n)
         return p;
@@ -585,7 +641,7 @@ PstedcVectorPlan pstedc_policy(const DdlaHandle_t& h, int n)
         // local STEDC's smaller leaves reduce host work without adding a strip.
         const int leaf = p.backend == DdlaBackend::GPU && p.ranks == 1 && n > 1024
             ? stedc_gpu_leaf_size(n) : 1024;
-        policy[0] = dc_leaf_size("DDLA_EIG_DC_LEAF", leaf);
+        policy[0] = leaf;
         policy[1] = p.backend == DdlaBackend::CPU ? dc_split_gemm_mode() : 0;
         if (const char* env = std::getenv("DDLA_EIG_DC_STRIP")) {
             const long v = std::strtol(env, nullptr, 10);
@@ -596,15 +652,6 @@ PstedcVectorPlan pstedc_policy(const DdlaHandle_t& h, int n)
     if(p.ranks>1)MPI_CHECK(MPI_Bcast(policy, 3, MPI_INT, 0, h->comm));
     p.leaf = policy[0];
     p.split = policy[1];
-    // On a multi-rank grid, a single leaf would solve and broadcast the
-    // entire n-by-n eigenvector matrix. Keep every nontrivial leaf smaller
-    // than the original problem, including an oversized user leaf override.
-    if (p.ranks > 1 && n > 1) {
-        // Large leaves should not serialize the solve on a subset of ranks.
-        // Keep a bounded floor for small problems, where extra merges dominate.
-        const int share = n / p.ranks + (n % p.ranks != 0);
-        p.leaf = std::min({p.leaf, n / 2 + n % 2, std::max(256, share)});
-    }
     p.threads = h->host_threads;
     p.profile = eig_profile_enabled();
     const auto rows = (static_cast<unsigned long long>(n) + p.ranks - 1) / p.ranks;
@@ -629,20 +676,21 @@ PstedcVectorPlan pstedc_policy(const DdlaHandle_t& h, int n)
     return p;
 }
 
-template PstedcVectorPlan pstedc_policy<float>(const DdlaHandle_t&, int);
-template PstedcVectorPlan pstedc_policy<double>(const DdlaHandle_t&, int);
+template PstedcVectorPlan pstedc_policy<float>(const DdlaHandle_t&, int, int);
+template PstedcVectorPlan pstedc_policy<double>(const DdlaHandle_t&, int, int);
 
 template <class R>
-PstedcPlan pstedc_policy(const DdlaHandle_t& h, char jobz, int n, int ldz)
+PstedcPlan pstedc_policy(const DdlaHandle_t& h, char jobz, int n, int nblk, int ldz)
 {
     PstedcPlan p;
-    p.rows = pstedc_policy<R>(h, n);
+    p.rows = pstedc_policy<R>(h, n, nblk);
     p.rows.ldy = ldz;
+    if (jobz == 'N') p.rows.rank_leaf = false;
     p.mode = jobz == 'N' ? PstedcMode::values : PstedcMode::vectors;
     if (n && jobz == 'N') {
         int knobs[2]{};
         if (p.rows.rank == 0) {
-            knobs[0] = dc_leaf_size("DDLA_EIG_DC_LEAF", kValsLeaf);
+            knobs[0] = kValsLeaf;
             knobs[1] = pstedc_keep_mb();
         }
         MPI_CHECK(MPI_Bcast(knobs, 2, MPI_INT, 0, h->comm));
@@ -654,7 +702,7 @@ PstedcPlan pstedc_policy(const DdlaHandle_t& h, char jobz, int n, int ldz)
 }
 
 template <class R>
-PstedcPlan pstedc_check(const DdlaHandle_t& h, char jobz, int n, const R* d, const R* e, const R* w,
+PstedcPlan pstedc_check(const DdlaHandle_t& h, char jobz, int n, int nblk, const R* d, const R* e, const R* w,
                         const R* z, int ldz)
 {
     detail::agree_check(h, "pstedc", [&](detail::Agree& agreement) {
@@ -663,25 +711,25 @@ PstedcPlan pstedc_check(const DdlaHandle_t& h, char jobz, int n, const R* d, con
             throw std::invalid_argument("pstedc: null handle");
         if (h->backend == DdlaBackend::GPU && !DDLA_HAS_GPU)
             throw std::invalid_argument("pstedc: backend not built");
-        if ((jobz != 'N' && jobz != 'V') || n < 0)
+        if ((jobz != 'N' && jobz != 'V') || n < 0 || nblk < 1)
             throw std::invalid_argument("pstedc: invalid jobz or dimension");
         if (n && (!d || !w || (n > 1 && !e)))
             throw std::invalid_argument("pstedc: invalid input/output pointer");
     });
-    const int signature[] = {3112, int(h->backend), int(jobz), n, int(sizeof(R))};
+    const int signature[] = {3112, int(h->backend), int(jobz), n, nblk, int(sizeof(R))};
     detail::agree_signature(h, "pstedc", signature);
     if (jobz == 'V') {
         PstedcPlan p;
         p.mode = PstedcMode::vectors;
-        p.rows = pstedc_check<R>(h, n, d, e, w, z, ldz);
+        p.rows = pstedc_check<R>(h, n, nblk, d, e, w, z, ldz);
         return p;
     }
-    return pstedc_policy<R>(h, jobz, n, ldz);
+    return pstedc_policy<R>(h, jobz, n, nblk, ldz);
 }
 
 // The buffers of pstedc_run in its carving order (listed in pstedc_impl.h).
 template <class R>
-void stedc_rows_workspace_size(const DdlaHandle_t&, const PstedcVectorPlan& p, std::size_t* backend_bytes,
+void stedc_rows_workspace_size(const DdlaHandle_t& h, const PstedcVectorPlan& p, std::size_t* backend_bytes,
                                 std::size_t* host_bytes)
 {
     using detail::padded_bytes;
@@ -691,29 +739,37 @@ void stedc_rows_workspace_size(const DdlaHandle_t&, const PstedcVectorPlan& p, s
         return;
     const bool gpu = p.backend == DdlaBackend::GPU;
     const std::size_t n = p.n;
-    const int leaves = pstedc_leaves(p.n, p.leaf), mine = pstedc_my_leaves(leaves, p.rank, p.ranks);
-    const std::size_t m = pstedc_leaf_geometry(p.n, leaves, leaves - 1), workers = std::min(p.threads, mine);
+    const int leaves = pstedc_leaves(p), mine = pstedc_my_leaves(leaves, p.rank, p.ranks);
+    const std::size_t m = pstedc_max_leaf(p), workers = std::min(p.threads, mine);
     const std::size_t slab = std::size_t(std::max(1, detail::RowShare(p.n, p.ranks).count(p.rank))) * n;
     std::size_t backend = p.borrow_q ? 0 : padded_bytes<R>(slab);
-    if (leaves > 1) {
-        if (!p.borrow_q2)
-            backend += padded_bytes<R>(slab);
-        backend += padded_bytes<R>(n * p.strip);
-        if (gpu)
-            backend += padded_bytes<R>(5 * n) + padded_bytes<int>(2 * n) + padded_bytes<R>(2 * n);
+    if (leaves > 1 && !p.borrow_q2) backend += padded_bytes<R>(slab);
+    std::size_t tail = leaves > 1 ? padded_bytes<R>(n * p.strip) : 0;
+    if (gpu) {
+        if (leaves > 1)
+            tail += padded_bytes<R>(5*n) + padded_bytes<int>(2*n) + padded_bytes<R>(2*n);
+        tail += padded_bytes<int>(n);
     }
-    if (gpu)
-        backend += padded_bytes<int>(n);
+    const auto local = pstedc_rank_plan<R>(h,p);
+    if (gpu) tail = std::max(tail, local.backend_bytes);
+    backend += tail;
     std::size_t retained = 0;
     for (int i = p.rank; i < leaves; i += p.ranks) {
-        const std::size_t size = pstedc_leaf_geometry(p.n, leaves, i);
+        const std::size_t size = pstedc_leaf_geometry(p, i);
         retained += size * size;
     }
     const std::size_t kept =
         2 * padded_bytes<int>(leaves) + padded_bytes<int>(n) + padded_bytes<std::size_t>(mine + 1);
-    const std::size_t leaf = padded_bytes<R>(retained) + padded_bytes<R>(p.ranks > 1 ? m * m : 0) +
+    std::size_t leaf = padded_bytes<R>(retained) + padded_bytes<R>(p.ranks > 1 ? m * m : 0) +
                              padded_bytes<int>(mine) + padded_bytes<R>(workers * (m * m + 6 * m + 1)) +
                              padded_bytes<int>(workers * (5 * m + 3));
+    if (p.rank_leaf) {
+        const auto native = !gpu && local.backend_bytes > padded_bytes<R>(slab)
+            ? local.backend_bytes : 0;
+        const auto publication = 2*padded_bytes<int>(p.ranks) +
+            padded_bytes<R>(m * std::min(p.strip, std::max(1,INT_MAX / int(m))));
+        leaf = std::max({publication, local.host_bytes, native});
+    }
     std::size_t merge = 0;
     if (leaves > 1) {
         const std::size_t split = p.split ? n : 0, norm_workers = std::max(1, std::min(p.threads, p.n));
@@ -801,7 +857,7 @@ void pstedc_workspace_size(const DdlaHandle_t& h, const PstedcPlan& p, std::size
 }
 
 template <class R>
-PstedcVectorPlan pstedc_check(const DdlaHandle_t& h, int n, const R* d, const R* e, const R* w, const R* Y,
+PstedcVectorPlan pstedc_check(const DdlaHandle_t& h, int n, int nblk, const R* d, const R* e, const R* w, const R* Y,
                                  int ldy, const R* scratch, std::size_t scratch_elements)
 {
     auto p = detail::agree_check(h, "pstedc", [&](detail::Agree& agreement) {
@@ -814,8 +870,8 @@ PstedcVectorPlan pstedc_check(const DdlaHandle_t& h, int n, const R* d, const R*
         result.ldy = ldy;
         result.ranks = h->nprocs;
         result.rank = h->myid;
-        if (n < 0)
-            throw std::invalid_argument("pstedc: n must be nonnegative");
+        if (n < 0 || nblk < 1)
+            throw std::invalid_argument("pstedc: invalid n or nblk");
         if (result.ranks < 1 || result.rank < 0 || result.rank >= result.ranks)
             throw std::invalid_argument("pstedc: invalid communicator rank");
         const detail::RowShare rows(n, result.ranks);
@@ -824,11 +880,11 @@ PstedcVectorPlan pstedc_check(const DdlaHandle_t& h, int n, const R* d, const R*
             throw std::invalid_argument("pstedc: invalid input/output pointer or row stride");
         return result;
     });
-    const int signature[] = {3111, int(p.backend), n, p.ranks, int(sizeof(R))};
+    const int signature[] = {3111, int(p.backend), n, nblk, p.ranks, int(sizeof(R))};
     detail::agree_signature(h, "pstedc", signature);
     if (!n)
         return p;
-    p = pstedc_policy<R>(h, n);
+    p = pstedc_policy<R>(h, n, nblk);
     p.ldy = ldy;
     const detail::RowShare share(n, p.ranks);
     const std::size_t slab = std::size_t(std::max(1, share.count(p.rank))) * n;
@@ -849,9 +905,9 @@ PstedcVectorPlan pstedc_check(const DdlaHandle_t& h, int n, const R* d, const R*
     return p;
 }
 
-template PstedcVectorPlan pstedc_check<float>(const DdlaHandle_t&, int, const float*, const float*,
+template PstedcVectorPlan pstedc_check<float>(const DdlaHandle_t&, int, int, const float*, const float*,
                                                  const float*, const float*, int, const float*, std::size_t);
-template PstedcVectorPlan pstedc_check<double>(const DdlaHandle_t&, int, const double*, const double*,
+template PstedcVectorPlan pstedc_check<double>(const DdlaHandle_t&, int, int, const double*, const double*,
                                                   const double*, const double*, int, const double*,
                                                   std::size_t);
 
@@ -902,7 +958,7 @@ void stedc_rows_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, 
     // ---- scratch (pstedc_workspace_size) ---------------------------------------------------------------
     // The backend buffers, then the host arrays: host memory on a GPU handle, after the backend buffers on a CPU
     // handle (where backend memory is host memory).  The leaf phase and the merge phase overlay.
-    const int leaf = policy.leaf, nsub = pstedc_leaves(n, leaf), mine = pstedc_my_leaves(nsub, me, P);
+    const int nsub = pstedc_leaves(policy), mine = pstedc_my_leaves(nsub, me, P);
     const int norm_workers = std::max(1, std::min(nth, n));
     const int Wcap = policy.strip, kRootChunk = policy.root_chunk, split_mode = policy.split;
     const std::size_t slab = std::size_t(ld) * n;
@@ -915,8 +971,10 @@ void stedc_rows_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, 
     int* dGcol = nullptr; // GPU
     rt* dGnum = nullptr;  // GPU
     int* dPerm = nullptr; // GPU
-    if (nsub > 1) {
+    if (nsub > 1)
         dQ2 = policy.borrow_q2 ? dY : take<rt>(bw, slab);
+    char* const tail = bw;
+    if (nsub > 1) {
         dS = take<rt>(bw, std::size_t(n) * Wcap);
         if constexpr (kGpu) {
             dVec = take<rt>(bw, 5 * std::size_t(n));
@@ -926,6 +984,9 @@ void stedc_rows_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, 
     }
     if constexpr (kGpu)
         dPerm = take<int>(bw, n);
+    if constexpr (kGpu)
+        if (resources.local)
+            bw = tail + std::max(std::size_t(bw - tail), resources.local->plan.backend_bytes);
     char* const host_base = kGpu ? static_cast<char*>(host_work) : bw;
     [[maybe_unused]] const auto fits = [&](const char* end) {
         return kGpu ? std::size_t(bw - backend_base) <= backend_bytes &&
@@ -939,12 +1000,81 @@ void stedc_rows_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, 
     std::size_t* const offsets = take<std::size_t>(hw, mine + 1);
     char* const phase = hw;
 
-    pstedc_split_leaves(n, nsub, d, e, sizes, start);
+    for (int i = 0; i < nsub; ++i)
+        sizes[i] = pstedc_leaf_geometry(policy, i, start + i);
+    for (int i = 1; i < nsub; ++i) {
+        const int cut = start[i];
+        const rt rho = std::abs(e[cut - 1]);
+        d[cut - 1] -= rho;
+        d[cut] -= rho;
+    }
 
-    // Initialize the local eigenvector slab as block diagonal.
-    DDLA_CHECK(ddlaMemset(handle, dQ, 0, slab * sizeof(rt)));
+    // The outer Q slab is idle workspace until the rank-local solve finishes.
+    if (!policy.rank_leaf)
+        DDLA_CHECK(ddlaMemset(handle, dQ, 0, slab * sizeof(rt)));
 
-    // ---- leaves: independent host solves; only retained factors are broadcast.
+    // ---- local solves and bounded publication -------------------------------
+    if (policy.rank_leaf) {
+        // Each nonempty rank makes exactly one backend-selected local solve.
+        // Q is idle until publication; Q2 is idle until the outer merges.
+        detail::agree_local(handle, "pstedc: local STEDC", [&] {
+            if (!resources.local) return;
+            auto& local = *resources.local;
+            const int m = sizes[me], first = start[me];
+            void* work = tail;
+            if constexpr (!kGpu)
+                work = local.plan.backend_bytes <= detail::padded_bytes<rt>(slab)
+                    ? static_cast<void*>(dQ) : static_cast<void*>(phase);
+            int info = 0;
+            stedc_run<B,rt>(handle,local.plan,local.resources,d + first,e + first,
+                dQ2,m,info,work,phase,dQ);
+            if (info) throw std::runtime_error("pstedc: local STEDC failed, info=" + std::to_string(info));
+        });
+        DDLA_CHECK(ddlaMemset(handle,dQ,0,slab*sizeof(rt)));
+        char* publication = phase;
+        int* const counts = take<int>(publication,P);
+        int* const displacements = take<int>(publication,P);
+        auto* const panel = reinterpret_cast<rt*>(publication);
+        for (int i = 0; i < nsub; ++i) {
+            const int m = sizes[i], first = start[i];
+            MPI_CHECK(MPI_Bcast(d + first,m,mt,i,comm));
+            const int width = std::min(Wcap,std::max(1,INT_MAX / m));
+            const int ra = std::max(lo,first), rb = std::min(lo + nrl,first + m);
+            // Most rows already belong to the local solver's rank. Keep them
+            // on the backend; only block-rounding boundary rows need transport.
+            if (me == i && rb > ra)
+                DDLA_CHECK(ddlaMemcpy2D(handle,dQ + (ra-lo) + std::size_t(first)*ld,
+                    std::size_t(ld)*sizeof(rt),dQ2 + (ra-first),std::size_t(m)*sizeof(rt),
+                    std::size_t(rb-ra)*sizeof(rt),m));
+            for (int j = 0; j < m; j += width) {
+                const int columns = std::min(width,m-j);
+                int total = 0;
+                for (int q = 0; q < P; ++q) {
+                    const int begin = std::max(rs.lo(q),first);
+                    const int end = std::min(rs.hi(q),first+m);
+                    counts[q] = q == i ? 0 : std::max(0,end-begin)*columns;
+                    displacements[q] = total;
+                    total += counts[q];
+                    if (me == i && counts[q])
+                        DDLA_CHECK(ddlaMemcpy2D(handle,panel + displacements[q],
+                            std::size_t(end-begin)*sizeof(rt),
+                            dQ2 + (begin-first) + std::size_t(j)*m,std::size_t(m)*sizeof(rt),
+                            std::size_t(end-begin)*sizeof(rt),columns));
+                }
+                if (!total) continue;
+                if (me == i) sync(); // MPI must see the completed host pack.
+                MPI_CHECK(MPI_Scatterv(panel,counts,displacements,mt,
+                    me == i ? MPI_IN_PLACE : panel,counts[me],mt,i,comm));
+                if (counts[me]) {
+                    DDLA_CHECK(ddlaMemcpy2D(handle,dQ + (ra-lo) + std::size_t(first+j)*ld,
+                        std::size_t(ld)*sizeof(rt),panel,std::size_t(rb-ra)*sizeof(rt),
+                        std::size_t(rb-ra)*sizeof(rt),columns));
+                    sync(); // The next scatter overwrites the host receive panel.
+                }
+            }
+            for (int j = 0; j < m; ++j) indxq[first+j] = j+1;
+        }
+    } else
     {
         const int maxsz = pstedc_leaf_geometry(n, nsub, nsub - 1), workers = std::min(nth, mine);
         const std::size_t leaf_work_count = std::size_t(maxsz) * maxsz + 6 * std::size_t(maxsz) + 1;
@@ -1431,11 +1561,12 @@ void stedc_rows_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, 
     };
 
     // Reuse the leaf sizes in place for the successive tree levels.
-    for (int count = nsub; count > 1; count /= 2) {
+    for (int count = nsub; count > 1; count = (count + 1) / 2) {
         int s = 0;
         for (int i = 0; i < count; i += 2) {
-            const int m1 = sizes[i], m = m1 + sizes[i + 1];
-            merge(s, m, m1);
+            const int m1 = sizes[i], m = m1 + (i + 1 < count ? sizes[i + 1] : 0);
+            if (i + 1 < count)
+                merge(s, m, m1);
             sizes[i / 2] = m;
             s += m;
         }
@@ -1476,7 +1607,7 @@ void stedc_rows_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, 
         std::printf(
             "[pstedc_slab] n=%d P=%d threads=%d leaf=%d nleaf=%d merges=%d split=%d topK=%lld sumK=%lld | "
             "leaf %.3f decide %.3f roots %.3f zhat+S %.3f dev %.3f s\n",
-            n, P, nth, leaf, nsub, n_merge, n_split, top_k, sum_k, t_leaf, t_decide, t_roots, t_zhat, t_dev);
+            n, P, nth, pstedc_max_leaf(policy), nsub, n_merge, n_split, top_k, sum_k, t_leaf, t_decide, t_roots, t_zhat, t_dev);
 }
 
 #define PSTEDC_VECTORS_RUN(B, R)                                                                                \
@@ -1882,8 +2013,8 @@ void pstedc_run(const DdlaHandle_t& handle, const PstedcPlan& policy, rt* d, rt*
 }
 
 #define PSTEDC_CHECK_SIZE(R)                                                                                 \
-    template PstedcPlan pstedc_policy<R>(const DdlaHandle_t&, char, int, int);                               \
-    template PstedcPlan pstedc_check<R>(const DdlaHandle_t&, char, int, const R*, const R*, const R*,        \
+    template PstedcPlan pstedc_policy<R>(const DdlaHandle_t&, char, int, int, int);                               \
+    template PstedcPlan pstedc_check<R>(const DdlaHandle_t&, char, int, int, const R*, const R*, const R*,        \
                                         const R*, int); \
     template void pstedc_workspace_size<R>(const DdlaHandle_t&, const PstedcPlan&, std::size_t*, std::size_t*)
 PSTEDC_CHECK_SIZE(float);
@@ -1958,38 +2089,38 @@ void pstedc_allocate(const DdlaHandle_t& handle, const spectral_impl::PstedcPlan
 }
 
 template <typename T>
-void pstedc(const DdlaHandle_t& handle, char jobz, int n, typename real_type<T>::type* d,
+void pstedc(const DdlaHandle_t& handle, char jobz, int n, int nblk, typename real_type<T>::type* d,
             typename real_type<T>::type* e, typename real_type<T>::type* w,
             typename real_type<T>::type* z, int ldz, int& info)
 {
     static_assert(std::is_same<T, float>::value || std::is_same<T, double>::value,
                   "pstedc operates on real scalar types");
     info = 0;
-    const auto p = spectral_impl::pstedc_check<typename real_type<T>::type>(handle, jobz, n, d, e, w, z, ldz);
+    const auto p = spectral_impl::pstedc_check<typename real_type<T>::type>(handle, jobz, n, nblk, d, e, w, z, ldz);
     pstedc_allocate(handle, p, d, e, w, z);
 }
 
-template void pstedc<float>(const DdlaHandle_t&, char, int, float*, float*, float*, float*, int,
+template void pstedc<float>(const DdlaHandle_t&, char, int, int, float*, float*, float*, float*, int,
                                        int&);
-template void pstedc<double>(const DdlaHandle_t&, char, int, double*, double*, double*, double*,
+template void pstedc<double>(const DdlaHandle_t&, char, int, int, double*, double*, double*, double*,
                                         int, int&);
 
 template <typename rt>
-void pstedc(const DdlaHandle_t& handle, int n, rt* d, rt* e, rt* w, rt* Y, int ldy)
+void pstedc(const DdlaHandle_t& handle, int n, int nblk, rt* d, rt* e, rt* w, rt* Y, int ldy)
 {
-    pstedc(handle, n, d, e, w, Y, ldy, static_cast<rt*>(nullptr), 0);
+    pstedc(handle, n, nblk, d, e, w, Y, ldy, static_cast<rt*>(nullptr), 0);
 }
 
 template <typename rt>
-void pstedc(const DdlaHandle_t& handle, int n, rt* d, rt* e, rt* w, rt* Y, int ldy, rt* scratch,
+void pstedc(const DdlaHandle_t& handle, int n, int nblk, rt* d, rt* e, rt* w, rt* Y, int ldy, rt* scratch,
                  std::size_t scratch_elements)
 {
     static_assert(std::is_same<rt, float>::value || std::is_same<rt, double>::value,
                   "pstedc operates on the real types (float, double)");
     if (handle == nullptr)
         throw std::runtime_error("pstedc: null handle");
-    if (n < 0)
-        throw std::runtime_error("pstedc: n must be non-negative");
+    if (n < 0 || nblk < 1)
+        throw std::runtime_error("pstedc: invalid n or nblk");
     if (n == 0)
         return;
     const auto backend = ddlaGetBackend(handle);
@@ -1997,15 +2128,15 @@ void pstedc(const DdlaHandle_t& handle, int n, rt* d, rt* e, rt* w, rt* Y, int l
         throw std::runtime_error("pstedc: the handle's backend is not built into this library");
     spectral_impl::PstedcPlan p;
     p.mode = spectral_impl::PstedcMode::vectors;
-    p.rows = spectral_impl::pstedc_check(handle, n, d, e, w, Y, ldy, scratch, scratch_elements);
+    p.rows = spectral_impl::pstedc_check(handle, n, nblk, d, e, w, Y, ldy, scratch, scratch_elements);
     pstedc_allocate(handle, p, d, e, w, Y, scratch);
 }
 
-template void pstedc<float>(const DdlaHandle_t&, int, float*, float*, float*, float*, int);
-template void pstedc<double>(const DdlaHandle_t&, int, double*, double*, double*, double*, int);
-template void pstedc<float>(const DdlaHandle_t&, int, float*, float*, float*, float*, int, float*,
+template void pstedc<float>(const DdlaHandle_t&, int, int, float*, float*, float*, float*, int);
+template void pstedc<double>(const DdlaHandle_t&, int, int, double*, double*, double*, double*, int);
+template void pstedc<float>(const DdlaHandle_t&, int, int, float*, float*, float*, float*, int, float*,
                                  std::size_t);
-template void pstedc<double>(const DdlaHandle_t&, int, double*, double*, double*, double*, int, double*,
+template void pstedc<double>(const DdlaHandle_t&, int, int, double*, double*, double*, double*, int, double*,
                                   std::size_t);
 
 } // namespace ddla

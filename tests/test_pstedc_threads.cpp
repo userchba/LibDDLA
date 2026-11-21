@@ -110,19 +110,12 @@ void run_case(const ddla::DdlaHandle_t& h,bool public_api,const char* kind,int t
     int rank=0,P=1;MPI_Comm_rank(MPI_COMM_WORLD,&rank);MPI_Comm_size(MPI_COMM_WORLD,&P);
     const bool single=std::string(kind)=="singleleaf",unwind=std::string(kind)=="unwind";
     const int n=single?31:32*P*std::max(threads,2)+1;
-    EnvGuard leaf("DDLA_EIG_DC_LEAF","64");
-    // A single-rank CPU solve calls LAPACK once with the handle's BLAS
-    // budget. Only the distributed path splits leaves across OpenMP workers.
-    const bool local=P==1;
-    int leaves=1,max_leaf=n;
-    // A nontrivial multi-rank solve never uses a full-size replicated leaf.
-    // The small case has one local leaf per rank on the two-rank test grid.
-    const int leaf_limit=P>1&&n>1?std::min(64,n/2+n%2):64;
-    while(!local && max_leaf>leaf_limit) {max_leaf=(max_leaf+1)/2;leaves*=2;}
-    const int local_leaves=rank<leaves?(leaves-1-rank)/P+1:0;
-    const bool parallel=!local && threads>1 && local_leaves>1;
-    const int expected_calls=unwind && !parallel?std::min(local_leaves,1):local_leaves;
-    const int expected_blas=local?threads:(parallel?1:blas);
+    // Exactly one native STEDC per nonempty rank, with the handle's BLAS
+    // budget. Local solves are independent; only the outer merge uses MPI.
+    const int local_leaves=rank<std::min(P,n)?1:0;
+    const bool parallel=false;
+    const int expected_calls=local_leaves;
+    const int expected_blas=threads;
     const ddla::detail::RowShare rows(n,P);
     const int nr=rows.count(rank),ld=std::max(nr,1)+3;
     const R sentinel=R(12345);
@@ -148,9 +141,9 @@ void run_case(const ddla::DdlaHandle_t& h,bool public_api,const char* kind,int t
     bool caught=false;
     try {
         if(public_api) {
-            int info=0;ddla::pstedc<R>(h,'V',n,d.data(),e.data(),w.data(),Y.data(),ld,info);
+            int info=0;ddla::pstedc<R>(h,'V',n, 128,d.data(),e.data(),w.data(),Y.data(),ld,info);
             if(info!=0)throw std::runtime_error("pstedc returned nonzero info");
-        } else ddla::pstedc(h,n,d.data(),e.data(),w.data(),Y.data(),ld);
+        } else ddla::pstedc(h,n, 128,d.data(),e.data(),w.data(),Y.data(),ld);
     } catch(const InjectedLeafFailure&) {caught=true;}
     probe.active.store(false,std::memory_order_release);
     const int calls=probe.calls.load(),bmin=calls?probe.blas_min.load():0,bmax=probe.blas_max.load();

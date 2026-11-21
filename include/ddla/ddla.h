@@ -2472,6 +2472,8 @@ void stedc(const DdlaHandle_t& handle, char compz, int n,
  * in backend memory. For communicator rank q among P ranks, rows start at
  * q*(n/P)+min(q,n%P), with n/P+(q<n%P) rows. Column j corresponds to w[j].
  * May be null on ranks owning no rows. Ignored for 'N'.
+ * @param nblk Positive distribution block size. Contiguous block-aligned local
+ * subproblems are balanced across ranks; oversized blocks use equal row cuts.
  * @param ldz Local leading dimension, at least max(1, local row count) for 'V'.
  * Padding and storage beyond the first n columns are preserved. Ignored for 'N'.
  * @param info Zero on success. Invalid arguments or numerical failure throw.
@@ -2482,7 +2484,7 @@ void stedc(const DdlaHandle_t& handle, char compz, int n,
 template <typename T>
 void pstedc(
     const DdlaHandle_t& handle,
-    char jobz, int n,
+    char jobz, int n, int nblk,
     typename real_type<T>::type* diag_in,
     typename real_type<T>::type* e_in,
     typename real_type<T>::type* w,

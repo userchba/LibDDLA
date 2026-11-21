@@ -73,7 +73,7 @@ template<DdlaBackend B,class R>void tridiagonal_case(DdlaHandle_t h,int n,bool c
     std::vector<R> original(ysize,poison);
     R* scratch=lend_q?Q.ptr:nullptr;
     const std::size_t scratch_count=lend_q?qsize:0;
-    const auto p=pstedc_check<R>(h,n,d.data(),e.data(),w.data(),Y.ptr,ld,scratch,scratch_count);
+    const auto p=pstedc_check<R>(h,n, 128,d.data(),e.data(),w.data(),Y.ptr,ld,scratch,scratch_count);
     std::size_t backend_bytes=0,host_bytes=0;
     local_query(h,[&]{pstedc_workspace_size<R>(h,p,&backend_bytes,&host_bytes);});
     require_close(h,"compact output and caller factor storage are preserved in solver plan",
@@ -274,11 +274,11 @@ template<DdlaBackend B>void run(MPI_Comm comm,int pr,int pc,char major) {
     if constexpr(B==DdlaBackend::CPU){band_case<B,double>(h,17,8,false);band_case<B,std::complex<double>>(h,17,8,true);}
     // Force both a many-leaf tree and a single-leaf tree. Policy reads occur
     // before each measured region, and no child LAPACK query is needed.
-    setenv("DDLA_EIG_DC_LEAF","4",1);
+
     tridiagonal_case<B,float>(h,19,false,false);tridiagonal_case<B,double>(h,19,false,false);
     tridiagonal_case<B,float>(h,19,true,true);tridiagonal_case<B,double>(h,19,true,true);
     tridiagonal_case<B,float>(h,1,false,false);tridiagonal_case<B,double>(h,0,true,false);
-    unsetenv("DDLA_EIG_DC_LEAF");
+
     setenv("DDLA_SVD_DC_LEAF","4",1);setenv("DDLA_SVD_DC_THREADS","3",1);
     for(char uplo:{'U','L'}) {
         bidiagonal_case<B,float>(h,23,uplo,0,true);bidiagonal_case<B,double>(h,23,uplo,0,true);

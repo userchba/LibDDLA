@@ -128,14 +128,14 @@ OneStagePlan one_stage_check(const DdlaHandle_t& h, DdlaBackend backend, char jo
         int overlap = p.backup ? 1 : 0;
         MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, &overlap, 1, MPI_INT, MPI_MAX, h->comm));
         p.backup = overlap != 0;
-        p.vectors = pstedc_policy<R>(h, n);
+        p.vectors = pstedc_policy<R>(h, n, da[DDLA_MB_]);
         const detail::RowShare rows(n,h->nprocs);
         p.vectors.ldy = std::max(1,rows.count(h->myid));
         // The driver owns a separate, tightly packed row slab, disjoint from d/e/w.
         p.vectors.borrow_q2 = rows.count(h->myid)>0;
 
     } else
-        p.values = pstedc_values_policy<R>(h, n);
+        p.values = pstedc_values_policy<R>(h, n, da[DDLA_MB_]);
     return p;
 }
 

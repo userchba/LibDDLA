@@ -213,11 +213,10 @@ identical results).  Rules for a threaded run:
   forty allowed CPUs also receive ten. Partially overlapping masks share only
   their common CPUs. The budget is fixed when `ddlaSet` sets up the handle;
   later environment or affinity changes take effect after another `ddlaSet`.
-- On CPU handles, `pheevd` / `pstedc` temporarily set recognized BLAS thread controls to one while
-  multiple LAPACK STEDC leaves run on multiple host threads. The previous count is restored after the
-  joined leaf loop, before merge GEMMs, and when that loop exits by exception. One-leaf and one-host-thread
-  paths retain the caller's setting. This guard applies to CPU handles in CPU-only or dual builds;
-  it does not change GPU-handle behavior.
+- Each CPU vector `pstedc` rank calls native LAPACK STEDC once, temporarily using
+  the handle's host-thread budget for BLAS. The previous count is restored on
+  return or exception. GPU local STEDC keeps CPU leaf BLAS serial while its
+  independent small leaves run on host workers; vector updates run on the GPU.
 - The vendor thread setting is process-global. Run one solver call per process, with no overlapping
   solves or unrelated concurrent BLAS calls while the guard is active. The guard recognizes
   OpenBLAS/MKL get/set control pairs; unsupported libraries retain their configuration. The validation
@@ -1076,7 +1075,7 @@ conquer with host LAPACK leaves/secular roots and device eigenvector updates.
 Values-only uses host LAPACK on either backend. GPU handles must first be
 initialized with `ddlaSet`, as for local BLAS operations.
 
-`pstedc<T>(handle, jobz, n, d, e, w, z, ldz, info)` has two modes:
+`pstedc<T>(handle, jobz, n, nblk, d, e, w, z, ldz, info)` has two modes:
 `jobz='N'` computes eigenvalues only; `jobz='V'` also returns eigenvectors as
 contiguous row slabs in backend memory. For communicator rank q among P ranks,
 `local_rows = n/P + (q < n%P)` and the first global row is
@@ -1088,20 +1087,17 @@ eigenvalues on every rank. For 'N', z and ldz are ignored and z may be null.
 
 The former `descZ` overload and its automatic row-to-2D redistribution have
 been removed. Callers must allocate the row layout described above.
-With one rank, vector `pstedc` uses local `stedc` on CPU or GPU, including its
-GPU leaf policy above order 1024 and validated caller-supplied factor scratch.
-Orders through 1024 retain the one-leaf default to avoid extra device workspace;
-explicit leaf overrides remain supported. Multi-rank
-`pstedc` uses the shared row-distributed divide-and-conquer engine, with
-secular factors generated in bounded strips. The eigenvalues-only tree keeps
-only the boundary rows needed by later merges.
-
-Vector solves default to a requested leaf size of 1024. On multiple ranks,
-the actual size is also limited by `ceil(n/2)` and
-`max(256, ceil(n/P))`, including when `DDLA_EIG_DC_LEAF` requests larger leaves.
-This distributes large leaf solves across ranks while avoiding extra merges
-for small problems. Root calculation and vector normalization reuse the same
-scratch because their lifetimes do not overlap.
+With one rank, vector `pstedc` uses local `stedc` on the selected backend.
+With multiple ranks, every nonempty rank solves one contiguous local problem
+through the backend-selected `stedc` implementation, then participates in the
+row-distributed divide-and-conquer merges. The required positive `nblk` balances
+contiguous descriptor blocks: n=1000, nblk=128 and two ranks give 512/488.
+If blocks are too large to balance local factors within the existing row slabs,
+the solver uses equal contiguous row cuts. Local output and factors reuse the
+outer scratch slabs, and bounded host panels scatter only rows belonging to other ranks.
+No full global eigenvector matrix is gathered or replicated. `DDLA_EIG_DC_LEAF`
+is no longer used. The local GPU engine and eigenvalues-only tree keep internal
+bounded leaf sizes; `nblk` does not set that numerical grain.
 
 The Hermitian one-stage and two-stage drivers use the same row-distributed
 D&C solver. Each rank owns a contiguous share of rows and all

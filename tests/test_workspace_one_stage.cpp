@@ -206,7 +206,7 @@ int main(int argc,char** argv)
     ddla_test_mpi_init(&argc,&argv);int size;MPI_Comm_size(MPI_COMM_WORLD,&size);TestOptions options;std::string error;
     if(!parse_options(argc,argv,size,options,error)){std::cerr<<error<<std::endl;MPI_Abort(MPI_COMM_WORLD,2);}
     // Exercise D&C merges/resources on these small numerical problems.
-    setenv("DDLA_EIG_DC_LEAF","4",1);
+
     for(auto grid:options.grids)for(char major:{'R','C'}) {
         run<DdlaBackend::CPU>(MPI_COMM_WORLD,grid.first,grid.second,major);
 #if DDLA_HAS_GPU
