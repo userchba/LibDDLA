@@ -155,6 +155,11 @@ void invalid_cases(DdlaHandle_t h)
     if (ddlaGetSize(h)>1) {
         rejected(h,[&]{pdgmm(h,'L',7,ddlaGetRank(h)==0 ? 10 : 11,a.data,a.d,x.data(),1,c.data,c.d);});
         rejected(h,[&]{pdgmm(h,ddlaGetRank(h)==0 ? 'L' : 'R',7,11,a.data,a.d,x.data(),1,c.data,c.d);});
+        // An empty region permits every integer stride. Agreement must still
+        // detect disagreement before individual ranks take the empty return.
+        pdgmm(h,'L',0,0,a.data,a.d,x.data(),INT_MIN,c.data,c.d);
+        rejected(h,[&]{pdgmm(h,'L',0,0,a.data,a.d,x.data(),
+            ddlaGetRank(h)==0 ? INT_MIN : INT_MAX,c.data,c.d);});
     }
 }
 

@@ -55,15 +55,25 @@ struct Agree {
 // Global operation metadata must agree before any rank takes an empty-path
 // return or starts a descriptor-dependent communication schedule. LLD and
 // local pointers/coordinates deliberately do not belong in this signature.
-template<std::size_t N>
-void agree_signature(const DdlaHandle_t& h,const char* name,const int (&signature)[N])
+template <std::size_t N>
+void agree_signature(const DdlaHandle_t& h, const char* name, const int (&signature)[N])
 {
-    if(h==nullptr||h->nprocs<=1||h->comm==MPI_COMM_NULL)return;
-    int smallest[N],largest[N];
-    MPI_CHECK(MPI_Allreduce(signature,smallest,static_cast<int>(N),MPI_INT,MPI_MIN,h->comm));
-    MPI_CHECK(MPI_Allreduce(signature,largest,static_cast<int>(N),MPI_INT,MPI_MAX,h->comm));
-    for(std::size_t i=0;i<N;++i)if(smallest[i]!=largest[i])
-        throw std::invalid_argument(std::string(name)+": global metadata differs between ranks");
+    if (!h || h->nprocs <= 1 || h->comm == MPI_COMM_NULL) return;
+
+    // Complement reverses unsigned order, so MAX finds both ends of each
+    // range in one collective. This also accepts INT_MIN without negation.
+    unsigned bounds[2 * N];
+    for (std::size_t i = 0; i < N; ++i) {
+        const auto value = static_cast<unsigned>(signature[i]);
+        bounds[2 * i] = value;
+        bounds[2 * i + 1] = ~value;
+    }
+    MPI_CHECK(MPI_Allreduce(MPI_IN_PLACE, bounds, static_cast<int>(2 * N),
+                            MPI_UNSIGNED, MPI_MAX, h->comm));
+    for (std::size_t i = 0; i < N; ++i) {
+        if (bounds[2 * i] != ~bounds[2 * i + 1])
+            throw std::invalid_argument(std::string(name) + ": global metadata differs between ranks");
+    }
 }
 inline void descriptor_signature(int* destination,const int* descriptor) noexcept
 {
