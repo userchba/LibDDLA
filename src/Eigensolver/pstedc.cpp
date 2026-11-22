@@ -1022,7 +1022,7 @@ void stedc_rows_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, 
             auto& local = *resources.local;
             const int m = sizes[me], first = start[me];
             void* work = tail;
-            if constexpr (!kGpu)
+            if constexpr (B != DdlaBackend::GPU)
                 work = local.plan.backend_bytes <= detail::padded_bytes<rt>(slab)
                     ? static_cast<void*>(dQ) : static_cast<void*>(phase);
             int info = 0;
@@ -1094,7 +1094,7 @@ void stedc_rows_run(const DdlaHandle_t& handle, const PstedcVectorPlan& policy, 
         assert(fits(lw));
         {
             std::optional<detail::ScopedBlasThreads> serial_blas;
-            if constexpr (!kGpu)
+            if constexpr (B != DdlaBackend::GPU)
                 if (nth > 1 && mine > 1)
                     serial_blas.emplace(1);
             detail::host_parallel_for(workers, 1, nth, [&](long long wa, long long wb) {
