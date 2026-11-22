@@ -102,14 +102,10 @@ Geometry check(const DdlaHandle_t &h, char side, char trans, int m, int n, int k
             throw std::invalid_argument("orgqr output overlaps tau");
     });
     if constexpr (Distributed) {
-        const int sig[] = {int(B), Generate ? 1 : 0, int(p.side), int(p.trans), m, n,
-                           k,      int(sizeof(T))};
-        detail::agree_signature(h, "qr application", sig);
-        int sa[7], sc[7];
-        detail::descriptor_signature(sa, da);
-        detail::descriptor_signature(sc, dc);
-        detail::agree_signature(h, "qr reflector distribution", sa);
-        detail::agree_signature(h, "qr output distribution", sc);
+        int signature[8 + 7 + 7] = {int(B), Generate, p.side, p.trans, m, n, k, int(sizeof(T))};
+        detail::descriptor_signature(signature + 8, da);
+        detail::descriptor_signature(signature + 15, dc);
+        detail::agree_signature(h, "qr application", signature);
     }
     return p;
 }
@@ -128,8 +124,6 @@ template <class T> struct Workspace {
 template <DdlaBackend B, bool Distributed, class T>
 void prepare(const DdlaHandle_t &h, const Geometry &p, const T *tau, Workspace<T> &w) {
     checked_setup<Distributed>(h, [&] {
-        if (!p.m || !p.n || !p.k)
-            return;
         const auto count = std::size_t(p.nq) * p.cap;
         w.panel.resize(count);
         w.tmat.resize(std::size_t(p.cap) * p.cap);
@@ -146,8 +140,6 @@ void prepare(const DdlaHandle_t &h, const Geometry &p, const T *tau, Workspace<T
         w.larft.resize(w.larft_bytes);
     });
     if constexpr (Distributed) {
-        if (!p.m || !p.n || !p.k)
-            return;
         for (int j = 0; j < p.k; ++j)
             if (indxg2p(j, p.nb, p.csrc, h->npcols_) == h->mypcol_)
                 w.host_tau[j] = tau[indxg2l(j, p.nb, h->npcols_)];
@@ -187,8 +179,6 @@ void pack(const DdlaHandle_t &h, const Geometry &p, int first, int width, const 
 template <DdlaBackend B, bool Distributed, class T>
 void apply_run(const DdlaHandle_t &h, const Geometry &p, const T *a, const T *tau, T *c,
                const int *dc, Workspace<T> &w) {
-    if (!p.m || !p.n || !p.k)
-        return;
     const T one = T(1);
     const bool backwards = (p.side == 'L') == (p.trans == 'N');
     const int panels = (p.k - 1) / p.cap + 1;
@@ -262,6 +252,8 @@ void apply(const DdlaHandle_t &h, char side, char trans, int m, int n, int k, co
     const auto p =
         check<B, Distributed, false>(h, side, trans, m, n, k, a, lda, da, tau, c, ldc, dc);
     info = 0;
+    if (!m || !n || !k)
+        return;
     Workspace<T> w(h);
     prepare<B, Distributed>(h, p, tau, w);
     apply_run<B, Distributed>(h, p, a, tau, c, dc, w);
@@ -274,6 +266,10 @@ void generate(const DdlaHandle_t &h, int m, int n, int k, T *a, int lda, const i
     info = 0;
     if (!m || !n)
         return;
+    if (!k) {
+        identity<Distributed>(h, p, a, da);
+        return;
+    }
     Workspace<T> w(h);
     vector<T> saved(h);
     Geometry stored = p;
