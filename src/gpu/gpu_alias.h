@@ -117,6 +117,7 @@ constexpr auto gpucclSum = ncclSum;
 #define gpuMemcpy2DAsync DDLA_GPU_RT(Memcpy2DAsync)
 #define gpuMemcpyAsync DDLA_GPU_RT(MemcpyAsync)
 #define gpuMemsetAsync DDLA_GPU_RT(MemsetAsync)
+#define gpuMemset2DAsync DDLA_GPU_RT(Memset2DAsync)
 #define gpuPointerGetAttributes DDLA_GPU_RT(PointerGetAttributes)
 #define gpuSetDevice DDLA_GPU_RT(SetDevice)
 #define gpuStreamCreate DDLA_GPU_RT(StreamCreate)

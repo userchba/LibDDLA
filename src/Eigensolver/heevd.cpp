@@ -122,6 +122,14 @@ void heevd_run(const DdlaHandle_t& h, char job, char uplo, int n, T* a, int lda,
             if (n>1 || std::is_same_v<T, std::complex<double>>)
                 DDLA_CHECK(ddlaMemset(h, work, 0, std::size_t(lwork) * sizeof(T)));
 #endif
+#if defined(DDLA_USE_HIP)
+            if constexpr (!std::is_same_v<T, typename real_type<T>::type>) {
+                using R = typename real_type<T>::type;
+                GPU_CHECK(gpuMemset2DAsync(reinterpret_cast<R*>(a) + 1,
+                    (std::size_t(lda) + 1) * sizeof(T), 0, sizeof(R), n,
+                    static_cast<gpuStream_t>(h->stream)));
+            }
+#endif
             SOLVER_CHECK(gpu_heevd_call(static_cast<gpusolverHandle_t>(h->solverH),
                 job == 'V' ? GPUSOLVER_EIG_MODE_VECTOR : GPUSOLVER_EIG_MODE_NOVECTOR,
                 uplo == 'U' ? GPUSOLVER_FILL_MODE_UPPER : GPUSOLVER_FILL_MODE_LOWER,

@@ -797,6 +797,19 @@ void reduce(const DdlaHandle_t& h, char uplo, int n, T* a, const int* desc, T* t
     (void)host_bytes;
     detail::agree_local(h,"one-stage eigensolver", [&] {
         resources.begin_reduction();
+#if defined(DDLA_USE_HIP)
+        if constexpr (B == DdlaBackend::GPU && !std::is_same_v<T, R>) {
+            // Hermitian input does not use the imaginary diagonal.
+            for (int first = 0; first < n; first += nb) {
+                if (first / nb % pr != mr || first / nb % pc != mc) continue;
+                const int r = indxg2l(first, nb, pr), c = indxg2l(first, nb, pc);
+                T* diagonal = a + triangle_offset(lower, ld, r, c);
+                GPU_CHECK(gpuMemset2DAsync(reinterpret_cast<R*>(diagonal) + 1,
+                    (std::size_t(ld) + 1) * sizeof(T), 0, sizeof(R),
+                    std::min(nb, n - first), static_cast<gpuStream_t>(h->stream)));
+            }
+        }
+#endif
         if (invalid)
             DDLA_CHECK(ddlaMemset(h, invalid, 0, sizeof(int)));
         // Inactive slots remain defined while subsequent columns use prefixes.
