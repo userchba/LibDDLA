@@ -368,6 +368,19 @@ void pgebrd_run(const DdlaHandle_t& handle,const PgebrdPlan& p,T* A,const int*,
             commAllReduce<Backend>(handle, CommScope::Grid, d_slot, d_slot, nprocs, cclSum);
             detail::brd_sigma<T>(handle, d_slot, nprocs, d_sigma);
         }
+        rt input_scale = rt(1);
+#if defined(DDLA_USE_HIP)
+        // Keep native BLAS updates away from extreme matrix magnitudes.
+        // The existing scale is shared by all ranks and is an exact power of two.
+        DDLA_CHECK(ddlaMemcpy(handle, &input_scale, d_sigma, sizeof(rt)));
+        DDLA_CHECK(ddlaSynchronize(handle));
+        const rt safe = std::sqrt(detail::qr_safmin<rt>());
+        if (input_scale > rt(1) / safe || input_scale < safe) {
+            blas_impl::matrix_scal_run<Backend,T,rt>(handle,mloc,nloc,input_scale,A,lld);
+            static constexpr rt one = rt(1);
+            DDLA_CHECK(ddlaMemcpy(handle,d_sigma,&one,sizeof(rt)));
+        } else input_scale = rt(1);
+#endif
         // T slots of the norm record at the head of a fused all-reduce buffer (the record is rt-typed;
         // complex T rounds it up to whole elements, brd_mv's record fill covers the extra real)
         auto rec_slots = [&](int P) {
@@ -606,8 +619,31 @@ void pgebrd_run(const DdlaHandle_t& handle,const PgebrdPlan& p,T* A,const int*,
                                          ldv, ldy, mloc, nloc,
                                          VX, YU, d_d, d_e, d_tq, d_tp);
         }
+#if defined(DDLA_USE_HIP)
+        if (input_scale != rt(1)) {
+            const rt inverse = rt(1) / input_scale;
+            blas_impl::matrix_scal_run<Backend,rt>(handle,k,1,inverse,d_d,k);
+            if (k > 1) blas_impl::matrix_scal_run<Backend,rt>(handle,k-1,1,inverse,d_e,k-1);
+            // Only the bidiagonal carries the scale of A; reflector tails do not.
+            for (int band = 0; band < 2; ++band) {
+                const int row_offset = upper ? 0 : band;
+                const int col_offset = upper ? band : 0;
+                for (int first = 0; first < k - band;) {
+                    const int row = first + row_offset, col = first + col_offset;
+                    const int count = std::min({k-band-first,mb-row%mb,nb-col%nb});
+                    if (indxg2p(row,mb,rsrc,nprows)==myprow &&
+                        indxg2p(col,nb,csrc,npcols)==mypcol) {
+                        T* values = A + indxg2l(row,mb,nprows)
+                            + std::size_t(indxg2l(col,nb,npcols))*lld;
+                        blas_impl::matrix_scal_run<Backend,T,rt>(handle,1,count,inverse,values,lld+1);
+                    }
+                    first += count;
+                }
+            }
+        }
+#endif
         // d, e, tauq, taup to the HOST outputs: four stream-ordered copies behind
-        // the last payload kernel, then ONE stream sync (the only one of the call).
+        // the last payload kernel, then one stream sync. HIP also synchronizes its initial range decision.
         DDLA_CHECK(ddlaMemcpy(handle, d, d_d, static_cast<std::size_t>(k) * sizeof(rt)));
         if (k > 1)
             DDLA_CHECK(ddlaMemcpy(handle, e, d_e, static_cast<std::size_t>(k - 1) * sizeof(rt)));
