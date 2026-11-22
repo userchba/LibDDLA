@@ -7,6 +7,20 @@ set_target_properties(ddla_lib PROPERTIES
   VERSION ${CMAKE_PROJECT_VERSION}
   SOVERSION ${CMAKE_PROJECT_SOVERSION_MAJOR}
 )
+# Keep GCC's CPU-dispatch helpers in this DSO: an IFUNC resolver can run
+# before an external helper's PLT is ready during dlopen on older loaders.
+# This preserves target_clones and leaves the C++ exception runtime shared.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+    execute_process(COMMAND "${CMAKE_CXX_COMPILER}" -print-libgcc-file-name
+        OUTPUT_VARIABLE _ddla_gcc_runtime OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _ddla_gcc_runtime_status)
+    if(NOT _ddla_gcc_runtime_status EQUAL 0 OR NOT EXISTS "${_ddla_gcc_runtime}")
+        message(FATAL_ERROR "Cannot locate GCC's compiler runtime archive")
+    endif()
+    target_link_libraries(ddla_lib PRIVATE "${_ddla_gcc_runtime}")
+endif()
+
 # Public headers support C++11; implementation sources still require C++17.
 target_compile_features(ddla_lib PRIVATE cxx_std_17 INTERFACE cxx_std_11)
 target_include_directories(ddla_lib PUBLIC
