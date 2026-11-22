@@ -27,6 +27,35 @@ class TestMatrix(unittest.TestCase):
                     gr, gc = A.get_global_index(lr, lc)
                     self.assertEqual((gr, gc), (r, c))
 
+    def test_padded_shifted_partition(self):
+        m, n, mb, nb = 13, 11, 4, 3
+        pr, pc = self.handle.grid_dims
+        r, c = self.handle.grid_coords
+        rs, cs = pr - 1, pc - 1
+        rows = [i for i in range(m) if (rs + i // mb) % pr == r]
+        cols = [j for j in range(n) if (cs + j // nb) % pc == c]
+        global_data = np.arange(m * n, dtype=np.int32).reshape(m, n)
+        local_data = global_data[np.ix_(rows, cols)]
+        lld = len(rows) + 5
+
+        A = ddla.DistributedMatrix(self.handle, m, n, mb, nb, np.float64,
+                                   rs, cs, lld, data=local_data)
+        self.assertEqual(A.local_shape, local_data.shape)
+        self.assertEqual(A.data.strides[1], lld * A.dtype.itemsize)
+        np.testing.assert_array_equal(A.to_host(), local_data)
+        A.from_host(local_data + 1)
+        result = A.to_global_matrix()
+        if self.handle.rank == 0:
+            np.testing.assert_array_equal(result, global_data + 1)
+        for i in range(m):
+            self.assertEqual(A.is_local_row(i), i in rows)
+        for j in range(n):
+            self.assertEqual(A.is_local_col(j), j in cols)
+        for lr, i in enumerate(rows):
+            for lc, j in enumerate(cols):
+                self.assertEqual(A.get_local_index(i, j), (lr, lc))
+                self.assertEqual(A.get_global_index(lr, lc), (i, j))
+
     def test_gather_scatter_roundtrip(self):
         np.random.seed(101)
         orig = np.random.randn(64, 48)
@@ -35,6 +64,19 @@ class TestMatrix(unittest.TestCase):
         if self.handle.rank == 0:
             diff = np.max(np.abs(gathered - orig))
             self.assertAlmostEqual(diff, 0.0, places=12)
+
+    def test_packed_input_storage(self):
+        base = ddla.DistributedMatrix(self.handle, 13, 11, mb=3, nb=2)
+        data = np.ones(base.local_shape, dtype=base.dtype, order='F')
+        borrowed = ddla.DistributedMatrix(self.handle, 13, 11, 3, 2, data=data)
+        if data.size:
+            self.assertTrue(np.shares_memory(borrowed.data, data))
+
+        data.setflags(write=False)
+        writable = ddla.DistributedMatrix(self.handle, 13, 11, 3, 2, data=data)
+        writable.from_host(np.zeros_like(data))
+        np.testing.assert_array_equal(data, np.ones_like(data))
+        np.testing.assert_array_equal(writable.to_host(), np.zeros_like(data))
 
 if __name__ == '__main__':
     unittest.main()

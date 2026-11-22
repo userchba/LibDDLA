@@ -28,6 +28,7 @@ class DistributedMatrix:
     def __init__(self, handle: Handle, m: int, n: int, mb: int = 64, nb: int = 64,
                  dtype = np.float64, irsrc: int = 0, icsrc: int = 0, lld: int = -1,
                  data: Optional[np.ndarray] = None):
+        self._device_ptr = None
         self.handle = handle
         self.m = int(m)
         self.n = int(n)
@@ -50,15 +51,18 @@ class DistributedMatrix:
         handle.descinit(self.desc, self.m, self.n, self.mb, self.nb, self.irsrc, self.icsrc, lld)
 
         self.lld = int(self.desc[LLD_])
-        self._device_ptr = None
-
         if handle.backend == Backend.CPU:
-            if data is not None:
-                if data.shape != (self.m_loc, self.n_loc):
-                    raise ValueError(f"Provided data shape {data.shape} does not match expected local shape ({self.m_loc}, {self.n_loc})")
-                self.data = np.asfortranarray(data, dtype=self.dtype)
+            if data is not None and data.shape != self.local_shape:
+                raise ValueError(f"Provided data shape {data.shape} does not match expected local shape {self.local_shape}")
+            if data is not None and self.lld == self.m_loc:
+                self.data = np.require(data, dtype=self.dtype, requirements=['F', 'A', 'W'])
             else:
-                self.data = np.zeros((self.m_loc, self.n_loc), dtype=self.dtype, order='F')
+                # Native calls use LLD as the distance between column starts.
+                rows = self.lld if self.m_loc else 0
+                storage = np.zeros((rows, self.n_loc), dtype=self.dtype, order='F')
+                self.data = storage[:self.m_loc, :]
+                if data is not None:
+                    self.data[...] = data
             self.data_ptr = self.data.ctypes.data
         else:
             nbytes = self.lld * max(1, self.n_loc) * self.dtype.itemsize
@@ -109,10 +113,10 @@ class DistributedMatrix:
         """Upload local partition from a NumPy array to GPU device (or copy to CPU buffer)."""
         if host_arr.shape != (self.m_loc, self.n_loc):
             raise ValueError(f"Shape {host_arr.shape} != local shape ({self.m_loc}, {self.n_loc})")
-        arr = np.asfortranarray(host_arr, dtype=self.dtype)
         if self.handle.backend == Backend.CPU:
-            self.data[:, :] = arr
+            self.data[...] = host_arr
         else:
+            arr = np.asfortranarray(host_arr, dtype=self.dtype)
             elem_size = self.dtype.itemsize
             dpitch = self.lld * elem_size
             spitch = self.m_loc * elem_size
@@ -191,16 +195,15 @@ class DistributedMatrix:
     def is_local_row(self, global_r: int) -> bool:
         nprows, _ = self.handle.grid_dims
         myprow, _ = self.handle.grid_coords
-        return ((global_r // self.mb) % nprows) == myprow
+        return (self.irsrc + global_r // self.mb) % nprows == myprow
 
     def is_local_col(self, global_c: int) -> bool:
         _, npcols = self.handle.grid_dims
         _, mypcol = self.handle.grid_coords
-        return ((global_c // self.nb) % npcols) == mypcol
+        return (self.icsrc + global_c // self.nb) % npcols == mypcol
 
     def get_local_index(self, global_r: int, global_c: int) -> Tuple[int, int]:
         nprows, npcols = self.handle.grid_dims
-        myprow, mypcol = self.handle.grid_coords
         lr = (global_r // (nprows * self.mb)) * self.mb + (global_r % self.mb)
         lc = (global_c // (npcols * self.nb)) * self.nb + (global_c % self.nb)
         return (lr, lc)
@@ -208,8 +211,10 @@ class DistributedMatrix:
     def get_global_index(self, local_r: int, local_c: int) -> Tuple[int, int]:
         nprows, npcols = self.handle.grid_dims
         myprow, mypcol = self.handle.grid_coords
-        gr = ((local_r // self.mb) * nprows + myprow) * self.mb + (local_r % self.mb)
-        gc = ((local_c // self.nb) * npcols + mypcol) * self.nb + (local_c % self.nb)
+        row_offset = (myprow - self.irsrc) % nprows
+        col_offset = (mypcol - self.icsrc) % npcols
+        gr = ((local_r // self.mb) * nprows + row_offset) * self.mb + (local_r % self.mb)
+        gc = ((local_c // self.nb) * npcols + col_offset) * self.nb + (local_c % self.nb)
         return (gr, gc)
 
     def __repr__(self) -> str:
