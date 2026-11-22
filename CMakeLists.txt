@@ -100,7 +100,6 @@ if(DDLA_USE_HIP)
     endif()
     if(HIP_LIBRARIES)
         message(STATUS "HIP_LIBRARIES: ${HIP_LIBRARIES}")
-        list(APPEND math_libs ${HIP_LIBRARIES})
     endif()
 endif()
 # Host BLAS is required for CPU-only and CPU+GPU builds alike.
@@ -187,6 +186,12 @@ else()
     endif()
     message(STATUS "Using LAPACK: ${LAPACK_LIBRARIES}")
     list(APPEND math_libs ${LAPACK_LIBRARIES})
+endif()
+
+# Resolve host BLAS/LAPACK before GPU libraries that may export the same
+# Fortran symbols (for example DTK hipSOLVER).
+if(DDLA_USE_HIP)
+    list(APPEND math_libs ${HIP_LIBRARIES})
 endif()
 
 # cuda setting
