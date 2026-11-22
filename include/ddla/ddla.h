@@ -1042,6 +1042,7 @@ void pdam(const DdlaHandle_t& handle, const T1& alpha, T2* A, const int* descA, 
  * (potrf), broadcast factor, solve off-diagonal (trsm), update trailing
  * submatrix via gemm/herk.  With uplo='L', computes A = L * L^H.
  * With uplo='U', computes A = U^H * U.
+ * Use the factor in the selected triangle; HIP vendor POTRF may overwrite the opposite triangle.
  *
  * @tparam T   Scalar type (float, double, complex<float>, complex<double>).
  * @param uplo     'L' or 'U' -- triangle of A to store and factor.
@@ -2150,8 +2151,9 @@ void getrf(const DdlaHandle_t& handle, int m, int n, T* A, int lda, int* ipiv, i
  * @brief Handle-driven Cholesky factorization of a Hermitian (symmetric) positive-definite matrix (LAPACK ?potrf):
  * A = U^H * U for uplo = 'U', A = L * L^H for uplo = 'L'.
  *
- * A is n x n column-major with lda >= max(1, n).  Only the `uplo` triangle is read and overwritten; the other triangle
- * is left untouched.  `info` is 0 on success and k > 0 when the leading minor of order k is not positive definite.
+ * A is n x n column-major with lda >= max(1, n). The `uplo` triangle defines A on entry and contains the factor on exit.
+ * The opposite output triangle is unspecified: HIP/DTK may overwrite it. Leading-dimension padding is preserved.
+ * See docs/hip-dtk.md for tested DTK versions. `info` is 0 on success and k > 0 when the leading minor is not positive definite.
  * Pointer placement, asynchrony and the n <= 0 case are as for getrf.
  */
 template <typename T>

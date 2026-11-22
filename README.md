@@ -21,6 +21,10 @@ See the [changelog](CHANGELOG.md) for changes since 0.0.6.
 
 ## Key facts and caveats
 
+- **DTK HIP POTRF.** Use only the factor in the selected `uplo`; the strict
+  opposite triangle may be overwritten. See the [DTK compatibility notes](docs/hip-dtk.md)
+  for version-specific measurements and the regression-test policy.
+
 - **Backend selection.** The CPU backend is always built. Enable
   `DDLA_USE_CUDA` or `DDLA_USE_HIP` to add GPU support; the two GPU vendors
   are mutually exclusive. With neither enabled the build is CPU-only.
@@ -879,7 +883,7 @@ factorization succeeds. The factor passed to `ppotrs` is read-only.
 |----------|-------------|
 | `swap` | Swap two vectors (BLAS-1 `?swap`; strides may be negative) |
 | `getrf` | Local LU with partial pivoting, `A = P·L·U` (LAPACK `?getrf`; `ipiv` and `info` live with the data) |
-| `potrf` | Local Cholesky factorization, `uplo` = `'U'`/`'L'` (LAPACK `?potrf`; the other triangle is not touched) |
+| `potrf` | Local Cholesky factorization, `uplo` = `'U'`/`'L'` (LAPACK `?potrf`; use the selected factor; [DTK caveats](docs/hip-dtk.md) apply to the opposite triangle) |
 | `laswp` | Local row interchanges from a `getrf` pivot array (LAPACK `?laswp`; any nonzero `incx`) |
 | `geqrf(handle, uplo, m, n, A, lda, tau)` | Local QR / QL factorization, `uplo` = `'U'` (`A = Q·R`, LAPACK `?geqrf`) or `'L'` (`A = Q·L`, LAPACK `?geqlf`; cuSOLVER / hipSOLVER have no QL, so the GPU runs the vendor `geqrf` on the reversed matrix `J A J`); `tau` lives with the data |
 | `larft(handle, direct, storev, n, k, V, ldv, tau, T, ldt)` | Local triangular factor `T` of a block reflector (LAPACK `?larft`, `storev` = `'C'`): `H = I - V·T·V^H` for `k` reflectors stored as `geqrf` / `geqlf` leave them, `direct` = `'F'` (`T` upper, `H = H(1)…H(k)`) or `'B'` (`T` lower, `H = H(k)…H(1)`); `T` is written whole (zeros in the other triangle).  The GPU needs no vendor routine (cuSOLVER has `Xlarft` only from CUDA 12.4, hipSOLVER none): `herk` forms `V^H V` and one small kernel runs the column recurrence |

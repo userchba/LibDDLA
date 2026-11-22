@@ -12,6 +12,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -385,7 +386,7 @@ inline double local_max_error(const ddla::DdlaHandle_t& handle,
     return err;
 }
 
-inline void require_close(const ddla::DdlaHandle_t& handle, const std::string& name,
+inline void require_close(const ddla::DdlaHandle_t& handle, std::string_view name,
                           double local_err, double tol)
 {
     // NaN must not slip through MPI_MAX (every comparison against NaN is

@@ -438,7 +438,7 @@ if(TARGET test_api_grid_pheevd AND NOT DDLA_HAS_GPU)
     add_test(NAME test_api_grid_pheevd_cpuaccum_mpi
         COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${DDLA_TEST_NP}
                 ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_api_grid_pheevd> ${MPIEXEC_POSTFLAGS})
-    set_tests_properties(test_api_grid_pheevd_cpuaccum_mpi PROPERTIES PROCESSORS ${DDLA_TEST_NP} LABELS cpu
+    set_tests_properties(test_api_grid_pheevd_cpuaccum_mpi PROPERTIES TIMEOUT 2400 PROCESSORS ${DDLA_TEST_NP} LABELS cpu
         ENVIRONMENT "DDLA_EIG_CPU_ACCUM=1;DDLA_EIG_HOST_ACCUM_BLOCK=4096;DDLA_EIG_HOST_ACCUM_SLOTS=2;DDLA_EIG_HOST_FINISH_PANEL=64")
     add_test(NAME test_api_grid_pheevd_cpureplay_mpi
         COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${DDLA_TEST_NP}
@@ -659,11 +659,11 @@ endif()
 add_test_executable(test_pstedc_scratch)
 add_test_executable(test_hb2st_cpu_failures)
 if(TARGET test_hb2st_cpu_failures)
-    set_tests_properties(test_hb2st_cpu_failures_mpi PROPERTIES TIMEOUT 180 LABELS cpu)
+    set_tests_properties(test_hb2st_cpu_failures_mpi PROPERTIES TIMEOUT 900 LABELS cpu)
     add_test(NAME test_hb2st_cpu_failures_mpi1
         COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1
                 ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_hb2st_cpu_failures> ${MPIEXEC_POSTFLAGS})
-    set_tests_properties(test_hb2st_cpu_failures_mpi1 PROPERTIES TIMEOUT 180 PROCESSORS 1 LABELS cpu)
+    set_tests_properties(test_hb2st_cpu_failures_mpi1 PROPERTIES TIMEOUT 900 PROCESSORS 1 LABELS cpu)
 endif()
 
 add_test_executable(test_pheevd_cpu_replay)

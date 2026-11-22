@@ -115,7 +115,8 @@ void matrix_case(DdlaHandle_t h,bool local,bool structured,char side,char ua,cha
     std::array<char,256> first,last,guard;guard.fill(char(0x5a));
     DDLA_CHECK(ddlaMemcpy(h,first.data(),work.data(),256));DDLA_CHECK(ddlaMemcpy(h,last.data(),work.data()+256+bytes,256));DDLA_CHECK(ddlaSynchronize(h));
     require(h,first==guard&&last==guard&&std::all_of(host.begin(),host.begin()+256,[](char x){return x==char(0x5a);})&&std::all_of(host.end()-256,host.end(),[](char x){return x==char(0x5a);}),"mixed workspace guard changed");
-    const auto aa=a.download(),bb=b.download();
+    const auto aa=a.download();
+    const auto bb=b.download();
     require(h,!std::memcmp(aa.data(),a.host.data(),aa.size()*sizeof(TA))&&!std::memcmp(bb.data(),b.host.data(),bb.size()*sizeof(TB)),"mixed input was modified");
     ++cases;
 }

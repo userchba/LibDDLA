@@ -23,6 +23,9 @@
 #include <nccl.h>
 #endif
 #endif
+#if defined(DDLA_USE_HIP)
+#include <hipsolver/hipsolver.h>
+#endif
 
 namespace {
 enum Counter { DdlaAlloc,DdlaFree,PinnedAlloc,RawGpuAlloc,HostNew,VendorQuery,Copies,Launches,Syncs,Collectives,ResourceSetup,CounterCount };
@@ -310,6 +313,24 @@ TRACE_NCCL(ncclCommInitAll,true,(ncclComm_t* c,int n,const int* devices),(c,n,de
 #endif
 #endif
 
+#if defined(DDLA_USE_HIP)
+// Observe the regular HIP API used by the backend, matching CUDA's queries.
+#define TRACE_HIP_SOLVER(Name,Params,Args) \
+    using Name##Fn=hipsolverStatus_t(*) Params; \
+    static Name##Fn real_##Name(){static Name##Fn f=next<Name##Fn>(#Name);return f;} \
+    extern "C" hipsolverStatus_t Name Params {count(VendorQuery,true);auto f=real_##Name();return f?f Args:HIPSOLVER_STATUS_INTERNAL_ERROR;}
+#define TRACE_HIP_SOLVER_TYPE(P,T) \
+ TRACE_HIP_SOLVER(hipsolver##P##getrf_bufferSize,(hipsolverHandle_t h,int m,int n,T* a,int ld,int* lw),(h,m,n,a,ld,lw)) \
+ TRACE_HIP_SOLVER(hipsolver##P##geqrf_bufferSize,(hipsolverHandle_t h,int m,int n,T* a,int ld,int* lw),(h,m,n,a,ld,lw)) \
+ TRACE_HIP_SOLVER(hipsolver##P##potrf_bufferSize,(hipsolverHandle_t h,hipsolverFillMode_t u,int n,T* a,int ld,int* lw),(h,u,n,a,ld,lw))
+TRACE_HIP_SOLVER_TYPE(S,float)
+TRACE_HIP_SOLVER_TYPE(D,double)
+TRACE_HIP_SOLVER_TYPE(C,hipFloatComplex)
+TRACE_HIP_SOLVER_TYPE(Z,hipDoubleComplex)
+#undef TRACE_HIP_SOLVER_TYPE
+#undef TRACE_HIP_SOLVER
+#endif
+
 namespace {
 void prewarm()
 {
@@ -326,6 +347,11 @@ void prewarm()
     (void)ddla::real_ddlaDeviceSynchronize();(void)ddla::real_ddlaEventSynchronize();
     (void)real_sgeqrf_();(void)real_dgeqrf_();(void)real_cgeqrf_();(void)real_zgeqrf_();
     (void)real_sgeqlf_();(void)real_dgeqlf_();(void)real_cgeqlf_();(void)real_zgeqlf_();
+#if defined(DDLA_USE_HIP)
+#define WARM_HIP_SOLVER(P) (void)real_hipsolver##P##getrf_bufferSize();(void)real_hipsolver##P##geqrf_bufferSize();(void)real_hipsolver##P##potrf_bufferSize()
+    WARM_HIP_SOLVER(S);WARM_HIP_SOLVER(D);WARM_HIP_SOLVER(C);WARM_HIP_SOLVER(Z);
+#undef WARM_HIP_SOLVER
+#endif
 #if defined(DDLA_USE_CUDA)
 #define WARM(Name) (void)real_##Name()
     WARM(cudaMalloc);WARM(cudaMallocAsync);WARM(cudaMallocHost);WARM(cudaHostAlloc);

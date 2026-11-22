@@ -6,8 +6,8 @@
 //
 //   getrf  square / tall / wide shapes, padded leading dimension with the padding checked untouched, pivot range,
 //          A = P*L*U rebuilt by hand and compared with the input, `info` for an exactly singular matrix;
-//   potrf  'U' and 'L' on a Hermitian positive-definite matrix, A = U^H U / L L^H rebuilt by hand, the unreferenced
-//          triangle checked bit for bit;
+//   potrf  'U' and 'L' on a Hermitian positive-definite matrix, A = U^H U / L L^H rebuilt by hand, the
+//          selected factor and leading-dimension padding checked;
 //   laswp  bit-exact against a hand-written LAPACK loop for incx = 1, 2, -1, -2 and sub-ranges k1..k2 (incx = 1 is
 //          the vendor routine on CUDA, every other stride the row-by-row fallback), and incx = 1 followed by
 //          incx = -1 restoring the matrix;
@@ -274,12 +274,13 @@ int check_potrf(const DdlaHandle_t& h, char uplo, int n, int pad, std::uint64_t 
             if (i == j) s = Tr<T>::make(static_cast<double>(std::real(s)) + n, 0.0);
             A[i + static_cast<std::size_t>(j) * lda] = s;
         }
-    // The triangle potrf must not touch gets a sentinel that would wreck the result if it were read.
+    // Poison the ignored input triangle to detect accidental reads into the result.
     std::vector<T> A0 = A;
     for (int j = 0; j < n; ++j)
         for (int i = 0; i < n; ++i)
             if ((uplo == 'U' && i > j) || (uplo == 'L' && i < j))
-                A0[i + static_cast<std::size_t>(j) * lda] = Tr<T>::make(777.0 + i, -555.0 - j);
+                A0[i + static_cast<std::size_t>(j) * lda] = Tr<T>::make(std::numeric_limits<double>::quiet_NaN(),
+                    std::numeric_limits<double>::quiet_NaN());
 
     Buf<T> dA(h, A0.size());
     Buf<int> dinfo(h, 1);
@@ -298,17 +299,16 @@ int check_potrf(const DdlaHandle_t& h, char uplo, int n, int pad, std::uint64_t 
                                  " want 0");
         ++failures;
     }
-    // Unreferenced triangle and padding: bit for bit what went in.
+    // POTRF returns its factor in the selected triangle. DTK HIP can modify
+    // entries in the strict opposite triangle (see docs/hip-dtk.md).
+    // Padding is outside the matrix and must remain unchanged.
     for (int j = 0; j < n; ++j)
-        for (int i = 0; i < lda; ++i) {
-            const bool referenced = i < n && ((uplo == 'U' && i <= j) || (uplo == 'L' && i >= j));
-            if (referenced) continue;
-            if (!same_bits(F[i + static_cast<std::size_t>(j) * lda], A0[i + static_cast<std::size_t>(j) * lda])) {
-                report("potrf wrote outside the triangle", std::string("uplo=") + uplo + " " + dims(n, n) + " at (" +
-                                                               std::to_string(i) + "," + std::to_string(j) + ")");
+        for (int i = n; i < lda; ++i)
+            if (!same_bits(F[i + static_cast<std::size_t>(j) * lda], guard_value<T>())) {
+                report("potrf padding written", std::string("uplo=") + uplo + " " + dims(n, n) + " at (" +
+                                                 std::to_string(i) + "," + std::to_string(j) + ")");
                 return failures + 1;
             }
-        }
 
     double err = 0.0;
     for (int j = 0; j < n; ++j)
@@ -322,7 +322,9 @@ int check_potrf(const DdlaHandle_t& h, char uplo, int n, int pad, std::uint64_t 
                 else
                     s += F[i + static_cast<std::size_t>(t) * lda] * Tr<T>::conjv(F[j + static_cast<std::size_t>(t) * lda]);
             }
-            err = std::max(err, static_cast<double>(std::abs(s - A[i + static_cast<std::size_t>(j) * lda])));
+            const double residual = static_cast<double>(std::abs(s - A[i + static_cast<std::size_t>(j) * lda]));
+            if (!std::isfinite(residual)) err = std::numeric_limits<double>::infinity();
+            else err = std::max(err, residual);
         }
     const double tol = 200.0 * Tr<T>::eps() * n * n;
     if (!(err <= tol)) {
