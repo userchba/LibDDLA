@@ -282,6 +282,8 @@ void test(DdlaHandle_t h, bool distributed, int order, int k, int qcols) {
 }
 template <DdlaBackend B, class T> void cases(DdlaHandle_t h) {
     for (bool distributed : {false, true}) {
+        // One active coordinate in the last panel leaves some grid ranks empty.
+        test<B, T>(h, distributed, 65, 65, 65);
         test<B, T>(h, distributed, 43, 37, 43);
         test<B, T>(h, distributed, 13, 7, 9);
         test<B, T>(h, distributed, 3, 1, 2);
