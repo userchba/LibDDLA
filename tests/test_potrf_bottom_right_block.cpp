@@ -1,3 +1,4 @@
+#include "test_max_error.h"
 #include "test_backend.h"
 #include <algorithm>
 #include <cmath>
@@ -157,15 +158,6 @@ double tolerance(int n)
          * std::max(1, n);
 }
 
-inline void update_error(double& error, double value)
-{
-    if(!std::isfinite(value)){
-        error = std::numeric_limits<double>::infinity();
-    }else{
-        error = std::max(error, value);
-    }
-}
-
 template <typename T>
 bool run_success_case(char uplo, int n, const DdlaHandle_t& handle)
 {
@@ -206,15 +198,15 @@ bool run_success_case(char uplo, int n, const DdlaHandle_t& handle)
                 ? expected[row + static_cast<std::size_t>(column) * lda]
                 : opposite_triangle_sentinel<T>(row, column);
             if(referenced){
-                update_error(factor_error,
+                ddla_test::update_max_error(factor_error,
                              static_cast<double>(std::abs(actual - reference)));
             }else{
-                update_error(opposite_triangle_error,
+                ddla_test::update_max_error(opposite_triangle_error,
                              static_cast<double>(std::abs(actual - reference)));
             }
         }
         for(int row = n; row < lda; ++row){
-            update_error(
+            ddla_test::update_max_error(
                 padding_error,
                 static_cast<double>(std::abs(
                     output[row + static_cast<std::size_t>(column) * lda]

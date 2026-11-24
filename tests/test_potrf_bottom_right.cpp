@@ -1,3 +1,4 @@
+#include "test_max_error.h"
 #include "test_backend.h"
 #include <algorithm>
 #include <cmath>
@@ -163,7 +164,7 @@ double factor_error(
             if(!in_referenced_triangle(uplo, i, j)){
                 continue;
             }
-            error = std::max(
+            ddla_test::update_max_error(
                 error,
                 static_cast<double>(std::abs(
                     actual[i + static_cast<size_t>(j) * lda]
@@ -183,7 +184,7 @@ double opposite_triangle_error(
             if(in_referenced_triangle(uplo, i, j)){
                 continue;
             }
-            error = std::max(
+            ddla_test::update_max_error(
                 error,
                 static_cast<double>(std::abs(
                     matrix[i + static_cast<size_t>(j) * lda]
@@ -200,13 +201,24 @@ double padding_error(const std::vector<T>& matrix, int n, int lda)
     const T expected = padding_value<T>();
     for(int j = 0; j < n; ++j){
         for(int i = n; i < lda; ++i){
-            error = std::max(
+            ddla_test::update_max_error(
                 error,
                 static_cast<double>(std::abs(
                     matrix[i + static_cast<size_t>(j) * lda] - expected)));
         }
     }
     return error;
+}
+
+bool detects_nonfinite_output()
+{
+    constexpr int n = 2, lda = 3;
+    const auto expected = make_factor<double>('U', n, lda);
+    auto actual = expected;
+    actual[0] = actual[1] = actual[2] = std::numeric_limits<double>::quiet_NaN();
+    return std::isinf(factor_error('U', actual, expected, n, lda))
+        && std::isinf(opposite_triangle_error('U', actual, n, lda))
+        && std::isinf(padding_error(actual, n, lda));
 }
 
 template <typename T>
@@ -282,7 +294,8 @@ int main(int argc, char** argv)
     ddla::ddlaInit(handle, ddla_test::execution_backend);
     ddla::ddlaSet(handle, MPI_COMM_WORLD);
 
-    bool passed = true;
+    bool passed = detects_nonfinite_output();
+    if (!passed) std::cerr << "FAIL: nonfinite Cholesky output was accepted\n";
     passed = run_type<float>(handle) && passed;
     passed = run_type<double>(handle) && passed;
     passed = run_type<std::complex<float>>(handle) && passed;
