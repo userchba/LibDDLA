@@ -24,6 +24,8 @@ class DistributedMatrix:
     
     Provides NumPy array interoperability for local partitions on CPU handles,
     device memory management on GPU handles, and native gather/scatter routines.
+    CPU ``data`` exposes the logical local shape with a column stride of ``lld``
+    elements; padded partitions are not necessarily Fortran-contiguous.
     """
     def __init__(self, handle: Handle, m: int, n: int, mb: int = 64, nb: int = 64,
                  dtype = np.float64, irsrc: int = 0, icsrc: int = 0, lld: int = -1,
@@ -53,12 +55,17 @@ class DistributedMatrix:
         self._device_ptr = None
 
         if handle.backend == Backend.CPU:
-            if data is not None:
-                if data.shape != (self.m_loc, self.n_loc):
-                    raise ValueError(f"Provided data shape {data.shape} does not match expected local shape ({self.m_loc}, {self.n_loc})")
+            if data is not None and data.shape != (self.m_loc, self.n_loc):
+                raise ValueError(f"Provided data shape {data.shape} does not match expected local shape ({self.m_loc}, {self.n_loc})")
+            if data is not None and self.lld == self.m_loc:
                 self.data = np.asfortranarray(data, dtype=self.dtype)
             else:
-                self.data = np.zeros((self.m_loc, self.n_loc), dtype=self.dtype, order='F')
+                storage = np.zeros((self.lld, self.n_loc), dtype=self.dtype, order='F')
+                # The view retains its backing allocation and the descriptor's
+                # column stride while hiding padding from local indexing.
+                self.data = storage[:self.m_loc, :]
+                if data is not None:
+                    self.from_host(data)
             self.data_ptr = self.data.ctypes.data
         else:
             nbytes = self.lld * max(1, self.n_loc) * self.dtype.itemsize
