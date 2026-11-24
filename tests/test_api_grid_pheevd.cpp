@@ -59,6 +59,41 @@ void dsterf_(const int*, double*, double*, int*);
 
 namespace {
 
+template <typename rt>
+double values_only_metric(const std::vector<rt>& w, const std::vector<rt>& ref, double normA)
+{
+    double dev = 0.0;
+    for (std::size_t i = 0; i < w.size(); ++i) {
+        const double error = std::fabs(static_cast<double>(w[i] - ref[i]));
+        // Reject non-finite differences before std::max can discard a NaN.
+        dev = std::max(dev, std::isfinite(error) ? error : std::numeric_limits<double>::infinity());
+    }
+    return dev / (normA * eig_test::eps_trait<rt>::value) / w.size();
+}
+
+template <typename rt>
+void check_values_only_metric(const ddla::DdlaHandle_t& handle)
+{
+    const std::vector<rt> ref = {rt(-2), rt(0), rt(2)};
+    require_close(handle, "pheevd 'N' metric exact control", values_only_metric(ref, ref, 2.0), 0.0);
+
+    std::vector<rt> w = ref;
+    w[1] = rt(6) * eig_test::eps_trait<rt>::value;
+    require_close(handle, "pheevd 'N' metric finite control",
+                  std::fabs(values_only_metric(w, ref, 2.0) - 1.0),
+                  4 * std::numeric_limits<rt>::epsilon());
+
+    for (rt nonfinite : {std::numeric_limits<rt>::quiet_NaN(),
+                         std::numeric_limits<rt>::infinity(),
+                         -std::numeric_limits<rt>::infinity()}) {
+        // All other eigenvalues match: a swallowed NaN would report zero error.
+        w[1] = nonfinite;
+        require_close(handle, "pheevd 'N' metric rejects non-finite error",
+                      values_only_metric(w, ref, 2.0) == std::numeric_limits<double>::infinity()
+                          ? 0.0 : 1.0, 0.0);
+    }
+}
+
 template <typename U> U conj_v2(U v) { return v; }
 template <typename U> std::complex<U> conj_v2(std::complex<U> v) { return std::conj(v); }
 
@@ -616,12 +651,8 @@ void check_body_t(const ddla::DdlaHandle_t& handle, const Shape& base)
         const std::vector<rt> ref = host_eigh<T>(Ah_full, nn);
         double normA = 0.0;
         for (const T v : Ah_full) normA = std::max(normA, static_cast<double>(std::abs(v)));
-        double dev = 0.0;
-        for (int i = 0; i < nn; ++i)
-            dev = std::max(dev, std::fabs(static_cast<double>(w2[i] - ref[i])));
-        const double metric = dev / (normA * eig_test::eps_trait<rt>::value);
         // same two-stage backward-error bound as the jobz='V' check above
-        require_close(handle, "pheevd 'N' eigenvalues", metric / nn, 8.0);
+        require_close(handle, "pheevd 'N' eigenvalues", values_only_metric(w2, ref, normA), 8.0);
     };
     check_pheevd_N(n, true);
     check_pheevd_N(n, false);
@@ -639,6 +670,8 @@ void check_body_t(const ddla::DdlaHandle_t& handle, const Shape& base)
 
 static void check_body(const ddla::DdlaHandle_t& handle, const Shape& base)
 {
+    check_values_only_metric<float>(handle);
+    check_values_only_metric<double>(handle);
     check_body_t<float>(handle, base);
     check_body_t<double>(handle, base);
     check_body_t<std::complex<float>>(handle, base);
