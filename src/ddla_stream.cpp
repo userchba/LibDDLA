@@ -1,5 +1,6 @@
 #include "ddla_stream.h"
 #include "ddla_connector.h"
+#include "check_agree.h"
 
 #include <cmath>
 #include <cstdio>
@@ -77,14 +78,22 @@ void clean_resources(DdlaStream& s)
 {
     if constexpr (Backend == DdlaBackend::GPU) {
 #if DDLA_HAS_GPU
-        if (s.local_device >= 0) GPU_CHECK(gpuSetDevice(s.local_device));
-        // CCL work may still reference the queues. Finish it before releasing
-        // communicators, then destroy queues and compute-library resources.
-        if (s.stream || s.blasH || s.solverH)
-            GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(s.stream)));
-        if (s.stream_data) GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(s.stream_data)));
-        if (s.stream_level) GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(s.stream_level)));
-        s.communicator->release(&s, false);
+        const auto drain = [&] {
+            if (s.local_device >= 0) GPU_CHECK(gpuSetDevice(s.local_device));
+            if (s.stream || s.blasH || s.solverH)
+                GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(s.stream)));
+            if (s.stream_data) GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(s.stream_data)));
+            if (s.stream_level) GPU_CHECK(gpuStreamSynchronize(static_cast<gpuStream_t>(s.stream_level)));
+        };
+        const bool collective_ccl = s.initialized && s.nprocs > 1 && s.communication() == DdlaCommunication::CCL;
+        if (collective_ccl) {
+            // A peer can still be importing a CCL buffer after our own stream
+            // completes. Every rank must finish before any rank releases it.
+            detail::agree_local(s.comm, "ddla: CCL queue drain", drain);
+        } else {
+            drain();
+        }
+        s.communicator->release(&s, collective_ccl);
         for (auto& event : s.summa_ready) destroy_fence(event);
         for (auto& event : s.summa_reuse) destroy_fence(event);
         destroy_fence(s.summa_input);
