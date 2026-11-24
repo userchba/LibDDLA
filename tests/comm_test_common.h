@@ -177,6 +177,11 @@ template<DdlaBackend B,class T>void messages(DdlaHandle_t h,CommScope scope,int 
     }
     verify(recv,0,[&](std::size_t){return guard;},"reduce non-root output untouched");
 
+    upload();
+    commReduceSum<B>(h,scope,send.data(),recv.data(),count,root);
+    verify(recv,rank==root?count:0,sum,"reduce separate root output value/guard");
+    verify(send,count,[&](std::size_t i){return value<T>(rank,i);},"reduce preserves separate input");
+
     // Allgather is also used by the CCL one-stage reduction. Exercise all
     // transports with zero counts, every scalar type and guarded output.
     upload();

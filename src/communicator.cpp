@@ -87,14 +87,15 @@ public:
                     int count, MPI_Datatype type, std::size_t width, int root, void* queue) const override
     {
         const auto bytes = message_bytes(count, width);
-        auto [hs, hr] = h->host_buffers<std::byte>(bytes, bytes);
-        DDLA_CHECK(detail::memcpy_on(h, hs, send, bytes, queue ? queue : h->stream));
-        DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
-        MPI_CHECK(MPI_Reduce(hs, hr, count, type, MPI_SUM, root, mpi_comm(h, scope)));
+        auto* host = h->host_buffers<std::byte>(bytes)[0];
         const int rank = scope == CommScope::Row ? h->mypcol_ :
                          scope == CommScope::Col ? h->myprow_ : h->myid;
+        DDLA_CHECK(detail::memcpy_on(h, host, send, bytes, queue ? queue : h->stream));
+        DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
+        MPI_CHECK(MPI_Reduce(rank == root ? MPI_IN_PLACE : host, host, count, type,
+                             MPI_SUM, root, mpi_comm(h, scope)));
         if (rank == root) {
-            DDLA_CHECK(detail::memcpy_on(h, recv, hr, bytes, queue ? queue : h->stream));
+            DDLA_CHECK(detail::memcpy_on(h, recv, host, bytes, queue ? queue : h->stream));
             DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
         }
     }
