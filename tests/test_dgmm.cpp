@@ -174,6 +174,7 @@ void scalar_cases(DdlaHandle_t h)
         distributed_case<B,T,U>(h,side,1,1,incx,inplace,0,0);
     }
     for (char side : {'L','R'}) {
+        local_case<B,T,U>(h,side,67,19,-2,true);
         local_case<B,T,U>(h,side,0,7,1,false);
         local_case<B,T,U>(h,side,5,0,-1,false);
         distributed_case<B,T,U>(h,side,0,11,1,false,0,0);
@@ -192,6 +193,25 @@ void run(int pr, int pc)
     scalar_cases<B,std::complex<double>,std::complex<double>>(h);
     scalar_cases<B,std::complex<float>,float>(h);
     scalar_cases<B,std::complex<double>,double>(h);
+    // One column can legally have a pitch too large to double for real DGMM.
+    // The imaginary component must remain finite when the real one is NaN.
+    {
+        using Z = std::complex<double>;
+        const int ld = INT_MAX / 2 + 1;
+        const Z seed(std::numeric_limits<double>::quiet_NaN(), -3.);
+        const double scale = 2.;
+        Z result;
+        ddla::vector<Z> matrix(h, 1);
+        ddla::vector<double> diagonal(h, 1);
+        DDLA_CHECK(ddlaMemcpy(h, matrix.data(), &seed, sizeof(seed)));
+        DDLA_CHECK(ddlaMemcpy(h, diagonal.data(), &scale, sizeof(scale)));
+        dgmm(h, 'R', 1, 1, matrix.data(), ld, diagonal.data(), INT_MIN, matrix.data(), ld);
+        DDLA_CHECK(ddlaMemcpy(h, &result, matrix.data(), sizeof(result)));
+        DDLA_CHECK(ddlaSynchronize(h));
+        require_all(h, std::isnan(result.real()) && result.imag() == -6., "DGMM large pitch or mixed component");
+    }
+    if constexpr (B == DdlaBackend::CPU)
+        distributed_case<B,std::complex<double>,double>(h,'R',1043,1061,-2,true,0,0);
     invalid_cases<B>(h);
     if (ddlaGetRank(h)==0) std::cout<<"DGMM_PASS backend="<<int(B)<<" grid="<<pr<<'x'<<pc<<" type_pairs=6"<<std::endl;
     DDLA_CHECK(ddlaDestroy(h));

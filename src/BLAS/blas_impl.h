@@ -2,6 +2,7 @@
 #define DDLA_BLAS_IMPL_H
 #include <ddla/ddla.h>
 #include "ddla_connector.h"
+#include "host_parallel.h"
 #include "plan_util.h"
 #include <algorithm>
 #include <type_traits>
@@ -11,6 +12,18 @@
 namespace ddla { namespace blas_impl {
 // Shared with rectangle batches: below this size CPU GEAM stays serial.
 constexpr long long kGeamParallelMinElems = 1LL << 16;
+
+// A column range belongs to one worker, including all block-cyclic diagonal
+// segments within it. The grain keeps each worker's nested DGMM calls serial.
+template <class Function>
+void dgmm_columns(int rows, int columns, int threads, const Function& scale)
+{
+    constexpr long long grain = 1LL << 16;
+    if (threads > 1 && columns > 1 && std::size_t(rows) * columns >= 4 * grain)
+        detail::host_parallel_for(columns, std::max(1LL, grain / rows), threads, scale);
+    else
+        scale(0, columns);
+}
 // Scratch-free operations expose check/run only. Mixed GEMM, GEMMT and TRTRM
 // need scratch: a size function (backend bytes) and a run that takes them.
 // These conversions assume the caller has already checked the flags.

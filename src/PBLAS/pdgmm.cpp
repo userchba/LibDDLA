@@ -44,33 +44,41 @@ void pdgmm_run(const DdlaHandle_t& h, char side, int m, int n,
     const int rows=num_loc(m,descA[DDLA_MB_],h->myprow_,descA[DDLA_RSRC_],h->nprows_);
     const int columns=num_loc(n,descA[DDLA_NB_],h->mypcol_,descA[DDLA_CSRC_],h->npcols_);
     if (rows==0 || columns==0) return;
-    if (h->nprocs == 1) {
-        blas_impl::dgmm_run<Backend,T,U>(h,side,m,n,A,descA[DDLA_LLD_],
-            x,incx,C,descC[DDLA_LLD_]);
-        return;
-    }
     side=blas_impl::upper(side);
     const bool left=side=='L';
     const int length=left ? m : n;
-    const int local_length=left ? rows : columns;
     const int block=descA[left ? DDLA_MB_ : DDLA_NB_];
     const int source=descA[left ? DDLA_RSRC_ : DDLA_CSRC_];
     const int coordinate=left ? h->myprow_ : h->mypcol_;
     const int processes=left ? h->nprows_ : h->npcols_;
-    const std::ptrdiff_t step=incx<0 ? -std::ptrdiff_t(incx) : incx;
-    for (int local=0;local<local_length;) {
-        const int width=std::min(block,local_length-local);
-        const int global=indxl2g(local,block,coordinate,source,processes);
-        // DGMM starts a negative-stride slice at its highest address. Pass
-        // the slice's lowest address so its first value is global[global].
-        const std::ptrdiff_t diagonal_offset=incx<0 ?
-            std::ptrdiff_t(length-global-width)*step : std::ptrdiff_t(global)*step;
-        const std::size_t a_offset=left ? local : std::size_t(local)*descA[DDLA_LLD_];
-        const std::size_t c_offset=left ? local : std::size_t(local)*descC[DDLA_LLD_];
-        blas_impl::dgmm_run<Backend,T,U>(h,side,left ? width : rows,left ? columns : width,
-            A+a_offset,descA[DDLA_LLD_],x+diagonal_offset,incx,C+c_offset,descC[DDLA_LLD_]);
-        local+=width;
+    // A constant diagonal or an undistributed scaling axis needs only one
+    // local product, even when the other axis spans several ranks.
+    if (incx == 0 || processes == 1) {
+        blas_impl::dgmm_run<Backend,T,U>(h,side,rows,columns,A,descA[DDLA_LLD_],
+            x,incx,C,descC[DDLA_LLD_]);
+        return;
     }
+    const std::ptrdiff_t step=incx<0 ? -std::ptrdiff_t(incx) : incx;
+    const int lda = descA[DDLA_LLD_], ldc = descC[DDLA_LLD_];
+    const auto scale_columns = [&](int begin, int end) {
+        const int limit = left ? rows : end;
+        for (int local = left ? 0 : begin; local < limit;) {
+            const int width = std::min(block - local % block, limit - local);
+            const int global = indxl2g(local, block, coordinate, source, processes);
+            // Negative-stride DGMM expects the lowest address of this slice.
+            const auto offset = std::ptrdiff_t(incx < 0 ? length - global - width : global) * step;
+            const int row = left ? local : 0;
+            const int col = left ? begin : local;
+            blas_impl::dgmm_run<Backend,T,U>(h, side, left ? width : rows, left ? end - begin : width,
+                A + std::size_t(col) * lda + row, lda, x + offset, incx,
+                C + std::size_t(col) * ldc + row, ldc);
+            local += width;
+        }
+    };
+    if constexpr (Backend == DdlaBackend::CPU)
+        blas_impl::dgmm_columns(rows, columns, h->host_threads, scale_columns);
+    else
+        scale_columns(0, columns);
 }
 
 }} // namespace ddla::pdgmm_impl
