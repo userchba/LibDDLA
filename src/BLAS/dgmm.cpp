@@ -13,6 +13,29 @@
 
 namespace ddla { namespace blas_impl {
 
+#if DDLA_HAS_GPU
+namespace {
+// Vendor DGMM supports a single scalar type. A real diagonal scales each
+// component of a complex element independently, including infinities and NaNs.
+template <typename R>
+__global__ void mixed_dgmm(bool left, int m, int n, const R* a, int lda,
+                           const R* diagonal, int incx, R* c, int ldc)
+{
+    for (unsigned j = blockIdx.y * blockDim.y + threadIdx.y; j < unsigned(n);
+         j += gridDim.y * blockDim.y) {
+        for (unsigned i = blockIdx.x * blockDim.x + threadIdx.x; i < unsigned(m);
+             i += gridDim.x * blockDim.x) {
+            const R scale = diagonal[std::ptrdiff_t(left ? i : j) * incx];
+            const auto src = 2 * (std::size_t(j) * lda + i);
+            const auto dst = 2 * (std::size_t(j) * ldc + i);
+            c[dst]     = a[src]     * scale;
+            c[dst + 1] = a[src + 1] * scale;
+        }
+    }
+}
+} // namespace
+#endif
+
 template <DdlaBackend Backend, typename T, typename U>
 void dgmm_check(const DdlaHandle_t& h, char side, int m, int n,
     const T* A, int lda, const U* x, int incx, T* C, int ldc, int diagonal_length)
@@ -52,33 +75,40 @@ void dgmm_run(const DdlaHandle_t& h, char side, int m, int n,
     const int length=side=='L' ? m : n;
     const std::ptrdiff_t first=incx<0 ? std::ptrdiff_t(length-1)*-std::ptrdiff_t(incx) : 0;
     if constexpr (Backend==DdlaBackend::CPU) {
-        for (int j=0;j<n;++j) {
-            for (int i=0;i<m;++i) {
-                const int diagonal_index=side=='L' ? i : j;
-                C[i+std::size_t(j)*ldc]=A[i+std::size_t(j)*lda]
-                    *x[first+std::ptrdiff_t(diagonal_index)*incx];
+        const U* diagonal = x + first;
+        const auto scale_columns = [&](int begin, int end) {
+            for (int j = begin; j < end; ++j) {
+                const T* input = A + std::size_t(j) * lda;
+                T* output = C + std::size_t(j) * ldc;
+                if (side == 'L') {
+                    for (int i = 0; i < m; ++i)
+                        output[i] = input[i] * diagonal[std::ptrdiff_t(i) * incx];
+                } else {
+                    const U scale = diagonal[std::ptrdiff_t(j) * incx];
+                    for (int i = 0; i < m; ++i)
+                        output[i] = input[i] * scale;
+                }
             }
-        }
+        };
+        dgmm_columns(m, n, h->host_threads, scale_columns);
     } else {
 #if DDLA_HAS_GPU
         const auto handle=static_cast<gpublasHandle_t>(h->blasH);
         if (length==1) incx=0;
         if constexpr (!std::is_same_v<T,U>) {
-            // A real diagonal scales both components equally. Right scaling
-            // views the full matrix as 2m real rows. Left scaling views each
-            // column as a 2-by-m real matrix and scales its columns.
+            // Right scaling can treat each complex column as 2m real rows.
             if (side=='R' && lda<=std::numeric_limits<int>::max()/2 &&
                 ldc<=std::numeric_limits<int>::max()/2) {
                 dgmm_run<Backend,U,U>(h,'R',2*m,n,reinterpret_cast<const U*>(A),2*lda,
                     x,incx,reinterpret_cast<U*>(C),2*ldc);
             } else {
-                for (int j=0;j<n;++j) {
-                    const U* diagonal=side=='L' ? x : x+first+std::ptrdiff_t(j)*incx;
-                    dgmm_run<Backend,U,U>(h,'R',2,m,
-                        reinterpret_cast<const U*>(A+std::size_t(j)*lda),2,
-                        diagonal,side=='L' ? incx : 0,
-                        reinterpret_cast<U*>(C+std::size_t(j)*ldc),2);
-                }
+                const dim3 block(32, 8);
+                const dim3 grid(std::min(65535u, (unsigned(m) + block.x - 1) / block.x),
+                                std::min(65535u, (unsigned(n) + block.y - 1) / block.y));
+                mixed_dgmm<<<grid, block, 0, static_cast<gpuStream_t>(h->stream)>>>(
+                    side == 'L', m, n, reinterpret_cast<const U*>(A), lda,
+                    x + first, incx, reinterpret_cast<U*>(C), ldc);
+                DDLA_CHECK(ddlaGetLastError(h));
             }
         } else if constexpr (std::is_same_v<T,float>) {
             BLAS_CHECK(gpublasSdgmm(handle,blas_impl::side(side),m,n,A,lda,x,incx,C,ldc));

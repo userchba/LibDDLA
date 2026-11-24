@@ -1,3 +1,4 @@
+#include "test_max_error.h"
 #include "test_backend.h"
 #include "api_grid_test_common.h"
 
@@ -130,15 +131,6 @@ double factor_tolerance(int n)
          * std::max(1, n);
 }
 
-inline void update_error(double& error, double value)
-{
-    if(!std::isfinite(value)){
-        error = std::numeric_limits<double>::infinity();
-    }else{
-        error = std::max(error, value);
-    }
-}
-
 template <typename T>
 struct LocalMatrix {
     std::vector<T> values;
@@ -208,7 +200,7 @@ void check_success_case(const ddla::DdlaHandle_t& handle, char uplo, int n, int 
     double padding_error = 0.0;
     for(size_t offset = 0; offset < output.size(); ++offset){
         if(!input.valid[offset]){
-            update_error(padding_error,
+            ddla_test::update_max_error(padding_error,
                          static_cast<double>(std::abs(output[offset] - padding_sentinel<T>())));
         }
     }
@@ -222,10 +214,10 @@ void check_success_case(const ddla::DdlaHandle_t& handle, char uplo, int n, int 
                 const T expected = uplo == 'U'
                     ? upper_factor_value<T>(i, j)
                     : lower_factor_value<T>(i, j);
-                update_error(factor_error,
+                ddla_test::update_max_error(factor_error,
                              static_cast<double>(std::abs(output[offset] - expected)));
             }else{
-                update_error(sentinel_error,
+                ddla_test::update_max_error(sentinel_error,
                              static_cast<double>(std::abs(
                                  output[offset]
                                  - opposite_triangle_sentinel<T>(i, j, n))));

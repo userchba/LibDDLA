@@ -102,14 +102,10 @@ Geometry check(const DdlaHandle_t &h, char side, char trans, int m, int n, int k
             throw std::invalid_argument("orgqr output overlaps tau");
     });
     if constexpr (Distributed) {
-        const int sig[] = {int(B), Generate ? 1 : 0, int(p.side), int(p.trans), m, n,
-                           k,      int(sizeof(T))};
-        detail::agree_signature(h, "qr application", sig);
-        int sa[7], sc[7];
-        detail::descriptor_signature(sa, da);
-        detail::descriptor_signature(sc, dc);
-        detail::agree_signature(h, "qr reflector distribution", sa);
-        detail::agree_signature(h, "qr output distribution", sc);
+        int signature[8 + 7 + 7] = {int(B), Generate, p.side, p.trans, m, n, k, int(sizeof(T))};
+        detail::descriptor_signature(signature + 8, da);
+        detail::descriptor_signature(signature + 15, dc);
+        detail::agree_signature(h, "qr application", signature);
     }
     return p;
 }
@@ -128,8 +124,6 @@ template <class T> struct Workspace {
 template <DdlaBackend B, bool Distributed, class T>
 void prepare(const DdlaHandle_t &h, const Geometry &p, const T *tau, Workspace<T> &w) {
     checked_setup<Distributed>(h, [&] {
-        if (!p.m || !p.n || !p.k)
-            return;
         const auto count = std::size_t(p.nq) * p.cap;
         w.panel.resize(count);
         w.tmat.resize(std::size_t(p.cap) * p.cap);
@@ -146,8 +140,6 @@ void prepare(const DdlaHandle_t &h, const Geometry &p, const T *tau, Workspace<T
         w.larft.resize(w.larft_bytes);
     });
     if constexpr (Distributed) {
-        if (!p.m || !p.n || !p.k)
-            return;
         for (int j = 0; j < p.k; ++j)
             if (indxg2p(j, p.nb, p.csrc, h->npcols_) == h->mypcol_)
                 w.host_tau[j] = tau[indxg2l(j, p.nb, h->npcols_)];
@@ -161,7 +153,8 @@ void prepare(const DdlaHandle_t &h, const Geometry &p, const T *tau, Workspace<T
 // Entries on/above R's diagonal are never copied. The unit entry is explicit.
 template <bool Distributed, class T>
 void pack(const DdlaHandle_t &h, const Geometry &p, int first, int width, const T *a, T *panel) {
-    DDLA_CHECK(ddlaMemset(h, panel, 0, std::size_t(p.nq) * width * sizeof(T)));
+    const int height = p.nq - first;
+    DDLA_CHECK(ddlaMemset(h, panel, 0, std::size_t(height) * width * sizeof(T)));
     for (int j = 0; j < width; ++j) {
         const int column = first + j;
         if constexpr (Distributed) {
@@ -172,13 +165,13 @@ void pack(const DdlaHandle_t &h, const Geometry &p, int first, int width, const 
             for (int i = num_loc(column + 1, p.mb, h->myprow_, p.rsrc, h->nprows_); i < end;) {
                 const int global = indxl2g(i, p.mb, h->myprow_, p.rsrc, h->nprows_);
                 const int count = std::min(end - i, p.mb - global % p.mb);
-                DDLA_CHECK(ddlaMemcpy(h, panel + global + std::size_t(j) * p.nq,
+                DDLA_CHECK(ddlaMemcpy(h, panel + (global - first) + std::size_t(j) * height,
                                       a + i + std::size_t(lc) * p.lda,
                                       std::size_t(count) * sizeof(T)));
                 i += count;
             }
         } else if (column + 1 < p.nq)
-            DDLA_CHECK(ddlaMemcpy(h, panel + column + 1 + std::size_t(j) * p.nq,
+            DDLA_CHECK(ddlaMemcpy(h, panel + j + 1 + std::size_t(j) * height,
                                   a + column + 1 + std::size_t(column) * p.lda,
                                   std::size_t(p.nq - column - 1) * sizeof(T)));
     }
@@ -187,50 +180,56 @@ void pack(const DdlaHandle_t &h, const Geometry &p, int first, int width, const 
 template <DdlaBackend B, bool Distributed, class T>
 void apply_run(const DdlaHandle_t &h, const Geometry &p, const T *a, const T *tau, T *c,
                const int *dc, Workspace<T> &w) {
-    if (!p.m || !p.n || !p.k)
-        return;
     const T one = T(1);
     const bool backwards = (p.side == 'L') == (p.trans == 'N');
     const int panels = (p.k - 1) / p.cap + 1;
     for (int index = 0; index < panels; ++index) {
         const int first = (backwards ? panels - 1 - index : index) * p.cap;
         const int width = std::min(p.cap, p.k - first);
+        // Each panel acts as the identity on the first 'first' coordinates.
+        // Pack and communicate only the suffix, and apply it to the matching
+        // local suffix of C. Empty contraction ranks still join the reduction.
+        const int height = p.nq - first;
+        const bool left = p.side == 'L';
         pack<Distributed>(h, p, first, width, a, w.panel.data());
         T *full = w.panel.data();
         if constexpr (Distributed) {
             commAllReduce<B>(h, CommScope::Grid, w.panel.data(), w.reduced.data(),
-                             std::size_t(p.nq) * width, cclSum);
+                             std::size_t(height) * width, cclSum);
             full = w.reduced.data();
         }
         for (int j = 0; j < width; ++j)
-            DDLA_CHECK(ddlaMemcpy(h, full + first + j + std::size_t(j) * p.nq, &one, sizeof(T)));
+            DDLA_CHECK(ddlaMemcpy(h, full + j + std::size_t(j) * height, &one, sizeof(T)));
         const T *scalars = Distributed ? w.device_tau.data() : tau;
-        lapack_impl::larft_run<B, T>(h, 'F', p.nq - first, width, full + first, p.nq,
-                                     scalars + first, w.tmat.data(), p.cap, w.larft.data(),
-                                     w.larft_bytes);
+        lapack_impl::larft_run<B, T>(h, 'F', height, width, full, height, scalars + first,
+                                     w.tmat.data(), p.cap, w.larft.data(), w.larft_bytes);
         T *v = full;
-        int ldv = p.nq;
+        int ldv = height;
+        int skip = first;
         if constexpr (Distributed) {
-            const bool left = p.side == 'L';
             const int block = dc[left ? DDLA_MB_ : DDLA_NB_],
                       source = dc[left ? DDLA_RSRC_ : DDLA_CSRC_];
             const int me = left ? h->myprow_ : h->mypcol_, ranks = left ? h->nprows_ : h->npcols_;
             const int count = left ? p.rows : p.cols;
-            ldv = std::max(1, count);
+            skip = num_loc(first, block, me, source, ranks);
+            ldv = std::max(1, count - skip);
             v = w.view.data();
-            for (int i = 0; i < count;) {
+            for (int i = skip; i < count;) {
                 const int global = indxl2g(i, block, me, source, ranks),
                           run = std::min(count - i, block - global % block);
-                DDLA_CHECK(ddlaMemcpy2D(h, v + i, std::size_t(ldv) * sizeof(T), full + global,
-                                        std::size_t(p.nq) * sizeof(T), std::size_t(run) * sizeof(T),
-                                        width));
+                DDLA_CHECK(ddlaMemcpy2D(h, v + (i - skip), std::size_t(ldv) * sizeof(T),
+                                        full + (global - first), std::size_t(height) * sizeof(T),
+                                        std::size_t(run) * sizeof(T), width));
                 i += run;
             }
         }
-        const bool reduce = Distributed && (p.side == 'L' ? h->nprows_ : h->npcols_) > 1;
-        detail::punmtr_run<B, T>(h, p.side, 'U', p.trans, p.rows, p.cols, width, ldv, p.cap, p.ldc,
-                                 p.side == 'L' ? width : std::max(1, p.rows), reduce, v,
-                                 w.tmat.data(), c, w.product.data(), w.reduced_product.data());
+        const int rows = left ? p.rows - skip : p.rows;
+        const int cols = left ? p.cols : p.cols - skip;
+        T *target = rows && cols ? c + (left ? std::size_t(skip) : std::size_t(skip) * p.ldc) : c;
+        const bool reduce = Distributed && (left ? h->nprows_ : h->npcols_) > 1;
+        detail::punmtr_run<B, T>(h, p.side, 'U', p.trans, rows, cols, width, ldv, p.cap, p.ldc,
+                                 left ? width : std::max(1, rows), reduce, v, w.tmat.data(), target,
+                                 w.product.data(), w.reduced_product.data());
     }
     DDLA_CHECK(ddlaSynchronize(h));
 }
@@ -262,6 +261,8 @@ void apply(const DdlaHandle_t &h, char side, char trans, int m, int n, int k, co
     const auto p =
         check<B, Distributed, false>(h, side, trans, m, n, k, a, lda, da, tau, c, ldc, dc);
     info = 0;
+    if (!m || !n || !k)
+        return;
     Workspace<T> w(h);
     prepare<B, Distributed>(h, p, tau, w);
     apply_run<B, Distributed>(h, p, a, tau, c, dc, w);
@@ -274,6 +275,10 @@ void generate(const DdlaHandle_t &h, int m, int n, int k, T *a, int lda, const i
     info = 0;
     if (!m || !n)
         return;
+    if (!k) {
+        identity<Distributed>(h, p, a, da);
+        return;
+    }
     Workspace<T> w(h);
     vector<T> saved(h);
     Geometry stored = p;

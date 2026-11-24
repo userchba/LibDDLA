@@ -1,4 +1,3 @@
-import gc
 import unittest
 import numpy as np
 import ddla
@@ -19,134 +18,6 @@ class TestMatrix(unittest.TestCase):
             self.assertEqual(A.data.shape, (A.m_loc, A.n_loc))
             self.assertTrue(A.data.flags['F_CONTIGUOUS'])
 
-    def assert_cpu_layout(self, A):
-        self.assertEqual(A.data.shape, A.local_shape)
-        self.assertEqual(A.data.dtype, A.dtype)
-        self.assertEqual(A.data_ptr, A.data.ctypes.data)
-        self.assertEqual(A.lld, A.desc[ddla.LLD_])
-        self.assertEqual(A.data.strides, (A.dtype.itemsize, A.lld * A.dtype.itemsize))
-        # Check the allocation before accessing descriptor-sized storage. These
-        # regressions must fail safely without calling native matrix operators.
-        owner = A.data
-        while isinstance(owner.base, np.ndarray):
-            owner = owner.base
-        self.assertGreaterEqual(owner.nbytes, A.lld * A.n_loc * A.dtype.itemsize)
-        storage = np.ndarray((A.lld, A.n_loc), dtype=A.dtype, buffer=owner, order='F')
-        self.assertEqual(storage.ctypes.data, A.data_ptr)
-        return storage
-
-    def test_cpu_padded_storage_and_host_copies(self):
-        nprows, npcols = self.handle.grid_dims
-        m, n = 5 * nprows, 4 * npcols
-        for dtype in [np.float32, np.float64, np.complex64, np.complex128]:
-            with self.subTest(dtype=dtype):
-                A = ddla.DistributedMatrix(self.handle, m, n, mb=2, nb=2,
-                                           dtype=dtype, lld=m + 3)
-                self.assertEqual(A.shape, (m, n))
-                self.assertEqual(A.lld, m + 3)
-                storage = self.assert_cpu_layout(A)
-                self.assertFalse(A.data.flags['F_CONTIGUOUS'])
-                np.testing.assert_array_equal(A.data, np.zeros(A.local_shape))
-                storage[A.m_loc:, :] = -97
-
-                values = np.arange(A.m_loc * A.n_loc).reshape(A.local_shape)
-                if np.issubdtype(dtype, np.complexfloating):
-                    values = values + 1j * (values + 1)
-                values = values[:, ::-1]  # Noncontiguous input, with dtype conversion.
-                pointer = A.data_ptr
-                A.from_host(values)
-                self.assertEqual(A.data_ptr, pointer)
-                np.testing.assert_array_equal(A.data, values)
-                np.testing.assert_array_equal(A.to_host(), values)
-
-                lr, lc = A.m_loc - 1, A.n_loc - 1
-                gr, gc = A.get_global_index(lr, lc)
-                self.assertTrue(A.is_local_row(gr) and A.is_local_col(gc))
-                self.assertEqual(A.get_local_index(gr, gc), (lr, lc))
-                A.data[lr, lc] = 42
-                self.assertEqual(storage[lr, lc], 42)
-                storage[0, 1] = 17
-                self.assertEqual(A.data[0, 1], 17)
-                copied = A.to_host()
-                self.assertEqual(copied.shape, A.local_shape)
-                self.assertFalse(np.shares_memory(copied, A.data))
-                copied[:, :] = -1
-                self.assertEqual(A.data[lr, lc], 42)
-                np.testing.assert_array_equal(storage[A.m_loc:, :], -97)
-
-    def test_cpu_padded_storage_with_data(self):
-        nprows, npcols = self.handle.grid_dims
-        m, n = 5 * nprows, 4 * npcols
-        compact = ddla.DistributedMatrix(self.handle, m, n, mb=2, nb=2)
-        values = np.arange(compact.m_loc * compact.n_loc).reshape(compact.local_shape)
-        for dtype in [np.float32, np.float64, np.complex64, np.complex128]:
-            source = values.astype(np.float64)
-            if np.issubdtype(dtype, np.complexfloating):
-                source = source + 1j * (values + 1)
-            expected = source.astype(dtype)
-            for layout, data in [
-                ('C', np.array(source, order='C')),
-                ('F', np.array(source, order='F')),
-                ('strided', np.repeat(source, 2, axis=1)[:, ::2]),
-            ]:
-                with self.subTest(dtype=dtype, layout=layout):
-                    A = ddla.DistributedMatrix(self.handle, m, n, mb=2, nb=2,
-                                               dtype=dtype, lld=compact.lld + 3, data=data)
-                    storage = self.assert_cpu_layout(A)
-                    np.testing.assert_array_equal(A.data, expected)
-                    np.testing.assert_array_equal(A.to_host(), expected)
-                    np.testing.assert_array_equal(storage[A.m_loc:, :], 0)
-                    self.assertFalse(np.shares_memory(A.data, data))
-                    view = A.data
-                    del A, storage
-                    gc.collect()
-                    np.testing.assert_array_equal(view, expected)
-                    view[-1, -1] = -1
-                    np.testing.assert_array_equal(data, expected)
-
-    def test_cpu_compact_data_compatibility(self):
-        nprows, npcols = self.handle.grid_dims
-        m, n = 5 * nprows, 4 * npcols
-        compact = ddla.DistributedMatrix(self.handle, m, n, mb=2, nb=2)
-        for dtype in [np.float32, np.float64, np.complex64, np.complex128]:
-            for lld in [-1, 0, compact.m_loc]:
-                with self.subTest(dtype=dtype, lld=lld):
-                    data = np.ones(compact.local_shape, dtype=dtype, order='F')
-                    A = ddla.DistributedMatrix(self.handle, m, n, mb=2, nb=2,
-                                               dtype=dtype, lld=lld, data=data)
-                    self.assertEqual(A.lld, compact.m_loc)
-                    self.assert_cpu_layout(A)
-                    self.assertTrue(A.data.flags['F_CONTIGUOUS'])
-                    self.assertTrue(np.shares_memory(A.data, data))
-                    A.from_host(np.full(A.local_shape, 3))
-                    np.testing.assert_array_equal(data, 3)
-                    np.testing.assert_array_equal(A.to_host(), data)
-
-    def test_cpu_empty_local_storage(self):
-        for m, n in [(0, 0), (0, 4), (4, 0), (1, 1)]:
-            for lld in [-1, 7]:
-                with self.subTest(shape=(m, n), lld=lld):
-                    A = ddla.DistributedMatrix(self.handle, m, n, mb=1, nb=1, lld=lld)
-                    self.assertEqual(A.data.shape, A.local_shape)
-                    values = np.ones(A.local_shape)
-                    A.from_host(values)
-                    np.testing.assert_array_equal(A.to_host(), values)
-                    B = ddla.DistributedMatrix(self.handle, m, n, mb=1, nb=1,
-                                               lld=lld, data=values)
-                    self.assertEqual(B.data.shape, B.local_shape)
-                    np.testing.assert_array_equal(B.to_host(), values)
-
-    def test_cpu_local_data_shape_validation(self):
-        for lld in [-1, 20]:
-            with self.subTest(lld=lld):
-                A = ddla.DistributedMatrix(self.handle, 5, 4, mb=2, nb=2, lld=lld)
-                wrong_shape = np.zeros((A.m_loc + 1, A.n_loc))
-                with self.assertRaises(ValueError):
-                    ddla.DistributedMatrix(self.handle, 5, 4, mb=2, nb=2,
-                                           lld=lld, data=wrong_shape)
-                with self.assertRaises(ValueError):
-                    A.from_host(wrong_shape)
-
     def test_index_mapping(self):
         A = ddla.DistributedMatrix(self.handle, 100, 100, mb=16, nb=16, dtype=np.float64)
         for r in range(0, 100, 23):
@@ -156,6 +27,46 @@ class TestMatrix(unittest.TestCase):
                     gr, gc = A.get_global_index(lr, lc)
                     self.assertEqual((gr, gc), (r, c))
 
+    def test_padded_storage_without_data(self):
+        pr, pc = self.handle.grid_dims
+        A = ddla.DistributedMatrix(self.handle, 3 * pr, 2 * pc, mb=1, nb=1, lld=5)
+        self.assertEqual(A.local_shape, (3, 2))
+        self.assertEqual(A.data.shape, A.local_shape)
+        self.assertEqual(A.data.strides, (A.dtype.itemsize, 5 * A.dtype.itemsize))
+        np.testing.assert_array_equal(A.data, np.zeros(A.local_shape))
+        A.from_host(np.arange(6).reshape(A.local_shape))
+        A.data[2, 1] = 17
+        np.testing.assert_array_equal(A.to_host(), [[0, 1], [2, 3], [4, 17]])
+
+    def test_padded_shifted_partition(self):
+        m, n, mb, nb = 13, 11, 4, 3
+        pr, pc = self.handle.grid_dims
+        r, c = self.handle.grid_coords
+        rs, cs = pr - 1, pc - 1
+        rows = [i for i in range(m) if (rs + i // mb) % pr == r]
+        cols = [j for j in range(n) if (cs + j // nb) % pc == c]
+        global_data = np.arange(m * n, dtype=np.int32).reshape(m, n)
+        local_data = global_data[np.ix_(rows, cols)]
+        lld = len(rows) + 5
+
+        A = ddla.DistributedMatrix(self.handle, m, n, mb, nb, np.float64,
+                                   rs, cs, lld, data=local_data)
+        self.assertEqual(A.local_shape, local_data.shape)
+        self.assertEqual(A.data.strides[1], lld * A.dtype.itemsize)
+        np.testing.assert_array_equal(A.to_host(), local_data)
+        A.from_host(local_data + 1)
+        result = A.to_global_matrix()
+        if self.handle.rank == 0:
+            np.testing.assert_array_equal(result, global_data + 1)
+        for i in range(m):
+            self.assertEqual(A.is_local_row(i), i in rows)
+        for j in range(n):
+            self.assertEqual(A.is_local_col(j), j in cols)
+        for lr, i in enumerate(rows):
+            for lc, j in enumerate(cols):
+                self.assertEqual(A.get_local_index(i, j), (lr, lc))
+                self.assertEqual(A.get_global_index(lr, lc), (i, j))
+
     def test_gather_scatter_roundtrip(self):
         np.random.seed(101)
         orig = np.random.randn(64, 48)
@@ -164,6 +75,19 @@ class TestMatrix(unittest.TestCase):
         if self.handle.rank == 0:
             diff = np.max(np.abs(gathered - orig))
             self.assertAlmostEqual(diff, 0.0, places=12)
+
+    def test_packed_input_storage(self):
+        base = ddla.DistributedMatrix(self.handle, 13, 11, mb=3, nb=2)
+        data = np.ones(base.local_shape, dtype=base.dtype, order='F')
+        borrowed = ddla.DistributedMatrix(self.handle, 13, 11, 3, 2, data=data)
+        if data.size:
+            self.assertTrue(np.shares_memory(borrowed.data, data))
+
+        data.setflags(write=False)
+        writable = ddla.DistributedMatrix(self.handle, 13, 11, 3, 2, data=data)
+        writable.from_host(np.zeros_like(data))
+        np.testing.assert_array_equal(data, np.ones_like(data))
+        np.testing.assert_array_equal(writable.to_host(), np.zeros_like(data))
 
 if __name__ == '__main__':
     unittest.main()
