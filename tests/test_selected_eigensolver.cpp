@@ -84,6 +84,24 @@ void scaling_require(MPI_Comm comm,const char* label,bool okay) {
         MPI_Abort(comm,1);
     }
 }
+// Distinct singleton blocks need no reorthogonalization. Each additional
+// vector therefore contributes exactly one certificate dot reduction.
+template<class R> void certificate_reductions(MPI_Comm comm) {
+    namespace core=ddla::spectral_impl::selected;
+    constexpr int n=32;
+    int rank=0,ranks=1;
+    MPI_Comm_rank(comm,&rank);
+    MPI_Comm_size(comm,&ranks);
+    int ldy=std::max(1,detail::RowShare(n,ranks).count(rank));
+    std::vector<R> d(n),e(n-1,R(0)),w(n),Y(std::size_t(ldy)*n);
+    for (int i=0;i<n;++i) d[i]=R(i+1);
+    const auto plan=core::check<R>(comm,n,n,d.data(),e.data(),w.data(),Y.data(),ldy);
+    std::vector<unsigned char> work(plan.bytes);
+    auto status=core::run<R>(plan,d.data(),e.data(),w.data(),Y.data(),work.data());
+    scaling_require(comm,"one batched certificate reduction for each later vector",
+        status.code==core::Code::success && status.dot_reductions==n-1);
+    if (!rank) std::cout<<"SELECTED_CERTIFICATE_REDUCTIONS nev="<<n<<" count="<<status.dot_reductions<<std::endl;
+}
 template<class R>
 void scaling_case(MPI_Comm comm,bool offdiagonal,int sign,int alias,bool exact,bool baseline_negative) {
     namespace core=ddla::spectral_impl::selected;
@@ -535,6 +553,8 @@ int main(int argc,char** argv) {
     int provided=0; MPI_Init_thread(&argc,&argv,MPI_THREAD_FUNNELED,&provided);
     if (provided<MPI_THREAD_FUNNELED) MPI_Abort(MPI_COMM_WORLD,2);
     int ranks=1; MPI_Comm_size(MPI_COMM_WORLD,&ranks);
+    certificate_reductions<float>(MPI_COMM_WORLD);
+    certificate_reductions<double>(MPI_COMM_WORLD);
     bool large=false,scaling_only=false,scaling_baseline_negative=false; int kept=1;
     for (int i=1;i<argc;++i) {
         if (!std::strcmp(argv[i],"--scaling-only")) scaling_only=true;

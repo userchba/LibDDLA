@@ -63,8 +63,8 @@ template<class R> const R* last_current(const Plan& p,const Status& s,const void
 struct Certificate { bool accepted=false; double norm=0,residual=0,orthogonality=0; };
 // Collective allocation-free certificate. d/e/lambda share safe scaled units;
 // x is a replicated full current vector. Q contains this rank's previous rows.
-// This is also used independently for perturbed-vector negative controls.
+// coefficients holds previous scratch elements for the batched dot reduction.
 template<class R> Certificate certify_scaled(const Plan&,const R* d,const R* e,R lambda,
-    const R* x,const R* Q,int previous);
+    const R* x,const R* Q,int previous,R* coefficients);
 } } } // namespace ddla::spectral_impl::selected
 #endif

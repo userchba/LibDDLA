@@ -137,7 +137,7 @@ Plan geometry(MPI_Comm comm,int n,int nev,int rank,int ranks,int ldy,
 }
 
 template<class R>
-Certificate certify_scaled(const Plan& p,const R* d,const R* e,R lambda,const R* x,const R* Q,int previous) {
+Certificate certify_scaled(const Plan& p,const R* d,const R* e,R lambda,const R* x,const R* Q,int previous,R* coefficients) {
     Certificate c;
     c.norm=norm(p.n,x);
     long double residual=0;
@@ -153,8 +153,12 @@ Certificate certify_scaled(const Plan& p,const R* d,const R* e,R lambda,const R*
     c.residual=denominator>0?double(residual/denominator):(residual==0?0:std::numeric_limits<double>::infinity());
     for (int j=0;j<previous;++j) {
         const R* column=p.rows?Q+std::size_t(j)*p.ldy:nullptr;
-        R coefficient=dot(p.rows,x+p.row0,column);
-        MPI_Allreduce(MPI_IN_PLACE,&coefficient,1,datatype<R>(),MPI_SUM,p.comm);
+        coefficients[j]=dot(p.rows,x+p.row0,column);
+    }
+    if (previous)
+        MPI_Allreduce(MPI_IN_PLACE,coefficients,previous,datatype<R>(),MPI_SUM,p.comm);
+    for (int j=0;j<previous;++j) {
+        const R coefficient=coefficients[j];
         finite=finite && std::isfinite(coefficient);
         c.orthogonality=std::isfinite(coefficient)?
             std::max(c.orthogonality,std::abs(double(coefficient))):std::numeric_limits<double>::infinity();
@@ -230,6 +234,11 @@ Status run(const Plan& p,const R* d,const R* e,R* w,R* Y,void* work) {
     MPI_Bcast(control,3,MPI_INT,0,p.comm);
     if (control[0]) { status.code=Code::stebz_failed; status.native_info=control[0]; return finish(status); }
     if (control[1]!=k || control[2]<1 || control[2]>n) { status.code=Code::count_mismatch; return finish(status); }
+    // STEBZ is finished with its 3*n integers. Reuse the aligned head for
+    // independent certificate dot products and the last n integers for LAGTF.
+    static_assert(sizeof(R)<=2*sizeof(int),"certificate workspace is too small");
+    R* coefficients=reinterpret_cast<R*>(base+p.integer_phase);
+    piv+=2*n;
     ns=control[2];
     MPI_Bcast(beta,k,datatype<R>(),0,p.comm); MPI_Bcast(blocks,k,MPI_INT,0,p.comm);
     MPI_Bcast(splits,ns,MPI_INT,0,p.comm);
@@ -401,8 +410,8 @@ Status run(const Plan& p,const R* d,const R* e,R* w,R* Y,void* work) {
                 // value, including any subnormal output rounding.
                 const R public_value=std::scalbn(w[j],status.scale_exponent);
                 const R target=std::scalbn(public_value,-status.scale_exponent);
-                const auto certificate=certify_scaled<R>(p,ds,es,target,x,Y,j);
-                status.dot_reductions+=j;
+                const auto certificate=certify_scaled<R>(p,ds,es,target,x,Y,j,coefficients);
+                status.dot_reductions+=j!=0;
                 status.last_residual=certificate.residual;
                 status.last_orthogonality=certificate.orthogonality;
                 status.candidate_available=true;
@@ -438,7 +447,7 @@ Status run(const Plan& p,const R* d,const R* e,R* w,R* Y,void* work) {
  template Plan geometry<R>(MPI_Comm,int,int,int,int,int,int,int); \
  template Plan check<R>(MPI_Comm,int,int,const R*,const R*,R*,R*,int,int,int); \
  template Status run<R>(const Plan&,const R*,const R*,R*,R*,void*); \
- template Certificate certify_scaled<R>(const Plan&,const R*,const R*,R,const R*,const R*,int)
+ template Certificate certify_scaled<R>(const Plan&,const R*,const R*,R,const R*,const R*,int,R*)
 INSTANTIATE(float);
 INSTANTIATE(double);
 #undef INSTANTIATE
