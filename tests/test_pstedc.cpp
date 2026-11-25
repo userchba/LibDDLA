@@ -174,7 +174,19 @@ template<DdlaBackend B,class R>void cases(DdlaHandle_t h)
 template<DdlaBackend B>void run(int pr,int pc,char major)
 {
     Env threads("DDLA_EIG_THREADS","2");
-    DdlaHandle_t h=nullptr;ddlaInit(h,B);ddlaSet(h,MPI_COMM_WORLD,pr,pc,major);
+    DdlaHandle_t h=nullptr;
+    ddlaInit(h,B);
+    bool rejected=true;
+    for (char job : {'N','V'}) {
+        float d=1,w=0,z=0;
+        int info=0;
+        try {
+            pstedc<float>(h,job,1,1,&d,nullptr,&w,&z,1,info);
+            rejected=false;
+        } catch (const std::invalid_argument&) {}
+    }
+    ddlaSet(h,MPI_COMM_WORLD,pr,pc,major);
+    require_close(h,"both modes reject a handle without ddlaSet",rejected?0:1,0);
     require_close(h,"pstedc handle configures two host workers",h->host_threads==2?0:1,0);
     cases<B,float>(h);cases<B,double>(h);
     if(h->myid==0)std::cout<<"PSTEDC PASS backend="<<int(B)<<" grid="<<pr<<"x"<<pc<<" major="<<major<<std::endl;

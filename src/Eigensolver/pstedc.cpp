@@ -97,15 +97,6 @@ void pstedc(const DdlaHandle_t& handle, int n, int nblk, rt* d, rt* e, rt* w, rt
 {
     static_assert(std::is_same<rt, float>::value || std::is_same<rt, double>::value,
                   "pstedc operates on the real types (float, double)");
-    if (handle == nullptr)
-        throw std::runtime_error("pstedc: null handle");
-    if (n < 0 || nblk < 1)
-        throw std::runtime_error("pstedc: invalid n or nblk");
-    if (n == 0)
-        return;
-    const auto backend = ddlaGetBackend(handle);
-    if (!ddlaBackendAvailable(backend))
-        throw std::runtime_error("pstedc: the handle's backend is not built into this library");
     spectral_impl::PstedcPlan p;
     p.mode = spectral_impl::PstedcMode::vectors;
     p.rows = spectral_impl::pstedc_check(handle, n, nblk, d, e, w, Y, ldy, scratch, scratch_elements);

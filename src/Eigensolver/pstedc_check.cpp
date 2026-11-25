@@ -139,62 +139,35 @@ PstedcPlan pstedc_policy(const DdlaHandle_t& h, char jobz, int n, int nblk, int 
     return p;
 }
 
+namespace {
 template <class R>
-PstedcPlan pstedc_check(const DdlaHandle_t& h, char jobz, int n, int nblk, const R* d, const R* e, const R* w,
-                        const R* z, int ldz)
+PstedcPlan checked_plan(const DdlaHandle_t& h, char jobz, int n, int nblk,
+                        const R* d, const R* e, const R* w, const R* Y, int ldy,
+                        const R* scratch, std::size_t scratch_elements)
 {
     detail::agree_check(h, "pstedc", [&](detail::Agree& agreement) {
         agreement.mode("spectral operation", 3112);
-        if (!h)
-            throw std::invalid_argument("pstedc: null handle");
-        if (h->backend == DdlaBackend::GPU && !DDLA_HAS_GPU)
+        if (!h || !h->initialized || h->comm == MPI_COMM_NULL ||
+            h->nprocs < 1 || h->myid < 0 || h->myid >= h->nprocs)
+            throw std::invalid_argument("pstedc: initialize the process grid with ddlaSet");
+        if (!ddlaBackendAvailable(h->backend))
             throw std::invalid_argument("pstedc: backend not built");
         if ((jobz != 'N' && jobz != 'V') || n < 0 || nblk < 1)
             throw std::invalid_argument("pstedc: invalid jobz or dimension");
         if (n && (!d || !w || (n > 1 && !e)))
             throw std::invalid_argument("pstedc: invalid input/output pointer");
+        if (jobz == 'V' && n) {
+            const int rows = detail::RowShare(n, h->nprocs).count(h->myid);
+            if ((rows && !Y) || ldy < std::max(1, rows))
+                throw std::invalid_argument("pstedc: invalid vector output or row stride");
+        }
     });
     const int signature[] = {3112, int(h->backend), int(jobz), n, nblk, int(sizeof(R))};
     detail::agree_signature(h, "pstedc", signature);
-    if (jobz == 'V') {
-        PstedcPlan p;
-        p.mode = PstedcMode::vectors;
-        p.rows = pstedc_check<R>(h, n, nblk, d, e, w, z, ldz);
-        return p;
-    }
-    return pstedc_policy<R>(h, jobz, n, nblk, ldz);
-}
-
-template <class R>
-PstedcVectorPlan pstedc_check(const DdlaHandle_t& h, int n, int nblk, const R* d, const R* e, const R* w, const R* Y,
-                                 int ldy, const R* scratch, std::size_t scratch_elements)
-{
-    auto p = detail::agree_check(h, "pstedc", [&](detail::Agree& agreement) {
-        agreement.mode("spectral operation", 3111);
-        PstedcVectorPlan result;
-        if (h == nullptr)
-            throw std::invalid_argument("pstedc: null handle");
-        result.backend = ddlaGetBackend(h);
-        result.n = n;
-        result.ldy = ldy;
-        result.ranks = h->nprocs;
-        result.rank = h->myid;
-        if (n < 0 || nblk < 1)
-            throw std::invalid_argument("pstedc: invalid n or nblk");
-        if (result.ranks < 1 || result.rank < 0 || result.rank >= result.ranks)
-            throw std::invalid_argument("pstedc: invalid communicator rank");
-        const detail::RowShare rows(n, result.ranks);
-        if (n && (!d || !w || (!Y && rows.count(result.rank) > 0) || (n > 1 && !e) ||
-                  ldy < std::max(1, rows.count(result.rank))))
-            throw std::invalid_argument("pstedc: invalid input/output pointer or row stride");
-        return result;
-    });
-    const int signature[] = {3111, int(p.backend), n, nblk, p.ranks, int(sizeof(R))};
-    detail::agree_signature(h, "pstedc", signature);
-    if (!n)
-        return p;
-    p = pstedc_policy<R>(h, n, nblk);
-    p.ldy = ldy;
+    auto plan = pstedc_policy<R>(h, jobz, n, nblk, ldy);
+    if (!n || jobz == 'N')
+        return plan;
+    auto& p = plan.rows;
     const detail::RowShare share(n, p.ranks);
     const std::size_t slab = std::size_t(std::max(1, share.count(p.rank))) * n;
     p.borrow_q = scratch && share.count(p.rank) > 0 && scratch_elements >= slab &&
@@ -211,7 +184,22 @@ PstedcVectorPlan pstedc_check(const DdlaHandle_t& h, int n, int nblk, const R* d
                   !detail::array_overlaps(Y, slab, e, n - 1) &&
                   !detail::array_overlaps(Y, slab, w, n);
 
-    return p;
+    return plan;
+}
+} // namespace
+
+template <class R>
+PstedcPlan pstedc_check(const DdlaHandle_t& h, char jobz, int n, int nblk, const R* d, const R* e, const R* w,
+                        const R* z, int ldz)
+{
+    return checked_plan<R>(h, jobz, n, nblk, d, e, w, z, ldz, nullptr, 0);
+}
+
+template <class R>
+PstedcVectorPlan pstedc_check(const DdlaHandle_t& h, int n, int nblk, const R* d, const R* e, const R* w,
+                              const R* z, int ldz, const R* scratch, std::size_t scratch_elements)
+{
+    return checked_plan<R>(h, 'V', n, nblk, d, e, w, z, ldz, scratch, scratch_elements).rows;
 }
 
 template PstedcVectorPlan pstedc_check<float>(const DdlaHandle_t&, int, int, const float*, const float*,
