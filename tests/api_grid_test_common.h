@@ -235,6 +235,14 @@ inline bool parse_options(int argc, char** argv, int nprocs, TestOptions& option
             return false;
         }
         options.grids = {{requested_grid_rows, requested_grid_cols}};
+    }else if(const char* mode = std::getenv("DDLA_TEST_GRID_MODE");
+             mode && std::string_view(mode) == "balanced"){
+        // Use the factor pair closest to square. An explicit --grid takes priority.
+        int rows = 1;
+        for(int r = 2; r <= nprocs / r; ++r){
+            if(nprocs % r == 0) rows = r;
+        }
+        options.grids = {{rows, nprocs / rows}};
     }else{
         for(int r = 1; r <= nprocs; ++r){
             if(nprocs % r == 0){

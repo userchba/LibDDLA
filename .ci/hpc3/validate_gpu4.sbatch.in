@@ -11,7 +11,7 @@
 #SBATCH --ntasks-per-node=@GPU4_GPUS@
 #SBATCH --cpus-per-task=@GPU4_CPUS@
 #SBATCH --gres=gpu:@GPU4_GPUS@
-#SBATCH --mem=@GPU4_MEM@
+#SBATCH --mem-per-gpu=@GPU4_MEM@
 #SBATCH --time=@GPU4_TIME@
 #SBATCH --output=@RESULTS@/gpu4-slurm.log
 #SBATCH --export=NIL
@@ -27,6 +27,9 @@ trap 'exit 143' TERM
 export TMPDIR=@BUILD_GPU@/tmp
 mkdir -p "$TMPDIR"
 source @CONTROL@/setup_gpu.sh
+if [[ @PROFILE@ == quick ]]; then
+    export DDLA_TEST_GRID_MODE=balanced
+fi
 
 echo "job $SLURM_JOB_ID on $(hostname) gpus=$(nvidia-smi -L | wc -l)"
 module -t list 2>&1 | tee @RESULTS@/gpu-modules.txt
@@ -45,13 +48,16 @@ cmake -S @SOURCE@ -B @BUILD_GPU@ \
     -DDDLA_USE_CCL=ON \
     -DDDLA_CPU_BLAS_LIBRARY="$OPENBLAS" \
     -DBUILD_TESTS=ON \
+    -DDDLA_BUILD_BENCHMARKS=OFF \
     -DCMAKE_CUDA_ARCHITECTURES=70 \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_CXX_COMPILER=g++ \
     -DMPIEXEC_EXECUTABLE="$MPIWRAP" \
     -DMPIEXEC_PREFLAGS= \
     2>&1 | tee @RESULTS@/gpu-configure.log
-cmake --build @BUILD_GPU@ --parallel 16 2>&1 | tee @RESULTS@/gpu-build.log
+build_start=$SECONDS
+cmake --build @BUILD_GPU@ --parallel "$SLURM_CPUS_ON_NODE" 2>&1 | tee @RESULTS@/gpu-build.log
+echo "Build seconds: $((SECONDS - build_start))"
 wait "$stage_libs" || true
 export LD_LIBRARY_PATH=@BUILD_GPU@/gpu-libs:$LD_LIBRARY_PATH
 

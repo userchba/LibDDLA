@@ -1,4 +1,5 @@
 name: HPC3 validation
+run-name: HPC3 validation (${{ inputs.profile || 'quick' }})
 
 on:
   push:
@@ -6,9 +7,16 @@ on:
   workflow_dispatch:
     inputs:
       source_sha:
-        description: "Commit or branch to test (defaults to develop)"
+        description: "Commit or branch to test (defaults to the dispatch ref)"
         required: false
         type: string
+      profile:
+        description: "Test coverage"
+        type: choice
+        options:
+          - full
+          - quick
+        default: full
 
 permissions:
   contents: read
@@ -31,7 +39,7 @@ jobs:
       - name: Checkout requested commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_sha || 'develop' }}
+          ref: ${{ inputs.source_sha || github.sha }}
           path: source
           fetch-depth: 0
           persist-credentials: false
@@ -75,8 +83,14 @@ jobs:
       - name: Submit remote build and test
         id: remote
         continue-on-error: true
+        env:
+          VALIDATION_PROFILE: ${{ inputs.profile || 'quick' }}
         run: |
           set -euo pipefail
+          case "$VALIDATION_PROFILE" in
+            quick|full) ;;
+            *) echo "Unknown HPC3 validation profile" >&2; exit 2 ;;
+          esac
           remote_root=$(ssh -F "$REMOTE_SSH_CONFIG" hpc3-ci 'printf "%s/libddla_hpc3_ci" "$HOME"')
           run_root="$remote_root/runs/github/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           echo "REMOTE_RUN_ROOT=$run_root" >> "$GITHUB_ENV"
@@ -93,7 +107,7 @@ jobs:
             trusted-control/.ci/hpc3/report.py trusted-control/.ci/hpc3/submit.sh \
             "hpc3-ci:$run_root/control/"
           ssh -F "$REMOTE_SSH_CONFIG" hpc3-ci \
-            "chmod 700 '$run_root/control/'*.sh; '$run_root/control/submit.sh' '$run_root'"
+            "chmod 700 '$run_root/control/'*.sh; '$run_root/control/submit.sh' '$run_root' '$VALIDATION_PROFILE'"
 
       - name: Download raw results
         if: always()

@@ -1,9 +1,9 @@
 # HPC3 validation
 
 The `HPC3 validation` workflow runs on **every push** to `main` or `develop`.
-It also supports manual `workflow_dispatch` runs. The source checkout uses
-the requested `source_sha`, or `develop` when that input is omitted. It sends
-that checkout to the HPC3 cluster
+Manual runs can select the validation profile and an optional `source_sha`.
+By default, both push and manual runs test the commit that triggered the
+workflow. The workflow sends that checkout to the HPC3 cluster
 (`hpc3.chinahpc.com:1014`, login `renxg`) over SSH, builds the CUDA backend,
 runs the CPU suite and registered GPU tests through Slurm (submitted in
 parallel, independent build trees), and publishes one table row per test in
@@ -30,29 +30,25 @@ The CI control scripts come from the workflow's own commit
 
 ## What runs
 
-| Stage | Partitions (first to start wins) | Job | Toolchain |
+- **Quick**, used on pushes, runs the CPU and four-GPU CTest suites. With four
+  ranks, fixtures using the shared API grid harness run on 2×2 by default.
+  Explicit grid arguments, rank-specific tests and other fixtures follow their
+  own configuration.
+- **Full**, the default for manual runs, exercises each fixture's usual grid
+  sweep and adds the six-GPU indexed addition and GEMM branch tests.
+
+| Stage | Partitions | Allocation | Toolchain |
 |---|---|---|---|
-| CPU | `debug`, `48cp1-3`, `p1` (4 ranks × 2 cores) | configure + build + `ctest -L cpu` | gcc/11.4.0, openmpi/4.1.1, cmake/3.25.3, OpenBLAS |
-| GPU 4-rank suite | `v100m3`, `v100g32fat`, `v100g32` (4 ranks × 4 cores, 4×V100) | configure + build + the default four-rank CTest suite | gcc/11.3.0, openmpi/4.1.8-cuda, cmake/3.25.3, NVHPC 25.5 |
-| GPU 6-rank suite | same (6 ranks × 4 cores, 6×V100) | build indexed addition/GEMM tests + CTest at six ranks | same |
+| CPU | `debug`, `48cp1-3`, `p1` | 4 ranks × 2 cores | GCC 11.4.0, OpenMPI 4.1.1, CMake 3.25.3, OpenBLAS |
+| GPU 4-rank | `v100m3`, `v100g32fat`, `v100g32` | 4 V100s, 3 CPU cores per rank | GCC 11.3.0, CUDA-aware OpenMPI 4.1.8, CMake 3.25.3, NVHPC 25.5 |
+| GPU 6-rank | Same GPU partitions | 6 V100s, 3 CPU cores per rank | Same GPU toolchain |
 
-The three jobs are submitted together and run in parallel. Each lists
-several partitions (`config.ini`) and Slurm starts it in whichever frees
-up first; a single partition used to leave the CPU job pending on `p1` for
-hours and the GitHub job ran into its 6 h timeout. `debug` takes one job
-per user, so when that slot is busy `submit.sh` resubmits the CPU job on
-its `fallback_partition` list. The one-hour limits are ~10× the run time
-and let the backfill scheduler slot the jobs into gaps on busy partitions.
-
-The default suite registers every test at `DDLA_TEST_NP=4` (a few cases
-at 1), so it runs on 4 GPUs; indexed `pgeadd` and GEMM branch tests
-additionally run at `DDLA_TEST_NP=6` in their own job. `gpurank_wrapper.sh`
-pins rank *r* to GPU *r*.
-
-The GPU jobs request four and six Slurm tasks respectively, with four CPU
-cores per task. MPI launches use only the allocated slots. The four-GPU
-job limits CTest's concurrent rank count to `SLURM_NTASKS`; the six-GPU
-tests run sequentially.
+The controller submits the selected jobs together. Slurm picks an available
+partition from each lane's configuration in `config.ini`. If `debug` rejects
+the CPU submission because its per-user slot is occupied, the controller retries
+on the CPU fallback partitions. Full CPU validation has a two-hour allocation
+to accommodate the full grid sweep. CTest uses `PROCESSORS` to schedule within
+the allocated rank count. The GPU wrapper maps MPI ranks to devices.
 
 Both GPU jobs run on one node. The wrapper selects OpenMPI's
 `self,vader,tcp` transports to avoid crashes in HPC3's `openib` component
@@ -81,9 +77,12 @@ node before/after):
   not run simultaneously. On the host `getrf_nopiv` alone holds ~51 GB;
   the job retains its 128 GB allocation.
 
-Each stage writes `result_{cpu,gpu4,gpu6}.json` +
-`summary_{cpu,gpu4,gpu6}.md`; all three jobs must finish with exit 0 for
-the GitHub check to be green. Build trees are not kept: to debug a failure,
+The CPU and four-GPU jobs set `DDLA_BUILD_BENCHMARKS=OFF` to keep standalone
+benchmark binaries out of the default build. An explicit benchmark target
+can still be built with `cmake --build <dir> --target <name>`.
+
+Each submitted stage writes a result JSON and a summary table. The GitHub
+check requires all submitted stages to finish successfully. Build trees are not kept: to debug a failure,
 rebuild from `runs/github/<run>/source`.
 
 ## Reading failures

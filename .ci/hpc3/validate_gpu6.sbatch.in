@@ -8,7 +8,7 @@
 #SBATCH --ntasks-per-node=@GPU6_GPUS@
 #SBATCH --cpus-per-task=@GPU6_CPUS@
 #SBATCH --gres=gpu:@GPU6_GPUS@
-#SBATCH --mem=@GPU6_MEM@
+#SBATCH --mem-per-gpu=@GPU6_MEM@
 #SBATCH --time=@GPU6_TIME@
 #SBATCH --output=@RESULTS@/gpu6-slurm.log
 #SBATCH --export=NIL
@@ -48,7 +48,7 @@ cmake -S @SOURCE@ -B @BUILD_GPU6@ \
     -DMPIEXEC_EXECUTABLE="$MPIWRAP" \
     -DMPIEXEC_PREFLAGS= \
     2>&1 | tee @RESULTS@/gpu6-configure.log
-cmake --build @BUILD_GPU6@ --parallel 16 --target test_pgeadd_indexed test_pgemm_branches 2>&1 | tee @RESULTS@/gpu6-build.log
+cmake --build @BUILD_GPU6@ --parallel "$SLURM_CPUS_ON_NODE" --target test_pgeadd_indexed test_pgemm_branches 2>&1 | tee @RESULTS@/gpu6-build.log
 wait "$stage_libs" || true
 export LD_LIBRARY_PATH=@BUILD_GPU6@/gpu-libs:$LD_LIBRARY_PATH
 

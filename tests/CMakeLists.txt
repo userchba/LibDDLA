@@ -67,6 +67,12 @@ function(add_test_executable test_name)
     endif()
 endfunction()
 
+option(DDLA_BUILD_BENCHMARKS "Include benchmark executables in the default build" ON)
+set(_benchmark_exclude)
+if(NOT DDLA_BUILD_BENCHMARKS)
+    set(_benchmark_exclude EXCLUDE_FROM_ALL)
+endif()
+
 # add_bench_executable: same as add_test_executable but does not register
 # with ctest -- heavy benchmarks should not run as part of the regression
 # gate (F1: ctest should be a pass/fail signal, not a benchmark run).
@@ -74,6 +80,10 @@ function(add_bench_executable test_name)
     set(test_source "${CMAKE_CURRENT_SOURCE_DIR}/${test_name}.cpp")
     if(EXISTS "${test_source}")
         add_executable(${test_name} ${test_name}.cpp)
+        # Some stand-alone test drivers are also registered with custom arguments.
+        if(NOT DDLA_BUILD_BENCHMARKS AND test_name MATCHES "^(benchmark_|bench_)")
+            set_property(TARGET ${test_name} PROPERTY EXCLUDE_FROM_ALL TRUE)
+        endif()
         target_link_libraries(${test_name} PRIVATE ddla_lib)
         apply_test_connector_defs(${test_name})
     else()
@@ -613,7 +623,7 @@ if(_scalapack_lib)
     endif()
     set(bench_src "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_cpu_pgemm_scalapack.cpp")
     if(EXISTS "${bench_src}")
-        add_executable(benchmark_cpu_pgemm_scalapack
+        add_executable(benchmark_cpu_pgemm_scalapack ${_benchmark_exclude}
             benchmark_cpu_pgemm_scalapack.cpp)
         target_link_libraries(benchmark_cpu_pgemm_scalapack PRIVATE
             ddla_lib "${_scalapack_lib}")
@@ -625,7 +635,7 @@ if(_scalapack_lib)
 
     set(bench_getrf_src "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_cpu_pgetrf_scalapack.cpp")
     if(EXISTS "${bench_getrf_src}")
-        add_executable(benchmark_cpu_pgetrf_scalapack
+        add_executable(benchmark_cpu_pgetrf_scalapack ${_benchmark_exclude}
             benchmark_cpu_pgetrf_scalapack.cpp)
         target_link_libraries(benchmark_cpu_pgetrf_scalapack PRIVATE
             ddla_lib "${_scalapack_lib}")
