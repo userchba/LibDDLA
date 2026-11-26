@@ -33,8 +33,11 @@ public:
         if (rank == root) DDLA_CHECK(detail::memcpy_on(h, host, buffer, bytes, queue ? queue : h->stream));
         DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
         MPI_CHECK(MPI_Bcast(host, static_cast<int>(count), type, root, comm));
-        DDLA_CHECK(detail::memcpy_on(h, buffer, host, bytes, queue ? queue : h->stream));
-        DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
+        // The root already has the payload in its device buffer.
+        if (rank != root) {
+            DDLA_CHECK(detail::memcpy_on(h, buffer, host, bytes, queue ? queue : h->stream));
+            DDLA_CHECK(detail::synchronize_on(h, queue ? queue : h->stream));
+        }
     }
     void send(const DdlaHandle_t& h, CommScope scope, const void* buffer, std::size_t count,
               MPI_Datatype type, std::size_t width, int peer, void* queue) const override

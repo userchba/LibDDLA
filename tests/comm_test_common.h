@@ -124,10 +124,32 @@ template<DdlaBackend B,class T>void messages(DdlaHandle_t h,CommScope scope,int 
     };
     const auto sum=[&](std::size_t i){T total=0;for(int p=0;p<size;++p)total+=value<T>(p,i);return total;};
     const int root=size-1;
-    upload();
-    if(rank==root)DDLA_CHECK(ddlaMemcpy(h,recv.data(),input.data(),input.size()*sizeof(T)));
-    commBcast<B>(h,scope,count?recv.data():nullptr,count,root);
-    verify(recv,count,[&](std::size_t i){return value<T>(root,i);},"broadcast value/guard");
+    const bool staged=B==DdlaBackend::GPU && h->communication()==DdlaCommunication::HostStagedMPI;
+    const std::array<void*,2> queues{nullptr,h->stream_data};
+    for(int q=0;q<(staged?2:1);++q)for(int broadcast_root=0;broadcast_root<size;++broadcast_root) {
+        void* const queue=queues[q]?queues[q]:h->stream;
+        // Leave input work on the selected queue for bcast's leading wait.
+        const auto& source=rank==broadcast_root?input:initial;
+        DDLA_CHECK(detail::memcpy_on(h,recv.data(),source.data(),source.size()*sizeof(T),queue));
+        workspace_test::Scope broadcast_trace;
+        commBcast<B>(h,scope,count?recv.data():nullptr,count,broadcast_root,queues[q]);
+        const auto trace=broadcast_trace.finish();
+#if defined(DDLA_USE_CUDA)
+        // The diagnostic preload currently traces native copy/wait calls on CUDA.
+        if(staged && workspace_test::available()) {
+            check(h,trace.copies==std::uint64_t(count?1:0) &&
+                trace.syncs==std::uint64_t(rank==broadcast_root?1:2) && trace.collectives==1,
+                "staged broadcast root skips copy-back/wait; receivers complete copy-back");
+        }
+#else
+        (void)trace;
+#endif
+#if DDLA_HAS_GPU
+        if(staged)check(h,gpuStreamQuery(static_cast<gpuStream_t>(queue))==gpuSuccess,
+            "staged broadcast completes the selected queue");
+#endif
+        verify(recv,count,[&](std::size_t i){return value<T>(broadcast_root,i);},"broadcast value/guard");
+    }
 
     upload();
     const int peer=rank%2 ? rank-1 : std::min(rank+1,size-1);
