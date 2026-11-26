@@ -1,3 +1,4 @@
+import os
 import unittest
 import numpy as np
 import ddla
@@ -64,6 +65,32 @@ class TestMatrix(unittest.TestCase):
         if self.handle.rank == 0:
             diff = np.max(np.abs(gathered - orig))
             self.assertAlmostEqual(diff, 0.0, places=12)
+
+    def _check_scatter(self, handle):
+        root = handle.size - 1
+        original = np.arange(63, dtype=np.float64).reshape(7, 9) if handle.rank == root else None
+        A = ddla.scatter(handle, original, mb=3, nb=2, root=root)
+        gathered = ddla.gather(A, root=root)
+        if handle.rank == root:
+            np.testing.assert_array_equal(gathered, original)
+        else:
+            self.assertIsNone(gathered)
+
+    def test_integer_communicator_scatter(self):
+        with ddla.Handle(backend=ddla.Backend.CPU, comm=self.handle.layout.comm_f) as handle:
+            self._check_scatter(handle)
+
+    def test_invalid_root_input(self):
+        root = self.handle.size - 1
+        for array, error in ((None, ValueError), (np.zeros(3), ValueError),
+                             (np.zeros((2, 2), dtype=np.int32), TypeError)):
+            with self.subTest(array=array), self.assertRaises(error):
+                ddla.scatter(self.handle, array if self.handle.rank == root else None, root=root)
+
+    @unittest.skipUnless(os.getenv("DDLA_PYTHON_TEST_GPU") == "1", "requires allocated GPUs")
+    def test_gpu_numpy_roundtrip(self):
+        with ddla.Handle(backend=ddla.Backend.GPU) as handle:
+            self._check_scatter(handle)
 
     def test_packed_input_storage(self):
         base = ddla.DistributedMatrix(self.handle, 13, 11, mb=3, nb=2)

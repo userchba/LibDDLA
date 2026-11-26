@@ -8,7 +8,7 @@ Designed with native **NumPy** array interoperability and **mpi4py** integration
 - **2D Block-Cyclic Distributed Matrix (`DistributedMatrix`)**:
   - Automatically derives process grids and ScaLAPACK `int[9]` descriptors.
   - Interoperates with `numpy.ndarray` on CPU (`order='F'`) with zero-copy data passing.
-  - `gather` and `scatter` between CPU distributed partitions and global NumPy arrays.
+  - `gather` and `scatter` between distributed CPU or GPU partitions and a global NumPy array on the chosen root. GPU transfers use a temporary root device buffer the size of that array.
   - GPU device buffers with explicit `from_host` / `to_host` copies and handle synchronization.
 - **Process Grid Management (`ProcessorLayout`)**:
   - Automatically factors communicator ranks into balanced 2D grid dimensions (`np_rows` x `np_cols`).
@@ -57,6 +57,7 @@ without a second CPU/GPU execution dispatcher.
 Distributed operations are collective over the handle's communicator. Launch the example
 below with an MPI rank count covered by the scheduler allocation, for example
 `mpirun -n 4 python3 example.py`. It uses CPU handles and NumPy host arrays.
+Pass the global NumPy array only on the root for scatter. With an allocated GPU for each rank, set `DDLA_PYTHON_TEST_GPU=1` to include the GPU NumPy scatter/gather test.
 For GPU local-buffer copies, call `handle.synchronize()` before consuming
 results returned by `to_host()`.
 

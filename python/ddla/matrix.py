@@ -128,68 +128,83 @@ class DistributedMatrix:
                                          width, height)
                 check_status(st, "ddla_c_memcpy2d (from_host)")
 
+    def _global_transfer(self, root, operation, array=None):
+        # Native gather/scatter access root storage in the handle's backend.
+        # Keep both the NumPy array and any device staging alive until completion.
+        on_root = self.handle.rank == root
+        upload = operation == 'scatter'
+        device = None
+        ptr = None
+        preparation_error = None
+        try:
+            if on_root:
+                try:
+                    if upload:
+                        array = np.asfortranarray(array)
+                    else:
+                        array = np.empty(self.shape, dtype=self.dtype, order='F')
+                    if self.handle.backend == Backend.GPU and array.nbytes:
+                        device = self.handle.malloc(array.nbytes)
+                        ptr = device
+                        if upload:
+                            self.handle.memcpy(device, array, array.nbytes)
+                    else:
+                        ptr = array.ctypes.data
+                except Exception as error:
+                    # A null root pointer makes native validation fail on all
+                    # ranks. Still enter the collective so peers can return.
+                    preparation_error = error
+                    ptr = None
+
+            name = f"ddla_{self.type_char}_{operation}"
+            st = getattr(lib, name)(
+                self.handle.ptr, self.m, self.n,
+                ctypes.c_void_p(self.data_ptr), 1, 1,
+                ctypes.c_void_p(self.desc.ctypes.data),
+                root, ctypes.c_void_p(ptr), max(1, self.m)
+            )
+            if preparation_error is not None:
+                raise preparation_error
+            check_status(st, name)
+            if device is not None and not upload:
+                self.handle.memcpy(array, device, array.nbytes)
+            return array if on_root and not upload else None
+        finally:
+            if device is not None:
+                try:
+                    self.handle.synchronize()
+                finally:
+                    self.handle.free(device)
+
     def to_global_matrix(self, root: int = 0) -> Optional[np.ndarray]:
         """Gather distributed matrix to a global NumPy array on rank `root`."""
-        rank = self.handle.rank
-        out = None
-        dst_ptr = ctypes.c_void_p(None)
-        lddst = 1
-        if rank == root:
-            out = np.zeros((self.m, self.n), dtype=self.dtype, order='F')
-            dst_ptr = ctypes.c_void_p(out.ctypes.data)
-            lddst = max(1, self.m)
-
-        gather_func = getattr(lib, f"ddla_{self.type_char}_gather")
-        st = gather_func(
-            self.handle.ptr, self.m, self.n,
-            ctypes.c_void_p(self.data_ptr), 1, 1,
-            ctypes.c_void_p(self.desc.ctypes.data),
-            root, dst_ptr, lddst
-        )
-        check_status(st, f"ddla_{self.type_char}_gather")
-        return out
+        return self._global_transfer(root, 'gather')
 
     @classmethod
     def from_global_matrix(cls, handle: Handle, global_arr: Optional[np.ndarray],
                            mb: int = 64, nb: int = 64, root: int = 0):
         """Scatter global NumPy array from rank `root` across the process grid."""
-        rank = handle.rank
-        m, n, dtype = 0, 0, np.float64
-        if rank == root:
-            if global_arr is None:
-                raise ValueError("global_arr must be provided on root rank")
-            m, n = global_arr.shape
-            dtype = global_arr.dtype
+        if root < 0 or root >= handle.size:
+            raise ValueError("root must be a rank in the handle communicator")
+        m, n, type_code = ctypes.c_int(), ctypes.c_int(), ctypes.c_int()
+        if handle.rank == root and isinstance(global_arr, np.ndarray) and global_arr.ndim == 2:
+            rows, cols = global_arr.shape
+            if max(rows, cols) <= np.iinfo(np.int32).max:
+                m.value, n.value = rows, cols
+                type_char = DTYPE_TO_CHAR.get(global_arr.dtype)
+                type_code.value = ord(type_char) if type_char else -1
 
-        if hasattr(handle.layout, 'comm') and handle.layout.comm is not None:
-            m, n, dtype = handle.layout.comm.bcast((m, n, dtype), root=root)
-        else:
-            from ._c_api import ddla_c_bcast_dims
-            cm = ctypes.c_int(m)
-            cn = ctypes.c_int(n)
-            tc = DTYPE_TO_CHAR.get(np.dtype(dtype), 'd')
-            ctc = ctypes.c_int(ord(tc))
-            ddla_c_bcast_dims(handle.layout.comm_f, ctypes.byref(cm), ctypes.byref(cn), ctypes.byref(ctc), int(root))
-            m, n = cm.value, cn.value
-            dtype = CHAR_TO_DTYPE[chr(ctc.value)]
-
-        A = cls(handle, m, n, mb=mb, nb=nb, dtype=dtype)
-        src_ptr = ctypes.c_void_p(None)
-        ldsrc = 1
-        arr = None
-        if rank == root:
-            arr = np.asfortranarray(global_arr, dtype=A.dtype)
-            src_ptr = ctypes.c_void_p(arr.ctypes.data)
-            ldsrc = max(1, m)
-
-        scatter_func = getattr(lib, f"ddla_{A.type_char}_scatter")
-        st = scatter_func(
-            handle.ptr, m, n,
-            ctypes.c_void_p(A.data_ptr), 1, 1,
-            ctypes.c_void_p(A.desc.ctypes.data),
-            root, src_ptr, ldsrc
-        )
-        check_status(st, f"ddla_{A.type_char}_scatter")
+        # Every layout supplies a Fortran communicator, including mpi4py
+        # layouts. Broadcast invalid root input along with valid metadata.
+        st = lib.ddla_c_bcast_dims(handle.layout.comm_f, ctypes.byref(m),
+                                   ctypes.byref(n), ctypes.byref(type_code), root)
+        check_status(st, "ddla_c_bcast_dims")
+        if type_code.value == 0:
+            raise ValueError("root must provide a 2D NumPy array with dimensions representable as int32")
+        if type_code.value == -1:
+            raise TypeError("unsupported dtype for the root matrix")
+        A = cls(handle, m.value, n.value, mb=mb, nb=nb, dtype=CHAR_TO_DTYPE[chr(type_code.value)])
+        A._global_transfer(root, 'scatter', global_arr)
         return A
 
     def is_local_row(self, global_r: int) -> bool:
