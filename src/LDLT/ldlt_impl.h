@@ -301,17 +301,11 @@ char distributed_check(const DdlaHandle_t &h, char u, int n, int nrhs, T *a, con
             }
         }
     });
-    // Two signatures avoid including rank-local leading dimensions.
-    int common[7] = {int(u), n, nrhs, int(B), H, Pivot, Solve};
-    detail::agree_signature(h, "pldlt", common);
-    int sa[7];
-    detail::descriptor_signature(sa, da);
-    detail::agree_signature(h, "pldlt A", sa);
-    if constexpr (Solve) {
-        int sb[7];
-        detail::descriptor_signature(sb, db);
-        detail::agree_signature(h, "pldlt B", sb);
-    }
+    int signature[Solve ? 21 : 14] = {u, n, nrhs, int(B), H, Pivot, Solve};
+    detail::descriptor_signature(signature + 7, da);
+    if constexpr (Solve)
+        detail::descriptor_signature(signature + 14, db);
+    detail::agree_signature(h, "pldlt", signature);
     info = 0;
     return u;
 }
