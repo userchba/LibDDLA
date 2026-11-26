@@ -64,6 +64,9 @@ ddlaStatus_t ddlaSet(DdlaHandle_t handle, const MPI_Comm& comm,
                       char major = 'R');
 
 /// Release all resources; idempotent (safe to call multiple times).
+/// For a configured multi-rank CCL handle, every grid rank must release the
+/// handle in the same order before MPI_Finalize. Destruction waits until all
+/// ranks have completed their queued work before releasing peer buffers.
 ddlaStatus_t ddlaDestroy(DdlaHandle_t& handle);
 
 // ---------------------------------------------------------------------------
