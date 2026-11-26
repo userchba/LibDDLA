@@ -22,6 +22,9 @@ void client(ddla::DdlaHandle_t h) {
     ddla::ddlaInit(h,ddla::DdlaBackend::CPU);
     ddla::gemm<double>(h,'N','N',0,0,0,1.,p,1,p,1,0.,p,1);
     ddla::scal(h,0,1.,p,1);
+    ddla::rscl(h,0,1.,p,1);
+    ddla::rscl<std::complex<double>>(h,0,2.,z,1);
+    ddla::rscl(h,0,std::complex<float>(2,1),c,1);
     ddla::gelqf(h,0,0,p,1,p);
     ddla::gerqf<std::complex<double>>(h,0,0,z,1,z);
     ddla::pgelqf(h,0,0,p,nullptr,p,info);

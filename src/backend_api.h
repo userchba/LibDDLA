@@ -275,6 +275,9 @@ void write_matrix(const T* A, int m, int n, const char* filename);
 template <DdlaBackend Backend, typename T>
 void scal(const DdlaHandle_t& handle, int n, const T& alpha, T* x, int incx);
 
+template <DdlaBackend Backend, typename T, typename Alpha>
+void rscl(const DdlaHandle_t& handle, int n, const Alpha& divisor, T* x, int incx);
+
 template <DdlaBackend Backend, typename T>
 void scal(const DdlaHandle_t& handle, int m, int n, const T& alpha, T* A, int lda);
 

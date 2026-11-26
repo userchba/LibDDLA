@@ -1,10 +1,14 @@
-#include "PBLAS/pdgmm_impl.h"
 #include "PBLAS/plapiv_impl.h"
 #include "PBLAS/pswap_impl.h"
 #include "PBLAS/ptrtrs_impl.h"
 #include "ldlt_distributed.h"
+#include "ldlt_pair_solve.h"
+#include "host_parallel.h"
 #include "instantiate.h"
 #include <array>
+#include <climits>
+#include <cmath>
+#include <limits>
 #include <ddla/ddla.h>
 #include <numeric>
 
@@ -22,18 +26,62 @@ void distributed_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* 
         h, u, n, nrhs, const_cast<T*>(a), da, const_cast<int*>(ipiv), b, db, info);
     if (!n || !nrhs)
         return;
+    const auto tiny = [](R magnitude) {
+        return magnitude > R(0) && magnitude < std::numeric_limits<R>::min();
+    };
+    const auto diagonal_value = [](T value) -> D {
+        if constexpr (H) return std::real(value);
+        else return value;
+    };
     if constexpr (Backend == DdlaBackend::CPU && Pivot)
     {
         if (h->nprocs == 1)
         {
             ldlt_impl::check_pivots(u, n, ipiv);
-            ldlt_impl::solve(std::bool_constant<H>{}, u, n, nrhs, a, da[DDLA_LLD_], ipiv, b, db[DDLA_LLD_],
-                             info);
-            return;
+            // Native SYTRS/HETRS can multiply by 1/D for scalar pivots.
+            // Its two-by-two solve divides the RHS by the off-diagonal first.
+            bool needs_scaling = false;
+            R smallest_scalar = R(1);
+            const int ld = da[DDLA_LLD_];
+            R pair_rhs_bound = std::numeric_limits<R>::max();
+            for (int i = 0; i < n && !needs_scaling; ++i) {
+                const D diagonal = diagonal_value(a[i + std::size_t(i) * ld]);
+                if (ipiv[i] > 0) {
+                    const R magnitude = std::abs(diagonal);
+                    needs_scaling = tiny(magnitude) || magnitude > std::numeric_limits<R>::max() / R(4);
+                    smallest_scalar = std::min(smallest_scalar, magnitude);
+                } else {
+                    const T coupling = u == 'L' ? a[i + 1 + std::size_t(i) * ld]
+                                                : a[i + std::size_t(i + 1) * ld];
+                    const D partner = diagonal_value(a[i + 1 + std::size_t(i + 1) * ld]);
+                    needs_scaling = !ordinary_pair_value(pair_components<R>(diagonal)) ||
+                                    !ordinary_pair_value(pair_components<R>(partner)) ||
+                                    !ordinary_pair_value(pair_components<R>(coupling)) || coupling == T(0);
+                    pair_rhs_bound = std::min(pair_rhs_bound,
+                        std::min(R(1), std::abs(coupling)) * (std::numeric_limits<R>::max() / R(4)));
+                    ++i;
+                }
+            }
+            // Large RHS values can overflow reciprocal multiplication even
+            // with normal D. Preserve the native shortcut for ordinary data.
+            if ((smallest_scalar < R(1) || pair_rhs_bound < std::numeric_limits<R>::max()) &&
+                !needs_scaling) {
+                const R bound = std::min(pair_rhs_bound, smallest_scalar * (std::numeric_limits<R>::max() / R(4)));
+                for (int j = 0; j < nrhs && !needs_scaling; ++j)
+                    for (int i = 0; i < n && !needs_scaling; ++i) {
+                        const T value = b[i + std::size_t(j) * db[DDLA_LLD_]];
+                        needs_scaling = std::max(std::abs(std::real(value)), std::abs(std::imag(value))) > bound;
+                    }
+            }
+            if (!needs_scaling) {
+                ldlt_impl::solve(std::bool_constant<H>{}, u, n, nrhs, a, da[DDLA_LLD_], ipiv, b,
+                                 db[DDLA_LLD_], info);
+                return;
+            }
         }
     }
     std::vector<int> piv, permutation, where, order, swaps;
-    bool pairs = false, convert = false, permute = false;
+    bool pairs = false, scalars = !Pivot, convert = false, permute = false;
     detail::agree_check(h, "phetrs metadata",
                         [&](detail::Agree&)
                         {
@@ -60,6 +108,7 @@ void distributed_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* 
             const int row = step == 2 ? k + (u == 'L' ? 1 : -1) : k;
             const int target = std::abs(piv[k]) - 1;
             pairs |= step == 2;
+            scalars |= step == 1;
             convert |= step == 2 || row != target;
             std::swap(permutation[row], permutation[target]);
             done += step;
@@ -134,15 +183,14 @@ void distributed_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* 
 
     std::vector<T> host_d;
     {
-        vector<T> local(h), global(h);
+        vector<T> diagonal(h);
         detail::agree_check(h, "phetrs diagonal storage",
                             [&](detail::Agree&)
                             {
                                 host_d.resize((Pivot ? 2 : 1) * std::size_t(n));
-                                local.resize(host_d.size());
-                                global.resize(host_d.size());
+                                diagonal.resize(host_d.size());
                             });
-        DDLA_CHECK(ddlaMemset(h, local.data(), 0, local.size() * sizeof(T)));
+        DDLA_CHECK(ddlaMemset(h, diagonal.data(), 0, diagonal.size() * sizeof(T)));
         for (int j = 0; j < n;)
         {
             const int width =
@@ -150,7 +198,7 @@ void distributed_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* 
                           dt[DDLA_NB_] - j % dt[DDLA_NB_]});
             const int row = indx_g2l_r(dt, h, j), col = indx_g2l_c(dt, h, j);
             if (row >= 0 && col >= 0)
-                DDLA_CHECK(ddlaMemcpy2D(h, local.data() + j, sizeof(T),
+                DDLA_CHECK(ddlaMemcpy2D(h, diagonal.data() + j, sizeof(T),
                                         triangle + row + std::size_t(col) * dt[DDLA_LLD_],
                                         std::size_t(dt[DDLA_LLD_] + 1) * sizeof(T), sizeof(T),
                                         width));
@@ -165,66 +213,60 @@ void distributed_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* 
                     if (row >= 0 && col >= 0)
                     {
                         T* entry = triangle + row + std::size_t(col) * dt[DDLA_LLD_];
-                        DDLA_CHECK(ddlaMemcpy(h, local.data() + n + i, entry, sizeof(T)));
+                        DDLA_CHECK(ddlaMemcpy(h, diagonal.data() + n + i, entry, sizeof(T)));
                         DDLA_CHECK(ddlaMemset(h, entry, 0, sizeof(T)));
                     }
                     ++i;
                 }
-        commReduceSum<Backend>(h, CommScope::Grid, local.data(), global.data(), global.size(), 0);
-        commBcast<Backend>(h, CommScope::Grid, global.data(), global.size(), 0);
-        DDLA_CHECK(ddlaMemcpy(h, host_d.data(), global.data(), host_d.size() * sizeof(T)));
+        // Complex all-reduce can use two real components per entry.
+        for (std::size_t offset = 0; offset < diagonal.size();) {
+            const int count = static_cast<int>(std::min(diagonal.size() - offset, std::size_t(INT_MAX / 2)));
+            T* chunk = diagonal.data() + offset;
+            commAllReduce<Backend>(h, CommScope::Grid, chunk, chunk, count, cclSum);
+            offset += count;
+        }
+        DDLA_CHECK(ddlaMemcpy(h, host_d.data(), diagonal.data(), host_d.size() * sizeof(T)));
         DDLA_CHECK(ddlaSynchronize(h));
     }
-    std::vector<D> inverse;
-    std::vector<T> off;
+    std::vector<D> local_diagonal;
+    std::vector<PairRow<R>> pair_rows;
     std::vector<int> pair_swap;
-    detail::agree_check(h, "phetrs diagonal coefficients",
-                        [&](detail::Agree&)
-                        {
-                            inverse.resize(n);
-                            off.resize(pairs ? n : 0, T(0));
-                            pair_swap.resize(pairs ? n : 0);
-                        });
+    const int local_rows = num_loc(n, dx[DDLA_MB_], h->myprow_, dx[DDLA_RSRC_], h->nprows_);
+    detail::agree_check(h, "phetrs diagonal coefficients", [&](detail::Agree&) {
+        local_diagonal.resize(scalars ? local_rows : 0, D(1));
+        if (pairs) {
+            pair_rows.reserve(local_rows);
+            pair_swap.resize(n);
+        }
+    });
     std::iota(pair_swap.begin(), pair_swap.end(), 1);
-    for (int i = 0; i < n; ++i)
-    {
-        const auto diagonal = [&](int j) -> D {
-            if constexpr (H)
-                return std::real(host_d[j]);
-            else
-                return host_d[j];
-        };
-        const D d0 = diagonal(i);
+    const auto add_pair_row = [&](int global, D diagonal, D partner_diagonal, T coupling) {
+        const int row = indx_g2l_r(dx, h, global);
+        if (row >= 0)
+            pair_rows.push_back({row, pair_components<R>(diagonal),
+                                 pair_components<R>(partner_diagonal), pair_components<R>(coupling)});
+    };
+    for (int i = 0; i < n; ++i) {
+        const D diagonal = diagonal_value(host_d[i]);
         if constexpr (!Pivot)
-            if (d0 == R(0))
-            {
+            if (diagonal == R(0)) {
                 info = i + 1;
                 return;
             }
         if constexpr (Pivot)
-            if (piv[i] < 0)
-            {
+            if (piv[i] < 0) {
+                const D partner = diagonal_value(host_d[i + 1]);
                 const T stored = host_d[n + i];
-                const T e = H && u == 'U' ? detail::host_conj(stored) : stored;
-                const R scale = std::abs(e);
-                const D a0 = d0 / scale, a1 = diagonal(i + 1) / scale;
-                const T z = e / scale;
-                const D determinant = [&]() -> D {
-                    if constexpr (H)
-                        return a0 * a1 - R(1);
-                    else
-                        return a0 * a1 - z * z;
-                }();
-                const D multiplier = (D(1) / determinant) / scale;
-                inverse[i] = a1 * multiplier;
-                inverse[i + 1] = a0 * multiplier;
-                off[i + 1] = -z * multiplier;
-                off[i] = H ? detail::host_conj(off[i + 1]) : off[i + 1];
+                const T other = H ? detail::host_conj(stored) : stored;
+                add_pair_row(i, diagonal, partner, u == 'U' ? stored : other);
+                add_pair_row(i + 1, partner, diagonal, u == 'L' ? stored : other);
                 pair_swap[i] = i + 2;
                 ++i;
                 continue;
             }
-        inverse[i] = R(1) / d0;
+        const int row = indx_g2l_r(dx, h, i);
+        if (row >= 0)
+            local_diagonal[row] = diagonal;
     }
     std::size_t device_bytes = 0, host_bytes = 0;
     if (h->nprocs > 1)
@@ -254,8 +296,8 @@ void distributed_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* 
         }
     vector<char> work(h);
     std::vector<char> host;
-    vector<D> device_inverse(h);
-    vector<T> device_off(h);
+    vector<D> device_diagonal(h);
+    vector<PairRow<R>> device_pairs(h);
     std::vector<int> local_piv, local_pair;
     detail::agree_check(
         h, "phetrs solve workspace",
@@ -263,12 +305,15 @@ void distributed_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* 
         {
             work.resize(device_bytes);
             host.resize(host_bytes);
-            device_inverse.resize(n);
-            device_off.resize(off.size());
-            DDLA_CHECK(
-                ddlaMemcpy(h, device_inverse.data(), inverse.data(), inverse.size() * sizeof(D)));
-            if (pairs)
-                DDLA_CHECK(ddlaMemcpy(h, device_off.data(), off.data(), off.size() * sizeof(T)));
+            device_diagonal.resize(local_diagonal.size());
+            DDLA_CHECK(ddlaMemcpy(h, device_diagonal.data(), local_diagonal.data(),
+                                  local_diagonal.size() * sizeof(D)));
+            if constexpr (Backend == DdlaBackend::GPU)
+                if (!pair_rows.empty()) {
+                    device_pairs.resize(pair_rows.size());
+                    DDLA_CHECK(ddlaMemcpy(h, device_pairs.data(), pair_rows.data(),
+                                          pair_rows.size() * sizeof(PairRow<R>)));
+                }
             const int rows = num_loc(n, dx[DDLA_MB_], h->myprow_, dx[DDLA_RSRC_], h->nprows_);
             local_piv.resize(permute ? rows : 0);
             local_pair.resize(pairs ? rows : 0);
@@ -329,16 +374,30 @@ void distributed_solve(const DdlaHandle_t& h, char u, int n, int nrhs, const T* 
                                                 work.data(), work.size(), host.data(), host.size());
     };
     triangular_solve('N');
-    if (pairs)
-    {
+    const int columns = num_loc(nrhs, dx[DDLA_NB_], h->mypcol_, dx[DDLA_CSRC_], h->npcols_);
+    blas_impl::rscl_rows_run<Backend, T, D>(
+        h, int(local_diagonal.size()), columns, device_diagonal.data(), x, dx[DDLA_LLD_]);
+    if (pairs) {
         add(x, dx, nullptr, dx, spare.data(), ds, false);
         apply_pivots('F', spare.data(), ds, local_pair);
-        pdgmm_impl::pdgmm_run<Backend, T, T>(h, 'L', n, nrhs, spare.data(), ds, device_off.data(),
-                                             1, spare.data(), ds);
+        // Each row reads its original value and the exchanged partner. Both
+        // outputs can be written in place without seeing an updated RHS.
+        if constexpr (Backend == DdlaBackend::CPU) {
+            detail::host_parallel_for(columns, 1, h->host_threads, [&](long long first, long long end) {
+                for (auto j = first; j < end; ++j) {
+                    T* column = x + std::size_t(j) * dx[DDLA_LLD_];
+                    const T* partner_column = spare.data() + std::size_t(j) * ds[DDLA_LLD_];
+                    for (const auto& row : pair_rows)
+                        column[row.row] = solve_pair_row<H>(row, column[row.row], partner_column[row.row]);
+                }
+            });
+        } else {
+#if DDLA_HAS_GPU
+            solve_pair_rows_gpu<H>(h, static_cast<int>(pair_rows.size()), columns, device_pairs.data(),
+                                   x, dx[DDLA_LLD_], spare.data(), ds[DDLA_LLD_]);
+#endif
+        }
     }
-    pdgmm_impl::pdgmm_run<Backend, T, D>(h, 'L', n, nrhs, x, dx, device_inverse.data(), 1, x, dx);
-    if (pairs)
-        add(x, dx, spare.data(), ds, x, dx, true);
     triangular_solve(H ? 'C' : 'T');
     if (permute)
         apply_pivots('B', x, dx, local_piv);

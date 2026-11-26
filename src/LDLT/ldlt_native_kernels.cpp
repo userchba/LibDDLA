@@ -3,6 +3,7 @@
 #include "helpers.h"
 #include "hetrf_native.h"
 #include "ldlt_gpu_max.h"
+#include "ldlt_pair_solve.h"
 #include "instantiate.h"
 #include <algorithm>
 #include <type_traits>
@@ -308,6 +309,41 @@ void swap_stored(const DdlaHandle_t& h, char u, int n, const int* d, T* a, int l
         reinterpret_cast<const D*>(ca), reinterpret_cast<const D*>(cb), hermitian);
     DDLA_CHECK(ddlaGetLastError(h));
 }
+
+template<bool Hermitian, class T, class R>
+__global__ void solve_pair_rows_kernel(int rows, int columns, const PairRow<R>* plan,
+                                      T* x, int ldx, const T* partner, int ldp)
+{
+    for (std::size_t i = std::size_t(blockIdx.x) * blockDim.x + threadIdx.x;
+         i < std::size_t(rows) * columns; i += std::size_t(gridDim.x) * blockDim.x) {
+        const auto& row = plan[i % rows];
+        const auto column = i / rows;
+        T& rhs = x[row.row + column * ldx];
+        rhs = solve_pair_row<Hermitian>(row, rhs, partner[row.row + column * ldp]);
+    }
+}
+
+template<bool Hermitian, class T, class R>
+void solve_pair_rows_gpu(const DdlaHandle_t& h, int rows, int columns, const PairRow<R>* plan,
+                         T* x, int ldx, const T* partner, int ldp)
+{
+    if (!rows || !columns)
+        return;
+    using Device = detail::DeviceScalarT<T>;
+    solve_pair_rows_kernel<Hermitian><<<blocks(std::size_t(rows) * columns), 256, 0,
+                                       static_cast<gpuStream_t>(h->stream)>>>(
+        rows, columns, plan, reinterpret_cast<Device*>(x), ldx,
+        reinterpret_cast<const Device*>(partner), ldp);
+    DDLA_CHECK(ddlaGetLastError(h));
+}
+
+#define PAIR_INSTANCE(T) \
+    template void solve_pair_rows_gpu<true, T>(const DdlaHandle_t&, int, int, \
+        const PairRow<typename real_type<T>::type>*, T*, int, const T*, int); \
+    template void solve_pair_rows_gpu<false, T>(const DdlaHandle_t&, int, int, \
+        const PairRow<typename real_type<T>::type>*, T*, int, const T*, int)
+DDLA_FOR_EACH_TYPE(PAIR_INSTANCE)
+#undef PAIR_INSTANCE
 
 #define INSTANCE(T)                                                                                \
     template void swap_stored<T>(const DdlaHandle_t&, char, int, const int*, T*, int, int, int,    \

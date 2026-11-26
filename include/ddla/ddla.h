@@ -2052,6 +2052,18 @@ void write_matrix(const DdlaHandle_t& handle, const T* A, int m, int n, const ch
 
 template <typename T>
 void scal(const DdlaHandle_t& handle, int n, const T& alpha, T* x, int incx);
+
+/** @brief Divide a local vector by a nonzero, finite HOST scalar in place.
+ * Supports matching real/complex types and real divisors of complex vectors.
+ * x resides in the handle's memory domain; active vectors need incx > 0.
+ * n == 0 is a no-op. No caller workspace or communication is needed.
+ * CPU real divisors use LAPACK xRSCL with direct division at extreme ranges;
+ * complex divisors use guarded BLAS scaling or xLADIV. CUDA/HIP share a
+ * stream-ordered division kernel.
+ * The result has the usual floating-point rounding and representable range.
+ */
+template <typename T, typename Alpha = T>
+void rscl(const DdlaHandle_t& handle, int n, const Alpha& divisor, T* x, int incx);
 /** @brief Scale an m-by-n matrix region in place, preserving its padding.
  * Alpha zero overwrites active entries without reading their old values.
  * Unlike the vector overload, lda is a column-major leading dimension.

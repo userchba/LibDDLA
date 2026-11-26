@@ -17,6 +17,98 @@ template <class T> T number(double x, double y = 0)
     else
         return T(x, y);
 }
+// Input is already factored. The tiny pivot and RHS have a finite quotient,
+// but an unscaled reciprocal is outside the range of the scalar type.
+template <class T> void check_tiny_pivots(DdlaHandle_t h)
+{
+    using R = typename real_type<T>::type;
+    const R d = std::ldexp(std::numeric_limits<R>::min(), -3);
+    int desc[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(desc, h, 3, 3, 1, 1, 0, 0));
+    for (int mode : {0, 1, 2}) {
+        const bool pivoted = mode != 0, pair = mode == 2;
+        for (char uplo : {'U', 'L'}) {
+            auto factor = make_local<T>(h, desc, [&](int i, int j) {
+                if (i == j) return T(i == 2 ? 2 : pair ? 0 : d);
+                if (pair && ((uplo == 'L' && i == 1 && j == 0) ||
+                             (uplo == 'U' && i == 0 && j == 1))) return T(d);
+                return T(0);
+            });
+            auto solution = [](int i, int j) { return number<T>(1 + i + j, i - j); };
+            auto rhs = make_local<T>(h, desc, [&](int i, int j) {
+                if (i == 2) return solution(i, j) * R(2);
+                return solution(pair ? 1 - i : i, j) * d;
+            });
+            DeviceBuffer<T> a(h, factor.size()), b(h, rhs.size());
+            upload(h, a.ptr, factor);
+            int info = -1;
+            for (bool symmetric : {false, true}) {
+                upload(h, b.ptr, rhs);
+                if (pivoted) {
+                    const int pivot = uplo == 'L' ? -2 : -1;
+                    const int pivots[] = {pair ? pivot : 1, pair ? pivot : 2, 3};
+                    if (symmetric)
+                        psytrs<T>(h, uplo, 3, 3, a.ptr, desc, pivots, b.ptr, desc, info);
+                    else
+                        phetrs<T>(h, uplo, 3, 3, a.ptr, desc, pivots, b.ptr, desc, info);
+                } else if (symmetric) {
+                    psytrs_nopiv<T>(h, uplo, 3, 3, a.ptr, desc, b.ptr, desc, info);
+                } else {
+                    phetrs_nopiv<T>(h, uplo, 3, 3, a.ptr, desc, b.ptr, desc, info);
+                }
+                require_close(h, "tiny LDLT pivot status", std::abs(info), 0);
+                const auto out = download(h, b.ptr, rhs.size());
+                require_close(h, "tiny LDLT pivot quotient",
+                              local_max_error<T>(h, desc, out, solution), 0);
+            }
+        }
+    }
+}
+template<class T> void check_pair_range(DdlaHandle_t h)
+{
+    using R = typename real_type<T>::type;
+    const R largest = std::numeric_limits<R>::max();
+    const R smallest = std::numeric_limits<R>::min();
+    int factor_desc[DDLA_DLEN_], rhs_desc[DDLA_DLEN_];
+    DDLA_CHECK(ddlaDescInit(factor_desc, h, 2, 2, 1, 1, 0, 0));
+    DDLA_CHECK(ddlaDescInit(rhs_desc, h, 2, 3, 1, 1, 0, 0));
+
+    for (char uplo : {'U', 'L'}) {
+        const int pivot = uplo == 'L' ? -2 : -1;
+        const int pivots[] = {pivot, pivot};
+        for (bool mixed_scale : {false, true}) {
+            const R d0 = mixed_scale ? largest / 4 : R(.3);
+            const R d1 = mixed_scale ? smallest : R(.3);
+            const R coupling = mixed_scale ? R(.25) : R(.5);
+            const R result = (R(.6) / (R(.3) + R(.5))) * largest;
+            auto factor = make_local<T>(h, factor_desc, [&](int i, int j) {
+                if (i == j) return T(i == 0 ? d0 : d1);
+                return T((uplo == 'L' ? i > j : i < j) ? coupling : R(0));
+            });
+            auto rhs = make_local<T>(h, rhs_desc, [&](int i, int) {
+                return T(mixed_scale ? (i == 0 ? coupling : smallest) : R(.6) * largest);
+            });
+            DeviceBuffer<T> a(h, factor.size()), b(h, rhs.size());
+            upload(h, a.ptr, factor);
+            for (bool symmetric : {false, true}) {
+                upload(h, b.ptr, rhs);
+                int info = -1;
+                if (symmetric)
+                    psytrs<T>(h, uplo, 2, 3, a.ptr, factor_desc, pivots, b.ptr, rhs_desc, info);
+                else
+                    phetrs<T>(h, uplo, 2, 3, a.ptr, factor_desc, pivots, b.ptr, rhs_desc, info);
+                require_close(h, "wide-range LDLT pair status", std::abs(info), 0);
+                auto out = download(h, b.ptr, rhs.size());
+                if (!mixed_scale)
+                    for (T& value : out) value /= result;
+                const auto expected = [&](int i, int) { return T(mixed_scale ? i : 1); };
+                require_close(h, "wide-range LDLT pair quotient",
+                    local_max_error<T>(h, rhs_desc, out, expected), 8 * std::numeric_limits<R>::epsilon());
+            }
+        }
+    }
+}
+
 double random_value(int i, int j, unsigned salt)
 {
     std::uint64_t x = std::uint64_t(i + 1) * 0x9e3779b97f4a7c15ULL +
@@ -556,6 +648,12 @@ int main(int argc, char **argv)
                 typed(std::complex<double>{});
             if (n < 0)
             {
+                check_tiny_pivots<double>(h);
+                check_tiny_pivots<std::complex<double>>(h);
+                check_pair_range<float>(h);
+                check_pair_range<double>(h);
+                check_pair_range<std::complex<float>>(h);
+                check_pair_range<std::complex<double>>(h);
                 invalid_calls<B>(h);
 #if DDLA_HAS_GPU
                 if constexpr (B == DdlaBackend::GPU)

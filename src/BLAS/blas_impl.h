@@ -152,6 +152,12 @@ void scal_run(const DdlaHandle_t& handle, int n, const T& alpha, T* x, int incx)
 
 template <DdlaBackend Backend, typename T>
 void swap_check(const DdlaHandle_t& handle, int n, T* x, int incx, T* y, int incy);
+template <DdlaBackend Backend, typename T, typename Alpha>
+void rscl_run(const DdlaHandle_t& h, int n, const Alpha& divisor, T* x, int incx);
+// Prechecked componentwise division by a packed, backend-resident local diagonal.
+template <DdlaBackend Backend, typename T, typename Alpha>
+void rscl_rows_run(const DdlaHandle_t& h, int m, int n, const Alpha* diagonal, T* x, int lda);
+
 template <DdlaBackend Backend, typename T>
 void swap_run(const DdlaHandle_t& handle, int n, T* x, int incx, T* y, int incy);
 

@@ -1296,6 +1296,23 @@ template void scal<double>(const DdlaHandle_t& handle, int n, const double& alph
 template void scal<std::complex<float>>(const DdlaHandle_t& handle, int n, const std::complex<float>& alpha, std::complex<float>* x, int incx);
 template void scal<std::complex<double>>(const DdlaHandle_t& handle, int n, const std::complex<double>& alpha, std::complex<double>* x, int incx);
 
+template <typename T, typename Alpha>
+void rscl(const DdlaHandle_t& handle, int n, const Alpha& divisor, T* x, int incx)
+{
+#if DDLA_HAS_GPU
+    if (handle && handle->backend == DdlaBackend::GPU)
+        return rscl<DdlaBackend::GPU, T, Alpha>(handle, n, divisor, x, incx);
+#endif
+    return rscl<DdlaBackend::CPU, T, Alpha>(handle, n, divisor, x, incx);
+}
+
+template void rscl<float, float>(const DdlaHandle_t& handle, int n, const float& divisor, float* x, int incx);
+template void rscl<double, double>(const DdlaHandle_t& handle, int n, const double& divisor, double* x, int incx);
+template void rscl<std::complex<float>, std::complex<float>>(const DdlaHandle_t& handle, int n, const std::complex<float>& divisor, std::complex<float>* x, int incx);
+template void rscl<std::complex<double>, std::complex<double>>(const DdlaHandle_t& handle, int n, const std::complex<double>& divisor, std::complex<double>* x, int incx);
+template void rscl<std::complex<float>, float>(const DdlaHandle_t& handle, int n, const float& divisor, std::complex<float>* x, int incx);
+template void rscl<std::complex<double>, double>(const DdlaHandle_t& handle, int n, const double& divisor, std::complex<double>* x, int incx);
+
 template <typename T>
 void scal(const DdlaHandle_t& handle, int m, int n, const T& alpha, T* A, int lda)
 {

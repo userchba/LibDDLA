@@ -1,6 +1,6 @@
 {
-  "public_backend_overloads": 156,
-  "public_concrete_specializations": 558,
+  "public_backend_overloads": 157,
+  "public_concrete_specializations": 564,
   "pstedc": "already handle-only, unchanged",
   "type_policy_sources": {
     "dgmm": "src/BLAS/dgmm.cpp TYPES",
@@ -1495,6 +1495,26 @@
     },
     {
       "index": 89,
+      "name": "rscl",
+      "header_overload": 0,
+      "scalar_parameters": [
+        "T",
+        "Alpha"
+      ],
+      "public_signature": "void rscl(const DdlaHandle_t& handle, int n, const Alpha& divisor, T* x, int incx)",
+      "private_signature": "void rscl(const DdlaHandle_t& handle, int n, const Alpha& divisor, T* x, int incx)",
+      "supported_scalar_arguments": [
+        "float, float",
+        "double, double",
+        "std::complex<float>, std::complex<float>",
+        "std::complex<double>, std::complex<double>",
+        "std::complex<float>, float",
+        "std::complex<double>, double"
+      ],
+      "policy": "direct_backend_forward"
+    },
+    {
+      "index": 90,
       "name": "scal",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1511,7 +1531,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 90,
+      "index": 91,
       "name": "pscal",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1528,7 +1548,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 91,
+      "index": 92,
       "name": "scalBatched",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1545,7 +1565,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 92,
+      "index": 93,
       "name": "scal",
       "header_overload": 2,
       "scalar_parameters": [
@@ -1561,7 +1581,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 93,
+      "index": 94,
       "name": "pscal",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1577,7 +1597,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 94,
+      "index": 95,
       "name": "scalBatched",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1593,7 +1613,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 95,
+      "index": 96,
       "name": "axpy",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1610,7 +1630,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 96,
+      "index": 97,
       "name": "iamax",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1627,7 +1647,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 97,
+      "index": 98,
       "name": "swap",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1644,7 +1664,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 98,
+      "index": 99,
       "name": "geru",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1661,7 +1681,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 99,
+      "index": 100,
       "name": "gerc",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1678,7 +1698,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 100,
+      "index": 101,
       "name": "getrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1695,7 +1715,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 101,
+      "index": 102,
       "name": "potrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1712,7 +1732,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 102,
+      "index": 103,
       "name": "laswp",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1729,7 +1749,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 103,
+      "index": 104,
       "name": "geqrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1746,7 +1766,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 104,
+      "index": 105,
       "name": "gelqf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1763,7 +1783,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 105,
+      "index": 106,
       "name": "gerqf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1780,7 +1800,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 106,
+      "index": 107,
       "name": "larft",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1797,7 +1817,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 107,
+      "index": 108,
       "name": "pgemm",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1812,7 +1832,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 108,
+      "index": 109,
       "name": "pgemm",
       "header_overload": 2,
       "scalar_parameters": [
@@ -1827,7 +1847,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 109,
+      "index": 110,
       "name": "phe2hb",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1844,7 +1864,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 110,
+      "index": 111,
       "name": "punmtr_he2hb",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1861,7 +1881,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 111,
+      "index": 112,
       "name": "herm_complete",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1878,7 +1898,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 112,
+      "index": 113,
       "name": "syrm_complete",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1895,7 +1915,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 113,
+      "index": 114,
       "name": "psyrm_complete",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1912,7 +1932,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 114,
+      "index": 115,
       "name": "pherm_complete",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1929,7 +1949,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 115,
+      "index": 116,
       "name": "phetrd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1946,7 +1966,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 116,
+      "index": 117,
       "name": "punmtr",
       "header_overload": 0,
       "scalar_parameters": [
@@ -1963,7 +1983,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 117,
+      "index": 118,
       "name": "punmtr",
       "header_overload": 1,
       "scalar_parameters": [
@@ -1980,7 +2000,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 118,
+      "index": 119,
       "name": "gemm",
       "header_overload": 2,
       "scalar_parameters": [
@@ -1995,7 +2015,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 119,
+      "index": 120,
       "name": "stedc",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2012,7 +2032,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 120,
+      "index": 121,
       "name": "syevd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2027,7 +2047,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 121,
+      "index": 122,
       "name": "heevd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2042,7 +2062,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 122,
+      "index": 123,
       "name": "hegvd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2057,7 +2077,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 123,
+      "index": 124,
       "name": "sygvd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2072,7 +2092,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 124,
+      "index": 125,
       "name": "phegst",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2089,7 +2109,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 125,
+      "index": 126,
       "name": "phegvd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2106,7 +2126,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 126,
+      "index": 127,
       "name": "pheevd_chebyshev",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2123,7 +2143,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 127,
+      "index": 128,
       "name": "pheevd",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2140,7 +2160,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 128,
+      "index": 129,
       "name": "pheevd_two_stage",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2157,7 +2177,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 129,
+      "index": 130,
       "name": "pheevd_one_stage",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2174,7 +2194,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 130,
+      "index": 131,
       "name": "gemmt",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2191,7 +2211,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 131,
+      "index": 132,
       "name": "gemmt",
       "header_overload": 1,
       "scalar_parameters": [
@@ -2206,7 +2226,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 132,
+      "index": 133,
       "name": "gemmt",
       "header_overload": 2,
       "scalar_parameters": [
@@ -2221,7 +2241,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 133,
+      "index": 134,
       "name": "ptrtrm",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2238,7 +2258,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 134,
+      "index": 135,
       "name": "sytrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2255,7 +2275,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 135,
+      "index": 136,
       "name": "sytrs",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2272,7 +2292,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 136,
+      "index": 137,
       "name": "sytrf_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2289,7 +2309,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 137,
+      "index": 138,
       "name": "sytrs_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2306,7 +2326,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 138,
+      "index": 139,
       "name": "hetrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2323,7 +2343,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 139,
+      "index": 140,
       "name": "hetrs",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2340,7 +2360,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 140,
+      "index": 141,
       "name": "hetrf_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2357,7 +2377,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 141,
+      "index": 142,
       "name": "hetrs_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2374,7 +2394,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 142,
+      "index": 143,
       "name": "psytrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2391,7 +2411,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 143,
+      "index": 144,
       "name": "psytrs",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2408,7 +2428,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 144,
+      "index": 145,
       "name": "psytrf_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2425,7 +2445,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 145,
+      "index": 146,
       "name": "psytrs_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2442,7 +2462,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 146,
+      "index": 147,
       "name": "phetrf",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2459,7 +2479,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 147,
+      "index": 148,
       "name": "phetrs",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2476,7 +2496,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 148,
+      "index": 149,
       "name": "phetrf_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2493,7 +2513,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 149,
+      "index": 150,
       "name": "phetrs_nopiv",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2510,7 +2530,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 150,
+      "index": 151,
       "name": "ormqr",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2527,7 +2547,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 151,
+      "index": 152,
       "name": "pormqr",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2544,7 +2564,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 152,
+      "index": 153,
       "name": "orgqr",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2561,7 +2581,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 153,
+      "index": 154,
       "name": "porgqr",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2578,7 +2598,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 154,
+      "index": 155,
       "name": "diag_logdet",
       "header_overload": 0,
       "scalar_parameters": [
@@ -2595,7 +2615,7 @@
       "policy": "direct_backend_forward"
     },
     {
-      "index": 155,
+      "index": 156,
       "name": "pdiag_logdet",
       "header_overload": 0,
       "scalar_parameters": [

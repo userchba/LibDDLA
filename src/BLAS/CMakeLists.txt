@@ -23,6 +23,7 @@ target_sources(ddla_lib PRIVATE
     trtrm.cpp
     gemmBatched.cpp
     scal.cpp
+    rscl.cpp
     scalBatched.cpp
     geam.cpp
     swap.cpp
@@ -47,12 +48,12 @@ set_source_files_properties(scalBatched.cpp TARGET_DIRECTORY ddla_lib
 
 if(DDLA_USE_CUDA)
     target_sources(ddla_lib PRIVATE gemm_vbatched.cpp geam_kernels.cpp)
-    set_source_files_properties(dgmm.cpp trtrm.cpp gemmt.cpp hemmt.cpp gemm_mixed.cpp gemm_vbatched.cpp geam_kernels.cpp TARGET_DIRECTORY ddla_lib
+    set_source_files_properties(rscl.cpp dgmm.cpp trtrm.cpp gemmt.cpp hemmt.cpp gemm_mixed.cpp gemm_vbatched.cpp geam_kernels.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES LANGUAGE CUDA)
 endif()
 if(DDLA_USE_HIP)
     target_sources(ddla_lib PRIVATE gemm_vbatched.cpp geam_kernels.cpp)
-    set_source_files_properties(dgmm.cpp trtrm.cpp gemmt.cpp hemmt.cpp gemm_mixed.cpp gemm_vbatched.cpp geam_kernels.cpp TARGET_DIRECTORY ddla_lib
+    set_source_files_properties(rscl.cpp dgmm.cpp trtrm.cpp gemmt.cpp hemmt.cpp gemm_mixed.cpp gemm_vbatched.cpp geam_kernels.cpp TARGET_DIRECTORY ddla_lib
         PROPERTIES LANGUAGE HIP)
 endif()
 
@@ -60,3 +61,6 @@ endif()
 target_sources(ddla_lib PRIVATE gemm_mixed_cpu.cpp)
 set_source_files_properties(gemm_mixed_cpu.cpp TARGET_DIRECTORY ddla_lib
     PROPERTIES COMPILE_OPTIONS "${_ddla_cpu_kernel_opts}")
+
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/LAPACK-LICENSE
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/LibDDLA RENAME LAPACK-BSD-3-Clause.txt)
