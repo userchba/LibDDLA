@@ -336,6 +336,15 @@ void ddla_c_finalize()
     }
 }
 
+// Agree on Python-side buffer checks before entering a collective numerical routine.
+int ddla_c_union_flags(int f_comm, int flags, int* result)
+{
+    if (result == nullptr) return DDLA_C_STATUS_INVALID_VALUE;
+    MPI_Comm comm = MPI_Comm_f2c(static_cast<MPI_Fint>(f_comm));
+    return MPI_Allreduce(&flags, result, 1, MPI_INT, MPI_BOR, comm) == MPI_SUCCESS
+        ? DDLA_C_STATUS_SUCCESS : DDLA_C_STATUS_INTERNAL_ERROR;
+}
+
 int ddla_c_bcast_dims(int f_comm, int* m, int* n, int* type_char, int root)
 {
     MPI_Comm comm = MPI_Comm_f2c(static_cast<MPI_Fint>(f_comm));

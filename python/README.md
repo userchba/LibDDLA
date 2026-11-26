@@ -57,7 +57,7 @@ without a second CPU/GPU execution dispatcher.
 Distributed operations are collective over the handle's communicator. Launch the example
 below with an MPI rank count covered by the scheduler allocation, for example
 `mpirun -n 4 python3 example.py`. It uses CPU handles and NumPy host arrays.
-Pass the global NumPy array only on the root for scatter. With an allocated GPU for each rank, set `DDLA_PYTHON_TEST_GPU=1` to include the GPU NumPy scatter/gather test.
+Use the same handle and dtype for matrix operands in a high-level operation. Pass the global NumPy array only on the root for scatter. With an allocated GPU for each rank, set `DDLA_PYTHON_TEST_GPU=1` to include the GPU NumPy scatter/gather test.
 For GPU local-buffer copies, call `handle.synchronize()` before consuming
 results returned by `to_host()`.
 

@@ -15,15 +15,39 @@ def _to_char_bytes(c: Union[str, bytes]) -> bytes:
         return c.upper()
     return c.upper().encode('ascii')
 
+def _union_flags(handle, flags):
+    if handle.layout.nprocs == 1:
+        return flags
+    agreed = ctypes.c_int()
+    st = lib.ddla_c_union_flags(handle.layout.comm_f, flags, ctypes.byref(agreed))
+    check_status(st, "ddla_c_union_flags")
+    return agreed.value
+
+
+def _check_matrix_operands(A, B, C=None):
+    # Low four bits identify the native scalar entry point chosen on each rank.
+    flags = 1 << "sdcz".index(A.type_char)
+    for operand in (B,) if C is None else (B, C):
+        if not isinstance(operand, DistributedMatrix) or operand.dtype != A.dtype:
+            flags |= 16
+        elif operand.handle is not A.handle:
+            flags |= 32
+    flags = _union_flags(A.handle, flags)
+    types = flags & 15
+    if flags & 16 or types & (types - 1):
+        raise TypeError("Matrix operands must have the same dtype on every rank")
+    if flags & 32:
+        raise ValueError("Matrix operands must use the same handle on every rank")
+
+
 def pgemm(A: DistributedMatrix, B: DistributedMatrix, C: Optional[DistributedMatrix] = None,
           alpha: float = 1.0, beta: float = 0.0,
           transa: str = 'N', transb: str = 'N') -> DistributedMatrix:
     """Distributed matrix-matrix multiplication: C := alpha * op(A) * op(B) + beta * C.
     
-    If C is None, a new DistributedMatrix of appropriate dimensions and matching dtype is allocated.
+    If C is None, the result contains alpha * op(A) * op(B) for any beta.
     """
-    if A.type_char != B.type_char:
-        raise TypeError(f"A and B must have identical dtype, got {A.dtype} and {B.dtype}")
+    _check_matrix_operands(A, B, C)
     
     ta = _to_char_bytes(transa)
     tb = _to_char_bytes(transb)
@@ -38,11 +62,10 @@ def pgemm(A: DistributedMatrix, B: DistributedMatrix, C: Optional[DistributedMat
 
     if C is None:
         C = DistributedMatrix(A.handle, m, n, mb=A.mb, nb=B.nb, dtype=A.dtype)
+        beta = 0
     else:
         if C.m != m or C.n != n:
             raise ValueError(f"C shape {C.shape} incompatible with product ({m}, {n})")
-        if C.type_char != A.type_char:
-            raise TypeError("C dtype must match A and B")
 
     func = getattr(lib, f"ddla_{A.type_char}_pgemm")
     al_val = to_scalar(alpha, A.type_char)
@@ -88,6 +111,11 @@ def pgetrf(A: DistributedMatrix, ipiv=None):
 
 def pgetrs(A: DistributedMatrix, B: DistributedMatrix, ipiv, trans: str = 'N') -> DistributedMatrix:
     """Solve using the backend pivot vector returned by pgetrf."""
+    _check_matrix_operands(A, B)
+    return _solve_lu(A, B, ipiv, trans)
+
+
+def _solve_lu(A, B, ipiv, trans):
     if ipiv is None:
         raise TypeError("pgetrs requires the pivots returned by pgetrf")
     ipiv, pivot_ptr = _pivot_storage(A, ipiv)
@@ -104,9 +132,10 @@ def pgetrs(A: DistributedMatrix, B: DistributedMatrix, ipiv, trans: str = 'N') -
 
 def pgesv(A: DistributedMatrix, B: DistributedMatrix, ipiv=None):
     """Factor and solve; retain pivots in the selected backend."""
+    _check_matrix_operands(A, B)
     A, ipiv, info = pgetrf(A, ipiv=ipiv)
     if info == 0:
-        pgetrs(A, B, ipiv, trans='N')
+        _solve_lu(A, B, ipiv, 'N')
     return B, ipiv, info
 
 
@@ -125,6 +154,11 @@ def ppotrf(A: DistributedMatrix, uplo: str = 'L') -> Tuple[DistributedMatrix, in
 
 def ppotrs(A: DistributedMatrix, B: DistributedMatrix, uplo: str = 'L') -> DistributedMatrix:
     """Solve distributed linear system A * X = B using Cholesky factor from ppotrf."""
+    _check_matrix_operands(A, B)
+    return _solve_cholesky(A, B, uplo)
+
+
+def _solve_cholesky(A, B, uplo):
     u = _to_char_bytes(uplo)
     func = getattr(lib, f"ddla_{A.type_char}_ppotrs")
     st = func(
@@ -137,15 +171,30 @@ def ppotrs(A: DistributedMatrix, B: DistributedMatrix, uplo: str = 'L') -> Distr
 
 def pposv(A: DistributedMatrix, B: DistributedMatrix, uplo: str = 'L') -> Tuple[DistributedMatrix, int]:
     """Distributed Cholesky driver: factors A and solves A * X = B."""
+    _check_matrix_operands(A, B)
     A, info = ppotrf(A, uplo=uplo)
     if info == 0:
-        ppotrs(A, B, uplo=uplo)
+        _solve_cholesky(A, B, uplo)
     return B, info
 
 def _qr_factor(A: DistributedMatrix, tau: Optional[np.ndarray], routine: str,
                default_tau_size: int) -> Tuple[DistributedMatrix, np.ndarray, int]:
+    flags = 0
     if tau is None:
-        tau = np.zeros(default_tau_size, dtype=A.dtype)
+        try:
+            tau = np.zeros(default_tau_size, dtype=A.dtype)
+        except MemoryError:
+            flags = 2
+    elif (not isinstance(tau, np.ndarray) or tau.dtype != A.dtype or tau.ndim != 1
+          or not tau.flags.c_contiguous or not tau.flags.aligned or not tau.flags.writeable
+          or tau.size < default_tau_size):
+        flags = 1
+    flags = _union_flags(A.handle, flags)
+    if flags & 2:
+        raise MemoryError("Could not allocate reflector scalars on a rank")
+    if flags & 1:
+        raise ValueError("tau on each rank must be a writable contiguous aligned vector "
+                         "with matching dtype and sufficient local reflector storage")
     info = ctypes.c_int(0)
     func = getattr(lib, f"ddla_{A.type_char}_{routine}")
     st = func(
@@ -161,7 +210,7 @@ def _qr_factor(A: DistributedMatrix, tau: Optional[np.ndarray], routine: str,
 
 def pgeqrf(A: DistributedMatrix, tau: Optional[np.ndarray] = None) -> Tuple[DistributedMatrix, np.ndarray, int]:
     """Distributed Householder QR factorization, A = Q * R, overwriting A."""
-    return _qr_factor(A, tau, "pgeqrf", min(A.m, A.n))
+    return _qr_factor(A, tau, "pgeqrf", A.n_loc)
 
 
 def pgeqlf(A: DistributedMatrix, tau: Optional[np.ndarray] = None) -> Tuple[DistributedMatrix, np.ndarray, int]:
@@ -188,6 +237,7 @@ def pgerqf(A: DistributedMatrix, tau: Optional[np.ndarray] = None) -> Tuple[Dist
 def ptrtrs(A: DistributedMatrix, B: DistributedMatrix, side: str = 'L',
            uplo: str = 'U', trans: str = 'N', diag: str = 'N') -> DistributedMatrix:
     """Solve triangular distributed system with multiple right-hand sides."""
+    _check_matrix_operands(A, B)
     s = _to_char_bytes(side)
     u = _to_char_bytes(uplo)
     t = _to_char_bytes(trans)
@@ -204,6 +254,7 @@ def ptrtrs(A: DistributedMatrix, B: DistributedMatrix, side: str = 'L',
 def ptrmm(A: DistributedMatrix, B: DistributedMatrix, alpha: float = 1.0,
           side: str = 'L', uplo: str = 'U', trans: str = 'N', diag: str = 'N') -> DistributedMatrix:
     """Distributed triangular matrix multiplication: B := alpha * op(A) * B (or B * op(A))."""
+    _check_matrix_operands(A, B)
     s = _to_char_bytes(side)
     u = _to_char_bytes(uplo)
     t = _to_char_bytes(trans)
@@ -225,14 +276,16 @@ def pgeadd(A: DistributedMatrix, B: DistributedMatrix, C: Optional[DistributedMa
     
     If C is None, a new DistributedMatrix is allocated.
     """
-    if A.type_char != B.type_char:
-        raise TypeError(f"A and B must have identical dtype, got {A.dtype} and {B.dtype}")
+    _check_matrix_operands(A, B, C)
     ta = _to_char_bytes(transa)
     tb = _to_char_bytes(transb)
     m = A.n if ta in (b'T', b'C') else A.m
     n = A.m if ta in (b'T', b'C') else A.n
     if C is None:
         C = DistributedMatrix(A.handle, m, n, mb=A.mb, nb=A.nb, dtype=A.dtype)
+    else:
+        if C.shape != (m, n):
+            raise ValueError(f"C shape {C.shape} incompatible with sum ({m}, {n})")
     al_val = to_scalar(alpha, A.type_char)
     be_val = to_scalar(beta, B.type_char)
     func = getattr(lib, f"ddla_{A.type_char}_pgeadd")

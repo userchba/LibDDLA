@@ -257,6 +257,10 @@ ddla_c_comm_size = lib.ddla_c_comm_size
 ddla_c_comm_size.restype = ctypes.c_int
 ddla_c_comm_size.argtypes = [ctypes.c_int]
 
+ddla_c_union_flags = lib.ddla_c_union_flags
+ddla_c_union_flags.restype = ctypes.c_int
+ddla_c_union_flags.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
+
 ddla_c_bcast_dims = lib.ddla_c_bcast_dims
 ddla_c_bcast_dims.restype = ctypes.c_int
 ddla_c_bcast_dims.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.c_int]

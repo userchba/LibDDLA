@@ -519,6 +519,15 @@ void ddla_c_finalize()
     }
 }
 
+// Agree on Python-side buffer checks before entering a collective numerical routine.
+int ddla_c_union_flags(int f_comm, int flags, int* result)
+{
+    if (result == nullptr) return DDLA_C_STATUS_INVALID_VALUE;
+    MPI_Comm comm = MPI_Comm_f2c(static_cast<MPI_Fint>(f_comm));
+    return MPI_Allreduce(&flags, result, 1, MPI_INT, MPI_BOR, comm) == MPI_SUCCESS
+        ? DDLA_C_STATUS_SUCCESS : DDLA_C_STATUS_INTERNAL_ERROR;
+}
+
 int ddla_c_bcast_dims(int f_comm, int* m, int* n, int* type_char, int root)
 {
     MPI_Comm comm = MPI_Comm_f2c(static_cast<MPI_Fint>(f_comm));
@@ -1315,6 +1324,10 @@ ddla_c_comm_rank.argtypes = [ctypes.c_int]
 ddla_c_comm_size = lib.ddla_c_comm_size
 ddla_c_comm_size.restype = ctypes.c_int
 ddla_c_comm_size.argtypes = [ctypes.c_int]
+
+ddla_c_union_flags = lib.ddla_c_union_flags
+ddla_c_union_flags.restype = ctypes.c_int
+ddla_c_union_flags.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
 
 ddla_c_bcast_dims = lib.ddla_c_bcast_dims
 ddla_c_bcast_dims.restype = ctypes.c_int

@@ -37,8 +37,25 @@ class TestLuQr(unittest.TestCase):
 
         A_fact, tau, info = ddla.pgeqrf(A)
         self.assertEqual(info, 0)
-        self.assertEqual(len(tau), min(m, n))
+        self.assertEqual(len(tau), A.n_loc)
         self.assertTrue(np.all(np.isfinite(tau)))
+
+    def test_reflector_storage(self):
+        # All ranks own reflector entries, including on a four-rank grid.
+        m = 4 * max(self.handle.grid_dims) + 1
+        n = m + 6
+        matrix = np.arange(m * n, dtype=np.float64).reshape(m, n)
+        A = ddla.scatter(self.handle, matrix, mb=2, nb=2)
+        for routine, size in ((ddla.pgeqrf, A.n_loc), (ddla.pgeqlf, A.n_loc),
+                              (ddla.pgelqf, A.m_loc), (ddla.pgerqf, A.m_loc)):
+            with self.assertRaises(ValueError):
+                routine(A, tau=np.zeros(size - 1) if self.handle.rank == 0 else None)
+            readonly = np.zeros(size)
+            readonly.setflags(write=False)
+            for invalid in (np.zeros(size - 1), np.zeros(size, dtype=np.float32),
+                            np.zeros(2 * size)[::2], readonly):
+                with self.subTest(routine=routine.__name__), self.assertRaises(ValueError):
+                    routine(A, tau=invalid)
 
     def test_pgeqlf(self):
         rng = np.random.default_rng(71)
