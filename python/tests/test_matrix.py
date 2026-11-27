@@ -28,6 +28,17 @@ class TestMatrix(unittest.TestCase):
                     gr, gc = A.get_global_index(lr, lc)
                     self.assertEqual((gr, gc), (r, c))
 
+    def test_padded_storage_without_data(self):
+        pr, pc = self.handle.grid_dims
+        A = ddla.DistributedMatrix(self.handle, 3 * pr, 2 * pc, mb=1, nb=1, lld=5)
+        self.assertEqual(A.local_shape, (3, 2))
+        self.assertEqual(A.data.shape, A.local_shape)
+        self.assertEqual(A.data.strides, (A.dtype.itemsize, 5 * A.dtype.itemsize))
+        np.testing.assert_array_equal(A.data, np.zeros(A.local_shape))
+        A.from_host(np.arange(6).reshape(A.local_shape))
+        A.data[2, 1] = 17
+        np.testing.assert_array_equal(A.to_host(), [[0, 1], [2, 3], [4, 17]])
+
     def test_padded_shifted_partition(self):
         m, n, mb, nb = 13, 11, 4, 3
         pr, pc = self.handle.grid_dims
